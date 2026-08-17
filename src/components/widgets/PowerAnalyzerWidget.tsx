@@ -37,12 +37,14 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       );
       if (found !== undefined) return found.value;
 
-      // Fallback check in device metrics
+      // Fallback check in device metrics (Case-Insensitive)
       const dev = devices.find((d) => !config.deviceId || d.id === config.deviceId);
       if (dev && dev.metrics) {
+        const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
-          if ((dev.metrics as Record<string, number>)[k] !== undefined) {
-            return Number((dev.metrics as Record<string, number>)[k]);
+          const match = metricKeys.find((mk) => mk.toLowerCase() === k.toLowerCase());
+          if (match && (dev.metrics as Record<string, number>)[match] !== undefined) {
+            return Number((dev.metrics as Record<string, number>)[match]);
           }
         }
       }
@@ -56,11 +58,14 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       );
       if (found !== undefined) return found.value;
 
+      // Fallback check in device metrics (Case-Insensitive)
       const dev = devices.find((d) => !config.deviceId || d.id === config.deviceId);
       if (dev && dev.metrics) {
+        const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
-          if ((dev.metrics as Record<string, number>)[k] !== undefined) {
-            return Number((dev.metrics as Record<string, number>)[k]);
+          const match = metricKeys.find((mk) => mk.toLowerCase() === k.toLowerCase());
+          if (match && (dev.metrics as Record<string, number>)[match] !== undefined) {
+            return Number((dev.metrics as Record<string, number>)[match]);
           }
         }
       }
