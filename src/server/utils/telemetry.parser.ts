@@ -28,31 +28,36 @@ export function getUnitForMetric(mKey: string): string {
   return 'birim';
 }
 
-export function parseTelemetryPayload(req: express.Request): ParsedTelemetryPayload {
-  const headerKey = (req.headers['x-api-key'] ||
-    req.headers['authorization']?.replace('Bearer ', '') ||
-    req.headers['x-token'] ||
-    req.headers['x-device-id']) as string;
+export function parseTelemetryPayload(req: any): ParsedTelemetryPayload {
+  const isExpressReq = req && req.headers && req.query;
+  const reqHeaders = isExpressReq ? req.headers : {};
+  const reqQuery = isExpressReq ? req.query : {};
+  const reqBody = isExpressReq ? req.body : req; // If not Express, assume req IS the payload object
+
+  const headerKey = (reqHeaders['x-api-key'] ||
+    reqHeaders['authorization']?.replace('Bearer ', '') ||
+    reqHeaders['x-token'] ||
+    reqHeaders['x-device-id']) as string;
 
   let rawBodyText = '';
-  if (typeof req.body === 'string') {
-    rawBodyText = req.body.trim();
-  } else if (Buffer.isBuffer(req.body)) {
-    rawBodyText = (req.body as Buffer).toString('utf-8').trim();
-  } else if (req.body && typeof req.body === 'object') {
-    if (typeof req.body.payload === 'string') rawBodyText = req.body.payload.trim();
-    else if (typeof req.body.raw === 'string') rawBodyText = req.body.raw.trim();
-    else if (typeof req.body.data === 'string') rawBodyText = req.body.data.trim();
-    else if (typeof req.body.text === 'string') rawBodyText = req.body.text.trim();
+  if (typeof reqBody === 'string') {
+    rawBodyText = reqBody.trim();
+  } else if (Buffer.isBuffer(reqBody)) {
+    rawBodyText = (reqBody as Buffer).toString('utf-8').trim();
+  } else if (reqBody && typeof reqBody === 'object') {
+    if (typeof reqBody.payload === 'string') rawBodyText = reqBody.payload.trim();
+    else if (typeof reqBody.raw === 'string') rawBodyText = reqBody.raw.trim();
+    else if (typeof reqBody.data === 'string') rawBodyText = reqBody.data.trim();
+    else if (typeof reqBody.text === 'string') rawBodyText = reqBody.text.trim();
   }
 
-  if (!rawBodyText && typeof req.query.data === 'string') rawBodyText = req.query.data.trim();
-  if (!rawBodyText && typeof req.query.payload === 'string') rawBodyText = req.query.payload.trim();
-  if (!rawBodyText && typeof req.query.raw === 'string') rawBodyText = req.query.raw.trim();
+  if (!rawBodyText && typeof reqQuery.data === 'string') rawBodyText = reqQuery.data.trim();
+  if (!rawBodyText && typeof reqQuery.payload === 'string') rawBodyText = reqQuery.payload.trim();
+  if (!rawBodyText && typeof reqQuery.raw === 'string') rawBodyText = reqQuery.raw.trim();
 
   // Extract Device Identifier
-  const bodyObj = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-  const firstArrayItem = Array.isArray(req.body) && req.body[0] && typeof req.body[0] === 'object' ? req.body[0] : {};
+  const bodyObj = reqBody && typeof reqBody === 'object' && !Array.isArray(reqBody) ? reqBody : {};
+  const firstArrayItem = Array.isArray(reqBody) && reqBody[0] && typeof reqBody[0] === 'object' ? reqBody[0] : {};
 
   let token =
     headerKey ||
@@ -167,8 +172,8 @@ export function parseTelemetryPayload(req: express.Request): ParsedTelemetryPayl
   }
 
   // Format 5: Root Array of metrics
-  if (metricsToProcess.length === 0 && Array.isArray(req.body)) {
-    for (const item of req.body) {
+  if (metricsToProcess.length === 0 && Array.isArray(reqBody)) {
+    for (const item of reqBody) {
       if (item && typeof item === 'object') {
         const mKey = item.metric || item.name || item.key;
         const mVal = item.value ?? item.val ?? item.v;
@@ -187,7 +192,7 @@ export function parseTelemetryPayload(req: express.Request): ParsedTelemetryPayl
   }
 
   // Format 6: Standard single metric object or flat properties
-  const srcObj = (req.body && typeof req.body === 'object' ? req.body : req.query) as Record<string, any>;
+  const srcObj = (reqBody && typeof reqBody === 'object' ? reqBody : reqQuery) as Record<string, any>;
   if (metricsToProcess.length === 0 && srcObj && typeof srcObj === 'object') {
     if (srcObj.metric && srcObj.value !== undefined) {
       const num = typeof srcObj.value === 'number' ? srcObj.value : parseFloat(String(srcObj.value));
@@ -224,6 +229,7 @@ export function parseTelemetryPayload(req: express.Request): ParsedTelemetryPayl
           ].includes(k)
         )
           continue;
+
         if (typeof v === 'object' && v !== null) {
           const nestedVal = (v as any).value ?? (v as any).val;
           const num = typeof nestedVal === 'number' ? nestedVal : parseFloat(String(nestedVal));
@@ -245,18 +251,19 @@ export function parseTelemetryPayload(req: express.Request): ParsedTelemetryPayl
   }
 
   // Real Client IP & MAC Extraction (No spoofed IPs/MACs)
-  const rawIpHeader = String(
-    req.headers['x-device-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || ''
-  ).split(',')[0].trim();
-  const clientIp = (req.query.ip || (req.body && req.body.ip) || rawIpHeader || req.socket.remoteAddress || '').toString().replace('::ffff:', '').trim();
+  const rawIpHeader = isExpressReq ? String(
+    reqHeaders['x-device-ip'] || reqHeaders['x-forwarded-for'] || req.socket?.remoteAddress || ''
+  ).split(',')[0].trim() : '';
 
-  const mac = (
-    (req.headers['x-mac-address'] as string) ||
-    (req.headers['x-mac'] as string) ||
-    (req.query.mac as string) ||
-    (req.body && (req.body.mac || req.body.macAddress)) ||
+  const clientIp = isExpressReq ? (reqQuery.ip || (reqBody && reqBody.ip) || rawIpHeader || req.socket?.remoteAddress || '').toString().replace('::ffff:', '').trim() : '';
+
+  const mac = isExpressReq ? (
+    (reqHeaders['x-mac-address'] as string) ||
+    (reqHeaders['x-mac'] as string) ||
+    (reqQuery.mac as string) ||
+    (reqBody && (reqBody.mac || reqBody.macAddress)) ||
     ''
-  ).toString().trim();
+  ).toString().trim() : '';
 
   const finalFormattedPacket = `${token}, ${deviceNameFromPayload || token}, ${metricsToProcess.map((m) => `${m.metric}:${m.value}`).join(', ')}`;
 

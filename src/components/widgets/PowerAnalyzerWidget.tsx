@@ -31,11 +31,11 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       (t) => !config.deviceId || t.deviceId === config.deviceId
     );
 
-    const getMetric = (keys: string[], defaultVal: number) => {
+    const getMetric = (keys: string[], prevVal: number, defaultVal: number) => {
       const found = devTelemetry.find((t) =>
         keys.some((k) => k.toLowerCase() === t.metric.toLowerCase())
       );
-      if (found) return found.value;
+      if (found !== undefined) return found.value;
 
       // Fallback check in device metrics
       const dev = devices.find((d) => !config.deviceId || d.id === config.deviceId);
@@ -46,7 +46,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
           }
         }
       }
-      return defaultVal;
+      return prevVal >= 0 ? prevVal : defaultVal;
     };
 
     // Check live telemetry batch or device metrics for pct_ri/pct_rc; fallback to previous value to prevent resetting
@@ -70,12 +70,12 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
     setMetrics((prev) => {
       const mappings = config.metricMappings || {};
       return {
-        l1: getMetric(mappings.l1 ? [mappings.l1] : ['l1', 'voltage_l1', 'v1', 'l1_voltage', 'phase1', 'voltage'], prev.l1),
-        l2: getMetric(mappings.l2 ? [mappings.l2] : ['l2', 'voltage_l2', 'v2', 'l2_voltage', 'phase2'], prev.l2),
-        l3: getMetric(mappings.l3 ? [mappings.l3] : ['l3', 'voltage_l3', 'v3', 'l3_voltage', 'phase3'], prev.l3),
-        ri: getMetric(mappings.ri ? [mappings.ri] : ['ri', 'reactive_ind', 'reactive_inductive', 'ind_reactive', 'induktif', 'enduktif', 'ri_kvar'], prev.ri),
-        rc: getMetric(mappings.rc ? [mappings.rc] : ['rc', 'reactive_cap', 'reactive_capacitive', 'cap_reactive', 'kapasitif', 'rc_kvar'], prev.rc),
-        p: getMetric(mappings.p ? [mappings.p] : ['p', 'power', 'active_power', 'kw', 'power_kw'], prev.p),
+        l1: getMetric(mappings.l1 ? [mappings.l1] : ['l1', 'voltage_l1', 'v1', 'l1_voltage', 'phase1', 'voltage'], prev.l1, prev.l1),
+        l2: getMetric(mappings.l2 ? [mappings.l2] : ['l2', 'voltage_l2', 'v2', 'l2_voltage', 'phase2'], prev.l2, prev.l2),
+        l3: getMetric(mappings.l3 ? [mappings.l3] : ['l3', 'voltage_l3', 'v3', 'l3_voltage', 'phase3'], prev.l3, prev.l3),
+        ri: getMetric(mappings.ri ? [mappings.ri] : ['ri', 'reactive_ind', 'reactive_inductive', 'ind_reactive', 'induktif', 'enduktif', 'ri_kvar'], prev.ri, prev.ri),
+        rc: getMetric(mappings.rc ? [mappings.rc] : ['rc', 'reactive_cap', 'reactive_capacitive', 'cap_reactive', 'kapasitif', 'rc_kvar'], prev.rc, prev.rc),
+        p: getMetric(mappings.p ? [mappings.p] : ['p', 'power', 'active_power', 'kw', 'power_kw'], prev.p, prev.p),
         pct_ri: getLivePctMetric(mappings.pct_ri ? [mappings.pct_ri] : ['pct_ri', 'percent_ri', 'percent_ind', 'yuzde_ri', 'ri_percent', 'ri_ratio', 'pct_ind'], prev.pct_ri),
         pct_rc: getLivePctMetric(mappings.pct_rc ? [mappings.pct_rc] : ['pct_rc', 'percent_rc', 'percent_cap', 'yuzde_rc', 'rc_percent', 'rc_ratio', 'pct_cap'], prev.pct_rc),
       };

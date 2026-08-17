@@ -2,6 +2,8 @@ import type http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { db } from '../db.js';
 import type { User, TelemetryReading, Device, DashboardLayout } from '../../types.js';
+import { deviceAuthService } from './deviceAuth.service.js';
+import { telemetryService } from './telemetry.service.js';
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -464,7 +466,7 @@ export function initWebSocketServer(server: http.Server) {
       sendBootstrapData(ws, ws.user);
     }
 
-    ws.on('message', (data) => {
+    ws.on('message', async (data) => {
       ws.isAlive = true;
 
       // Rate limiting check
@@ -528,6 +530,40 @@ export function initWebSocketServer(server: http.Server) {
         // Client heartbeat
         if (parsed.event === 'heartbeat') {
           safeSend(ws, JSON.stringify({ event: 'heartbeat:ack', timestamp: Date.now() }));
+          return;
+        }
+
+        // Telemetry Ingestion via WebSocket
+        if (parsed.event === 'telemetry:ingest') {
+          // Parse using the unified telemetry parser
+          const { parseTelemetryPayload } = await import('../utils/telemetry.parser.js');
+          const parsedPayload = parseTelemetryPayload(parsed.payload);
+
+          const authResult = deviceAuthService.authenticateDevice(parsedPayload);
+          if (authResult.success && authResult.device) {
+            telemetryService.ingestTelemetry(
+              authResult.device,
+              parsedPayload.metricsToProcess,
+              parsedPayload.finalFormattedPacket,
+              authResult.devInfoUpdated
+            ).then(({ addedReadings }) => {
+               safeSend(ws, JSON.stringify({
+                 event: 'telemetry:ingest:ack',
+                 payload: { success: true, processed: addedReadings.length }
+               }));
+            }).catch(err => {
+               console.error('[WebSocket] Ingest Error:', err);
+               safeSend(ws, JSON.stringify({
+                 event: 'telemetry:ingest:ack',
+                 payload: { success: false, error: 'Internal ingest error' }
+               }));
+            });
+          } else {
+             safeSend(ws, JSON.stringify({
+               event: 'telemetry:ingest:ack',
+               payload: { success: false, error: authResult.errorResponse?.error || 'Auth failed' }
+             }));
+          }
           return;
         }
       } catch {
