@@ -27,7 +27,7 @@ jobs:
 
       - name: Install Project Dependencies
         run: |
-          npm install --include=optional
+          npm ci || npm install
           npm rebuild
 
       - name: Type Check (TypeScript)
