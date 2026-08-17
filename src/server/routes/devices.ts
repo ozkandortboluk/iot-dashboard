@@ -1,0 +1,300 @@
+import { Router } from 'express';
+import { db } from '../db.js';
+import { broadcast } from '../services/websocket.js';
+import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+
+const router = Router();
+
+// Devices Endpoints (Protected with Role-based filtering)
+router.get('/', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const userId = req.query.userId as string | undefined;
+  const targetCustomerId = req.query.targetCustomerId as string | undefined;
+
+  if (currentUser.role === 'admin') {
+    res.json(db.getDevices(userId, targetCustomerId));
+  } else {
+    // Non-admin users can ONLY view their own devices
+    res.json(db.getDevices(currentUser.id, currentUser.id));
+  }
+});
+
+router.post('/', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated } = req.body;
+
+  if (!name || !type) {
+    return res.status(400).json({ error: 'Cihaz adı ve türü zorunludur.' });
+  }
+
+  // Non-admins can only create devices for themselves
+  const targetOwnerId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
+
+  const device = db.createDevice({
+    userId: targetOwnerId,
+    name,
+    type,
+    location: location || 'Tanımsız Konum',
+    ipAddress: ipAddress || '127.0.0.1',
+    macAddress: macAddress || undefined,
+    status: 'online',
+    rateLimitPerMin: rateLimitPerMin || 120,
+    encryptionMethod: encryptionMethod || 'AES-256-GCM',
+    apiKey: apiKey && apiKey.trim() ? apiKey.trim() : undefined,
+    isSimulated: isSimulated !== undefined ? Boolean(isSimulated) : false,
+    metrics: {},
+  });
+
+  if (ipAddress) db.removeUnregisteredDevice(ipAddress);
+  if (macAddress) db.removeUnregisteredDevice(macAddress);
+  if (name) db.removeUnregisteredDevice(name);
+
+  broadcast('device:created', device);
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.status(201).json(device);
+});
+
+router.put('/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const devices = db.getDevices();
+  const existingDev = devices.find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin') {
+    if (existingDev.userId !== currentUser.id) {
+      return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınızı düzenleyebilirsiniz.' });
+    }
+    delete req.body.userId;
+  }
+
+  try {
+    const updated = db.updateDevice(deviceId, req.body);
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+    res.json(updated);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Cihaz güncellenemedi.';
+    res.status(400).json({ error: msg });
+  }
+});
+
+router.put('/:id/owner', authenticateUser, requireAdmin, (req, res) => {
+  const { targetUserId } = req.body;
+  db.assignDeviceOwner(req.params.id, targetUserId);
+  broadcast('devices:updated', db.getDevices());
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.json({ success: true, message: 'Cihaz sahibi değiştirildi.' });
+});
+
+router.post('/:id/regen-key', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const devices = db.getDevices();
+  const existingDev = devices.find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızın API anahtarını yenileyebilirsiniz.' });
+  }
+
+  try {
+    const newKey = db.regenerateApiKey(deviceId);
+    broadcast('devices:updated', db.getDevices());
+    res.json({ apiKey: newKey, message: 'API Anahtarı başarıyla yenilendi.' });
+  } catch {
+    res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+});
+
+router.post('/:id/control', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const devices = db.getDevices();
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && device.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınıza kontrol komutu gönderebilirsiniz.' });
+  }
+
+  try {
+    const { command, value, outputPin, unit } = req.body;
+
+    const pinOrMetric = outputPin || command || 'OUT_1';
+    const numericValue = typeof value === 'number' ? value : (value === 'ON' || value === 'HIGH' || value === true ? 1 : 0);
+    const displayValue = value !== undefined ? String(value) : 'COMMAND';
+
+    // Update metrics on device
+    const updatedMetrics = { ...device.metrics, [pinOrMetric]: numericValue };
+    db.updateDevice(deviceId, { metrics: updatedMetrics, lastSeen: new Date().toISOString() });
+
+    // Record Telemetry Reading for control signal feedback
+    const reading = db.addTelemetryReading({
+      deviceId: device.id,
+      deviceName: device.name,
+      metric: pinOrMetric,
+      value: numericValue,
+      unit: unit || (typeof value === 'number' ? '%' : 'STATE'),
+      status: 'normal',
+      rawPayload: `[CONTROL_OUT] Pin:${pinOrMetric} | Cmd:${command || 'SET'} | Val:${displayValue}`,
+    });
+
+    broadcast('telemetry:new', reading);
+    broadcast('device:control', {
+      deviceId: device.id,
+      deviceName: device.name,
+      outputPin: pinOrMetric,
+      command,
+      value: displayValue,
+      timestamp: new Date().toISOString(),
+    });
+
+    db.addAuditLog(currentUser.id, currentUser.name, `Cihaz Çıkış Sinyali Gönderildi: [${device.name}] -> ${pinOrMetric} = ${displayValue}`, 'medium');
+
+    // Queue downlink command for physical ESP devices
+    const queuedCmd = db.addCommand(deviceId, command || pinOrMetric, displayValue, 'user_control');
+    broadcast('commands:updated', db.getCommands(deviceId));
+
+    res.json({
+      success: true,
+      message: `Çıkış komutu (${pinOrMetric}: ${displayValue}) başarıyla cihaza iletildi ve kuyruğa alındı.`,
+      command: queuedCmd,
+      reading,
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Kontrol sinyali iletilemedi.';
+    res.status(400).json({ error: msg });
+  }
+});
+
+router.delete('/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const devices = db.getDevices();
+  const existingDev = devices.find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızı silebilirsiniz.' });
+  }
+
+  db.deleteDevice(deviceId);
+  broadcast('device:deleted', { id: deviceId });
+  broadcast('devices:updated', db.getDevices());
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.json({ message: 'Cihaz silindi.' });
+});
+
+export const devicesRouter = router;
+
+// Network Discovery Router
+const networkRouter = Router();
+networkRouter.get('/discovered', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const targetCustomer = currentUser.role === 'admin' ? (req.query.targetCustomerId as string | undefined) : undefined;
+  
+  const discovered = db.getDiscoveredDevices(currentUser.id, targetCustomer);
+  res.json(discovered);
+});
+export { networkRouter };
+
+// Device Commands Router (v1 API)
+const deviceCommandsRouter = Router();
+
+deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { deviceId } = req.params;
+  const { command, payload, source } = req.body;
+
+  const dev = db.getDevices().find((d) => d.id === deviceId);
+  if (!dev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihaza komut gönderme yetkiniz yok.' });
+  }
+
+  if (!command) {
+    return res.status(400).json({ error: 'Komut adı gereklidir (ör. RELAY_1, FAN, REBOOT)' });
+  }
+
+  const newCmd = db.addCommand(deviceId, command, payload ?? '1', source || 'user_ui');
+  broadcast('commands:updated', db.getCommands(deviceId));
+
+  res.status(201).json({
+    status: 'success',
+    message: 'Komut cihaza iletilmek üzere kuyruğa eklendi.',
+    command: newCmd,
+  });
+});
+
+deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { deviceId } = req.params;
+
+  const dev = db.getDevices().find((d) => d.id === deviceId);
+  if (!dev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihazın komutlarını görüntüleyemezsiniz.' });
+  }
+
+  const cmds = db.getCommands(deviceId);
+  res.json(cmds);
+});
+
+// Endpoint for ESP devices to poll commands directly
+deviceCommandsRouter.get('/device/commands', (req, res) => {
+  const token = (req.query.token as string) || (req.headers['x-api-key'] as string);
+  if (!token) {
+    return res.status(401).json({ error: 'Token eksik' });
+  }
+  const device = db.getDeviceByApiKey(token);
+  if (!device) {
+    return res.status(403).json({ error: 'Geçersiz Token' });
+  }
+
+  const pending = db.getPendingCommands(device.id);
+  if (pending.length > 0) {
+    db.markCommandsDelivered(pending.map((c) => c.id));
+    broadcast('commands:updated', db.getCommands(device.id));
+  }
+
+  res.json({
+    deviceId: device.id,
+    deviceName: device.name,
+    commands: pending.map((c) => ({
+      id: c.id,
+      command: c.command,
+      payload: c.payload,
+    })),
+  });
+});
+
+export { deviceCommandsRouter };

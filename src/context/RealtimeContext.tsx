@@ -1,0 +1,914 @@
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import type {
+  Device,
+  TelemetryReading,
+  NotificationItem,
+  WidgetConfig,
+  DashboardLayout,
+  ServerStats,
+  User,
+} from '../types';
+import { useAuth } from './AuthContext';
+import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
+
+export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
+
+interface RealtimeContextType {
+  isConnected: boolean;
+  connectionStatus: ConnectionStatus;
+  reconnectWebSocket: () => void;
+  wsLatency: number;
+  devices: Device[];
+  latestTelemetry: TelemetryReading[];
+  notifications: NotificationItem[];
+  unreadCount: number;
+  widgets: WidgetConfig[];
+  dashboardTitle: string;
+  serverStats: ServerStats | null;
+  simulatorActive: boolean;
+  selectedCustomerForAdmin: string; // 'all' or customer ID
+  setSelectedCustomerForAdmin: (customerId: string) => void;
+  customersList: User[];
+  refreshCustomers: () => Promise<void>;
+  createNewCustomer: (data: { name: string; email: string; password: string; companyName?: string; role?: User['role'] }) => Promise<User>;
+  deleteCustomer: (id: string) => Promise<void>;
+  refreshDevices: () => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
+  clearAllNotifications: () => Promise<void>;
+  saveWidgets: (newWidgets: WidgetConfig[], title?: string) => Promise<void>;
+  resetWidgetsToDefault: () => Promise<void>;
+  toggleSimulator: () => Promise<void>;
+  triggerTestTelemetry: (deviceId: string, metric: string, value: number, unit?: string) => Promise<void>;
+  createNewDevice: (data: Partial<Device>) => Promise<Device>;
+  updateDevice: (id: string, updates: Partial<Device>) => Promise<Device>;
+  deleteDevice: (id: string) => Promise<void>;
+  regenerateApiKey: (id: string) => Promise<string>;
+  sendControlCommand: (
+    deviceId: string,
+    command: string,
+    value?: any,
+    outputPin?: string,
+    unit?: string
+  ) => Promise<any>;
+}
+
+const RealtimeContext = createContext<RealtimeContextType | undefined>(undefined);
+
+function cleanFirestoreData<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const cleaned: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      if (val !== null && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
+        cleaned[key] = cleanFirestoreData(val);
+      } else {
+        cleaned[key] = val;
+      }
+    }
+  }
+  return cleaned;
+}
+
+export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('reconnecting');
+  const [wsLatency, setWsLatency] = useState(12);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [latestTelemetry, setLatestTelemetry] = useState<TelemetryReading[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
+  const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
+  const [serverStats, setServerStats] = useState<ServerStats | null>(null);
+  const [simulatorActive, setSimulatorActive] = useState(true);
+  const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>('all');
+  const [customersList, setCustomersList] = useState<User[]>([]);
+
+  const socketRef = useRef<WebSocket | null>(null);
+
+  // Customers List (for Admin)
+  const refreshCustomers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/customers');
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
+        const data = await res.json();
+        setCustomersList((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+          return data;
+        });
+      }
+    } catch (e) {
+      console.error('Customers fetch error:', e);
+    }
+  }, []);
+
+  const createNewCustomer = async (data: {
+    name: string;
+    email: string;
+    password: string;
+    companyName?: string;
+    role?: User['role'];
+  }): Promise<User> => {
+    const res = await fetch('/api/customers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const contentType = res.headers.get('content-type');
+    if (res.ok && contentType && contentType.includes('application/json')) {
+      const result = await res.json();
+      await refreshCustomers();
+      return result;
+    }
+    throw new Error('Müşteri hesabı oluşturulamadı.');
+  };
+
+  const deleteCustomer = async (id: string) => {
+    await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    if (selectedCustomerForAdmin === id) {
+      setSelectedCustomerForAdmin('all');
+    }
+    await refreshCustomers();
+  };
+
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
+
+  let quotaWarningLogged = false;
+  const isQuotaError = (error: any) =>
+    error?.code === 'resource-exhausted' ||
+    String(error).includes('Quota exceeded') ||
+    String(error).includes('8 RESOURCE_EXHAUSTED');
+
+  const handleQuotaExceeded = useCallback(() => {
+    setIsQuotaExceeded(true);
+    if (!quotaWarningLogged) {
+      quotaWarningLogged = true;
+      console.warn('[RealtimeContext] Firestore kotaları doldu. Sistem otomatik REST ve WebSocket canlı veri modunda çalışıyor.');
+    }
+  }, []);
+
+  const fetchDevices = useCallback(async () => {
+    if (!user) return;
+    try {
+      const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
+      let url = `/api/devices?userId=${encodeURIComponent(user.id)}`;
+      if (targetCust) url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+      const res = await fetch(url);
+      const data = await safeJson<Device[]>(res, []);
+      if (Array.isArray(data)) {
+        setDevices(data);
+      }
+    } catch {
+      // ignore
+    }
+  }, [user, selectedCustomerForAdmin]);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!user) return;
+    try {
+      const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
+      let url = `/api/notifications?userId=${encodeURIComponent(user.id)}`;
+      if (targetCust) url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+      const res = await fetch(url);
+      const data = await safeJson<NotificationItem[]>(res, []);
+      if (Array.isArray(data)) {
+        data.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setNotifications(data);
+      }
+    } catch {
+      // ignore
+    }
+  }, [user, selectedCustomerForAdmin]);
+
+  const refreshDevices = useCallback(async () => {
+    await fetchDevices();
+  }, [fetchDevices]);
+
+  // Fetch Users, Devices, Notifications via local API (0 Firestore Reads)
+  useEffect(() => {
+    if (!user) return;
+
+    refreshCustomers(); 
+    fetchDevices();
+    fetchNotifications();
+  }, [user, selectedCustomerForAdmin, refreshCustomers, fetchDevices, fetchNotifications]);
+
+  const devicesRef = useRef(devices);
+  const notificationsRef = useRef(notifications);
+  
+  useEffect(() => {
+    devicesRef.current = devices;
+  }, [devices]);
+  
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
+
+  // WebSocket for Live Telemetry, Device Updates and Server Stats
+  const connectRef = useRef<() => void>();
+
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
+    let pingTimer: any = null;
+    let watchdogTimer: any = null;
+    let isCleanedUp = false;
+
+    // Fetch initial telemetry history & simulator status
+    const fetchHistory = async () => {
+      if (!user) return;
+      try {
+        const queryUser = user.id;
+        const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
+        let url = `/api/telemetry/history?limit=100&userId=${encodeURIComponent(queryUser)}`;
+        if (targetCust) {
+          url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+        }
+        const res = await fetch(url);
+        const history = await safeJson<TelemetryReading[]>(res, []);
+        if (Array.isArray(history)) {
+          const seen = new Set<string>();
+          const uniqueHistory: TelemetryReading[] = [];
+          for (const h of history) {
+            if (h && h.id && !seen.has(h.id)) {
+              seen.add(h.id);
+              uniqueHistory.push(h);
+            }
+          }
+          // Ensure history is ordered DESCENDING BY TIMESTAMP (newest at index 0)
+          uniqueHistory.sort(
+            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          );
+          setLatestTelemetry(uniqueHistory);
+        }
+
+        const simRes = await fetch('/api/simulator/status');
+        const simData = await safeJson<{ simulatorActive?: boolean }>(simRes, {});
+        if (simData.simulatorActive !== undefined) {
+          setSimulatorActive(simData.simulatorActive);
+        }
+      } catch (err) {
+        console.warn('History/Simulator status fetch notice:', err);
+      }
+    };
+    fetchHistory();
+
+    const connect = () => {
+      if (isCleanedUp) return;
+
+      // Close previous instance if exists
+      if (ws) {
+        try {
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+
+      setConnectionStatus('reconnecting');
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const token = localStorage.getItem('dashboard_token') || '';
+      const userId = user?.id || '';
+      const role = user?.role || '';
+      const query = `?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(userId)}&role=${encodeURIComponent(role)}`;
+      const wsUrl = `${protocol}//${window.location.host}/ws${query}`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+        socketRef.current = ws;
+
+        let lastMessageReceivedAt = Date.now();
+
+        ws.onopen = () => {
+          if (isCleanedUp) return;
+          setIsConnected(true);
+          setConnectionStatus('connected');
+          lastMessageReceivedAt = Date.now();
+
+          // Authenticate WebSocket connection immediately with user session
+          const currentToken = localStorage.getItem('dashboard_token') || '';
+          const authPayload = {
+            type: 'auth',
+            event: 'auth',
+            token: currentToken,
+            userId: user?.id || 'usr_admin',
+            role: user?.role || 'admin',
+            email: user?.email || '',
+            user: user
+              ? {
+                  id: user.id,
+                  name: user.name,
+                  email: user.email,
+                  role: user.role,
+                  companyName: user.companyName,
+                }
+              : null,
+          };
+
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(authPayload));
+          }
+
+          // Periodic ping for latency calculation & connection keepalive
+          if (pingTimer) clearInterval(pingTimer);
+          pingTimer = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+            }
+          }, 5000);
+
+          // Watchdog: If no message or pong received in 25 seconds, reconnect
+          if (watchdogTimer) clearInterval(watchdogTimer);
+          watchdogTimer = setInterval(() => {
+            if (Date.now() - lastMessageReceivedAt > 25000) {
+              console.warn('[WebSocket] Bağlantı zaman aşımına uğradı, yeniden bağlanılıyor...');
+              if (ws) {
+                try {
+                  ws.close();
+                } catch {}
+              }
+            }
+          }, 10000);
+        };
+
+        ws.onmessage = (event) => {
+          lastMessageReceivedAt = Date.now();
+          try {
+            const data = JSON.parse(event.data);
+
+            if (data.event === 'pong') {
+              if (data.timestamp) {
+                setWsLatency(Math.max(1, Date.now() - Number(data.timestamp)));
+              }
+            } else if (data.event === 'auth:success') {
+              setIsConnected(true);
+              setConnectionStatus('connected');
+            } else if (data.event === 'telemetry:new' || data.event === 'telemetry:batch') {
+              const readings: TelemetryReading[] = Array.isArray(data.payload)
+                ? data.payload
+                : data.payload && (data.payload as TelemetryReading).deviceId
+                ? [data.payload as TelemetryReading]
+                : [];
+
+              if (readings.length > 0) {
+                const allowedReadings = readings.filter((reading) => {
+                  if (!reading || !reading.deviceId) return false;
+                  if (user?.role === 'admin' && selectedCustomerForAdmin === 'all') return true;
+                  return devicesRef.current.some((d) => d.id === reading.deviceId);
+                });
+
+                if (allowedReadings.length > 0) {
+                  // Collect metric updates per device
+                  const deviceUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
+                  for (const reading of allowedReadings) {
+                    const existing = deviceUpdatesMap.get(reading.deviceId) || {
+                      lastSeen: reading.timestamp || new Date().toISOString(),
+                      metrics: {},
+                    };
+                    existing.lastSeen = reading.timestamp || new Date().toISOString();
+                    existing.metrics[reading.metric] = reading.value;
+                    deviceUpdatesMap.set(reading.deviceId, existing);
+                  }
+
+                  // Batch update devices state once
+                  setDevices((prevDevs) =>
+                    prevDevs.map((dev) => {
+                      const update = deviceUpdatesMap.get(dev.id);
+                      if (update) {
+                        return {
+                          ...dev,
+                          lastSeen: dev.dataFlowActive !== false ? update.lastSeen : dev.lastSeen,
+                          status: dev.dataFlowActive !== false ? 'online' : dev.status,
+                          metrics: {
+                            ...(dev.metrics || {}),
+                            ...update.metrics,
+                          },
+                        };
+                      }
+                      return dev;
+                    })
+                  );
+
+                  // Batch update latestTelemetry state once
+                  setLatestTelemetry((prev) => {
+                    const newIds = new Set(allowedReadings.map((r) => r.id));
+                    const filteredPrev = prev.filter((item) => !newIds.has(item.id));
+                    return [...allowedReadings, ...filteredPrev].slice(0, 500);
+                  });
+                }
+              }
+            } else if (data.event === 'system:connected') {
+              setIsConnected(true);
+              setConnectionStatus('connected');
+              if (data.payload && data.payload.simulatorActive !== undefined) {
+                setSimulatorActive(data.payload.simulatorActive);
+              }
+              if (data.payload?.firestoreQuotaExceeded) {
+                handleQuotaExceeded();
+              }
+            } else if (data.event === 'simulator:updated') {
+              if (data.payload && data.payload.simulatorActive !== undefined) {
+                setSimulatorActive(data.payload.simulatorActive);
+              }
+            } else if (data.event === 'device:updated') {
+              if (data.payload && data.payload.id) {
+                setDevices((prev) =>
+                  prev.map((d) => (d.id === data.payload.id ? { ...d, ...data.payload } : d))
+                );
+              } else {
+                fetchDevices();
+              }
+            } else if (data.event === 'device:control') {
+              if (data.payload && data.payload.deviceId) {
+                const { deviceId, pinOrMetric, value } = data.payload;
+                setDevices((prev) =>
+                  prev.map((d) => {
+                    if (d.id === deviceId) {
+                      return {
+                        ...d,
+                        metrics: {
+                          ...(d.metrics || {}),
+                          [pinOrMetric]: value,
+                        },
+                      };
+                    }
+                    return d;
+                  })
+                );
+              }
+            } else if (data.event === 'device:created') {
+              if (data.payload && data.payload.id) {
+                const dev = data.payload as Device;
+                setDevices((prev) => {
+                  if (prev.some((d) => d.id === dev.id)) {
+                    return prev.map((d) => (d.id === dev.id ? { ...d, ...dev } : d));
+                  }
+                  if (user?.role === 'admin' || dev.userId === user?.id) {
+                    return [dev, ...prev];
+                  }
+                  return prev;
+                });
+              } else {
+                fetchDevices();
+              }
+            } else if (data.event === 'device:deleted') {
+              const delId = data.payload?.id || data.payload;
+              if (delId) {
+                setDevices((prev) => prev.filter((d) => d.id !== delId));
+              } else {
+                fetchDevices();
+              }
+            } else if (data.event === 'devices:updated') {
+              if (Array.isArray(data.payload)) {
+                setDevices(data.payload);
+              } else {
+                fetchDevices();
+              }
+            } else if (data.event === 'notifications:updated' || data.event === 'notification:new') {
+              if (data.event === 'notification:new' && data.payload && typeof data.payload === 'object' && (data.payload as any).id) {
+                const item = data.payload as NotificationItem;
+                setNotifications((prev) => {
+                  const idx = prev.findIndex((n) => n.id === item.id);
+                  if (idx >= 0) {
+                    const updated = [...prev];
+                    updated[idx] = item;
+                    return updated;
+                  }
+                  return [item, ...prev].slice(0, 500);
+                });
+              }
+              fetchNotifications();
+            } else if (data.event === 'dashboard:layout') {
+              if (data.payload && Array.isArray(data.payload.widgets) && data.payload.widgets.length > 0) {
+                const currentTarget =
+                  user?.role === 'admin' && selectedCustomerForAdmin !== 'all'
+                    ? selectedCustomerForAdmin
+                    : user?.id || 'usr_admin';
+                if (
+                  !data.payload.userId ||
+                  data.payload.userId === currentTarget ||
+                  (user?.role === 'admin' && currentTarget === 'usr_admin' && (data.payload.userId === 'usr_admin' || !data.payload.userId))
+                ) {
+                  setWidgets(data.payload.widgets);
+                  if (data.payload.title) setDashboardTitle(data.payload.title);
+                }
+              }
+            } else if (data.event === 'users:updated') {
+              if (Array.isArray(data.payload)) {
+                setCustomersList(data.payload);
+              } else {
+                refreshCustomers();
+              }
+            }
+          } catch (err) {
+            console.error('WebSocket message parsing error:', err);
+          }
+        };
+
+        ws.onclose = () => {
+          if (isCleanedUp) return;
+          setIsConnected(false);
+          setConnectionStatus('reconnecting');
+          clearInterval(pingTimer);
+          clearInterval(watchdogTimer);
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 2500);
+        };
+
+        ws.onerror = () => {
+          if (isCleanedUp) return;
+          setConnectionStatus('reconnecting');
+        };
+      } catch (err) {
+        console.error('[WebSocket] Connection initialization error:', err);
+        if (!isCleanedUp) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      }
+    };
+
+    connectRef.current = connect;
+    connect();
+
+    // Listen for online/focus events to immediately reconnect if idle or dropped
+    const handleOnline = () => {
+      console.log('[WebSocket] Ağ yeniden çevrimiçi, bağlanılıyor...');
+      connect();
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    // Fallback polling: When disconnected, poll REST API every 6 seconds
+    const fallbackPollInterval = setInterval(() => {
+      if (!isCleanedUp && !isConnected && user) {
+        fetchDevices();
+        fetchHistory();
+      }
+    }, 6000);
+
+    return () => {
+      isCleanedUp = true;
+      window.removeEventListener('online', handleOnline);
+      clearInterval(fallbackPollInterval);
+      clearTimeout(reconnectTimer);
+      clearInterval(pingTimer);
+      clearInterval(watchdogTimer);
+      if (ws) {
+        try {
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [user?.id, user?.role, selectedCustomerForAdmin]);
+
+  // Firestore listener & fetcher for Dashboard Widgets & Settings
+  useEffect(() => {
+    if (!user) return;
+
+    const targetUserId =
+      user.role === 'admin' && selectedCustomerForAdmin !== 'all'
+        ? selectedCustomerForAdmin
+        : user.id || 'usr_admin';
+
+    // 1. Initial REST fetch to trigger backend seeding if first time
+    fetch(`/api/dashboard/widgets?userId=${encodeURIComponent(targetUserId)}`)
+      .then((res) => res.json())
+      .then((data: DashboardLayout) => {
+        if (data && Array.isArray(data.widgets) && data.widgets.length > 0) {
+          setWidgets(data.widgets);
+          if (data.title) setDashboardTitle(data.title);
+        }
+      })
+      .catch((err) => console.error('Error fetching dashboard widgets:', err));
+  }, [user, selectedCustomerForAdmin]);
+
+  // Action methods
+  const markNotificationRead = useCallback(async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    try {
+      await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
+    } catch (e) {
+      console.error('markNotificationRead error:', e);
+    }
+  }, []);
+
+  const clearAllNotifications = useCallback(async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      await fetch('/api/notifications/clear', { method: 'POST' });
+    } catch (e) {
+      console.error('clearAllNotifications error:', e);
+    }
+  }, []);
+
+  const saveWidgets = useCallback(async (newWidgets: WidgetConfig[], title?: string) => {
+    setWidgets(newWidgets);
+    if (title) setDashboardTitle(title);
+
+    const targetUserId =
+      user?.role === 'admin' && selectedCustomerForAdmin !== 'all'
+        ? selectedCustomerForAdmin
+        : user?.id || 'usr_admin';
+
+    const newTitle = title || dashboardTitle;
+
+    try {
+      await fetch('/api/dashboard/widgets', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: targetUserId,
+          widgets: newWidgets,
+          title: newTitle,
+        }),
+      });
+    } catch (e) {
+      console.error('saveWidgets error:', e);
+    }
+  }, [user, selectedCustomerForAdmin, dashboardTitle]);
+
+  const resetWidgetsToDefault = useCallback(async () => {
+    const targetUserId =
+      user?.role === 'admin' && selectedCustomerForAdmin !== 'all'
+        ? selectedCustomerForAdmin
+        : user?.id || 'usr_admin';
+
+    try {
+      const res = await fetch('/api/dashboard/widgets/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: targetUserId }),
+      });
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
+        const data: DashboardLayout = await res.json();
+        setWidgets(data.widgets);
+        setDashboardTitle(data.title);
+      }
+    } catch (e) {
+      console.error('resetWidgetsToDefault error:', e);
+    }
+  }, [user, selectedCustomerForAdmin]);
+
+  const toggleSimulator = useCallback(async () => {
+    try {
+      const res = await fetch('/api/simulator/toggle', { method: 'POST' });
+      const contentType = res.headers.get('content-type');
+      if (res.ok && contentType && contentType.includes('application/json')) {
+        const data = await res.json();
+        setSimulatorActive(data.simulatorActive);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const triggerTestTelemetry = useCallback(async (deviceId: string, metric: string, value: number, unit?: string) => {
+    const dev = devices.find((d) => d.id === deviceId);
+    if (!dev) return;
+
+    try {
+      await fetch('/api/v1/telemetry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': dev.apiKey,
+        },
+        body: JSON.stringify({ metric, value, unit }),
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  }, [devices]);
+
+  const createNewDevice = useCallback(async (data: Partial<Device>): Promise<Device> => {
+    const targetOwner =
+      user?.role === 'admin'
+        ? (data.userId || (selectedCustomerForAdmin !== 'all' ? selectedCustomerForAdmin : user?.id || 'usr_admin'))
+        : user?.id || 'usr_admin';
+
+    const payload = {
+      userId: targetOwner,
+      name: data.name,
+      type: data.type || 'sensor',
+      location: data.location || 'Tanımsız Konum',
+      ipAddress: data.ipAddress || '127.0.0.1',
+      macAddress: data.macAddress,
+      rateLimitPerMin: data.rateLimitPerMin || 120,
+      encryptionMethod: data.encryptionMethod || 'AES-256-GCM',
+      apiKey: data.apiKey,
+      isSimulated: data.isSimulated ?? false,
+    };
+
+    try {
+      const res = await fetch('/api/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Cihaz oluşturulamadı');
+      }
+
+      const created: Device = await res.json();
+      return created;
+    } catch (e: any) {
+      console.error('createNewDevice error:', e);
+      throw new Error(e.message || 'Cihaz oluşturulamadı', { cause: e });
+    }
+  }, [user, selectedCustomerForAdmin]);
+
+  const updateDevice = useCallback(async (id: string, updates: Partial<Device>): Promise<Device> => {
+    const dev = devices.find((d) => d.id === id);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+      throw new Error('Bu cihazı değiştirme yetkiniz yoktur');
+    }
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Cihaz güncellenemedi');
+      }
+      const updated: Device = await res.json();
+      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
+      return updated;
+    } catch (e: any) {
+      console.error('updateDevice error:', e);
+      throw new Error(e.message || 'Cihaz güncellenemedi', { cause: e });
+    }
+  }, [devices, user]);
+
+  const deleteDevice = useCallback(async (id: string) => {
+    const dev = devices.find((d) => d.id === id);
+    if (!dev) return;
+    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+      console.error('Yetkisiz silme işlemi yapıldı');
+      return;
+    }
+    try {
+      await fetch(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setDevices((prev) => prev.filter((d) => d.id !== id));
+    } catch (e) {
+      console.error('deleteDevice error:', e);
+    }
+  }, [devices, user]);
+
+  const regenerateApiKey = useCallback(async (id: string): Promise<string> => {
+    const dev = devices.find((d) => d.id === id);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+      throw new Error('Yetkisiz işlem');
+    }
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}/regen-key`, { method: 'POST' });
+      if (!res.ok) throw new Error('Anahtar yenilenemedi');
+      const data = await res.json();
+      const newKey = data.apiKey;
+      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, apiKey: newKey } : d)));
+      return newKey;
+    } catch (e: any) {
+      console.error('regenerateApiKey error:', e);
+      throw new Error(e.message || 'Anahtar yenilenemedi', { cause: e });
+    }
+  }, [devices, user]);
+
+  const sendControlCommand = useCallback(
+    async (deviceId: string, command: string, value?: any, outputPin?: string, unit?: string) => {
+      try {
+        const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command, value, outputPin, unit }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Sinyal gönderilemedi');
+        }
+
+        const data = await res.json();
+        return data;
+      } catch (e: any) {
+        console.error('sendControlCommand error:', e);
+        throw e;
+      }
+    },
+    []
+  );
+
+  const reconnectWebSocket = useCallback(() => {
+    setConnectionStatus('reconnecting');
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (connectRef.current) {
+      connectRef.current();
+    }
+  }, []);
+
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
+
+  const contextValue = useMemo(
+    () => ({
+      isConnected,
+      connectionStatus,
+      reconnectWebSocket,
+      wsLatency,
+      devices,
+      latestTelemetry,
+      notifications,
+      unreadCount,
+      widgets,
+      dashboardTitle,
+      serverStats,
+      simulatorActive,
+      selectedCustomerForAdmin,
+      setSelectedCustomerForAdmin,
+      customersList,
+      refreshCustomers,
+      createNewCustomer,
+      deleteCustomer,
+      refreshDevices,
+      markNotificationRead,
+      clearAllNotifications,
+      saveWidgets,
+      resetWidgetsToDefault,
+      toggleSimulator,
+      triggerTestTelemetry,
+      createNewDevice,
+      updateDevice,
+      deleteDevice,
+      regenerateApiKey,
+      sendControlCommand,
+    }),
+    [
+      isConnected,
+      connectionStatus,
+      reconnectWebSocket,
+      wsLatency,
+      devices,
+      latestTelemetry,
+      notifications,
+      unreadCount,
+      widgets,
+      dashboardTitle,
+      serverStats,
+      simulatorActive,
+      selectedCustomerForAdmin,
+      setSelectedCustomerForAdmin,
+      customersList,
+      refreshCustomers,
+      createNewCustomer,
+      deleteCustomer,
+      refreshDevices,
+      markNotificationRead,
+      clearAllNotifications,
+      saveWidgets,
+      resetWidgetsToDefault,
+      toggleSimulator,
+      triggerTestTelemetry,
+      createNewDevice,
+      updateDevice,
+      deleteDevice,
+      regenerateApiKey,
+      sendControlCommand,
+    ]
+  );
+
+  return (
+    <RealtimeContext.Provider value={contextValue}>
+      {children}
+    </RealtimeContext.Provider>
+  );
+};
+
+export const useRealtime = () => {
+  const context = useContext(RealtimeContext);
+  if (!context) {
+    throw new Error('useRealtime must be used within a RealtimeProvider');
+  }
+  return context;
+};

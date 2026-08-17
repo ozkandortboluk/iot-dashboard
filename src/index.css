@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Smooth theme transitions and global body styles */
+body {
+  @apply bg-slate-100 text-slate-800 dark:bg-[#020617] dark:text-slate-200 transition-colors duration-200;
+}

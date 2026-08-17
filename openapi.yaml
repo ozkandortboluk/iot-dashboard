@@ -1,0 +1,106 @@
+openapi: 3.0.3
+info:
+  title: Industrial IoT & Telemetry Realtime Platform API
+  description: REST API ve Gerçek Zamanlı Telemetri, Cihaz Yönetimi, Çok Kiracılı İzolasyon, Kural & Alarm Motoru OpenAPI Şartnamesi.
+  version: 1.0.0
+  contact:
+    name: Özkan Dörtbölük
+    email: admin@dashboard.io
+servers:
+  - url: http://localhost:3000
+    description: Yerel Geliştirme Sunucusu
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT / Token
+      description: Kullanıcı oturum token'ı. Örn: 'token_usr_admin'
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Cihaz kimlik doğrulama anahtarı. Örn: 'dev_key_ist_98234710'
+
+paths:
+  /api/health:
+    get:
+      summary: Sistem Sağlık Durumu
+      responses:
+        '200':
+          description: Sağlıklı
+  /api/auth/login:
+    post:
+      summary: Kullanıcı Girişi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Başarılı Giriş
+        '401':
+          description: Hatalı Şifre
+  /api/devices:
+    get:
+      summary: Cihazları Listele
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cihaz listesi
+    post:
+      summary: Yeni Cihaz Ekle
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Oluşturuldu
+  /api/telemetry:
+    get:
+      summary: Canlı ve Son Telemetri Verileri
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Telemetri listesi
+    post:
+      summary: Telemetri Verisi Gönder
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Kaydedildi
+  /api/rules:
+    get:
+      summary: Alarm Kurallarını Listele
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Kurallar
+    post:
+      summary: Yeni Alarm Kuralı Oluştur
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Oluşturuldu
+  /api/alarms:
+    get:
+      summary: Aktif Alarmları Listele
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Alarmlar

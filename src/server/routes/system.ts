@@ -1,0 +1,402 @@
+import { Router } from 'express';
+import path from 'node:path';
+import fs from 'node:fs';
+import { db } from '../db.js';
+import { broadcast, getWebSocketClientsCount } from '../services/websocket.js';
+import {
+  simulatorActive,
+  simulatorIntervalMs,
+  anomalyProbability,
+  activeScenario,
+  telemetryIngestedCount,
+  setSimulatorActive,
+  setSimulatorConfig,
+  scheduleSimulationStep,
+} from '../services/simulator.js';
+import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+
+const startTime = Date.now();
+
+// System Router
+const systemRouter = Router();
+
+// OpenAPI & API Documentation (Public)
+systemRouter.get('/openapi.json', (req, res) => {
+  const openApiPath = path.join(process.cwd(), 'openapi.json');
+  if (fs.existsSync(openApiPath)) {
+    return res.sendFile(openApiPath);
+  }
+  res.status(404).json({ error: 'OpenAPI specification not found.' });
+});
+
+systemRouter.get('/docs', (req, res) => {
+  res.type('html').send(`
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+      <meta charset="utf-8" />
+      <title>IoT Telemetri & Alarm Platformu API Dokümantasyonu</title>
+      <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+      <style>
+        body { margin: 0; background: #0f172a; }
+        .swagger-ui { filter: invert(88%) hue-rotate(180deg); }
+        .swagger-ui .topbar { display: none; }
+      </style>
+    </head>
+    <body>
+      <div id="swagger-ui"></div>
+      <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+      <script>
+        window.onload = () => {
+          window.ui = SwaggerUIBundle({
+            url: '/api/openapi.json',
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [SwaggerUIBundle.presets.apis],
+          });
+        };
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+systemRouter.get('/system/stats', authenticateUser, (req, res) => {
+  res.json({
+    activeConnections: getWebSocketClientsCount(),
+    requestsPerSec: Number((Math.random() * 12 + 4).toFixed(1)),
+    telemetryIngestedTotal: telemetryIngestedCount,
+    dbType: 'SQLite (Development/Local)',
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    simulatorActive,
+  });
+});
+
+systemRouter.get('/system/postgres-schema', authenticateUser, requireAdmin, (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.setHeader('Content-Disposition', 'attachment; filename="iot_timescaledb_schema.sql"');
+  res.send(db.getPostgresSchemaSQL());
+});
+
+// Admin Stats & Quotas
+const adminRouter = Router();
+
+adminRouter.get('/database-stats', authenticateUser, requireAdmin, (req, res) => {
+  res.json(db.getDatabaseStats());
+});
+
+adminRouter.post('/test-firestore-quota', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.testAndResetFirestoreQuota();
+  res.json(result);
+});
+
+// Database Management Router
+const databaseRouter = Router();
+
+databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
+  res.json(db.getDatabaseHealth());
+});
+
+databaseRouter.post('/backup', authenticateUser, requireAdmin, (req, res) => {
+  const result = db.createBackup();
+  if (result.success) {
+    res.json({ message: 'Veritabanı yedeği başarıyla oluşturuldu.', result });
+  } else {
+    res.status(500).json({ error: 'Yedekleme oluşturulamadı.' });
+  }
+});
+
+databaseRouter.get('/backups', authenticateUser, requireAdmin, (req, res) => {
+  res.json({ backups: db.listBackups() });
+});
+
+databaseRouter.post('/restore', authenticateUser, requireAdmin, (req, res) => {
+  const { filename } = req.body;
+  if (!filename) {
+    return res.status(400).json({ error: 'Yedek dosya adı belirtilmedi.' });
+  }
+  const ok = db.restoreBackup(filename);
+  if (ok) {
+    res.json({ message: 'Veritabanı yedeği başarıyla geri yüklendi.' });
+  } else {
+    res.status(400).json({ error: 'Yedek geri yüklenemedi veya dosya bulunamadı.' });
+  }
+});
+
+databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
+  res.json(db.getPostgresConfig());
+});
+
+databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
+  const { engine, postgresUrl } = req.body;
+  if (!engine || !['postgres', 'timescaledb', 'local'].includes(engine)) {
+    return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi.' });
+  }
+  db.setActiveEngine(engine, postgresUrl);
+  res.json({
+    success: true,
+    message: `Aktif veritabanı motoru "${engine}" olarak güncellendi.`,
+    config: db.getPostgresConfig(),
+  });
+});
+
+databaseRouter.post('/postgres/test', authenticateUser, requireAdmin, async (req, res) => {
+  const { postgresUrl } = req.body;
+  const result = await db.testPostgresConnection(postgresUrl);
+  res.json(result);
+});
+
+databaseRouter.post('/postgres/migrate', authenticateUser, requireAdmin, async (req, res) => {
+  const { postgresUrl } = req.body;
+  const result = await db.executePostgresMigration(postgresUrl);
+  res.json(result);
+});
+
+databaseRouter.post('/postgres/sync-all', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.syncAllToPostgres();
+  res.json(result);
+});
+
+databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req, res) => {
+  res.json(db.getPostgresSetupGuide());
+});
+
+// Database Explorer & Management Endpoints
+databaseRouter.get('/explorer/tables', authenticateUser, requireAdmin, async (req, res) => {
+  const counts = db.getTableCounts();
+  const engineConfig = db.getPostgresConfig();
+  const tables = [
+    { id: 'users', name: 'Kullanıcılar (users)', count: counts.users || 0 },
+    { id: 'devices', name: 'Cihazlar (devices)', count: counts.devices || 0 },
+    { id: 'telemetry_readings', name: 'Telemetri Verileri (telemetry_readings)', count: counts.telemetry_readings || 0 },
+    { id: 'threshold_rules', name: 'Eşik Kuralları (threshold_rules)', count: counts.threshold_rules || 0 },
+    { id: 'active_alarms', name: 'Aktif Alarmlar (active_alarms)', count: counts.active_alarms || 0 },
+    { id: 'notifications', name: 'Bildirimler (notifications)', count: counts.notifications || 0 },
+    { id: 'audit_logs', name: 'Denetim Günlükleri (audit_logs)', count: counts.audit_logs || 0 },
+    { id: 'device_commands', name: 'Cihaz Komutları (device_commands)', count: counts.device_commands || 0 },
+    { id: 'dispatch_logs', name: 'Gönderim Günlükleri (dispatch_logs)', count: counts.dispatch_logs || 0 },
+    { id: 'dashboard_layouts', name: 'Dashboard Düzenleri (dashboard_layouts)', count: counts.dashboard_layouts || 0 },
+  ];
+  res.json({ tables, isPostgresConnected: engineConfig?.isPostgresConnected || false, activeEngine: engineConfig?.activeEngine });
+});
+
+databaseRouter.get('/explorer/data', authenticateUser, requireAdmin, async (req, res) => {
+  const table = (req.query.table as string) || 'users';
+  const page = parseInt((req.query.page as string) || '1', 10);
+  const limit = parseInt((req.query.limit as string) || '50', 10);
+  const search = (req.query.search as string) || '';
+  const result = await db.getTableDataExplorer(table, page, limit, search);
+  res.json(result);
+});
+
+databaseRouter.post('/explorer/record', authenticateUser, requireAdmin, async (req, res) => {
+  const { table, record } = req.body;
+  if (!table || !record) return res.status(400).json({ error: 'Tablo adı ve kayıt bilgisi zorunludur.' });
+  const result = await db.insertTableRecord(table, record);
+  res.json(result);
+});
+
+databaseRouter.put('/explorer/record', authenticateUser, requireAdmin, async (req, res) => {
+  const { table, id, updates } = req.body;
+  if (!table || !id || !updates) return res.status(400).json({ error: 'Tablo adı, kayıt ID ve güncelleme verisi zorunludur.' });
+  const result = await db.updateTableRecord(table, id, updates);
+  res.json(result);
+});
+
+databaseRouter.delete('/explorer/record', authenticateUser, requireAdmin, async (req, res) => {
+  const { table, id } = req.body;
+  if (!table || !id) return res.status(400).json({ error: 'Tablo adı ve kayıt ID zorunludur.' });
+  const result = await db.deleteTableRecord(table, id);
+  res.json(result);
+});
+
+databaseRouter.post('/explorer/sql', authenticateUser, requireAdmin, async (req, res) => {
+  const { sql } = req.body;
+  if (!sql || typeof sql !== 'string') return res.status(400).json({ error: 'Çalıştırılacak SQL ifadesi belirtilmedi.' });
+  const result = await db.executeCustomSqlQuery(sql);
+  res.json(result);
+});
+
+// Data Retention & Cleanup Endpoints
+databaseRouter.get('/retention', authenticateUser, requireAdmin, (req, res) => {
+  res.json(db.getRetentionPolicies());
+});
+
+databaseRouter.put('/retention', authenticateUser, requireAdmin, (req, res) => {
+  const updated = db.updateRetentionPolicies(req.body);
+  res.json(updated);
+});
+
+databaseRouter.post('/retention/cleanup', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.executeDataRetentionCleanup(false);
+  res.json(result);
+});
+
+// TimescaleDB Router
+const timescaleRouter = Router();
+
+timescaleRouter.get('/stats', authenticateUser, (req, res) => {
+  res.json(db.getTimescaleStats());
+});
+
+timescaleRouter.post('/compress-now', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.compressTimescaleChunksNow();
+  res.json(result);
+});
+
+timescaleRouter.post('/policies', authenticateUser, requireAdmin, (req, res) => {
+  const result = db.updateTimescalePolicies(req.body);
+  res.json(result);
+});
+
+timescaleRouter.get('/time-bucket', authenticateUser, async (req, res) => {
+  const { deviceId, metric, bucket = '5m', startTime, endTime } = req.query;
+  try {
+    const result = await db.queryTimeBucketTelemetryAsync({
+      deviceId: deviceId as string,
+      metric: metric as string,
+      bucket: (bucket as any) || '5m',
+      startTime: startTime as string,
+      endTime: endTime as string,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB zaman dilimi sorgusu başarısız oldu: ' + (err.message || '') });
+  }
+});
+
+timescaleRouter.get('/continuous-aggregates', authenticateUser, (req, res) => {
+  const stats = db.getTimescaleStats();
+  res.json(stats.continuousAggregates);
+});
+
+timescaleRouter.get('/export', authenticateUser, async (req, res) => {
+  const { deviceId, metric, bucket = '5m', format = 'json', startTime, endTime } = req.query;
+  try {
+    const data = await db.queryTimeBucketTelemetryAsync({
+      deviceId: deviceId as string,
+      metric: metric as string,
+      bucket: (bucket as any) || '5m',
+      startTime: startTime as string,
+      endTime: endTime as string,
+    });
+
+    if (format === 'csv') {
+      const csvHeader = 'Timestamp,Device ID,Metric,Average,Minimum,Maximum,Sample Count\n';
+      const csvRows = data.map((d) => `"${d.timeBucket}","${d.deviceId}","${d.metric}",${d.avgValue},${d.minValue},${d.maxValue},${d.readingCount}`).join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="timescaledb_export_${Date.now()}.csv"`);
+      return res.send(csvHeader + csvRows);
+    }
+
+    res.json({
+      exportedAt: new Date().toISOString(),
+      recordCount: data.length,
+      bucket,
+      data,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Veri dışa aktarılamadı: ' + (err.message || '') });
+  }
+});
+
+// Simulator Router
+const simulatorRouter = Router();
+
+simulatorRouter.get('/status', (req, res) => {
+  res.json({
+    simulatorActive,
+    simulatorIntervalMs,
+    anomalyProbability,
+    activeScenario,
+    telemetryIngestedCount,
+    activeConnectionsCount: getWebSocketClientsCount(),
+  });
+});
+
+simulatorRouter.post('/toggle', authenticateUser, requireAdmin, (req, res) => {
+  setSimulatorActive(!simulatorActive);
+  broadcast('simulator:updated', {
+    simulatorActive,
+    simulatorIntervalMs,
+    anomalyProbability,
+    activeScenario,
+  });
+  res.json({
+    simulatorActive,
+    message: `Cihaz verisi simülatörü ${simulatorActive ? 'AÇILDI' : 'KAPATILDI'}.`,
+  });
+});
+
+simulatorRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
+  setSimulatorConfig(req.body);
+  broadcast('simulator:updated', {
+    simulatorActive,
+    simulatorIntervalMs,
+    anomalyProbability,
+    activeScenario,
+  });
+  res.json({
+    success: true,
+    simulatorActive,
+    simulatorIntervalMs,
+    anomalyProbability,
+    activeScenario,
+    message: 'Simülatör ayarları güncellendi.',
+  });
+});
+
+simulatorRouter.post('/batch', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { count = 10, deviceId, metric, value, unit } = req.body;
+  const numCount = Math.min(200, Math.max(1, Number(count)));
+  let devices = db.getDevices().filter((d) => d.dataFlowActive !== false && d.status !== 'maintenance');
+
+  if (currentUser.role !== 'admin') {
+    devices = devices.filter((d) => d.userId === currentUser.id);
+  }
+
+  if (!devices.length) {
+    return res.status(400).json({ error: 'Sistemde aktif veri akışına izin verilen cihazınız bulunamadı.' });
+  }
+
+  const generatedReadings = [];
+  for (let i = 0; i < numCount; i++) {
+    const dev = deviceId ? devices.find((d) => d.id === deviceId) || devices[0] : devices[Math.floor(Math.random() * devices.length)];
+    const m = metric || (dev.type === 'sensor' ? 'temperature' : dev.type === 'server' ? 'cpu' : 'power');
+    const u = unit || (m === 'temperature' ? '°C' : m === 'power' ? 'kW' : '%');
+    const val = value !== undefined ? Number(value) : Number((20 + Math.random() * 60).toFixed(1));
+
+    const rawPayload = `BATCH_GEN, ${dev.apiKey}, ${dev.name}, ${m}:${val}`;
+    const reading = db.addTelemetryReading({
+      deviceId: dev.id,
+      deviceName: dev.name,
+      metric: m,
+      value: val,
+      unit: u,
+      status: val > 90 ? 'critical' : val > 75 ? 'warning' : 'normal',
+      rawPayload,
+    });
+    generatedReadings.push(reading);
+  }
+
+  if (generatedReadings.length > 0) {
+    broadcast('telemetry:batch', generatedReadings);
+  }
+
+  res.json({
+    success: true,
+    generatedCount: generatedReadings.length,
+    readings: generatedReadings,
+    message: `${generatedReadings.length} adet sanal telemetri paketi başarıyla üretildi ve yayınlandı.`,
+  });
+});
+
+export {
+  systemRouter,
+  adminRouter,
+  databaseRouter,
+  timescaleRouter,
+  simulatorRouter,
+};

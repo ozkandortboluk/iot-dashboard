@@ -1,0 +1,6 @@
+{
+  "name": "Web-Based Real-Time Analytics Dashboard",
+  "description": "Industrial real-time IoT dashboard powered by PostgreSQL and TimescaleDB with hypertable time-series data compression, continuous aggregates, WebSocket streaming, alarm engine, and role-based access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

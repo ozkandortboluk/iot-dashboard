@@ -1,0 +1,323 @@
+
+  public getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationItem[] {
+    const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+
+    if (reqUser && reqUser.role === 'customer') {
+      const customerDeviceIds = new Set(
+        this.data.devices.filter((d) => d.userId === requestingUserId).map((d) => d.id)
+      );
+      return this.data.notifications.filter(
+        (n) => n.userId === requestingUserId || (n.deviceId && customerDeviceIds.has(n.deviceId))
+      );
+    }
+
+    if (reqUser && reqUser.role === 'admin') {
+      if (targetCustomerId && targetCustomerId !== 'all') {
+        const custDeviceIds = new Set(
+          this.data.devices.filter((d) => d.userId === targetCustomerId).map((d) => d.id)
+        );
+        return this.data.notifications.filter(
+          (n) => n.userId === targetCustomerId || (n.deviceId && custDeviceIds.has(n.deviceId))
+        );
+      }
+      return this.data.notifications;
+    }
+
+    return this.data.notifications.filter((n) => n.userId === requestingUserId);
+  }
+
+  public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem {
+    const item: NotificationItem = {
+      ...notif,
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      read: false,
+    };
+    this.data.notifications.unshift(item);
+    if (this.data.notifications.length > 200) {
+      this.data.notifications = this.data.notifications.slice(0, 200);
+    }
+    
+    // Check if the related device is simulated
+    const device = item.deviceId ? this.data.devices.find((d) => d.id === item.deviceId) : undefined;
+    const isSimulated = device?.isSimulated === true;
+    
+    if (!isSimulated) {
+      // Write directly to Firestore ONLY for real device notifications
+      this.safeFirestoreWrite(
+        () => setDoc(doc(firestore, 'notifications', item.id), cleanFirestoreData(item)),
+        'create_notification'
+      );
+    }
+
+    this.saveData(this.data);
+
+    // Sync to PostgreSQL Repository
+    this.postgresRepo.saveNotification(item).catch(() => {});
+
+    this.notifyNotificationListeners('notification:new', item);
+    return item;
+  }
+
+  public markNotificationRead(id: string) {
+    const n = this.data.notifications.find((i) => i.id === id);
+    if (n) {
+      n.read = true;
+      n.updatedAt = new Date().toISOString();
+      n.version = (n.version || 1) + 1;
+      this.saveData(this.data);
+      this.postgresRepo.markNotificationRead(id).catch(() => {});
+      this.safeFirestoreWrite(
+        () => updateDoc(doc(firestore, 'notifications', id), { read: true, updatedAt: n.updatedAt, version: n.version }),
+        'mark_notification_read'
+      );
+      this.notifyNotificationListeners('notifications:updated');
+    }
+  }
+
+  public markAllNotificationsRead(userId = 'usr_admin') {
+    const now = new Date().toISOString();
+    this.data.notifications.forEach((n) => {
+      if (n.userId === userId || userId === 'usr_admin') {
+        if (!n.read) {
+          n.read = true;
+          n.updatedAt = now;
+          n.version = (n.version || 1) + 1;
+          this.safeFirestoreWrite(
+            () => updateDoc(doc(firestore, 'notifications', n.id), { read: true, updatedAt: n.updatedAt, version: n.version }),
+            'mark_notification_read'
+          );
+        }
+      }
+    });
+    this.saveData(this.data);
+    this.postgresRepo.markAllNotificationsRead(userId).catch(() => {});
+    this.notifyNotificationListeners('notifications:updated');
+  }
+
+  // Dashboards / Widgets
+  public getDashboard(userId: string): DashboardLayout {
+    let dash = this.data.dashboards.find((d) => d.userId === userId);
+    if (!dash) {
+      dash = {
+        id: `dash_${userId}`,
+        userId,
+        title: 'Özel Dashboard',
+        widgets: defaultWidgets,
+        updatedAt: new Date().toISOString(),
+      };
+      this.data.dashboards.push(dash);
+      this.saveData(this.data);
+      this.postgresRepo.saveDashboard(dash).catch(() => {});
+    }
+    return dash;
+  }
+
+  public saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): DashboardLayout {
+    let dash = this.data.dashboards.find((d) => d.userId === userId);
+    if (!dash) {
+      dash = {
+        id: `dash_${userId}`,
+        userId,
+        title: title || 'Kullanıcı Dashboard',
+        widgets,
+        updatedAt: new Date().toISOString(),
+        version: 1,
+      };
+      this.data.dashboards.push(dash);
+    } else {
+      dash.widgets = widgets;
+      if (title) dash.title = title;
+      dash.updatedAt = new Date().toISOString();
+      dash.version = (dash.version || 1) + 1;
+    }
+    this.saveData(this.data);
+
+    // Sync to PostgreSQL Repository
+    this.postgresRepo.saveDashboard(dash).catch(() => {});
+
+    // Sync to Firestore
+    this.safeFirestoreWrite(
+      () => setDoc(doc(firestore, 'dashboards', dash.id), cleanFirestoreData(dash)),
+      'save_dashboard'
+    );
+
+    return dash;
+  }
+
+  public resetDashboard(userId: string): DashboardLayout {
+    return this.saveDashboardWidgets(userId, defaultWidgets, 'Varsayılan Sistem Dashboard');
+  }
+
+  // Active Alarms & Actions
+  public getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string): ActiveAlarm[] {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+    const list = this.data.activeAlarms;
+
+    const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+    if (reqUser && reqUser.role === 'customer') {
+      return list.filter((a) => a.userId === requestingUserId);
+    }
+
+    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+      return list.filter((a) => a.userId === targetCustomerId);
+    }
+
+    return list;
+  }
+
+  public acknowledgeAlarm(alarmId: string, userId: string, userName: string) {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+    const alarm = this.data.activeAlarms.find((a) => a.id === alarmId);
+    if (alarm) {
+      alarm.acknowledged = true;
+      alarm.acknowledgedAt = new Date().toISOString();
+      alarm.acknowledgedBy = userName || userId;
+      alarm.updatedAt = alarm.acknowledgedAt;
+      alarm.version = (alarm.version || 1) + 1;
+      this.upsertActiveAlarm(alarm);
+
+      this.emitAlarmNotification(
+        alarm,
+        'ACKNOWLEDGED',
+        `ℹ️ [ALARM ONAYLANDI] ${alarm.deviceName} - ${alarm.metricKey.toUpperCase()}`,
+        `Alarm ${userName || userId} tarafından onaylandı. Tekrar bildirimleri durduruldu.`
+      );
+      this.addAuditLog(userId, userName, `Alarm onaylandı (${alarm.deviceName})`, 'low');
+      this.saveData(this.data);
+    }
+  }
+
+  public silenceAlarm(alarmId: string, durationMinutes: number, userId: string, userName: string) {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+    const alarm = this.data.activeAlarms.find((a) => a.id === alarmId);
+    if (alarm) {
+      const silenceEnd = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+      alarm.silencedUntil = silenceEnd;
+      alarm.state = 'SILENCED';
+      alarm.updatedAt = new Date().toISOString();
+      alarm.version = (alarm.version || 1) + 1;
+      this.upsertActiveAlarm(alarm);
+
+      this.addAuditLog(userId, userName, `Alarm ${durationMinutes} dakika boyunca susturuldu (${alarm.deviceName})`, 'medium');
+      this.saveData(this.data);
+    }
+  }
+
+  public resolveAlarm(alarmId: string, userId: string, userName: string) {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+    const alarm = this.data.activeAlarms.find((a) => a.id === alarmId);
+    if (alarm) {
+      alarm.state = 'RESOLVED';
+      alarm.resolvedAt = new Date().toISOString();
+      alarm.updatedAt = alarm.resolvedAt;
+      alarm.version = (alarm.version || 1) + 1;
+      this.upsertActiveAlarm(alarm);
+
+      this.emitAlarmNotification(
+        alarm,
+        'RESOLVED',
+        `✅ [ALARM MANÜEL KAPATILDI] ${alarm.deviceName}`,
+        `Alarm ${userName || userId} tarafından manuel olarak kapatıldı.`
+      );
+      this.addAuditLog(userId, userName, `Alarm kapatıldı (${alarm.deviceName})`, 'medium');
+      this.saveData(this.data);
+    }
+  }
+
+  // Threshold Rules
+  public getRules(requestingUserId = 'usr_admin', targetCustomerId?: string): ThresholdRule[] {
+    const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+    
+    if (reqUser && reqUser.role === 'customer') {
+      // Customer sees their own created rules PLUS global system rules (usr_admin)
+      return this.data.rules.filter((r) => !r.userId || r.userId === requestingUserId || r.userId === 'usr_admin');
+    }
+
+    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+      return this.data.rules.filter((r) => r.userId === targetCustomerId);
+    }
+
+    return this.data.rules;
+  }
+
+  public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: { id: string; name: string; role: string }): ThresholdRule {
+    let ownerId = ruleData.userId || 'usr_admin';
+    let ownerName = ruleData.userName || 'Sistem Yöneticisi';
+
+    if (requestingUser) {
+      if (requestingUser.role === 'customer') {
+        ownerId = requestingUser.id;
+        ownerName = requestingUser.name;
+      } else if (requestingUser.role === 'admin' && ruleData.userId) {
+        const foundUser = this.data.users.find((u) => u.id === ruleData.userId);
+        if (foundUser) ownerName = foundUser.name;
+      }
+    }
+
+    const newRule: ThresholdRule = {
+      ...ruleData,
+      id: `rule_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      userId: ownerId,
+      userName: ownerName,
+      notificationChannels: ruleData.notificationChannels || ['app'],
+      activeHours: ruleData.activeHours || '00:00-23:59',
+      recipients: ruleData.recipients || [],
+      updatedAt: new Date().toISOString(),
+      version: 1,
+    };
+
+    this.data.rules.push(newRule);
+    this.addAuditLog(ownerId, ownerName, `Yeni eşik kuralı oluşturuldu: ${newRule.metricKey.toUpperCase()} ${newRule.operator} ${newRule.thresholdValue}`, 'medium');
+    this.saveData(this.data);
+    this.postgresRepo.saveRule(newRule).catch(() => {});
+    return newRule;
+  }
+
+  public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: { id: string; role: string }): ThresholdRule | null {
+    const r = this.data.rules.find((item) => item.id === id);
+    if (!r) return null;
+
+    if (requestingUser && requestingUser.role !== 'admin' && r.userId && r.userId !== requestingUser.id) {
+      return null; // Forbidden: Müşteri başkasının kuralını değiştiremez
+    }
+
+    Object.assign(r, updates);
+    r.updatedAt = new Date().toISOString();
+    r.version = (r.version || 1) + 1;
+    this.saveData(this.data);
+    this.postgresRepo.saveRule(r).catch(() => {});
+    return r;
+  }
+
+  public deleteRule(id: string, requestingUser?: { id: string; role: string }): boolean {
+    const idx = this.data.rules.findIndex((r) => r.id === id);
+    if (idx < 0) return false;
+
+    const r = this.data.rules[idx];
+    if (requestingUser && requestingUser.role !== 'admin' && r.userId && r.userId !== requestingUser.id) {
+      return false; // Forbidden: Müşteri başkasının kuralını silemez
+    }
+
+    this.data.rules.splice(idx, 1);
+    this.saveData(this.data);
+    this.postgresRepo.deleteRule(id).catch(() => {});
+    return true;
+  }
+
+  public toggleRule(id: string, enabled: boolean, requestingUser?: { id: string; role: string }): boolean {
+    const r = this.data.rules.find((item) => item.id === id);
+    if (!r) return false;
+
+    if (requestingUser && requestingUser.role !== 'admin' && r.userId && r.userId !== requestingUser.id) {
+      return false; // Forbidden: Müşteri başkasının kuralını değiştiremez
+    }
+
+    r.enabled = enabled;
+    r.updatedAt = new Date().toISOString();
+    this.saveData(this.data);
+    this.postgresRepo.saveRule(r).catch(() => {});
+    return true;
+  }
+
+  

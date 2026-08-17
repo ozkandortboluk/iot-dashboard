@@ -1,0 +1,167 @@
+  // User Auth & Session Management
+  public getUsers(): User[] {
+    return this.data.users;
+  }
+
+  public createSession(user: User): string {
+    if (!this.data.sessions) {
+      this.data.sessions = [];
+    }
+    const token = crypto.randomBytes(32).toString('hex');
+    const session: UserSession = {
+      token,
+      userId: user.id,
+      userRole: user.role,
+      userEmail: user.email,
+      userName: user.name,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+    };
+    // Keep active sessions, prune expired ones
+    this.data.sessions = this.data.sessions.filter(
+      (s) => new Date(s.expiresAt).getTime() > Date.now()
+    );
+    this.data.sessions.push(session);
+    this.saveData(this.data);
+    this.postgresRepo.saveSession(session).catch(() => {});
+    return token;
+  }
+
+  public verifySession(token: string): { user: User; session?: UserSession } | null {
+    if (!token) return null;
+    const cleanToken = token.trim();
+
+    // 1. Check in-memory / persisted sessions
+    if (this.data.sessions && Array.isArray(this.data.sessions)) {
+      const session = this.data.sessions.find((s) => s.token === cleanToken);
+      if (session) {
+        // If session is expired, extend it if it's a known user
+        const user = this.data.users.find((u) => u.id === session.userId);
+        if (user) {
+          if (new Date(session.expiresAt).getTime() < Date.now()) {
+            session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+            this.scheduleSave();
+          }
+          return { user, session };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  public authenticate(email: string, pass: string): { user: User; token: string } | null {
+    const user = this.data.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) return null;
+
+    const storedHash = this.data.passwords[user.id];
+
+    if (storedHash && verifyPassword(pass, storedHash)) {
+      // Re-hash with bcrypt if it was a legacy hash format
+      if (!storedHash.startsWith('$2')) {
+        this.data.passwords[user.id] = hashPassword(pass);
+        this.saveData(this.data);
+      }
+      const token = this.createSession(user);
+      this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
+      return { user, token };
+    }
+
+    this.addAuditLog(user ? user.id : 'unknown', email, 'Hatalı Giriş Denemesi', 'high');
+    return null;
+  }
+
+  public registerUser(
+    name: string,
+    email: string,
+    pass: string,
+    role: User['role'] = 'customer',
+    companyName?: string
+  ): User {
+    const existing = this.data.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (existing) {
+      throw new Error('Bu e-posta adresi zaten kayıtlı.');
+    }
+
+    const newUser: User = {
+      id: `usr_${Date.now()}`,
+      name,
+      email,
+      role,
+      companyName: companyName || name,
+      created_at: new Date().toISOString(),
+    };
+
+    this.data.users.push(newUser);
+    this.data.passwords[newUser.id] = hashPassword(pass);
+
+    // Create user dashboard
+    this.data.dashboards.push({
+      id: `dash_${newUser.id}`,
+      userId: newUser.id,
+      title: `${companyName || name} Özel Dashboard`,
+      widgets: [...defaultWidgets],
+      updatedAt: new Date().toISOString(),
+    });
+
+    this.addAuditLog(newUser.id, name, `Yeni Kullanıcı Kaydı Yapıldı: ${email} (${role})`, 'low');
+    this.saveData(this.data);
+
+    // Sync to PostgreSQL Repository
+    this.postgresRepo.saveUser(newUser, hashPassword(pass)).catch(() => {});
+    if (this.data.dashboards.length > 0) {
+      const userDash = this.data.dashboards[this.data.dashboards.length - 1];
+      this.postgresRepo.saveDashboard(userDash).catch(() => {});
+    }
+
+    // Sync to Firestore
+    this.safeFirestoreWrite(
+      () => setDoc(doc(firestore, 'users', newUser.id), cleanFirestoreData(newUser)),
+      'create_user'
+    );
+
+    return newUser;
+  }
+
+  public updateUserRole(userId: string, newRole: User['role']): User {
+    const user = this.data.users.find((u) => u.id === userId);
+    if (!user) {
+      throw new Error('Kullanıcı bulunamadı.');
+    }
+
+    const oldRole = user.role;
+    user.role = newRole;
+
+    this.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
+    this.saveData(this.data);
+
+    // Sync to PostgreSQL Repository
+    this.postgresRepo.saveUser(user).catch(() => {});
+
+    // Sync to Firestore
+    this.safeFirestoreWrite(
+      () => updateDoc(doc(firestore, 'users', userId), { role: newRole }),
+      'update_user_role'
+    );
+
+    return user;
+  }
+
+  public deleteUser(userId: string) {
+    const index = this.data.users.findIndex((u) => u.id === userId);
+    if (index !== -1) {
+      const removed = this.data.users.splice(index, 1)[0];
+      delete this.data.passwords[userId];
+      // Optionally delete or reassign devices
+      this.addAuditLog('system', 'Admin', `Müşteri Hesabı Silindi: ${removed.name} (${removed.email})`, 'high');
+      this.saveData(this.data);
+
+      // Sync to PostgreSQL Repository
+      this.postgresRepo.deleteUser(userId).catch(() => {});
+
+      // Sync to Firestore
+      this.safeFirestoreWrite(
+        () => deleteDoc(doc(firestore, 'users', userId)),
+        'delete_user'
+      );
+    }

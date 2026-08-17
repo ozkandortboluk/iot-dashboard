@@ -1,0 +1,602 @@
+ Ingestion Engine
+  private RAW_TELEMETRY_MAX_BUFFER = 10000; // Expanded high-frequency ring buffer (supports 250+ active devices)
+
+  public async writeTelemetryToPostgres(reading: TelemetryReading): Promise<void> {
+    await this.postgresRepo.saveTelemetry(reading);
+  }
+
+  public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
+    const fullReading: TelemetryReading = {
+      ...reading,
+      id: `tel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    this.data.telemetry.push(fullReading);
+
+    // High-performance sliding ring buffer (10,000 raw points in memory)
+    if (this.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
+      this.data.telemetry = this.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
+    }
+
+    // Persist to PostgreSQL / TimescaleDB hypertable
+    this.writeTelemetryToPostgres(fullReading).catch(() => {});
+
+    // Update device metrics & last seen
+    const device = this.data.devices.find((d) => d.id === reading.deviceId);
+    if (device) {
+      if (device.status !== 'maintenance' && device.dataFlowActive !== false) {
+        device.lastSeen = fullReading.timestamp;
+        device.status = 'online';
+      }
+      if (!device.metrics) device.metrics = {};
+      (device.metrics as Record<string, number>)[reading.metric] = reading.value;
+
+      device.updatedAt = fullReading.timestamp;
+      device.version = (device.version || 1) + 1;
+
+      // Sync live metrics & status to Firestore for real devices
+      if (!device.isSimulated && device.dataFlowActive !== false) {
+        this.safeFirestoreWrite(
+          () => updateDoc(doc(firestore, 'devices', device.id), cleanFirestoreData({
+            metrics: device.metrics,
+            lastSeen: device.lastSeen,
+            status: device.status,
+            dataFlowActive: device.dataFlowActive,
+            updatedAt: device.updatedAt,
+            version: device.version,
+          })),
+          'update_metrics'
+        );
+      }
+
+      // Async long-term raw telemetry archive in Firestore for ALL readings
+      this.safeFirestoreWrite(
+        () => setDoc(doc(firestore, 'telemetry_logs', fullReading.id), cleanFirestoreData(fullReading)),
+        'archive_raw_telemetry'
+      );
+      
+      this.processHistory(fullReading, device.isSimulated || false);
+    }
+
+    // Check threshold rules for notification trigger!
+    this.evaluateRules(fullReading, device);
+
+    this.scheduleSave();
+    return fullReading;
+  }
+
+  public getTelemetryStats() {
+    let totalAggregatedBuckets = 0;
+    if (this.data.history) {
+      for (const devMetrics of Object.values(this.data.history)) {
+        for (const metricData of Object.values(devMetrics)) {
+          totalAggregatedBuckets += (metricData.hourly?.length || 0) + (metricData.daily?.length || 0) + (metricData.monthly?.length || 0);
+        }
+      }
+    }
+
+    return {
+      rawBufferCurrentSize: this.data.telemetry.length,
+      rawBufferMaxSize: this.RAW_TELEMETRY_MAX_BUFFER,
+      bufferUtilizationPercent: Math.round((this.data.telemetry.length / this.RAW_TELEMETRY_MAX_BUFFER) * 100),
+      timeSeriesAggregatedBuckets: totalAggregatedBuckets,
+      retentionPolicy: {
+        rawBuffer: '10,000 Son Canlı Veri Noktası (Kayar Halka Tampon)',
+        hourlyRollup: '168 Saat (7 Gün Saatlik Ortalama)',
+        dailyRollup: '365 Gün (1 Yıl Günlük Ortalama)',
+        monthlyRollup: '60 Ay (5 Yıl Aylık Ortalama)',
+        cloudArchive: 'Google Cloud Firestore (Sınırsız Ham Log Arşivi)',
+        postgresArchive: 'PostgreSQL / TimescaleDB (Sıkıştırılmış Hypertable)',
+      },
+    };
+  }
+
+  public getHistory(deviceId: string, metric: string): import('../types.js').MetricHistory | null {
+    if (!this.data.history || !this.data.history[deviceId] || !this.data.history[deviceId][metric]) {
+      return null;
+    }
+    return this.data.history[deviceId][metric];
+  }
+
+  public async getHistoryAsync(deviceId: string, metric: string): Promise<import('../types.js').MetricHistory | null> {
+    const pool = this.getPgPool();
+    if (pool) {
+      try {
+        const hourlyRes = await pool.query(`
+          SELECT 
+            time_bucket('1 hour', created_at) AS bucket,
+            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+            COUNT(*)::int AS cnt
+          FROM telemetry_readings
+          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '7 days'
+          GROUP BY bucket
+          ORDER BY bucket ASC;
+        `, [deviceId, metric]);
+
+        const dailyRes = await pool.query(`
+          SELECT 
+            time_bucket('1 day', created_at) AS bucket,
+            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+            COUNT(*)::int AS cnt
+          FROM telemetry_readings
+          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '365 days'
+          GROUP BY bucket
+          ORDER BY bucket ASC;
+        `, [deviceId, metric]);
+
+        const monthlyRes = await pool.query(`
+          SELECT 
+            time_bucket('1 month', created_at) AS bucket,
+            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+            COUNT(*)::int AS cnt
+          FROM telemetry_readings
+          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '5 years'
+          GROUP BY bucket
+          ORDER BY bucket ASC;
+        `, [deviceId, metric]);
+
+        if (hourlyRes.rows?.length > 0 || dailyRes.rows?.length > 0 || monthlyRes.rows?.length > 0) {
+          return {
+            hourly: (hourlyRes.rows || []).map((r: any) => ({ time: new Date(r.bucket).toISOString(), value: Number(r.avg_val), count: Number(r.cnt) })),
+            daily: (dailyRes.rows || []).map((r: any) => ({ time: new Date(r.bucket).toISOString(), value: Number(r.avg_val), count: Number(r.cnt) })),
+            monthly: (monthlyRes.rows || []).map((r: any) => ({ time: new Date(r.bucket).toISOString(), value: Number(r.avg_val), count: Number(r.cnt) })),
+          };
+        }
+      } catch {
+        // Fallback to in-memory history
+      }
+    }
+    return this.getHistory(deviceId, metric);
+  }
+
+  public getTelemetry(
+    deviceId?: string,
+    metric?: string,
+    limit = 100,
+    requestingUserId?: string,
+    targetCustomerId?: string
+  ): TelemetryReading[] {
+    let list = this.data.telemetry;
+
+    // Get list of allowed device IDs for this user or target customer
+    const allowedDevices = this.getDevices(requestingUserId, targetCustomerId);
+    const allowedDeviceIds = new Set(allowedDevices.map((d) => d.id));
+
+    // Filter by allowed devices
+    list = list.filter((t) => allowedDeviceIds.has(t.deviceId));
+
+    if (deviceId && deviceId !== 'all') {
+      list = list.filter((t) => t.deviceId === deviceId);
+    }
+    if (metric && metric !== 'all') {
+      list = list.filter((t) => t.metric === metric);
+    }
+    return list.slice(-limit);
+  }
+
+  public async getTelemetryAsync(
+    deviceId?: string,
+    metric?: string,
+    limit = 100,
+    requestingUserId?: string,
+    targetCustomerId?: string
+  ): Promise<TelemetryReading[]> {
+    const pool = this.getPgPool();
+    if (pool) {
+      try {
+        const allowedDevices = this.getDevices(requestingUserId, targetCustomerId);
+        const allowedDeviceIds = allowedDevices.map((d) => d.id);
+        if (allowedDeviceIds.length > 0) {
+          const queryDev = deviceId && deviceId !== 'all' ? deviceId : null;
+          const queryMetric = metric && metric !== 'all' ? metric : null;
+          const numLimit = Math.min(1000, Math.max(1, limit));
+
+          const sql = `
+            SELECT 
+              id,
+              device_id AS "deviceId",
+              device_name AS "deviceName",
+              metric,
+              metric_value AS value,
+              unit,
+              status_level AS status,
+              created_at AS timestamp
+            FROM telemetry_readings
+            WHERE device_id = ANY($1::text[])
+              AND ($2::text IS NULL OR device_id = $2)
+              AND ($3::text IS NULL OR metric = $3)
+            ORDER BY created_at DESC
+            LIMIT $4;
+          `;
+
+          const res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, numLimit]);
+          if (res.rows && res.rows.length > 0) {
+            return res.rows.map((r: any) => ({
+              id: r.id,
+              deviceId: r.deviceId,
+              deviceName: r.deviceName,
+              metric: r.metric,
+              value: Number(r.value),
+              unit: r.unit,
+              status: r.status,
+              timestamp: new Date(r.timestamp).toISOString(),
+            }));
+          }
+        }
+      } catch {
+        // Fallback to in-memory buffer
+      }
+    }
+    return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);
+  }
+
+  // Advanced Alarm Evaluation Engine with Hysteresis, Min Breach Duration, Throttling & Deduplication
+  private upsertActiveAlarm(alarm: ActiveAlarm) {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+    const idx = this.data.activeAlarms.findIndex((a) => a.id === alarm.id);
+    if (idx >= 0) {
+      this.data.activeAlarms[idx] = alarm;
+    } else {
+      this.data.activeAlarms.push(alarm);
+    }
+
+    // Sync to PostgreSQL Repository
+    this.postgresRepo.saveAlarm(alarm).catch(() => {});
+
+    this.safeFirestoreWrite(
+      () => setDoc(doc(firestore, 'active_alarms', alarm.id), cleanFirestoreData(alarm)),
+      'upsert_active_alarm'
+    );
+  }
+
+  private updateActiveNotificationDeduplicated(alarm: ActiveAlarm) {
+    const existingNotif = this.data.notifications.find(
+      (n) => n.alarmId === alarm.id && n.alarmState !== 'RESOLVED' && !n.read
+    );
+    if (existingNotif) {
+      existingNotif.message = `${alarm.message} (Ölçüm #${alarm.repeatCount}, Anlık: ${alarm.currentValue})`;
+      existingNotif.repeatCount = alarm.repeatCount;
+      existingNotif.currentValue = alarm.currentValue;
+      existingNotif.timestamp = new Date().toISOString();
+      existingNotif.updatedAt = existingNotif.timestamp;
+      existingNotif.version = (existingNotif.version || 1) + 1;
+
+      this.safeFirestoreWrite(
+        () => setDoc(doc(firestore, 'notifications', existingNotif.id), cleanFirestoreData(existingNotif)),
+        'update_notification_dedup'
+      );
+      this.notifyNotificationListeners('notification:new', existingNotif);
+    }
+  }
+
+  private emitAlarmNotification(
+    alarm: ActiveAlarm,
+    eventType: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED',
+    title: string,
+    customMsg?: string
+  ) {
+    const msg = customMsg || `${alarm.message} (Eşik: ${alarm.thresholdValue}, Ölçülen: ${alarm.currentValue})`;
+
+    this.addNotification({
+      userId: alarm.userId,
+      title,
+      message: msg,
+      severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
+      deviceId: alarm.deviceId,
+      deviceName: alarm.deviceName,
+      alarmId: alarm.id,
+      ruleId: alarm.ruleId,
+      alarmState: eventType,
+      acknowledged: alarm.acknowledged,
+      acknowledgedAt: alarm.acknowledgedAt,
+      acknowledgedBy: alarm.acknowledgedBy,
+      repeatCount: alarm.repeatCount,
+      currentValue: alarm.currentValue,
+      thresholdValue: alarm.thresholdValue,
+      silencedUntil: alarm.silencedUntil,
+    });
+
+    if (alarm.userId !== 'usr_admin') {
+      this.addNotification({
+        userId: 'usr_admin',
+        title: `[${alarm.deviceName}] ${title}`,
+        message: msg,
+        severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
+        deviceId: alarm.deviceId,
+        deviceName: alarm.deviceName,
+        alarmId: alarm.id,
+        ruleId: alarm.ruleId,
+        alarmState: eventType,
+        acknowledged: alarm.acknowledged,
+        acknowledgedAt: alarm.acknowledgedAt,
+        acknowledgedBy: alarm.acknowledgedBy,
+        repeatCount: alarm.repeatCount,
+        currentValue: alarm.currentValue,
+        thresholdValue: alarm.thresholdValue,
+        silencedUntil: alarm.silencedUntil,
+      });
+    }
+
+    // Enqueue external channels (WhatsApp, Telegram, Email, SMS, Webhook)
+    this.enqueueExternalNotification(alarm, eventType, title, msg);
+  }
+
+  private enqueueExternalNotification(
+    alarm: ActiveAlarm,
+    eventType: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED',
+    title: string,
+    msg: string
+  ) {
+    if (!this.data.notificationQueue) this.data.notificationQueue = [];
+    const rule = this.data.rules.find((r) => r.id === alarm.ruleId);
+    if (!rule || !rule.notificationChannels || rule.notificationChannels.length === 0) return;
+
+    const user = this.data.users.find((u) => u.id === alarm.userId);
+
+    for (const channel of rule.notificationChannels) {
+      if (channel === 'app') continue; // In-panel feed handles app notifications
+
+      const recipientsSet = new Set<string>();
+
+      // 1. Specific rule recipients
+      if (rule.recipients && rule.recipients.length > 0) {
+        for (const r of rule.recipients) {
+          const cleanR = r.trim();
+          if (!cleanR) continue;
+          if (channel === 'email' && cleanR.includes('@')) recipientsSet.add(cleanR);
+          if (channel === 'whatsapp' && (cleanR.startsWith('+') || /^\d+$/.test(cleanR))) recipientsSet.add(cleanR);
+          if (channel === 'telegram') recipientsSet.add(cleanR);
+          if (channel === 'sms' && (cleanR.startsWith('+') || /^\d+$/.test(cleanR))) recipientsSet.add(cleanR);
+          if (channel === 'webhook' && cleanR.startsWith('http')) recipientsSet.add(cleanR);
+        }
+      }
+
+      // 2. User profile contact details
+      if (user) {
+        if (channel === 'email' && (user.notificationEmail || user.email)) {
+          recipientsSet.add((user.notificationEmail || user.email).trim());
+        }
+        if (channel === 'whatsapp' && (user.whatsappNumber || user.phone)) {
+          recipientsSet.add((user.whatsappNumber || user.phone).trim());
+        }
+        if (channel === 'telegram' && user.telegramChatId) {
+          recipientsSet.add(user.telegramChatId.trim());
+        }
+        if (channel === 'sms' && user.phone) {
+          recipientsSet.add(user.phone.trim());
+        }
+        if (channel === 'webhook') {
+          const defaultWh = this.getServiceConfig().webhook.defaultEndpoint;
+          if (defaultWh) recipientsSet.add(defaultWh);
+        }
+      }
+
+      for (const recipient of recipientsSet) {
+        const queueItem: NotificationQueueItem = {
+          id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          ruleId: rule.id,
+          userId: alarm.userId,
+          userName: user?.name || alarm.userId,
+          channel,
+          recipient,
+          title,
+          message: msg,
+          severity: alarm.severity,
+          status: 'pending',
+          attempts: 0,
+          maxAttempts: 3,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        this.data.notificationQueue.unshift(queueItem);
+      }
+    }
+
+    this.saveData(this.data);
+    setTimeout(() => {
+      this.processQueue();
+    }, 50);
+  }
+
+  private evaluateRules(reading: TelemetryReading, device?: Device) {
+    if (!this.data.activeAlarms) this.data.activeAlarms = [];
+
+    const rules = this.data.rules.filter(
+      (r) => r.enabled && (r.deviceId === 'all' || r.deviceId === reading.deviceId) && r.metricKey === reading.metric
+    );
+
+    const deviceOwnerId = device ? device.userId : 'usr_admin';
+    const nowIso = reading.timestamp || new Date().toISOString();
+    const nowMs = new Date(nowIso).getTime();
+
+    for (const rule of rules) {
+      // Customer Ownership Isolation: If rule belongs to a specific customer, it ONLY applies to that customer's devices
+      if (rule.userId && rule.userId !== 'usr_admin') {
+        if (deviceOwnerId !== rule.userId) {
+          continue; // Skip evaluation if device does not belong to rule's customer owner
+        }
+      }
+
+      // Active Hours Check: If rule has specific active hours, verify current time
+      if (rule.activeHours) {
+        let startStr = '';
+        let endStr = '';
+        if (typeof rule.activeHours === 'string' && rule.activeHours.includes('-')) {
+          const parts = rule.activeHours.split('-');
+          startStr = parts[0].trim();
+          endStr = parts[1].trim();
+        } else if (typeof rule.activeHours === 'object' && rule.activeHours.start && rule.activeHours.end) {
+          startStr = rule.activeHours.start;
+          endStr = rule.activeHours.end;
+        }
+
+        if (startStr && endStr && startStr !== '00:00' || endStr !== '23:59') {
+          const now = new Date(nowIso);
+          const currentMinutes = now.getHours() * 60 + now.getMinutes();
+          const [startH, startM] = startStr.split(':').map(Number);
+          const [endH, endM] = endStr.split(':').map(Number);
+          const startMinutes = (startH || 0) * 60 + (startM || 0);
+          const endMinutes = (endH || 0) * 60 + (endM || 0);
+
+          if (startMinutes < endMinutes) {
+            if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
+              continue; // Outside active window
+            }
+          } else if (startMinutes > endMinutes) {
+            // Overnight active hours (e.g. 22:00 to 06:00)
+            if (currentMinutes < startMinutes && currentMinutes > endMinutes) {
+              continue; // Outside overnight window
+            }
+          }
+        }
+      }
+
+      const alarmKey = `alarm_${rule.id}_${reading.deviceId}_${reading.metric}`;
+
+      // Check if rule itself is silenced
+      if (rule.silencedUntil && new Date(rule.silencedUntil).getTime() > nowMs) {
+        continue;
+      }
+
+      let existingAlarm = this.data.activeAlarms.find((a) => a.id === alarmKey);
+
+      // 1. Calculate Breach condition
+      let isBreached = false;
+      if (rule.operator === '>' && reading.value > rule.thresholdValue) isBreached = true;
+      if (rule.operator === '<' && reading.value < rule.thresholdValue) isBreached = true;
+      if (rule.operator === '==' && reading.value === rule.thresholdValue) isBreached = true;
+
+      // 2. Calculate Recovery condition (using Hysteresis!)
+      const hysteresis = rule.hysteresis || 0;
+      let isRecovered = false;
+      if (rule.operator === '>' && reading.value <= (rule.thresholdValue - hysteresis)) isRecovered = true;
+      if (rule.operator === '<' && reading.value >= (rule.thresholdValue + hysteresis)) isRecovered = true;
+      if (rule.operator === '==' && reading.value !== rule.thresholdValue) isRecovered = true;
+
+      const minBreachSec = rule.minBreachDurationSeconds || 0;
+      const repeatIntervalSec = rule.repeatIntervalSeconds || 300; // default 5 mins
+
+      const formattedMsg = rule.messageTemplate
+        .replace('{deviceName}', reading.deviceName)
+        .replace('{value}', String(reading.value));
+
+      if (isBreached) {
+        // If alarm was silenced, check if silencing expired
+        if (existingAlarm && existingAlarm.silencedUntil && new Date(existingAlarm.silencedUntil).getTime() > nowMs) {
+          existingAlarm.currentValue = reading.value;
+          existingAlarm.repeatCount++;
+          existingAlarm.updatedAt = nowIso;
+          continue; // suppressed by snooze
+        }
+
+        if (!existingAlarm || existingAlarm.state === 'NORMAL' || existingAlarm.state === 'RESOLVED') {
+          if (minBreachSec > 0) {
+            existingAlarm = {
+              id: alarmKey,
+              ruleId: rule.id,
+              deviceId: reading.deviceId,
+              deviceName: reading.deviceName,
+              userId: deviceOwnerId,
+              metricKey: reading.metric,
+              operator: rule.operator,
+              thresholdValue: rule.thresholdValue,
+              currentValue: reading.value,
+              severity: rule.severity,
+              state: 'BREACH_PENDING',
+              firstBreachAt: nowIso,
+              acknowledged: false,
+              repeatCount: 1,
+              message: formattedMsg,
+              updatedAt: nowIso,
+              version: 1,
+            };
+            this.upsertActiveAlarm(existingAlarm);
+          } else {
+            existingAlarm = {
+              id: alarmKey,
+              ruleId: rule.id,
+              deviceId: reading.deviceId,
+              deviceName: reading.deviceName,
+              userId: deviceOwnerId,
+              metricKey: reading.metric,
+              operator: rule.operator,
+              thresholdValue: rule.thresholdValue,
+              currentValue: reading.value,
+              severity: rule.severity,
+              state: 'ACTIVE',
+              firstBreachAt: nowIso,
+              triggeredAt: nowIso,
+              lastNotifiedAt: nowIso,
+              acknowledged: false,
+              repeatCount: 1,
+              message: formattedMsg,
+              updatedAt: nowIso,
+              version: 1,
+            };
+            this.upsertActiveAlarm(existingAlarm);
+            this.emitAlarmNotification(existingAlarm, 'OPEN', `🚨 [ALARM AÇILDI] ${reading.deviceName} - ${reading.metric.toUpperCase()}`);
+          }
+        } else if (existingAlarm.state === 'BREACH_PENDING') {
+          const breachDurationMs = nowMs - new Date(existingAlarm.firstBreachAt || nowIso).getTime();
+          if (breachDurationMs >= minBreachSec * 1000) {
+            existingAlarm.state = 'ACTIVE';
+            existingAlarm.triggeredAt = nowIso;
+            existingAlarm.lastNotifiedAt = nowIso;
+            existingAlarm.currentValue = reading.value;
+            existingAlarm.repeatCount = 1;
+            existingAlarm.message = formattedMsg;
+            existingAlarm.updatedAt = nowIso;
+            existingAlarm.version = (existingAlarm.version || 1) + 1;
+            this.upsertActiveAlarm(existingAlarm);
+
+            this.emitAlarmNotification(existingAlarm, 'OPEN', `🚨 [ALARM AÇILDI] ${reading.deviceName} - ${reading.metric.toUpperCase()}`);
+          } else {
+            existingAlarm.currentValue = reading.value;
+            existingAlarm.updatedAt = nowIso;
+          }
+        } else if (existingAlarm.state === 'ACTIVE' || existingAlarm.state === 'SILENCED') {
+          existingAlarm.repeatCount++;
+          existingAlarm.currentValue = reading.value;
+          existingAlarm.message = formattedMsg;
+          existingAlarm.updatedAt = nowIso;
+
+          const lastNotifiedMs = new Date(existingAlarm.lastNotifiedAt || nowIso).getTime();
+          const timeSinceLastNotifiedSec = (nowMs - lastNotifiedMs) / 1000;
+
+          if (!existingAlarm.acknowledged && timeSinceLastNotifiedSec >= repeatIntervalSec) {
+            existingAlarm.lastNotifiedAt = nowIso;
+            existingAlarm.version = (existingAlarm.version || 1) + 1;
+            this.upsertActiveAlarm(existingAlarm);
+
+            this.emitAlarmNotification(
+              existingAlarm,
+              'REPEAT',
+              `⚠️ [ALARM TEKRARI #${existingAlarm.repeatCount}] ${reading.deviceName} - ${reading.metric.toUpperCase()}`
+            );
+          } else {
+            // Deduplication: Update existing active notification in-place
+            this.updateActiveNotificationDeduplicated(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm);
+          }
+        }
+      } else if (isRecovered && existingAlarm && (existingAlarm.state === 'ACTIVE' || existingAlarm.state === 'BREACH_PENDING' || existingAlarm.state === 'SILENCED')) {
+        existingAlarm.state = 'RESOLVED';
+        existingAlarm.resolvedAt = nowIso;
+        existingAlarm.currentValue = reading.value;
+        existingAlarm.updatedAt = nowIso;
+        existingAlarm.version = (existingAlarm.version || 1) + 1;
+        this.upsertActiveAlarm(existingAlarm);
+
+        this.emitAlarmNotification(
+          existingAlarm,
+          'RESOLVED',
+          `✅ [ALARM NORMALE DÖNDÜ] ${reading.deviceName} - ${reading.metric.toUpperCase()}`,
+          `Değer güvenli aralığa geri döndü: ${reading.value} ${reading.unit} (Eşik: ${rule.thresholdValue}, Histerezis: ${rule.hysteresis || 0})`
+        );
+      }
+    }
+  }
+
+  
