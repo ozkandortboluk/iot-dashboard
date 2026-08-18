@@ -336,11 +336,9 @@ class LocalDatabase {
     this.postgresRepo.setPool(pool);
 
     try {
-      // 1. Guarantee PostgreSQL & TimescaleDB schema tables exist
       const client = await pool.connect();
       try {
         await client.query('SELECT 1;');
-        await client.query(this.getPostgresSchemaSQL());
       } finally {
         client.release();
       }
@@ -350,85 +348,97 @@ class LocalDatabase {
         this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
       }
       this.data.databaseSettings.isPostgresConnected = true;
+      this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+
+      // 1. Guarantee PostgreSQL & TimescaleDB schema tables exist (isolated so non-fatal schema notices don't break connection)
+      try {
+        const schemaClient = await pool.connect();
+        try {
+          await schemaClient.query(this.getPostgresSchemaSQL());
+        } finally {
+          schemaClient.release();
+        }
+      } catch (schemaErr: any) {
+        console.warn('[PostgreSQL Schema Warning]:', schemaErr?.message || schemaErr);
+      }
 
       // 2. Hydrate from PostgreSQL into in-memory store
-      const hydrated = await this.postgresRepo.hydrateFromPostgres();
-      if (hydrated) {
-        if (hydrated.users.length > 0) {
-          this.data.users = hydrated.users;
-          this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
-        } else {
-          for (const u of this.data.users) {
-            await this.postgresRepo.saveUser(u, this.data.passwords[u.id]);
+      try {
+        const hydrated = await this.postgresRepo.hydrateFromPostgres();
+        if (hydrated) {
+          if (hydrated.users.length > 0) {
+            this.data.users = hydrated.users;
+            this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
+          } else {
+            for (const u of this.data.users) {
+              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch(() => {});
+            }
           }
-        }
 
-        if (hydrated.devices.length > 0) {
-          this.data.devices = hydrated.devices;
-        } else {
-          for (const d of this.data.devices) {
-            await this.postgresRepo.saveDevice(d);
+          if (hydrated.devices.length > 0) {
+            this.data.devices = hydrated.devices;
+          } else {
+            for (const d of this.data.devices) {
+              await this.postgresRepo.saveDevice(d).catch(() => {});
+            }
           }
-        }
 
-        if (hydrated.rules.length > 0) {
-          this.data.rules = hydrated.rules;
-        } else {
-          for (const r of this.data.rules) {
-            await this.postgresRepo.saveRule(r);
+          if (hydrated.rules.length > 0) {
+            this.data.rules = hydrated.rules;
+          } else {
+            for (const r of this.data.rules) {
+              await this.postgresRepo.saveRule(r).catch(() => {});
+            }
           }
-        }
 
-        if (hydrated.dashboards.length > 0) {
-          this.data.dashboards = hydrated.dashboards;
-        } else {
-          for (const dash of this.data.dashboards) {
-            await this.postgresRepo.saveDashboard(dash);
+          if (hydrated.dashboards.length > 0) {
+            this.data.dashboards = hydrated.dashboards;
+          } else {
+            for (const dash of this.data.dashboards) {
+              await this.postgresRepo.saveDashboard(dash).catch(() => {});
+            }
           }
-        }
 
-        if (hydrated.alarms.length > 0) {
-          this.data.activeAlarms = hydrated.alarms;
-        }
-
-        if (hydrated.notifications.length > 0) {
-          this.data.notifications = hydrated.notifications;
-        }
-
-        if (hydrated.telemetry.length > 0) {
-          this.data.telemetry = hydrated.telemetry;
-        }
-
-        if (hydrated.dispatchLogs && hydrated.dispatchLogs.length > 0) {
-          this.data.dispatchLogs = hydrated.dispatchLogs;
-        }
-
-        if (hydrated.commands && hydrated.commands.length > 0) {
-          this.data.commands = hydrated.commands;
-        }
-
-        if (hydrated.sessions && hydrated.sessions.length > 0) {
-          const sessionMap = new Map<string, UserSession>();
-          if (this.data.sessions) {
-            this.data.sessions.forEach((s) => sessionMap.set(s.token, s));
+          if (hydrated.alarms.length > 0) {
+            this.data.activeAlarms = hydrated.alarms;
           }
-          hydrated.sessions.forEach((s) => sessionMap.set(s.token, s));
-          this.data.sessions = Array.from(sessionMap.values());
-        } else if (this.data.sessions && this.data.sessions.length > 0) {
-          for (const s of this.data.sessions) {
-            await this.postgresRepo.saveSession(s);
-          }
-        }
 
-        this.saveData(this.data);
-        console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
+          if (hydrated.notifications.length > 0) {
+            this.data.notifications = hydrated.notifications;
+          }
+
+          if (hydrated.telemetry.length > 0) {
+            this.data.telemetry = hydrated.telemetry;
+          }
+
+          if (hydrated.dispatchLogs && hydrated.dispatchLogs.length > 0) {
+            this.data.dispatchLogs = hydrated.dispatchLogs;
+          }
+
+          if (hydrated.commands && hydrated.commands.length > 0) {
+            this.data.commands = hydrated.commands;
+          }
+
+          if (hydrated.sessions && hydrated.sessions.length > 0) {
+            const sessionMap = new Map<string, UserSession>();
+            if (this.data.sessions) {
+              this.data.sessions.forEach((s) => sessionMap.set(s.token, s));
+            }
+            hydrated.sessions.forEach((s) => sessionMap.set(s.token, s));
+            this.data.sessions = Array.from(sessionMap.values());
+          } else if (this.data.sessions && this.data.sessions.length > 0) {
+            for (const s of this.data.sessions) {
+              await this.postgresRepo.saveSession(s).catch(() => {});
+            }
+          }
+
+          this.saveData(this.data);
+          console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
+        }
+      } catch (hydrateErr: any) {
+        console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
       }
 
-      if (!this.data.databaseSettings) {
-        this.data.databaseSettings = { activeEngine: 'postgres' };
-      }
-      this.data.databaseSettings.isPostgresConnected = true;
-      this.data.databaseSettings.lastTestedAt = new Date().toISOString();
       return true;
     } catch (err: any) {
       this.postgresRepo.setConnected(false);

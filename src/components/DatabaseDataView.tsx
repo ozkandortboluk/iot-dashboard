@@ -506,9 +506,13 @@ export const DatabaseDataView: React.FC = () => {
       const data = await res.json();
       setPostgresTestResult(data);
       if (data.success) {
-        // Refresh engine config
+        // Refresh engine config and database stats immediately
         const resEng = await fetch('/api/database/config');
-        if (resEng.ok) setEngineConfig(await resEng.json());
+        if (resEng.ok) {
+          const eng = await resEng.json();
+          setEngineConfig(eng);
+        }
+        await fetchDatabaseStats();
       }
     } catch (err: any) {
       setPostgresTestResult({
@@ -535,7 +539,8 @@ export const DatabaseDataView: React.FC = () => {
       const data = await res.json();
       setPostgresMigrateResult(data);
       if (data.success) {
-        handleTestPostgres();
+        await handleTestPostgres();
+        await fetchDatabaseStats();
       }
     } catch (err: any) {
       setPostgresMigrateResult({
