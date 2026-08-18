@@ -26,50 +26,63 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
 
   // Extract values from live telemetry or device metrics
   useEffect(() => {
+    const targetDev = config.deviceId
+      ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+      : null;
+
     // Search for telemetry matching configured deviceId or overall
-    const devTelemetry = latestTelemetry.filter(
-      (t) => !config.deviceId || t.deviceId === config.deviceId
-    );
+    const devTelemetry = latestTelemetry.filter((t) => {
+      if (config.deviceId && targetDev) {
+        return t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey;
+      }
+      return !config.deviceId || t.deviceId === config.deviceId;
+    });
 
     const getMetric = (keys: string[], prevVal: number, defaultVal: number) => {
       const found = devTelemetry.find((t) =>
-        keys.some((k) => k.toLowerCase() === t.metric.toLowerCase())
+        keys.some((k) => k.toLowerCase() === t.metric?.toLowerCase())
       );
-      if (found !== undefined) return found.value;
+      if (found !== undefined && typeof found.value === 'number' && !isNaN(found.value)) {
+        return found.value;
+      }
 
       // Fallback check in device metrics (Case-Insensitive)
-      const dev = devices.find((d) => !config.deviceId || d.id === config.deviceId);
+      const dev = targetDev || (!config.deviceId ? devices.find((d) => d.metrics) : null);
       if (dev && dev.metrics) {
         const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
           const match = metricKeys.find((mk) => mk.toLowerCase() === k.toLowerCase());
           if (match && (dev.metrics as Record<string, number>)[match] !== undefined) {
-            return Number((dev.metrics as Record<string, number>)[match]);
+            const num = Number((dev.metrics as Record<string, number>)[match]);
+            if (!isNaN(num)) return num;
           }
         }
       }
-      return prevVal >= 0 ? prevVal : defaultVal;
+      return typeof prevVal === 'number' && !isNaN(prevVal) ? prevVal : defaultVal;
     };
 
     // Check live telemetry batch or device metrics for pct_ri/pct_rc; fallback to previous value to prevent resetting
     const getLivePctMetric = (keys: string[], prevVal: number) => {
       const found = devTelemetry.find((t) =>
-        keys.some((k) => k.toLowerCase() === t.metric.toLowerCase())
+        keys.some((k) => k.toLowerCase() === t.metric?.toLowerCase())
       );
-      if (found !== undefined) return found.value;
+      if (found !== undefined && typeof found.value === 'number' && !isNaN(found.value)) {
+        return found.value;
+      }
 
       // Fallback check in device metrics (Case-Insensitive)
-      const dev = devices.find((d) => !config.deviceId || d.id === config.deviceId);
+      const dev = targetDev || (!config.deviceId ? devices.find((d) => d.metrics) : null);
       if (dev && dev.metrics) {
         const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
           const match = metricKeys.find((mk) => mk.toLowerCase() === k.toLowerCase());
           if (match && (dev.metrics as Record<string, number>)[match] !== undefined) {
-            return Number((dev.metrics as Record<string, number>)[match]);
+            const num = Number((dev.metrics as Record<string, number>)[match]);
+            if (!isNaN(num)) return num;
           }
         }
       }
-      return prevVal >= 0 ? prevVal : -1;
+      return typeof prevVal === 'number' && !isNaN(prevVal) ? prevVal : -1;
     };
 
     setMetrics((prev) => {

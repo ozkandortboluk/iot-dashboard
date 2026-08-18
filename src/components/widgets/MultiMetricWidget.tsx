@@ -77,28 +77,45 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
     return <Activity className="w-4 h-4 text-purple-500" />;
   };
 
+  // Target device lookup if specific deviceId is configured
+  const targetDev = config.deviceId
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
+
   // Helper to extract value and trend for a slot
   const getMetricData = (metricKey: string) => {
-    const filtered = latestTelemetry.filter(
-      (t) => (!config.deviceId || t.deviceId === config.deviceId) && t.metric.toLowerCase() === metricKey.toLowerCase()
-    );
+    const filtered = latestTelemetry.filter((t) => {
+      if (config.deviceId && targetDev) {
+        if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
+      } else if (config.deviceId && t.deviceId !== config.deviceId) {
+        return false;
+      }
+      return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
+    });
 
     let currentVal = 0;
     const latest = filtered[0];
 
-    if (latest) {
+    if (latest && typeof latest.value === 'number' && !isNaN(latest.value)) {
       currentVal = latest.value;
-    } else if (config.deviceId) {
-      const dev = devices.find((d) => d.id === config.deviceId);
-      if (dev && dev.metrics && (dev.metrics as Record<string, number>)[metricKey] !== undefined) {
-        currentVal = Number((dev.metrics as Record<string, number>)[metricKey]);
+    } else if (targetDev && targetDev.metrics) {
+      const matchKey = Object.keys(targetDev.metrics).find(
+        (k) => k.toLowerCase() === metricKey.toLowerCase()
+      );
+      if (matchKey && (targetDev.metrics as Record<string, number>)[matchKey] !== undefined) {
+        currentVal = Number((targetDev.metrics as Record<string, number>)[matchKey]);
       }
     } else {
-      const devWithMetric = devices.find(
-        (d) => d.metrics && (d.metrics as Record<string, number>)[metricKey] !== undefined
-      );
-      if (devWithMetric) {
-        currentVal = Number((devWithMetric.metrics as Record<string, number>)[metricKey]);
+      for (const d of devices) {
+        if (d.metrics) {
+          const matchKey = Object.keys(d.metrics).find(
+            (k) => k.toLowerCase() === metricKey.toLowerCase()
+          );
+          if (matchKey && (d.metrics as Record<string, number>)[matchKey] !== undefined) {
+            currentVal = Number((d.metrics as Record<string, number>)[matchKey]);
+            break;
+          }
+        }
       }
     }
 

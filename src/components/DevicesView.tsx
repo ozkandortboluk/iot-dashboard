@@ -117,7 +117,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [lastResponse, setLastResponse] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
 
-  const activeDevice = (selectedDevice ? devices.find((d) => d.id === selectedDevice.id) : null) || devices[0] || selectedDevice;
+  const activeDevice =
+    (selectedDevice ? devices.find((d) => d.id === selectedDevice.id) : null) ||
+    devices.find((d) => d.status === 'online') ||
+    devices[0] ||
+    selectedDevice;
 
   const activeSystemMetrics = React.useMemo(() => {
     const set = new Set<string>();
@@ -693,7 +697,26 @@ print("Response:", response.json())`
             {activeSystemMetrics.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-1">
                 {activeSystemMetrics.map((m) => {
-                  const lastReading = latestTelemetry.find((t) => t.metric === m);
+                  const lastReading = latestTelemetry.find(
+                    (t) => t.metric?.toLowerCase() === m.toLowerCase()
+                  );
+                  let displayVal: number | string | undefined = lastReading?.value;
+                  if (displayVal === undefined) {
+                    for (const dev of devices) {
+                      if (dev.metrics) {
+                        const matchKey = Object.keys(dev.metrics).find(
+                          (k) => k.toLowerCase() === m.toLowerCase()
+                        );
+                        if (
+                          matchKey &&
+                          (dev.metrics as Record<string, number>)[matchKey] !== undefined
+                        ) {
+                          displayVal = (dev.metrics as Record<string, number>)[matchKey];
+                          break;
+                        }
+                      }
+                    }
+                  }
                   return (
                     <div
                       key={m}
@@ -701,9 +724,9 @@ print("Response:", response.json())`
                     >
                       <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
                       <span className="font-bold text-indigo-600 dark:text-indigo-400">{m}</span>
-                      {lastReading && (
+                      {displayVal !== undefined && (
                         <span className="text-[10px] text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2">
-                          {lastReading.value}
+                          {displayVal}
                         </span>
                       )}
                     </div>

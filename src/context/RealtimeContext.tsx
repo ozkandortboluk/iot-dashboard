@@ -349,36 +349,52 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setIsConnected(true);
               setConnectionStatus('connected');
             } else if (data.event === 'telemetry:new' || data.event === 'telemetry:batch') {
-              const readings: TelemetryReading[] = Array.isArray(data.payload)
-                ? data.payload
-                : data.payload && (data.payload as TelemetryReading).deviceId
-                ? [data.payload as TelemetryReading]
+              const rawPayload = data.payload;
+              const readings: TelemetryReading[] = Array.isArray(rawPayload)
+                ? rawPayload
+                : rawPayload && typeof rawPayload === 'object' && (rawPayload as TelemetryReading).deviceId
+                ? [rawPayload as TelemetryReading]
                 : [];
 
               if (readings.length > 0) {
                 const allowedReadings = readings.filter((reading) => {
                   if (!reading || !reading.deviceId) return false;
                   if (user?.role === 'admin' && selectedCustomerForAdmin === 'all') return true;
-                  return devicesRef.current.some((d) => d.id === reading.deviceId);
+                  return devicesRef.current.some(
+                    (d) => d.id === reading.deviceId || d.apiKey === reading.deviceId
+                  );
                 });
 
                 if (allowedReadings.length > 0) {
-                  // Collect metric updates per device
+                  // Collect metric updates per canonical device
                   const deviceUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
                   for (const reading of allowedReadings) {
-                    const existing = deviceUpdatesMap.get(reading.deviceId) || {
+                    if (!reading.metric || typeof reading.value !== 'number' || isNaN(reading.value)) {
+                      continue;
+                    }
+
+                    const targetDev = devicesRef.current.find(
+                      (d) => d.id === reading.deviceId || d.apiKey === reading.deviceId
+                    );
+                    const devId = targetDev ? targetDev.id : reading.deviceId;
+
+                    const existing = deviceUpdatesMap.get(devId) || {
                       lastSeen: reading.timestamp || new Date().toISOString(),
                       metrics: {},
                     };
                     existing.lastSeen = reading.timestamp || new Date().toISOString();
+                    // Store both original metric key and lowercase metric key to guarantee match
                     existing.metrics[reading.metric] = reading.value;
-                    deviceUpdatesMap.set(reading.deviceId, existing);
+                    existing.metrics[reading.metric.toLowerCase()] = reading.value;
+                    deviceUpdatesMap.set(devId, existing);
                   }
 
-                  // Batch update devices state once
+                  // Batch update devices state once (immutable merge)
                   setDevices((prevDevs) =>
                     prevDevs.map((dev) => {
-                      const update = deviceUpdatesMap.get(dev.id);
+                      const update =
+                        deviceUpdatesMap.get(dev.id) ||
+                        (dev.apiKey ? deviceUpdatesMap.get(dev.apiKey) : undefined);
                       if (update) {
                         return {
                           ...dev,

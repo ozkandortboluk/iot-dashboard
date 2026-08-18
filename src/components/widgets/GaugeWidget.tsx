@@ -15,19 +15,41 @@ export const GaugeWidget: React.FC<GaugeWidgetProps> = ({ config }) => {
   const metricKey = config.metricKey || 'power';
   const unit = config.unit || getMetricUnit(metricKey);
 
-  const filtered = latestTelemetry.filter(
-    (t) => (!config.deviceId || t.deviceId === config.deviceId) && t.metric === metricKey
-  );
+  const targetDev = config.deviceId
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
+
+  const filtered = latestTelemetry.filter((t) => {
+    if (config.deviceId && targetDev) {
+      if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
+    } else if (config.deviceId && t.deviceId !== config.deviceId) {
+      return false;
+    }
+    return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
+  });
+
   const latest = filtered[0];
   let val = 0;
-  if (latest) {
+  if (latest && typeof latest.value === 'number' && !isNaN(latest.value)) {
     val = latest.value;
-  } else {
-    const devWithMetric = devices.find(
-      (d) => (!config.deviceId || d.id === config.deviceId) && d.metrics && (d.metrics as Record<string, number>)[metricKey] !== undefined
+  } else if (targetDev && targetDev.metrics) {
+    const matchKey = Object.keys(targetDev.metrics).find(
+      (k) => k.toLowerCase() === metricKey.toLowerCase()
     );
-    if (devWithMetric) {
-      val = Number((devWithMetric.metrics as Record<string, number>)[metricKey]);
+    if (matchKey && (targetDev.metrics as Record<string, number>)[matchKey] !== undefined) {
+      val = Number((targetDev.metrics as Record<string, number>)[matchKey]);
+    }
+  } else {
+    for (const d of devices) {
+      if (d.metrics) {
+        const matchKey = Object.keys(d.metrics).find(
+          (k) => k.toLowerCase() === metricKey.toLowerCase()
+        );
+        if (matchKey && (d.metrics as Record<string, number>)[matchKey] !== undefined) {
+          val = Number((d.metrics as Record<string, number>)[matchKey]);
+          break;
+        }
+      }
     }
   }
 

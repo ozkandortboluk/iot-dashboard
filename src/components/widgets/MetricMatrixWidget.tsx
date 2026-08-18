@@ -53,31 +53,53 @@ export const MetricMatrixWidget: React.FC<MetricMatrixWidgetProps> = ({ config, 
   const getSlotData = (slot: MatrixSlotConfig) => {
     let rawValue: number | null = null;
     let unit = getMetricUnit(slot.metricKey);
-    let dev = slot.deviceId && slot.deviceId !== 'all' ? devices.find((d) => d.id === slot.deviceId) : null;
+    let dev =
+      slot.deviceId && slot.deviceId !== 'all'
+        ? devices.find((d) => d.id === slot.deviceId || d.apiKey === slot.deviceId)
+        : null;
 
     if (dev) {
-      if (dev.metrics && slot.metricKey in dev.metrics) {
-        rawValue = (dev.metrics as Record<string, number | undefined>)[slot.metricKey] ?? null;
+      if (dev.metrics) {
+        const matchKey = Object.keys(dev.metrics).find(
+          (k) => k.toLowerCase() === slot.metricKey.toLowerCase()
+        );
+        if (matchKey && (dev.metrics as Record<string, number | undefined>)[matchKey] !== undefined) {
+          rawValue = (dev.metrics as Record<string, number | undefined>)[matchKey] ?? null;
+        }
       }
       const tele = latestTelemetry.find(
-        (t) => (t.deviceId === dev!.id || t.deviceName === dev!.name) && t.metric.toLowerCase() === slot.metricKey.toLowerCase()
+        (t) =>
+          (t.deviceId === dev!.id || t.deviceId === dev!.apiKey || t.deviceName === dev!.name) &&
+          t.metric &&
+          t.metric.toLowerCase() === slot.metricKey.toLowerCase()
       );
-      if (tele) {
+      if (tele && typeof tele.value === 'number' && !isNaN(tele.value)) {
         rawValue = tele.value;
         if (tele.unit) unit = tele.unit;
       }
     } else {
       const tele = latestTelemetry.find(
-        (t) => t.metric.toLowerCase() === slot.metricKey.toLowerCase()
+        (t) => t.metric && t.metric.toLowerCase() === slot.metricKey.toLowerCase()
       );
-      if (tele) {
+      if (tele && typeof tele.value === 'number' && !isNaN(tele.value)) {
         rawValue = tele.value;
         if (tele.unit) unit = tele.unit;
       } else {
-        const devWithMetric = devices.find((d) => d.metrics && slot.metricKey in d.metrics);
-        if (devWithMetric) {
-          rawValue = (devWithMetric.metrics as Record<string, number | undefined>)[slot.metricKey] ?? null;
-          dev = devWithMetric;
+        const devWithMetric = devices.find((d) => {
+          if (!d.metrics) return false;
+          const matchKey = Object.keys(d.metrics).find(
+            (k) => k.toLowerCase() === slot.metricKey.toLowerCase()
+          );
+          return matchKey && (d.metrics as Record<string, number | undefined>)[matchKey] !== undefined;
+        });
+        if (devWithMetric && devWithMetric.metrics) {
+          const matchKey = Object.keys(devWithMetric.metrics).find(
+            (k) => k.toLowerCase() === slot.metricKey.toLowerCase()
+          );
+          if (matchKey) {
+            rawValue = (devWithMetric.metrics as Record<string, number | undefined>)[matchKey] ?? null;
+            dev = devWithMetric;
+          }
         }
       }
     }
