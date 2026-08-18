@@ -20,6 +20,42 @@ export const LogStreamWidget: React.FC<LogStreamWidgetProps> = ({ config }) => {
     }
   }, [latestTelemetry, isPaused]);
 
+  const groupLogsByPacket = (rawLogs: typeof latestTelemetry) => {
+    const result: Array<{
+      id: string;
+      deviceName: string;
+      timestamp: string;
+      rawPayload?: string;
+      metricsStr: string;
+    }> = [];
+    const map = new Map<string, (typeof result)[0]>();
+
+    for (const log of rawLogs) {
+      const raw = (log.rawPayload || '').trim();
+      const key = raw ? `${log.deviceId}_${raw}` : `${log.deviceId}_${log.timestamp}`;
+
+      let pkt = map.get(key);
+      if (!pkt) {
+        pkt = {
+          id: log.id,
+          deviceName: log.deviceName,
+          timestamp: log.timestamp,
+          rawPayload: log.rawPayload,
+          metricsStr: `${log.metric}:${log.value}`,
+        };
+        map.set(key, pkt);
+        result.push(pkt);
+      } else {
+        if (!pkt.metricsStr.includes(log.metric)) {
+          pkt.metricsStr += `, ${log.metric}:${log.value}`;
+        }
+      }
+    }
+    return result;
+  };
+
+  const groupedLogs = groupLogsByPacket(logs);
+
   return (
     <div className="h-full bg-[#020617] text-slate-200 rounded-3xl p-6 border border-slate-800 shadow-xl flex flex-col justify-between font-mono text-xs">
       {/* Header */}
@@ -52,10 +88,10 @@ export const LogStreamWidget: React.FC<LogStreamWidgetProps> = ({ config }) => {
 
       {/* Log Console Body */}
       <div className="my-2 h-44 overflow-y-auto space-y-1.5 text-[11px] font-mono pr-1">
-        {logs.length === 0 ? (
+        {groupedLogs.length === 0 ? (
           <div className="text-slate-600 text-center pt-8">Henüz paket verisi alınmadı...</div>
         ) : (
-          logs.map((log, idx) => (
+          groupedLogs.map((log, idx) => (
             <div key={`${log.id}_${idx}`} className="flex flex-col gap-0.5 hover:bg-slate-900/80 p-1.5 rounded border border-slate-800/40">
               <div className="flex items-center gap-2">
                 <span className="text-slate-500 text-[10px] shrink-0">[{formatShortTime(log.timestamp)}]</span>
@@ -66,7 +102,7 @@ export const LogStreamWidget: React.FC<LogStreamWidgetProps> = ({ config }) => {
                 </span>
               </div>
               <div className="text-[10px] text-amber-300/90 font-mono truncate pl-1 border-l-2 border-cyan-500/50">
-                {log.rawPayload || `${log.deviceName}, ${log.metric}:${log.value}`}
+                {log.rawPayload || `${log.deviceName}, ${log.metricsStr}`}
               </div>
             </div>
           ))

@@ -195,6 +195,59 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     });
   };
 
+  const groupLogsByPacket = (logs: TelemetryReading[]) => {
+    const result: Array<{
+      id: string;
+      deviceId: string;
+      deviceName: string;
+      timestamp: string;
+      rawPayload?: string;
+      metrics: Array<{
+        metric: string;
+        value: number;
+        unit: string;
+        status: 'normal' | 'warning' | 'critical';
+      }>;
+      overallStatus: 'normal' | 'warning' | 'critical';
+    }> = [];
+
+    const map = new Map<string, (typeof result)[0]>();
+
+    for (const log of logs) {
+      const raw = (log.rawPayload || '').trim();
+      const key = raw ? `${log.deviceId}_${raw}` : `${log.deviceId}_${log.timestamp}`;
+
+      let pkt = map.get(key);
+      if (!pkt) {
+        pkt = {
+          id: log.id,
+          deviceId: log.deviceId,
+          deviceName: log.deviceName,
+          timestamp: log.timestamp,
+          rawPayload: log.rawPayload,
+          metrics: [],
+          overallStatus: log.status || 'normal',
+        };
+        map.set(key, pkt);
+        result.push(pkt);
+      }
+
+      if (!pkt.metrics.some((m) => m.metric.toLowerCase() === log.metric.toLowerCase())) {
+        pkt.metrics.push({
+          metric: log.metric,
+          value: log.value,
+          unit: log.unit,
+          status: log.status,
+        });
+      }
+
+      if (log.status === 'critical') pkt.overallStatus = 'critical';
+      else if (log.status === 'warning' && pkt.overallStatus !== 'critical') pkt.overallStatus = 'warning';
+    }
+
+    return result;
+  };
+
   const handleTogglePause = () => {
     if (!isTerminalPaused) {
       setFrozenLogs(getFilteredTerminalLogs());
@@ -999,8 +1052,9 @@ print("Response:", response.json())`
                   <div className="my-2 h-56 overflow-y-auto space-y-2 text-[11px] font-mono pr-1 scrollbar-thin scrollbar-thumb-slate-800 pt-3 border-t border-slate-800/80">
                     {(() => {
                       const filteredLogs = isTerminalPaused && frozenLogs ? frozenLogs : getFilteredTerminalLogs();
+                      const packetLogs = groupLogsByPacket(filteredLogs);
 
-                      if (filteredLogs.length === 0) {
+                      if (packetLogs.length === 0) {
                         return (
                           <div className="text-slate-600 text-center pt-12 space-y-2">
                             <Terminal className="w-8 h-8 mx-auto opacity-30 text-cyan-400" />
@@ -1016,39 +1070,46 @@ print("Response:", response.json())`
                         );
                       }
 
-                      return filteredLogs.map((log, idx) => (
+                      return packetLogs.map((pkt, idx) => (
                         <div
-                          key={`${log.id}_${idx}`}
+                          key={`${pkt.id}_${idx}`}
                           className="p-2 rounded-2xl bg-slate-900/80 border border-slate-800/80 space-y-1 hover:border-cyan-500/30 transition"
                         >
                           <div className="flex items-center justify-between text-[10px]">
                             <span className="text-emerald-400 font-bold flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                              [POST /api/v1/telemetry] 201 OK • {log.deviceName}
+                              [POST /api/v1/telemetry] 201 OK • {pkt.deviceName}
                             </span>
-                            <span className="text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                            <span className="text-slate-500">{new Date(pkt.timestamp).toLocaleTimeString()}</span>
                           </div>
 
                           <div className="text-amber-300 font-mono text-[10px] bg-black/50 p-1.5 rounded-xl border border-amber-500/20 truncate">
-                            &gt; {log.rawPayload || `${log.deviceName}, ${log.metric}:${log.value}`}
+                            &gt; {pkt.rawPayload || `${pkt.deviceName}, ${pkt.metrics.map((m) => `${m.metric}:${m.value}`).join(', ')}`}
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] pt-0.5">
-                            <span className="text-slate-300">
-                              Cihaz: <strong className="text-cyan-300">{log.deviceName}</strong> | Metrik:{' '}
-                              <strong className="text-cyan-300">{log.metric}</strong> ={' '}
-                              <strong className="text-white">{log.value} {log.unit}</strong>
-                            </span>
+                          <div className="flex flex-wrap items-center justify-between text-[10px] gap-1 pt-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5 text-slate-300">
+                              <span>Cihaz: <strong className="text-cyan-300">{pkt.deviceName}</strong></span>
+                              <span className="text-slate-600">|</span>
+                              <div className="flex flex-wrap items-center gap-1">
+                                {pkt.metrics.map((m, mIdx) => (
+                                  <span key={mIdx} className="inline-flex items-center gap-0.5 bg-slate-800/80 px-1.5 py-0.2 rounded text-[9px] border border-slate-700/50">
+                                    <span className="text-slate-400">{m.metric}:</span>
+                                    <strong className="text-white">{m.value} {m.unit}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                             <span
                               className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                                log.status === 'critical'
+                                pkt.overallStatus === 'critical'
                                   ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                  : log.status === 'warning'
+                                  : pkt.overallStatus === 'warning'
                                   ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                                   : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
                               }`}
                             >
-                              {log.status.toUpperCase()}
+                              {pkt.overallStatus.toUpperCase()}
                             </span>
                           </div>
                         </div>
@@ -1821,8 +1882,9 @@ print("Response:", response.json())`
           <div className="flex-1 overflow-y-auto space-y-2 p-4 bg-black/60 rounded-3xl border border-slate-800 text-xs">
             {(() => {
               const logs = isTerminalPaused && frozenLogs ? frozenLogs : getFilteredTerminalLogs();
+              const packetLogs = groupLogsByPacket(logs);
 
-              if (logs.length === 0) {
+              if (packetLogs.length === 0) {
                 return (
                   <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-3">
                     <Radio className="w-12 h-12 opacity-30 text-cyan-400 animate-pulse" />
@@ -1834,32 +1896,39 @@ print("Response:", response.json())`
                 );
               }
 
-              return logs.map((log, idx) => (
-                <div key={`${log.id}_${idx}`} className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 space-y-1.5 hover:border-cyan-500/40 transition">
+              return packetLogs.map((pkt, idx) => (
+                <div key={`${pkt.id}_${idx}`} className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 space-y-2 hover:border-cyan-500/40 transition">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-emerald-400 font-bold flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      [INGESTION PKT RECV] HTTP 201 Created
+                      [INGESTION PKT RECV] HTTP 201 Created • {pkt.deviceName}
                     </span>
-                    <span className="text-slate-500">{log.timestamp ? new Date(log.timestamp).toLocaleString() : '-'}</span>
+                    <span className="text-slate-500">{pkt.timestamp ? new Date(pkt.timestamp).toLocaleString() : '-'}</span>
                   </div>
 
-                  <div className="p-2 bg-black text-amber-300 rounded-xl border border-amber-500/30 text-xs font-mono font-semibold">
-                    &gt; {log.rawPayload || `${activeDevice.apiKey}, ${activeDevice.name}, ${log.metric}:${log.value}`}
+                  <div className="p-2 bg-black text-amber-300 rounded-xl border border-amber-500/30 text-xs font-mono font-semibold break-all">
+                    &gt; {pkt.rawPayload || `${pkt.deviceName}, ${pkt.metrics.map((m) => `${m.metric}:${m.value}`).join(', ')}`}
                   </div>
 
-                  <div className="flex items-center justify-between text-xs text-slate-300 pt-1">
-                    <div className="flex items-center gap-4">
-                      <span>Cihaz: <strong className="text-cyan-300">{log.deviceName}</strong></span>
-                      <span>İşlenen Metrik: <strong className="text-white">{log.metric}</strong></span>
-                      <span>Değer: <strong className="text-amber-400">{log.value} {log.unit}</strong></span>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300 pt-1">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span>Cihaz: <strong className="text-cyan-300">{pkt.deviceName}</strong></span>
+                      <span className="text-slate-700">|</span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {pkt.metrics.map((m, mIdx) => (
+                          <span key={mIdx} className="inline-flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700/80 text-xs">
+                            <span className="text-slate-400">{m.metric}:</span>
+                            <strong className="text-amber-400">{m.value} {m.unit}</strong>
+                          </span>
+                        ))}
+                      </div>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      log.status === 'critical' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
-                      log.status === 'warning' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                      pkt.overallStatus === 'critical' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                      pkt.overallStatus === 'warning' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
                       'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     }`}>
-                      {log.status.toUpperCase()}
+                      {pkt.overallStatus.toUpperCase()}
                     </span>
                   </div>
                 </div>
