@@ -232,6 +232,18 @@ databaseRouter.post('/retention/cleanup', authenticateUser, requireAdmin, async 
   res.json(result);
 });
 
+databaseRouter.post('/retention/cleanup-simulated', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.executeSimulatedDataCleanup();
+  res.json(result);
+});
+
+databaseRouter.post('/retention/cleanup-category', authenticateUser, requireAdmin, async (req, res) => {
+  const { category, days } = req.body;
+  if (!category) return res.status(400).json({ error: 'Kategori belirtilmedi.' });
+  const result = await db.executeCategoryCleanup(category, days ? Number(days) : undefined);
+  res.json(result);
+});
+
 // TimescaleDB Router
 const timescaleRouter = Router();
 

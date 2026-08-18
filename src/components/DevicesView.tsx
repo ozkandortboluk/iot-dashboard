@@ -35,6 +35,7 @@ import {
   HelpCircle,
   ArrowRight,
   Power,
+  Database,
 } from 'lucide-react';
 
 export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNavigateToHelp }) => {
@@ -77,6 +78,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [targetOwnerId, setTargetOwnerId] = useState<string>('usr_admin');
   const [manualApiKey, setManualApiKey] = useState('');
   const [isSimulated, setIsSimulated] = useState<boolean>(false);
+  const [saveSimulatedDataToDb, setSaveSimulatedDataToDb] = useState<boolean>(false);
   const [addSimMetrics, setAddSimMetrics] = useState<string[]>(['l1', 'l2', 'l3', 'ri', 'rc', 'p']);
   const [addCustomSimMetricInput, setAddCustomSimMetricInput] = useState('');
 
@@ -92,6 +94,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editStatus, setEditStatus] = useState<Device['status']>('online');
   const [editApiKey, setEditApiKey] = useState('');
   const [editIsSimulated, setEditIsSimulated] = useState<boolean>(false);
+  const [editSaveSimulatedDataToDb, setEditSaveSimulatedDataToDb] = useState<boolean>(false);
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
   const [editCustomSimMetricInput, setEditCustomSimMetricInput] = useState('');
 
@@ -217,12 +220,14 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         userId: ownerId,
         apiKey: manualApiKey.trim() || undefined,
         isSimulated,
+        saveSimulatedDataToDb: isSimulated ? saveSimulatedDataToDb : false,
         simulatedMetrics: isSimulated ? addSimMetrics : [],
       });
       setShowAddModal(false);
       setName('');
       setManualApiKey('');
       setIsSimulated(false);
+      setSaveSimulatedDataToDb(false);
       setSelectedDevice(dev);
     } catch (err) {
       alert('Cihaz eklenemedi');
@@ -241,6 +246,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditStatus(dev.status);
     setEditApiKey(dev.apiKey);
     setEditIsSimulated(dev.isSimulated ?? false);
+    setEditSaveSimulatedDataToDb(dev.saveSimulatedDataToDb ?? false);
     setEditSimMetrics(dev.simulatedMetrics || (dev.isSimulated ? ['l1', 'l2', 'l3', 'ri', 'rc', 'p'] : ['l1', 'l2', 'l3', 'ri', 'rc', 'p']));
     setEditCustomSimMetricInput('');
   };
@@ -260,6 +266,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         status: editStatus,
         apiKey: editApiKey.trim() || undefined,
         isSimulated: editIsSimulated,
+        saveSimulatedDataToDb: editIsSimulated ? editSaveSimulatedDataToDb : false,
         simulatedMetrics: editIsSimulated ? editSimMetrics : [],
       });
       setEditingDevice(null);
@@ -554,10 +561,18 @@ print("Response:", response.json())`
                             {dev.name}
                           </p>
                           {dev.isSimulated ? (
-                            <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
-                              <Bot className="w-2.5 h-2.5" />
-                              <span>SANAL CİHAZ</span>
-                            </span>
+                            <>
+                              <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
+                                <Bot className="w-2.5 h-2.5" />
+                                <span>SANAL CİHAZ</span>
+                              </span>
+                              {dev.saveSimulatedDataToDb && (
+                                <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1" title="Sanal Cihaz Verileri Veritabanına Kaydediliyor">
+                                  <Database className="w-2.5 h-2.5" />
+                                  <span>DB KAYDI AKTİF</span>
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
                               <Cpu className="w-2.5 h-2.5" />
@@ -842,6 +857,15 @@ print("Response:", response.json())`
                         Varsayılan {activeDevice.type} metrikleri üretiliyor
                       </span>
                     )}
+                  </div>
+                  <div className="pt-1.5 border-t border-cyan-500/20 flex items-center justify-between text-[10px]">
+                    <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
+                      <Database className={`w-3 h-3 ${activeDevice.saveSimulatedDataToDb ? 'text-amber-500' : 'text-slate-400'}`} />
+                      Veritabanı Yazma:
+                    </span>
+                    <span className={`font-bold px-2 py-0.5 rounded-full ${activeDevice.saveSimulatedDataToDb ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30' : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                      {activeDevice.saveSimulatedDataToDb ? 'Aktif (DB\'ye Yazılıyor)' : 'Pasif (Sadece RAM)'}
+                    </span>
                   </div>
                 </div>
               )}
@@ -1161,6 +1185,34 @@ print("Response:", response.json())`
                     </button>
                   </div>
 
+                  {/* Simulated DB Persistence Toggle */}
+                  {isSimulated && (
+                    <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <Database className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">
+                              Sanal Cihaz Verilerini Veritabanına Kaydet
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
+                              Normalde sanal cihaz verileri veritabanına yazılmaz. Bu ayar aktif olduğunda telemetri ve alarmlar veritabanına kaydedilir (Test için).
+                            </p>
+                          </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={saveSimulatedDataToDb}
+                            onChange={(e) => setSaveSimulatedDataToDb(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-slate-600 peer-checked:bg-amber-500"></div>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Simulated Metrics Configuration */}
                   {renderSimulatedMetricsSelector(
                     isSimulated,
@@ -1444,6 +1496,34 @@ print("Response:", response.json())`
                       </div>
                     </button>
                   </div>
+
+                  {/* Simulated DB Persistence Toggle */}
+                  {editIsSimulated && (
+                    <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <Database className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">
+                              Sanal Cihaz Verilerini Veritabanına Kaydet
+                            </p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">
+                              Normalde sanal cihaz verileri veritabanına yazılmaz. Bu ayar aktif olduğunda telemetri ve alarmlar veritabanına kaydedilir (Test için).
+                            </p>
+                          </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={editSaveSimulatedDataToDb}
+                            onChange={(e) => setEditSaveSimulatedDataToDb(e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-slate-600 peer-checked:bg-amber-500"></div>
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   {renderSimulatedMetricsSelector(
                     editIsSimulated,

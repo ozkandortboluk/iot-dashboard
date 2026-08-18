@@ -31,7 +31,14 @@ export class NotificationRepository {
     }
     this.db.scheduleSave();
     this.db.notifyNotificationListeners('notification:new', fullNotif);
-    this.db.postgresRepo.saveNotification(fullNotif).catch(() => {});
+
+    const dev = fullNotif.deviceId ? (this.db.data.devices || []).find((d: any) => d.id === fullNotif.deviceId) : null;
+    const isSimulated = dev?.isSimulated || false;
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
+
+    if (!isSimulated || saveSimulatedDataToDb) {
+      this.db.postgresRepo.saveNotification(fullNotif).catch(() => {});
+    }
     return fullNotif;
   }
 

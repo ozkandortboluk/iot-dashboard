@@ -85,10 +85,11 @@ export class DeviceRepository {
     return this.db.data.devices.find((d: Device) => d.apiKey === token || d.id === token || d.name === token);
   }
 
-  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { apiKey?: string; isSimulated?: boolean }): Device {
+  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
     const newId = `dev_${Date.now()}`;
     const apiKey = deviceData.apiKey?.trim() || `dev_key_${crypto.randomBytes(8).toString('hex')}`;
     const isSimulated = deviceData.isSimulated ?? false;
+    const saveSimulatedDataToDb = deviceData.saveSimulatedDataToDb ?? false;
 
     let name = (deviceData.name || '').trim();
     if (isSimulated && !name.includes('[Sanal]') && !name.includes('(Sanal)')) {
@@ -99,6 +100,7 @@ export class DeviceRepository {
       ...deviceData,
       name,
       isSimulated,
+      saveSimulatedDataToDb,
       id: newId,
       apiKey,
       lastSeen: new Date().toISOString(),
@@ -151,6 +153,7 @@ export class DeviceRepository {
       'rateLimitPerMin',
       'encryptionMethod',
       'isSimulated',
+      'saveSimulatedDataToDb',
       'simulatedMetrics',
     ];
     const isConfigUpdated = configKeys.some((k) => updates[k] !== undefined);
@@ -164,8 +167,14 @@ export class DeviceRepository {
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
     if (updates.isSimulated !== undefined) dev.isSimulated = updates.isSimulated;
+    if (updates.saveSimulatedDataToDb !== undefined) dev.saveSimulatedDataToDb = updates.saveSimulatedDataToDb;
     if (updates.simulatedMetrics !== undefined) dev.simulatedMetrics = updates.simulatedMetrics;
-    if (updates.metrics !== undefined) dev.metrics = updates.metrics;
+    if (updates.metrics !== undefined) {
+      dev.metrics = {
+        ...(dev.metrics || {}),
+        ...updates.metrics,
+      };
+    }
     if (updates.lastSeen !== undefined) dev.lastSeen = updates.lastSeen;
 
     if (updates.apiKey !== undefined && updates.apiKey.trim()) {

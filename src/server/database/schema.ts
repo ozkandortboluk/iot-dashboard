@@ -45,8 +45,22 @@ CREATE TABLE IF NOT EXISTS devices (
     encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
     metrics JSONB DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN DEFAULT TRUE,
+    is_simulated BOOLEAN DEFAULT FALSE,
+    save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
+    simulated_metrics JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure columns exist for existing databases
+DO $$
+BEGIN
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'devices table alter notice: %', SQLERRM;
+END $$;
 
 -- 3. Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
 CREATE TABLE IF NOT EXISTS telemetry_readings (

@@ -53,6 +53,7 @@ export interface Device {
   encryptionMethod: string;
   dataFlowActive?: boolean;
   isSimulated?: boolean;
+  saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
   metrics: {
     cpu?: number;

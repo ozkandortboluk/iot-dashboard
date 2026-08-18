@@ -252,6 +252,36 @@ class LocalDatabase {
     this.startQueueWorker();
     this.startAutoRetentionWorker();
     this.initPostgresRepository().catch(() => {});
+    this.startPostgresAutoReconnect();
+  }
+
+  private postgresAutoReconnectInterval: any = null;
+
+  private startPostgresAutoReconnect(): void {
+    if (this.postgresAutoReconnectInterval) return;
+    this.postgresAutoReconnectInterval = setInterval(async () => {
+      if (!this.postgresRepo.isReady()) {
+        const url = this.getPostgresUrl();
+        if (url) {
+          await this.initPostgresRepository().catch(() => {});
+        }
+      }
+    }, 10000);
+  }
+
+  private getPgSslOption(url: string) {
+    if (!url) return undefined;
+    if (url.includes('sslmode=disable')) {
+      return undefined;
+    }
+    const hasSslParam = url.includes('sslmode=') || url.includes('ssl=true') || url.includes('ssl=1');
+    const isCloudHost = url.includes('neon.tech') || url.includes('supabase.co') || url.includes('render.com') || url.includes('railway.app') || url.includes('aivencloud.com') || url.includes('amazonaws.com') || url.includes('cockroachlabs.cloud');
+    const isProductionRemote = process.env.NODE_ENV === 'production' && !url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('postgres:5432');
+
+    if (hasSslParam || isCloudHost || isProductionRemote) {
+      return { rejectUnauthorized: false };
+    }
+    return undefined;
   }
 
   public getPgPool(): PgPoolType | null {
@@ -268,12 +298,16 @@ class LocalDatabase {
       try {
         this.pgPool = new Pool({
           connectionString: url,
-          connectionTimeoutMillis: 3000,
-          idleTimeoutMillis: 10000,
-          ssl: url.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 30000,
+          ssl: this.getPgSslOption(url),
         });
-        this.pgPool.on('error', () => {
+        this.pgPool.on('error', (err) => {
+          console.warn('[PostgreSQL Pool Error]', err?.message);
           this.postgresRepo.setConnected(false);
+          if (this.data.databaseSettings) {
+            this.data.databaseSettings.isPostgresConnected = false;
+          }
         });
       } catch {
         this.pgPool = null;
@@ -312,6 +346,10 @@ class LocalDatabase {
       }
 
       this.postgresRepo.setConnected(true);
+      if (!this.data.databaseSettings) {
+        this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
+      }
+      this.data.databaseSettings.isPostgresConnected = true;
 
       // 2. Hydrate from PostgreSQL into in-memory store
       const hydrated = await this.postgresRepo.hydrateFromPostgres();
@@ -1296,7 +1334,7 @@ class LocalDatabase {
       };
     }
     this.data.databaseSettings.activeEngine = engine;
-    if (postgresUrl !== undefined) {
+    if (postgresUrl !== undefined && !postgresUrl.includes('••••••••')) {
       this.data.databaseSettings.postgresUrl = postgresUrl.trim();
     }
     process.env.DB_ENGINE = engine;
@@ -1311,12 +1349,39 @@ class LocalDatabase {
     }
   }
 
+  public resolveUnmaskedPostgresUrl(customUrl?: string): string {
+    let connStr = (customUrl || '').trim();
+    if (!connStr || connStr.includes('••••••••')) {
+      connStr = this.getPostgresUrl();
+    }
+    return connStr.trim();
+  }
+
   public getPostgresUrl(): string {
-    const url = this.data.databaseSettings?.postgresUrl || process.env.DATABASE_URL || '';
-    if (!url.startsWith('postgres://') && !url.startsWith('postgresql://')) {
+    const envUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRESQL_URL || process.env.PG_URL || '').trim();
+    const storedUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
+
+    let candidate = '';
+
+    if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
+      candidate = envUrl;
+    } else if (storedUrl && (storedUrl.startsWith('postgres://') || storedUrl.startsWith('postgresql://')) && !storedUrl.includes('••••••••')) {
+      candidate = storedUrl;
+    }
+
+    if (candidate.includes('••••••••')) {
+      if (envUrl && !envUrl.includes('••••••••')) {
+        candidate = envUrl;
+      } else {
+        candidate = '';
+      }
+    }
+
+    if (!candidate.startsWith('postgres://') && !candidate.startsWith('postgresql://')) {
       return '';
     }
-    return url;
+
+    return candidate;
   }
 
   public getTimescaleStats(): import('../types.js').TimescaleDBStats { return this.timescaleManager.getTimescaleStats(); }
@@ -1486,11 +1551,11 @@ class LocalDatabase {
     latencyMs?: number;
     tablesStatus?: Record<string, boolean>;
   }> {
-    const connStr = (customUrl || this.getPostgresUrl()).trim();
+    const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
       return {
         success: false,
-        message: 'DATABASE_URL bağlantı adresi tanımlanmamış. Lütfen sunucu adresinizi girin.',
+        message: 'DATABASE_URL bağlantı adresi tanımlanmamış. Lütfen ortam değişkenlerinizi veya adresi kontrol edin.',
       };
     }
 
@@ -1500,7 +1565,7 @@ class LocalDatabase {
       pool = new Pool({
         connectionString: connStr,
         connectionTimeoutMillis: 5000,
-        ssl: connStr.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+        ssl: this.getPgSslOption(connStr),
       });
 
       const client = await pool.connect();
@@ -1538,7 +1603,7 @@ class LocalDatabase {
       this.data.databaseSettings.isPostgresConnected = true;
       this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
       this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-      if (customUrl) {
+      if (customUrl && !customUrl.includes('••••••••')) {
         this.data.databaseSettings.postgresUrl = customUrl.trim();
       }
       this.saveData(this.data);
@@ -1578,7 +1643,7 @@ class LocalDatabase {
     message: string;
     tablesCreated?: string[];
   }> {
-    const connStr = (customUrl || this.getPostgresUrl()).trim();
+    const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
       return {
         success: false,
@@ -1591,7 +1656,7 @@ class LocalDatabase {
       pool = new Pool({
         connectionString: connStr,
         connectionTimeoutMillis: 8000,
-        ssl: connStr.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+        ssl: this.getPgSslOption(connStr),
       });
 
       const client = await pool.connect();
@@ -1616,7 +1681,7 @@ class LocalDatabase {
       }
       this.data.databaseSettings.isPostgresConnected = true;
       this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-      if (customUrl) {
+      if (customUrl && !customUrl.includes('••••••••')) {
         this.data.databaseSettings.postgresUrl = customUrl.trim();
       }
       this.saveData(this.data);
@@ -2195,9 +2260,195 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     };
   }
 
+  public async executeSimulatedDataCleanup(): Promise<RetentionCleanupResult> {
+    const cleaned = {
+      telemetry: 0,
+      alarms: 0,
+      notifications: 0,
+      auditLogs: 0,
+      dispatchLogs: 0,
+      deviceCommands: 0,
+      total: 0,
+    };
+
+    // 1. Get simulated device IDs from memory
+    const simDeviceIds = new Set(
+      this.data.devices.filter((d) => d.isSimulated || d.id.startsWith('sim_')).map((d) => d.id)
+    );
+
+    // Filter in-memory arrays
+    const initTel = this.data.telemetry.length;
+    this.data.telemetry = this.data.telemetry.filter(
+      (t) => !simDeviceIds.has(t.deviceId) && !t.deviceId?.startsWith('sim_')
+    );
+    cleaned.telemetry = initTel - this.data.telemetry.length;
+
+    if (this.data.activeAlarms) {
+      const initAlarms = this.data.activeAlarms.length;
+      this.data.activeAlarms = this.data.activeAlarms.filter(
+        (a) => !simDeviceIds.has(a.deviceId) && !a.deviceId?.startsWith('sim_')
+      );
+      cleaned.alarms = initAlarms - this.data.activeAlarms.length;
+    }
+
+    if (this.data.notifications) {
+      const initNotifs = this.data.notifications.length;
+      this.data.notifications = this.data.notifications.filter(
+        (n) => !simDeviceIds.has(n.deviceId || '') && !n.deviceId?.startsWith('sim_')
+      );
+      cleaned.notifications = initNotifs - this.data.notifications.length;
+    }
+
+    if (this.data.commands) {
+      const initCmds = this.data.commands.length;
+      this.data.commands = this.data.commands.filter(
+        (c) => !simDeviceIds.has(c.deviceId || '') && !c.deviceId?.startsWith('sim_')
+      );
+      cleaned.deviceCommands = initCmds - this.data.commands.length;
+    }
+
+    // 2. PostgreSQL Cleanup
+    if (this.postgresRepo.isReady()) {
+      const pgCleaned = await this.postgresRepo.deleteSimulatedRecords();
+      cleaned.telemetry = Math.max(cleaned.telemetry, pgCleaned.telemetry);
+      cleaned.alarms = Math.max(cleaned.alarms, pgCleaned.alarms);
+      cleaned.notifications = Math.max(cleaned.notifications, pgCleaned.notifications);
+      cleaned.deviceCommands = Math.max(cleaned.deviceCommands, pgCleaned.deviceCommands);
+    }
+
+    cleaned.total =
+      cleaned.telemetry +
+      cleaned.alarms +
+      cleaned.notifications +
+      cleaned.auditLogs +
+      cleaned.dispatchLogs +
+      cleaned.deviceCommands;
+
+    const cleanupTime = new Date().toISOString();
+    this.saveData(this.data);
+
+    this.addAuditLog(
+      'usr_admin',
+      'Yönetici',
+      `Sanal Cihaz Veri Temizliği: Toplam ${cleaned.total} adet sanal veritabanı kaydı silindi (Telemetri: ${cleaned.telemetry}, Alarm: ${cleaned.alarms}, Bildirim: ${cleaned.notifications}, Komut: ${cleaned.deviceCommands})`,
+      'medium'
+    );
+
+    return {
+      success: true,
+      cleanedCounts: cleaned,
+      cleanedAt: cleanupTime,
+      message: `Sanal cihazlara ait toplam ${cleaned.total} adet telemetri, alarm ve bildirim kaydı başarıyla temizlendi.`,
+    };
+  }
+
+  public async executeCategoryCleanup(category: string, daysOverride?: number): Promise<RetentionCleanupResult> {
+    const policies = this.getRetentionPolicies();
+    const days = daysOverride && daysOverride > 0 ? daysOverride : (policies as any)[category + 'Days'] || 30;
+    const now = Date.now();
+    const cutoff = now - days * 24 * 3600 * 1000;
+
+    const cleaned = {
+      telemetry: 0,
+      alarms: 0,
+      notifications: 0,
+      auditLogs: 0,
+      dispatchLogs: 0,
+      deviceCommands: 0,
+      total: 0,
+    };
+
+    const optionsForPg: any = {};
+
+    if (category === 'telemetry') {
+      const init = this.data.telemetry.length;
+      this.data.telemetry = this.data.telemetry.filter((t) => new Date(t.timestamp).getTime() >= cutoff);
+      cleaned.telemetry = init - this.data.telemetry.length;
+      optionsForPg.telemetryDays = days;
+    } else if (category === 'resolvedAlarms' || category === 'alarms') {
+      if (this.data.activeAlarms) {
+        const init = this.data.activeAlarms.length;
+        this.data.activeAlarms = this.data.activeAlarms.filter((a) => {
+          if (a.state === 'RESOLVED') {
+            const resTime = a.resolvedAt ? new Date(a.resolvedAt).getTime() : a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+            return resTime >= cutoff;
+          }
+          return true;
+        });
+        cleaned.alarms = init - this.data.activeAlarms.length;
+      }
+      optionsForPg.resolvedAlarmsDays = days;
+    } else if (category === 'readNotifications' || category === 'notifications') {
+      if (this.data.notifications) {
+        const init = this.data.notifications.length;
+        this.data.notifications = this.data.notifications.filter((n) => {
+          if (n.read) {
+            return new Date(n.timestamp).getTime() >= cutoff;
+          }
+          return true;
+        });
+        cleaned.notifications = init - this.data.notifications.length;
+      }
+      optionsForPg.readNotificationsDays = days;
+    } else if (category === 'auditLogs') {
+      if (this.data.auditLogs) {
+        const init = this.data.auditLogs.length;
+        this.data.auditLogs = this.data.auditLogs.filter((l) => new Date(l.timestamp).getTime() >= cutoff);
+        cleaned.auditLogs = init - this.data.auditLogs.length;
+      }
+      optionsForPg.auditLogsDays = days;
+    } else if (category === 'dispatchLogs') {
+      if (this.data.dispatchLogs) {
+        const init = this.data.dispatchLogs.length;
+        this.data.dispatchLogs = this.data.dispatchLogs.filter((d) => new Date(d.sentAt).getTime() >= cutoff);
+        cleaned.dispatchLogs = init - this.data.dispatchLogs.length;
+      }
+      optionsForPg.dispatchLogsDays = days;
+    } else if (category === 'deviceCommands' || category === 'commands') {
+      if (this.data.commands) {
+        const init = this.data.commands.length;
+        this.data.commands = this.data.commands.filter((c) => {
+          if (c.status === 'delivered' || c.status === 'failed' || c.status === 'executed') {
+            return new Date(c.created_at).getTime() >= cutoff;
+          }
+          return true;
+        });
+        cleaned.deviceCommands = init - this.data.commands.length;
+      }
+      optionsForPg.deviceCommandsDays = days;
+    }
+
+    if (this.postgresRepo.isReady()) {
+      const pgCleaned = await this.postgresRepo.deleteOldRecords(optionsForPg);
+      cleaned.telemetry = Math.max(cleaned.telemetry, pgCleaned.telemetry);
+      cleaned.alarms = Math.max(cleaned.alarms, pgCleaned.alarms);
+      cleaned.notifications = Math.max(cleaned.notifications, pgCleaned.notifications);
+      cleaned.auditLogs = Math.max(cleaned.auditLogs, pgCleaned.auditLogs);
+      cleaned.dispatchLogs = Math.max(cleaned.dispatchLogs, pgCleaned.dispatchLogs);
+      cleaned.deviceCommands = Math.max(cleaned.deviceCommands, pgCleaned.deviceCommands);
+    }
+
+    cleaned.total =
+      cleaned.telemetry +
+      cleaned.alarms +
+      cleaned.notifications +
+      cleaned.auditLogs +
+      cleaned.dispatchLogs +
+      cleaned.deviceCommands;
+
+    const cleanupTime = new Date().toISOString();
+    this.saveData(this.data);
+
+    return {
+      success: true,
+      cleanedCounts: cleaned,
+      cleanedAt: cleanupTime,
+      message: `${days} günden eski ${cleaned.total} adet kayıt temizlendi.`,
+    };
+  }
+
   private startAutoRetentionWorker() {
-    // Check every hour if automated retention cleanup needs to run
-    setInterval(async () => {
+    const runWorkerCheck = async () => {
       try {
         const policies = this.getRetentionPolicies();
         if (!policies.enabled) return;
@@ -2210,7 +2461,13 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       } catch (err) {
         console.error('[Auto Retention Cleanup Worker Error]:', err);
       }
-    }, 60 * 60 * 1000);
+    };
+
+    // Initial check after server boot (15 seconds delay)
+    setTimeout(runWorkerCheck, 15000);
+
+    // Check every hour if automated retention cleanup needs to run
+    setInterval(runWorkerCheck, 60 * 60 * 1000);
   }
 }
 

@@ -127,8 +127,9 @@ export class PostgresRepository {
       INSERT INTO devices (
         id, user_id, name, device_type, api_key, status, location, 
         ip_address, mac_address, last_seen, rate_limit_per_min, 
-        encryption_method, metrics, data_flow_active, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        encryption_method, metrics, data_flow_active, is_simulated, 
+        save_simulated_data_to_db, simulated_metrics, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
@@ -142,7 +143,10 @@ export class PostgresRepository {
         rate_limit_per_min = EXCLUDED.rate_limit_per_min,
         encryption_method = EXCLUDED.encryption_method,
         metrics = EXCLUDED.metrics,
-        data_flow_active = EXCLUDED.data_flow_active;
+        data_flow_active = EXCLUDED.data_flow_active,
+        is_simulated = EXCLUDED.is_simulated,
+        save_simulated_data_to_db = EXCLUDED.save_simulated_data_to_db,
+        simulated_metrics = EXCLUDED.simulated_metrics;
     `;
     await this.query(sql, [
       dev.id,
@@ -159,6 +163,9 @@ export class PostgresRepository {
       dev.encryptionMethod || 'AES-256-GCM',
       JSON.stringify(dev.metrics || {}),
       dev.dataFlowActive !== false,
+      Boolean(dev.isSimulated),
+      Boolean(dev.saveSimulatedDataToDb),
+      JSON.stringify(dev.simulatedMetrics || []),
       new Date().toISOString(),
     ]);
   }
@@ -569,7 +576,7 @@ export class PostgresRepository {
       // 1. Telemetry readings
       if (options.telemetryDays && options.telemetryDays > 0) {
         const res = await this.query(
-          `DELETE FROM telemetry_readings WHERE created_at < NOW() - ($1 || ' days')::INTERVAL;`,
+          `DELETE FROM telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.telemetryDays]
         );
         counts.telemetry = res?.rowCount || 0;
@@ -578,7 +585,7 @@ export class PostgresRepository {
       // 2. Resolved Alarms
       if (options.resolvedAlarmsDays && options.resolvedAlarmsDays > 0) {
         const res = await this.query(
-          `DELETE FROM active_alarms WHERE state = 'RESOLVED' AND (resolved_at < NOW() - ($1 || ' days')::INTERVAL OR (resolved_at IS NULL AND updated_at < NOW() - ($1 || ' days')::INTERVAL));`,
+          `DELETE FROM active_alarms WHERE state = 'RESOLVED' AND (resolved_at < NOW() - ($1 * INTERVAL '1 day') OR (resolved_at IS NULL AND updated_at < NOW() - ($1 * INTERVAL '1 day')));`,
           [options.resolvedAlarmsDays]
         );
         counts.alarms = res?.rowCount || 0;
@@ -587,7 +594,7 @@ export class PostgresRepository {
       // 3. Read Notifications
       if (options.readNotificationsDays && options.readNotificationsDays > 0) {
         const res = await this.query(
-          `DELETE FROM notifications WHERE is_read = TRUE AND created_at < NOW() - ($1 || ' days')::INTERVAL;`,
+          `DELETE FROM notifications WHERE is_read = TRUE AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.readNotificationsDays]
         );
         counts.notifications = res?.rowCount || 0;
@@ -596,7 +603,7 @@ export class PostgresRepository {
       // 4. Audit Logs
       if (options.auditLogsDays && options.auditLogsDays > 0) {
         const res = await this.query(
-          `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 || ' days')::INTERVAL;`,
+          `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.auditLogsDays]
         );
         counts.auditLogs = res?.rowCount || 0;
@@ -605,7 +612,7 @@ export class PostgresRepository {
       // 5. Dispatch Logs
       if (options.dispatchLogsDays && options.dispatchLogsDays > 0) {
         const res = await this.query(
-          `DELETE FROM dispatch_logs WHERE sent_at < NOW() - ($1 || ' days')::INTERVAL;`,
+          `DELETE FROM dispatch_logs WHERE sent_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.dispatchLogsDays]
         );
         counts.dispatchLogs = res?.rowCount || 0;
@@ -614,7 +621,7 @@ export class PostgresRepository {
       // 6. Device Commands (Delivered or Failed)
       if (options.deviceCommandsDays && options.deviceCommandsDays > 0) {
         const res = await this.query(
-          `DELETE FROM device_commands WHERE status IN ('delivered', 'failed', 'expired') AND created_at < NOW() - ($1 || ' days')::INTERVAL;`,
+          `DELETE FROM device_commands WHERE status IN ('delivered', 'failed', 'expired') AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.deviceCommandsDays]
         );
         counts.deviceCommands = res?.rowCount || 0;
@@ -629,6 +636,64 @@ export class PostgresRepository {
         counts.deviceCommands;
     } catch (err: any) {
       console.warn('[PostgreSQL Retention Cleanup Error]:', err.message || err);
+    }
+
+    return counts;
+  }
+
+  public async deleteSimulatedRecords(): Promise<{
+    telemetry: number;
+    alarms: number;
+    notifications: number;
+    deviceCommands: number;
+    total: number;
+  }> {
+    const counts = {
+      telemetry: 0,
+      alarms: 0,
+      notifications: 0,
+      deviceCommands: 0,
+      total: 0,
+    };
+
+    if (!this.pool || !this.isConnected) return counts;
+
+    try {
+      // 1. Telemetry readings
+      const telRes = await this.query(`
+        DELETE FROM telemetry_readings 
+        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
+           OR device_id LIKE 'sim_%';
+      `);
+      counts.telemetry = telRes?.rowCount || 0;
+
+      // 2. Active/Resolved Alarms
+      const alarmRes = await this.query(`
+        DELETE FROM active_alarms 
+        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
+           OR device_id LIKE 'sim_%';
+      `);
+      counts.alarms = alarmRes?.rowCount || 0;
+
+      // 3. Notifications
+      const notifRes = await this.query(`
+        DELETE FROM notifications 
+        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
+           OR device_id LIKE 'sim_%';
+      `);
+      counts.notifications = notifRes?.rowCount || 0;
+
+      // 4. Device Commands
+      const cmdRes = await this.query(`
+        DELETE FROM device_commands 
+        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
+           OR device_id LIKE 'sim_%';
+      `);
+      counts.deviceCommands = cmdRes?.rowCount || 0;
+
+      counts.total = counts.telemetry + counts.alarms + counts.notifications + counts.deviceCommands;
+    } catch (err: any) {
+      console.warn('[PostgreSQL Simulated Data Cleanup Error]:', err.message || err);
     }
 
     return counts;
@@ -703,7 +768,9 @@ export class PostgresRepository {
             encryptionMethod: r.encryption_method || 'AES-256-GCM',
             metrics: typeof r.metrics === 'string' ? JSON.parse(r.metrics) : r.metrics || {},
             dataFlowActive: r.data_flow_active !== false,
-            isSimulated: r.name?.includes('[Sanal]') || r.id?.startsWith('dev_0') || r.id?.startsWith('sim_'),
+            isSimulated: r.is_simulated !== undefined && r.is_simulated !== null ? Boolean(r.is_simulated) : (r.name?.includes('[Sanal]') || r.id?.startsWith('dev_0') || r.id?.startsWith('sim_')),
+            saveSimulatedDataToDb: Boolean(r.save_simulated_data_to_db),
+            simulatedMetrics: Array.isArray(r.simulated_metrics) ? r.simulated_metrics : (typeof r.simulated_metrics === 'string' ? JSON.parse(r.simulated_metrics) : undefined),
           });
         });
       }

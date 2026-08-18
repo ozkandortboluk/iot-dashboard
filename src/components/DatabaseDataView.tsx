@@ -44,6 +44,7 @@ import {
   Plus,
   Bell,
   Send,
+  Bot,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
@@ -148,6 +149,8 @@ export const DatabaseDataView: React.FC = () => {
   });
   const [savingRetention, setSavingRetention] = useState<boolean>(false);
   const [runningCleanup, setRunningCleanup] = useState<boolean>(false);
+  const [runningSimulatedCleanup, setRunningSimulatedCleanup] = useState<boolean>(false);
+  const [runningCategoryCleanup, setRunningCategoryCleanup] = useState<string | null>(null);
   const [cleanupResult, setCleanupResult] = useState<RetentionCleanupResult | null>(null);
   const [retentionMsg, setRetentionMsg] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -420,6 +423,73 @@ export const DatabaseDataView: React.FC = () => {
       setRetentionMsg({ type: 'error', message: err.message || 'Ağ hatası.' });
     } finally {
       setRunningCleanup(false);
+    }
+  };
+
+  const handleRunSimulatedCleanup = async () => {
+    if (
+      !window.confirm(
+        'Sanal (simülatör) cihazlara ait tüm telemetri, alarm ve bildirim verileri veritabanından kalıcı olarak silinecektir. Devam etmek istiyor musunuz?'
+      )
+    )
+      return;
+    setRunningSimulatedCleanup(true);
+    setRetentionMsg(null);
+    setCleanupResult(null);
+    try {
+      const res = await fetch('/api/database/retention/cleanup-simulated', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCleanupResult(data);
+        setRetentionMsg({ type: 'success', message: data.message });
+        fetchDatabaseStats();
+      } else {
+        setRetentionMsg({
+          type: 'error',
+          message: data.message || data.error || 'Sanal veri temizliği sırasında hata oluştu.',
+        });
+      }
+    } catch (err: any) {
+      setRetentionMsg({ type: 'error', message: err.message || 'Ağ hatası.' });
+    } finally {
+      setRunningSimulatedCleanup(false);
+    }
+  };
+
+  const handleRunCategoryCleanup = async (categoryName: string, categoryLabel: string, days?: number) => {
+    if (
+      !window.confirm(
+        `${categoryLabel} kategorisine ait ${days ? days + ' günden eski' : ''} tüm veriler kalıcı olarak silinecektir. Emin misiniz?`
+      )
+    )
+      return;
+    setRunningCategoryCleanup(categoryName);
+    setRetentionMsg(null);
+    setCleanupResult(null);
+    try {
+      const res = await fetch('/api/database/retention/cleanup-category', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: categoryName, days }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCleanupResult(data);
+        setRetentionMsg({ type: 'success', message: data.message });
+        fetchDatabaseStats();
+      } else {
+        setRetentionMsg({
+          type: 'error',
+          message: data.message || data.error || 'Kategori temizliği sırasında hata oluştu.',
+        });
+      }
+    } catch (err: any) {
+      setRetentionMsg({ type: 'error', message: err.message || 'Ağ hatası.' });
+    } finally {
+      setRunningCategoryCleanup(null);
     }
   };
 
@@ -2240,6 +2310,43 @@ sudo systemctl restart postgresql`}
             </div>
           )}
 
+          {/* Simulated Device Data Cleanup Card */}
+          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent rounded-xl border border-amber-500/30 p-5 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                    <Bot className="w-3 h-3" />
+                    Sanal Cihazlar & Simülatör Test Verileri
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-mono font-bold">
+                    [Sanal] Etiketli Cihazlar
+                  </span>
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-500" />
+                  Sanal Cihaz Verilerini Temizle
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
+                  Test amacıyla oluşturulan sanal cihazların ürettiği tüm telemetri okumalarını, alarmları ve bildirimleri tek tıkla veritabanından silebilirsiniz. Gerçek donanım verileri korunur.
+                </p>
+              </div>
+
+              <div className="shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRunSimulatedCleanup}
+                  disabled={runningSimulatedCleanup}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Sanal cihazlara ait tüm telemetri ve alarmları veritabanından sil"
+                >
+                  <Trash2 className={`w-4 h-4 ${runningSimulatedCleanup ? 'animate-spin' : ''}`} />
+                  <span>{runningSimulatedCleanup ? 'Sanal Veriler Siliniyor...' : 'Sanal Verileri Sil'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Retention Duration Settings Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Telemetry Card */}
@@ -2295,6 +2402,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('telemetry', 'Telemetri', retentionPolicies.telemetryDays)}
+                  disabled={runningCategoryCleanup === 'telemetry'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'telemetry' ? 'Temizleniyor...' : 'Sadece Telemetriyi Sil'}</span>
+                </button>
               </div>
             </div>
 
@@ -2351,6 +2468,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('resolvedAlarms', 'Çözülen Alarmlar', retentionPolicies.resolvedAlarmsDays)}
+                  disabled={runningCategoryCleanup === 'resolvedAlarms'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'resolvedAlarms' ? 'Temizleniyor...' : 'Sadece Çözülen Alarmları Sil'}</span>
+                </button>
               </div>
             </div>
 
@@ -2407,6 +2534,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('readNotifications', 'Okunmuş Bildirimler', retentionPolicies.readNotificationsDays)}
+                  disabled={runningCategoryCleanup === 'readNotifications'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'readNotifications' ? 'Temizleniyor...' : 'Sadece Bildirimleri Sil'}</span>
+                </button>
               </div>
             </div>
 
@@ -2463,6 +2600,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('auditLogs', 'Denetim Logları', retentionPolicies.auditLogsDays)}
+                  disabled={runningCategoryCleanup === 'auditLogs'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'auditLogs' ? 'Temizleniyor...' : 'Sadece Denetim Loglarını Sil'}</span>
+                </button>
               </div>
             </div>
 
@@ -2519,6 +2666,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('dispatchLogs', 'Gönderim Logları', retentionPolicies.dispatchLogsDays)}
+                  disabled={runningCategoryCleanup === 'dispatchLogs'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'dispatchLogs' ? 'Temizleniyor...' : 'Sadece Gönderim Loglarını Sil'}</span>
+                </button>
               </div>
             </div>
 
@@ -2575,6 +2732,16 @@ sudo systemctl restart postgresql`}
                     </button>
                   ))}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRunCategoryCleanup('deviceCommands', 'Cihaz Komutları', retentionPolicies.deviceCommandsDays)}
+                  disabled={runningCategoryCleanup === 'deviceCommands'}
+                  className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{runningCategoryCleanup === 'deviceCommands' ? 'Temizleniyor...' : 'Sadece Komutları Sil'}</span>
+                </button>
               </div>
             </div>
           </div>

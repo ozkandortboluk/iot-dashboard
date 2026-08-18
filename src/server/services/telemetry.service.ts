@@ -15,6 +15,10 @@ export class TelemetryService {
     if (!device.metrics) device.metrics = {};
     for (const m of metricsToProcess) {
       device.metrics[m.metric] = m.value;
+      const lowerKey = m.metric.toLowerCase();
+      if (lowerKey !== m.metric) {
+        device.metrics[lowerKey] = m.value;
+      }
     }
 
     const addedReadings: TelemetryReading[] = [];

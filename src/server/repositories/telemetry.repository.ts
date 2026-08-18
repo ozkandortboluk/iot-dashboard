@@ -161,6 +161,15 @@ export class TelemetryRepository {
   private RAW_TELEMETRY_MAX_BUFFER = 10000; // Expanded high-frequency ring buffer
 
   public async writeTelemetryToPostgres(reading: TelemetryReading): Promise<boolean> {
+    const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
+    const isSimulated = dev?.isSimulated || false;
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
+
+    // Do not write virtual device telemetry to DB unless saveSimulatedDataToDb is explicitly active
+    if (isSimulated && !saveSimulatedDataToDb) {
+      return true;
+    }
+
     if (this.db.postgresRepo?.isReady()) {
       try {
         const writeRes = await this.db.postgresRepo.saveTelemetry(reading);
@@ -219,17 +228,35 @@ export class TelemetryRepository {
       }
       if (!device.metrics) device.metrics = {};
       (device.metrics as Record<string, number>)[reading.metric] = reading.value;
+      const lowerKey1 = reading.metric.toLowerCase();
+      if (lowerKey1 !== reading.metric) {
+        (device.metrics as Record<string, number>)[lowerKey1] = reading.value;
+      }
 
       device.updatedAt = fullReading.timestamp;
       device.version = (device.version || 1) + 1;
 
-      this.processHistory(fullReading, device.isSimulated || false);
+      this.processHistory(fullReading, device.isSimulated || false, device.saveSimulatedDataToDb || false);
     }
 
     // Check threshold rules for notification trigger!
     this.evaluateRules(fullReading, device);
 
     this.db.scheduleSave();
+
+    // Check virtual device setting: if device is simulated and saveSimulatedDataToDb is false, skip writing to DB
+    const isSimulated = device?.isSimulated || false;
+    const saveSimulatedDataToDb = device?.saveSimulatedDataToDb || false;
+
+    if (isSimulated && !saveSimulatedDataToDb) {
+      return {
+        reading: fullReading,
+        persisted: true,
+        engine: 'RAM / Sanal Filtre (Veritabanına Yazılmıyor)',
+        rowCount: 0,
+        queuedForRetry: false,
+      };
+    }
 
     // Direct Write Acknowledgment Check
     const isReady = this.db.postgresRepo?.isReady();
@@ -316,11 +343,15 @@ export class TelemetryRepository {
       }
       if (!device.metrics) device.metrics = {};
       (device.metrics as Record<string, number>)[reading.metric] = reading.value;
+      const lowerKey2 = reading.metric.toLowerCase();
+      if (lowerKey2 !== reading.metric) {
+        (device.metrics as Record<string, number>)[lowerKey2] = reading.value;
+      }
 
       device.updatedAt = fullReading.timestamp;
       device.version = (device.version || 1) + 1;
 
-      this.processHistory(fullReading, device.isSimulated || false);
+      this.processHistory(fullReading, device.isSimulated || false, device.saveSimulatedDataToDb || false);
     }
 
     // Check threshold rules for notification trigger!
@@ -532,8 +563,14 @@ export class TelemetryRepository {
       this.db.data.activeAlarms.push(alarm);
     }
 
-    // Sync to PostgreSQL Repository
-    this.db.postgresRepo?.saveAlarm(alarm).catch(() => {});
+    const dev = (this.db.data.devices || []).find((d: Device) => d.id === alarm.deviceId);
+    const isSimulated = dev?.isSimulated || false;
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
+
+    // Sync to PostgreSQL Repository if real device OR if saveSimulatedDataToDb is true
+    if (!isSimulated || saveSimulatedDataToDb) {
+      this.db.postgresRepo?.saveAlarm(alarm).catch(() => {});
+    }
   }
 
   private updateActiveNotificationDeduplicated(alarm: ActiveAlarm) {
@@ -914,8 +951,8 @@ export class TelemetryRepository {
     }
   }
 
-  public processHistory(reading: TelemetryReading, isSimulated: boolean) {
-    if (isSimulated) return;
+  public processHistory(reading: TelemetryReading, isSimulated: boolean, saveSimulatedDataToDb: boolean = false) {
+    if (isSimulated && !saveSimulatedDataToDb) return;
 
     const { deviceId, metric, value, timestamp } = reading;
 
