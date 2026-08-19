@@ -387,7 +387,7 @@ simulatorRouter.post('/batch', authenticateUser, (req, res) => {
       metric: m,
       value: val,
       unit: u,
-      status: val > 90 ? 'critical' : val > 75 ? 'warning' : 'normal',
+      status: 'normal',
       rawPayload,
     });
     generatedReadings.push(reading);

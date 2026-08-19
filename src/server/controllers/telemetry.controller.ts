@@ -1,5 +1,5 @@
 import type express from 'express';
-import { parseTelemetryPayload } from '../utils/telemetry.parser.js';
+import { parseProductionTelemetryPayload, parseLegacyTelemetryPayload, buildPacketAck } from '../utils/telemetry.parser.js';
 import { deviceAuthService } from '../services/deviceAuth.service.js';
 import { telemetryService } from '../services/telemetry.service.js';
 import { commandService } from '../services/command.service.js';
@@ -8,16 +8,47 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 export class TelemetryController {
   public async ingest(req: express.Request, res: express.Response) {
+    return this.processIngest(req, res, parseProductionTelemetryPayload);
+  }
+
+  public async ingestLegacy(req: express.Request, res: express.Response) {
+    return this.processIngest(req, res, parseLegacyTelemetryPayload);
+  }
+
+  private async processIngest(req: express.Request, res: express.Response, parserFn: (r: any) => any) {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'X-API-Key, Authorization, Content-Type, X-Token, X-Device-Id, X-MAC-Address');
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
 
     if (req.method === 'OPTIONS') {
       return res.status(200).send('OK');
     }
 
-    // 1. Parse Telemetry Payload
-    const parsedPayload = parseTelemetryPayload(req);
+    // Enforce HTTP POST only
+    if (req.method !== 'POST') {
+      return res.status(405).json({
+        error: 'HTTP metot hatası! Telemetri veri alımı için yalnızca HTTP POST metodu kabul edilir.',
+        methodProvided: req.method,
+        expectedMethod: 'POST',
+        protocol: {
+          endpoint: 'POST /api/telemetry',
+          headers: {
+            'X-API-Key': 'YOUR_DEVICE_API_KEY',
+            'Content-Type': 'application/json',
+          },
+          bodyFormat: {
+            sequence: 1234,
+            metrics: {
+              temperature: { value: 24.3, unit: 'C' },
+              humidity: { value: 52, unit: '%' },
+            },
+          },
+        },
+      });
+    }
+
+    // 1. Parse Telemetry Payload with selected parser
+    const parsedPayload = parserFn(req);
 
     // 2. Authenticate & Prepare Device (including Rate Limit checks)
     const authResult = deviceAuthService.authenticateDevice(parsedPayload);
@@ -39,6 +70,7 @@ export class TelemetryController {
         error: 'Veri paketinde geçerli metrik bulunamadı.',
         expectedFormat: {
           deviceId: device.id,
+          sequence: 10021,
           metrics: {
             temperature: { value: 24.7, unit: '°C' },
             humidity: { value: 58.2, unit: '%' },
@@ -54,20 +86,35 @@ export class TelemetryController {
       device,
       parsedPayload.metricsToProcess,
       parsedPayload.finalFormattedPacket,
-      authResult.devInfoUpdated
+      authResult.devInfoUpdated,
+      parsedPayload.sequence
     );
 
     // 5. Retrieve & Deliver Pending Commands
     const commands = commandService.getAndDeliverPendingCommands(device.id);
 
-    // 6. Return Clean Success Response
+    // 6. Build Standardized Packet ACK
+    const packetAck = buildPacketAck({
+      sequence: parsedPayload.sequence,
+      receivedCount: parsedPayload.metricsToProcess.length,
+      addedReadingsCount: addedReadings.length,
+      writeAck,
+      deviceId: device.id,
+    });
+
+    // 7. Return Clean Success Response (Packet-level standardized ACK)
     return res.status(201).json({
-      status: 'success',
+      status: packetAck.status,
+      packetId: packetAck.packetId,
+      received: packetAck.received,
+      persisted: packetAck.persisted,
+      queued: packetAck.queued,
       deviceId: device.id,
       deviceName: device.name,
+      ack: packetAck,
+      writeAck,
       processedMetricsCount: addedReadings.length,
       processedMetrics: parsedPayload.metricsToProcess.map((m) => m.metric),
-      writeAck,
       rawPacketReceived: parsedPayload.finalFormattedPacket,
       readings: addedReadings,
       commands,
@@ -81,7 +128,7 @@ export class TelemetryController {
   public async getHistory(req: express.Request, res: express.Response) {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    const { deviceId, metric, limit, userId, targetCustomerId } = req.query;
+    const { deviceId, metric, limit, userId, targetCustomerId, from, to, resolution } = req.query;
 
     if (deviceId && deviceId !== 'all') {
       const dev = db.getDevices().find((d) => d.id === (deviceId as string));
@@ -102,9 +149,12 @@ export class TelemetryController {
       const data = await telemetryService.getTelemetryAsync(
         deviceId as string | undefined,
         metric as string | undefined,
-        limit ? parseInt(limit as string, 10) : 100,
+        limit ? parseInt(limit as string, 10) : 1000,
         targetUser,
-        targetCust
+        targetCust,
+        from as string | undefined,
+        to as string | undefined,
+        resolution as string | undefined
       );
       res.json(data);
     } catch (err: any) {

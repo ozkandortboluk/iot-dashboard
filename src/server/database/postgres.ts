@@ -125,16 +125,18 @@ export class PostgresRepository {
     if (!this.pool) return;
     const sql = `
       INSERT INTO devices (
-        id, user_id, name, device_type, api_key, status, location, 
+        id, user_id, name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
         ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
         save_simulated_data_to_db, simulated_metrics, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
         device_type = EXCLUDED.device_type,
         api_key = EXCLUDED.api_key,
+        api_key_prefix = EXCLUDED.api_key_prefix,
+        api_key_hash = EXCLUDED.api_key_hash,
         status = EXCLUDED.status,
         location = EXCLUDED.location,
         ip_address = EXCLUDED.ip_address,
@@ -153,7 +155,9 @@ export class PostgresRepository {
       dev.userId || null,
       dev.name,
       dev.type || 'sensor',
-      dev.apiKey,
+      dev.apiKey || null,
+      dev.apiKeyPrefix || null,
+      dev.apiKeyHash || null,
       dev.status || 'online',
       dev.location || null,
       dev.ipAddress || null,
@@ -184,9 +188,9 @@ export class PostgresRepository {
     }
     const sql = `
       INSERT INTO telemetry_readings (
-        id, device_id, device_name, metric, metric_value, unit, status_level, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (id, created_at) DO NOTHING;
+        id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT DO NOTHING;
     `;
     const res = await this.query(sql, [
       reading.id,
@@ -196,6 +200,7 @@ export class PostgresRepository {
       Number(reading.value),
       reading.unit || '',
       reading.status || 'normal',
+      reading.sequence ?? null,
       reading.timestamp || new Date().toISOString(),
     ]);
     const rowCount = typeof res?.rowCount === 'number' ? res.rowCount : 1;
@@ -221,7 +226,7 @@ export class PostgresRepository {
       let paramIdx = 1;
 
       for (const r of chunk) {
-        valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7})`);
+        valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
         params.push(
           r.id,
           r.deviceId,
@@ -230,16 +235,17 @@ export class PostgresRepository {
           Number(r.value),
           r.unit || '',
           r.status || 'normal',
+          r.sequence ?? null,
           r.timestamp || new Date().toISOString()
         );
-        paramIdx += 8;
+        paramIdx += 9;
       }
 
       const sql = `
         INSERT INTO telemetry_readings (
-          id, device_id, device_name, metric, metric_value, unit, status_level, created_at
+          id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
         ) VALUES ${valueTuples.join(', ')}
-        ON CONFLICT (id, created_at) DO NOTHING;
+        ON CONFLICT DO NOTHING;
       `;
 
       const res = await this.query(sql, params);
@@ -247,6 +253,63 @@ export class PostgresRepository {
     }
 
     return totalInserted;
+  }
+
+  public async saveTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number }> {
+    if (!this.pool || !this.isConnected) {
+      throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
+    }
+    if (!readings || readings.length === 0) return { success: true, rowCount: 0 };
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const chunkSize = 100;
+      let totalInserted = 0;
+
+      for (let i = 0; i < readings.length; i += chunkSize) {
+        const chunk = readings.slice(i, i + chunkSize);
+        const valueTuples: string[] = [];
+        const params: any[] = [];
+        let paramIdx = 1;
+
+        for (const r of chunk) {
+          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
+          params.push(
+            r.id,
+            r.deviceId,
+            r.deviceName || r.deviceId,
+            r.metric,
+            Number(r.value),
+            r.unit || '',
+            r.status || 'normal',
+            r.sequence ?? null,
+            r.timestamp || new Date().toISOString()
+          );
+          paramIdx += 9;
+        }
+
+        const sql = `
+          INSERT INTO telemetry_readings (
+            id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
+          ) VALUES ${valueTuples.join(', ')}
+          ON CONFLICT DO NOTHING;
+        `;
+
+        const res = await client.query(sql, params);
+        totalInserted += res?.rowCount ?? chunk.length;
+      }
+
+      await client.query('COMMIT');
+      return { success: true, rowCount: totalInserted };
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed: ${err?.message || err}`);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // ==========================================
@@ -758,7 +821,9 @@ export class PostgresRepository {
             userId: r.user_id,
             name: r.name,
             type: r.device_type,
-            apiKey: r.api_key,
+            apiKey: r.api_key || '',
+            apiKeyPrefix: r.api_key_prefix || (r.api_key ? r.api_key.substring(0, 12) : undefined),
+            apiKeyHash: r.api_key_hash,
             status: r.status,
             location: r.location || '',
             ipAddress: r.ip_address || '',

@@ -4,6 +4,7 @@ import { db } from '../db.js';
 import type { User, TelemetryReading, Device, DashboardLayout } from '../../types.js';
 import { deviceAuthService } from './deviceAuth.service.js';
 import { telemetryService } from './telemetry.service.js';
+import { commandService } from './command.service.js';
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -52,67 +53,18 @@ export function safeSend(client: AuthenticatedWebSocket, message: string): boole
   }
 }
 
-// Helper to authenticate user from token, userId or user info
-function resolveUser(
-  token?: string | null,
-  userId?: string | null,
-  email?: string | null,
-  providedUser?: Partial<User> | null
-): User | null {
-  const users = db.getUsers();
-
-  // 1. Verify session token
-  if (token) {
-    const session = db.verifySession(token);
-    if (session?.user) {
-      return session.user;
-    }
+// Strict session token verification helper for WebSocket connections
+function resolveUser(token?: string | null): User | null {
+  if (!token || typeof token !== 'string' || token.trim() === '') {
+    return null;
   }
 
-  // 2. Lookup by userId
-  if (userId) {
-    const userById = users.find((u) => u.id === userId);
-    if (userById) return userById;
+  const session = db.verifySession(token.trim());
+  if (session?.user) {
+    return session.user;
   }
 
-  // 3. Lookup by email
-  if (email) {
-    const userByEmail = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (userByEmail) return userByEmail;
-  }
-
-  // 4. If provided user object contains id and name
-  if (providedUser && providedUser.id && providedUser.name) {
-    const existing = users.find((u) => u.id === providedUser.id || (providedUser.email && u.email.toLowerCase() === providedUser.email.toLowerCase()));
-    if (existing) return existing;
-
-    // Synthesize user from provided client payload
-    const synthesized: User = {
-      id: providedUser.id,
-      name: providedUser.name,
-      email: providedUser.email || `${providedUser.id}@iot-platform.local`,
-      role: providedUser.role || 'admin',
-      companyName: providedUser.companyName || providedUser.name,
-      created_at: new Date().toISOString(),
-    };
-    return synthesized;
-  }
-
-  // 5. Default fallback to first admin or first user if available
-  const defaultAdmin = users.find((u) => u.role === 'admin') || users[0];
-  if (defaultAdmin) {
-    return defaultAdmin;
-  }
-
-  // 6. Generic system fallback user
-  return {
-    id: 'usr_admin',
-    name: 'Sistem Yöneticisi',
-    email: 'admin@iot-platform.local',
-    role: 'admin',
-    companyName: 'Merkez Yönetim',
-    created_at: new Date().toISOString(),
-  };
+  return null;
 }
 
 // Push initial state data to authenticated client
@@ -162,16 +114,15 @@ export function broadcast(event: string, payload: unknown) {
   (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
     if (client.readyState !== WebSocket.OPEN) return;
 
-    // If client is not explicitly authenticated yet, allow public/system events or resolve default admin
-    const clientUser = client.user || (client.isAuth ? resolveUser() : null);
-    if (!clientUser) {
-      // Send general system/simulator broadcasts
+    // Unauthenticated clients receive NO protected data broadcasts
+    if (!client.isAuth || !client.user) {
       if (['simulator:updated', 'system:connected', 'ping'].includes(event)) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       }
       return;
     }
 
+    const clientUser = client.user;
     const isAdmin = clientUser.role === 'admin';
 
     // 1. Telemetry broadcast (single or batch)
@@ -410,6 +361,7 @@ export function initWebSocketServer(server: http.Server) {
   wss.on('connection', (ws: AuthenticatedWebSocket, req?: http.IncomingMessage) => {
     ws.isAlive = true;
     ws.isAuth = false;
+    ws.user = undefined;
     ws.messageCount = 0;
     ws.lastRateReset = Date.now();
 
@@ -417,33 +369,22 @@ export function initWebSocketServer(server: http.Server) {
       ws.isAlive = true;
     });
 
-    // Check if initial credentials exist in query params
+    // Check if valid session token exists in URL query params
     if (req?.url) {
       try {
         const urlObj = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
         const token = urlObj.searchParams.get('token');
-        const userId = urlObj.searchParams.get('userId');
-        const role = urlObj.searchParams.get('role');
 
-        if (token || userId) {
-          const verifiedUser = resolveUser(token, userId, null, role ? { id: userId || 'usr_admin', role: role as any } : null);
+        if (token) {
+          const verifiedUser = resolveUser(token);
           if (verifiedUser) {
             ws.isAuth = true;
             ws.user = verifiedUser;
-            console.log(`[WebSocket] URL ile anında doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
+            console.log(`[WebSocket] URL token ile anında doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
           }
         }
       } catch {
         // Ignore parse error
-      }
-    }
-
-    // If still unauthenticated, auto-assign default admin/system context so streaming is active immediately
-    if (!ws.isAuth) {
-      const defaultUser = resolveUser();
-      if (defaultUser) {
-        ws.isAuth = true;
-        ws.user = defaultUser;
       }
     }
 
@@ -455,14 +396,14 @@ export function initWebSocketServer(server: http.Server) {
         payload: {
           status: 'online',
           serverTime: new Date().toISOString(),
-          firestoreQuotaExceeded: false,
+          authenticated: ws.isAuth,
           user: ws.user ? { id: ws.user.id, name: ws.user.name, role: ws.user.role } : null,
         },
       })
     );
 
-    // Push initial data if user is established
-    if (ws.user) {
+    // Push initial bootstrap data ONLY if user is authenticated
+    if (ws.isAuth && ws.user) {
       sendBootstrapData(ws, ws.user);
     }
 
@@ -486,19 +427,15 @@ export function initWebSocketServer(server: http.Server) {
       try {
         const parsed = JSON.parse(data.toString());
 
-        // Authentication message from client
+        // Authentication message from client (REQUIRES VALID SESSION TOKEN ONLY)
         if (parsed.event === 'auth' || parsed.type === 'auth') {
           const token = parsed.token || parsed.sessionToken;
-          const userId = parsed.userId;
-          const email = parsed.email;
-          const userPayload = parsed.user || (userId ? { id: userId, role: parsed.role } : null);
-
-          const verifiedUser = resolveUser(token, userId, email, userPayload);
+          const verifiedUser = resolveUser(token);
 
           if (verifiedUser) {
             ws.isAuth = true;
             ws.user = verifiedUser;
-            console.log(`[WebSocket] Kimlik doğrulama güncellendi: ${verifiedUser.name} (${verifiedUser.role})`);
+            console.log(`[WebSocket] Kimlik başarıyla doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
             safeSend(
               ws,
               JSON.stringify({
@@ -510,11 +447,14 @@ export function initWebSocketServer(server: http.Server) {
             // Bootstrap fresh data for this authenticated user
             sendBootstrapData(ws, verifiedUser);
           } else {
+            ws.isAuth = false;
+            ws.user = undefined;
+            console.warn(`[WebSocket] Doğrulama başarısız: Geçersiz veya süresi dolmuş oturum anahtarı.`);
             safeSend(
               ws,
               JSON.stringify({
-                event: 'auth:warning',
-                message: 'Varsayılan oturum modu kullanılıyor.',
+                event: 'auth:failed',
+                error: 'Geçersiz veya süresi dolmuş oturum anahtarı.',
               })
             );
           }
@@ -533,36 +473,92 @@ export function initWebSocketServer(server: http.Server) {
           return;
         }
 
-        // Telemetry Ingestion via WebSocket
-        if (parsed.event === 'telemetry:ingest') {
-          // Parse using the unified telemetry parser
-          const { parseTelemetryPayload } = await import('../utils/telemetry.parser.js');
-          const parsedPayload = parseTelemetryPayload(parsed.payload);
+        // Telemetry Ingestion via WebSocket (Supports telemetry:ingest, telemetry:send, device:telemetry)
+        if (
+          parsed.event === 'telemetry:ingest' ||
+          parsed.event === 'telemetry:send' ||
+          parsed.event === 'device:telemetry'
+        ) {
+          const ackEvent = parsed.event ? `${parsed.event}:ack` : 'telemetry:ack';
+          const { parseTelemetryPayload, buildPacketAck } = await import('../utils/telemetry.parser.js');
+          const parsedPayload = parseTelemetryPayload(parsed.payload || parsed);
 
           const authResult = deviceAuthService.authenticateDevice(parsedPayload);
           if (authResult.success && authResult.device) {
-            telemetryService.ingestTelemetry(
-              authResult.device,
-              parsedPayload.metricsToProcess,
-              parsedPayload.finalFormattedPacket,
-              authResult.devInfoUpdated
-            ).then(({ addedReadings }) => {
-               safeSend(ws, JSON.stringify({
-                 event: 'telemetry:ingest:ack',
-                 payload: { success: true, processed: addedReadings.length }
-               }));
-            }).catch(err => {
-               console.error('[WebSocket] Ingest Error:', err);
-               safeSend(ws, JSON.stringify({
-                 event: 'telemetry:ingest:ack',
-                 payload: { success: false, error: 'Internal ingest error' }
-               }));
-            });
+            const device = authResult.device;
+            telemetryService
+              .ingestTelemetry(
+                device,
+                parsedPayload.metricsToProcess,
+                parsedPayload.finalFormattedPacket,
+                authResult.devInfoUpdated,
+                parsedPayload.sequence
+              )
+              .then(({ addedReadings, writeAck }) => {
+                const commands = commandService.getAndDeliverPendingCommands(device.id);
+                const packetAck = buildPacketAck({
+                  sequence: parsedPayload.sequence,
+                  receivedCount: parsedPayload.metricsToProcess.length,
+                  addedReadingsCount: addedReadings.length,
+                  writeAck,
+                  deviceId: device.id,
+                });
+
+                safeSend(
+                  ws,
+                  JSON.stringify({
+                    event: ackEvent,
+                    payload: packetAck,
+                    commands,
+                  })
+                );
+              })
+              .catch((err) => {
+                console.error('[WebSocket] Ingest Error:', err);
+                const packetAck = buildPacketAck({
+                  sequence: parsedPayload.sequence,
+                  receivedCount: parsedPayload.metricsToProcess.length,
+                  addedReadingsCount: 0,
+                  writeAck: {
+                    persisted: false,
+                    engine: 'Internal Server Error',
+                    persistedCount: 0,
+                    queuedForRetryCount: 0,
+                    status: 'FAILED',
+                  },
+                  error: 'İç sunucu işleme hatası',
+                });
+
+                safeSend(
+                  ws,
+                  JSON.stringify({
+                    event: ackEvent,
+                    payload: packetAck,
+                  })
+                );
+              });
           } else {
-             safeSend(ws, JSON.stringify({
-               event: 'telemetry:ingest:ack',
-               payload: { success: false, error: authResult.errorResponse?.error || 'Auth failed' }
-             }));
+            const packetAck = buildPacketAck({
+              sequence: parsedPayload.sequence,
+              receivedCount: parsedPayload.metricsToProcess.length,
+              addedReadingsCount: 0,
+              writeAck: {
+                persisted: false,
+                engine: 'Authentication Failed',
+                persistedCount: 0,
+                queuedForRetryCount: 0,
+                status: 'AUTH_FAILED',
+              },
+              error: authResult.errorResponse?.error || 'Doğrulama başarısız',
+            });
+
+            safeSend(
+              ws,
+              JSON.stringify({
+                event: ackEvent,
+                payload: packetAck,
+              })
+            );
           }
           return;
         }

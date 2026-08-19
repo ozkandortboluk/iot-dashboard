@@ -30,6 +30,7 @@ import {
 } from './src/server/routes/system.js';
 
 const app = express();
+app.set('trust proxy', true);
 const PORT = 3000;
 const server = http.createServer(app);
 

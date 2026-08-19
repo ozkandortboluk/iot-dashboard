@@ -14,8 +14,18 @@ export interface MetricHistory {
   monthly: { time: string; value: number; count: number }[];
 }
 
+export interface TelemetryPacket {
+  packetId: string;
+  deviceId: string;
+  timestamp: string;
+  sequence?: number;
+  readings: TelemetryReading[];
+  attempts?: number;
+  lastAttemptAt?: string;
+}
+
 export class TelemetryRepository {
-  private retryQueue: TelemetryReading[] = [];
+  private retryQueue: TelemetryPacket[] = [];
   private isFlushingRetryQueue = false;
   private retryWorkerTimer: NodeJS.Timeout | null = null;
   private queueFilePath = path.join(process.cwd(), 'data', 'telemetry-retry.ndjson');
@@ -25,7 +35,7 @@ export class TelemetryRepository {
     this.startRetryWorker();
   }
 
-  // Load uncommitted retry items from durable NDJSON file on disk
+  // Load uncommitted retry packets from durable NDJSON file on disk
   private loadPersistentQueue() {
     try {
       const dataDir = path.dirname(this.queueFilePath);
@@ -35,20 +45,36 @@ export class TelemetryRepository {
       if (fs.existsSync(this.queueFilePath)) {
         const content = fs.readFileSync(this.queueFilePath, 'utf8');
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
-        let loaded = 0;
+        let loadedPackets = 0;
+        let loadedReadings = 0;
         for (const line of lines) {
           try {
-            const parsed = JSON.parse(line) as TelemetryReading;
-            if (parsed && parsed.deviceId && parsed.metric) {
-              this.retryQueue.push(parsed);
-              loaded++;
+            const parsed = JSON.parse(line);
+            if (parsed && Array.isArray(parsed.readings) && parsed.readings.length > 0) {
+              this.retryQueue.push(parsed as TelemetryPacket);
+              loadedPackets++;
+              loadedReadings += parsed.readings.length;
+            } else if (parsed && parsed.deviceId && parsed.metric) {
+              // Backward compatibility for legacy single-reading lines
+              const legacyPacket: TelemetryPacket = {
+                packetId: `pkt_legacy_${parsed.id || Date.now()}`,
+                deviceId: parsed.deviceId,
+                timestamp: parsed.timestamp || new Date().toISOString(),
+                sequence: parsed.sequence,
+                readings: [parsed as TelemetryReading],
+                attempts: 0,
+                lastAttemptAt: new Date().toISOString(),
+              };
+              this.retryQueue.push(legacyPacket);
+              loadedPackets++;
+              loadedReadings++;
             }
           } catch {
             // ignore malformed line
           }
         }
-        if (loaded > 0) {
-          console.log(`[Persistent Queue / WAL] Diskten ${loaded} adet bekleyen telemetri kaydı başarıyla yüklendi (${this.queueFilePath}).`);
+        if (loadedPackets > 0) {
+          console.log(`[Persistent Queue / WAL] Diskten ${loadedPackets} paket (${loadedReadings} metrik kaydı) başarıyla yüklendi (${this.queueFilePath}).`);
         }
       }
     } catch (err: any) {
@@ -56,21 +82,47 @@ export class TelemetryRepository {
     }
   }
 
-  // Durable Disk-backed Enqueue (Write-Ahead Log style)
-  private enqueueToRetryQueue(reading: TelemetryReading) {
-    this.retryQueue.push(reading);
+  // Durable Disk-backed Packet Enqueue (Write-Ahead Log style for All-or-Nothing guarantees)
+  private enqueuePacketToRetryQueue(readings: TelemetryReading[]) {
+    if (!readings || readings.length === 0) return;
+
+    const first = readings[0];
+    const sequence = first.sequence;
+    const packetId =
+      sequence !== undefined && sequence !== null
+        ? `pkt_${first.deviceId}_seq_${sequence}`
+        : `pkt_${first.deviceId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const packet: TelemetryPacket = {
+      packetId,
+      deviceId: first.deviceId,
+      timestamp: first.timestamp || new Date().toISOString(),
+      sequence,
+      readings,
+      attempts: 0,
+      lastAttemptAt: new Date().toISOString(),
+    };
+
+    this.retryQueue.push(packet);
+
     try {
       const dataDir = path.dirname(this.queueFilePath);
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
-      fs.appendFileSync(this.queueFilePath, JSON.stringify(reading) + '\n', 'utf8');
+      fs.appendFileSync(this.queueFilePath, JSON.stringify(packet) + '\n', 'utf8');
+      console.warn(`[Persistent WAL] All-or-Nothing Paket disk sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
     } catch (err: any) {
       console.warn(`[Persistent Queue Append Error]: ${err?.message || err}`);
     }
   }
 
-  // Synchronize remaining queue items to disk atomically
+  // Legacy fallback wrapper
+  private enqueueToRetryQueue(reading: TelemetryReading) {
+    this.enqueuePacketToRetryQueue([reading]);
+  }
+
+  // Synchronize remaining packets to disk atomically
   private saveDiskQueue() {
     try {
       const dataDir = path.dirname(this.queueFilePath);
@@ -92,7 +144,7 @@ export class TelemetryRepository {
     }
   }
 
-  // Auto-retry worker runs every 5 seconds to flush pending telemetry queue
+  // Auto-retry worker runs every 5 seconds to flush pending telemetry packets atomically
   private startRetryWorker() {
     if (this.retryWorkerTimer) return;
     this.retryWorkerTimer = setInterval(() => {
@@ -100,44 +152,95 @@ export class TelemetryRepository {
     }, 5000);
   }
 
-  public async flushRetryQueue(): Promise<{ flushedCount: number; remainingCount: number }> {
+  public async flushRetryQueue(): Promise<{
+    flushedPacketCount: number;
+    flushedReadingCount: number;
+    remainingPacketCount: number;
+    remainingReadingCount: number;
+    flushedCount: number; // backward compatibility
+    remainingCount: number; // backward compatibility
+  }> {
+    const initialRemainingReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+
     if (this.isFlushingRetryQueue || this.retryQueue.length === 0) {
-      return { flushedCount: 0, remainingCount: this.retryQueue.length };
+      return {
+        flushedPacketCount: 0,
+        flushedReadingCount: 0,
+        remainingPacketCount: this.retryQueue.length,
+        remainingReadingCount: initialRemainingReadings,
+        flushedCount: 0,
+        remainingCount: initialRemainingReadings,
+      };
     }
     if (!this.db.postgresRepo?.isReady()) {
-      return { flushedCount: 0, remainingCount: this.retryQueue.length };
+      return {
+        flushedPacketCount: 0,
+        flushedReadingCount: 0,
+        remainingPacketCount: this.retryQueue.length,
+        remainingReadingCount: initialRemainingReadings,
+        flushedCount: 0,
+        remainingCount: initialRemainingReadings,
+      };
     }
 
     this.isFlushingRetryQueue = true;
-    let flushedCount = 0;
-    let itemsToFlush: TelemetryReading[] = [];
-    try {
-      itemsToFlush = [...this.retryQueue];
-      this.retryQueue = [];
+    let flushedPacketCount = 0;
+    let flushedReadingCount = 0;
+    const packetsToFlush = [...this.retryQueue];
+    this.retryQueue = [];
 
-      if (itemsToFlush.length > 0) {
-        if (typeof this.db.postgresRepo.saveTelemetryBatch === 'function') {
-          flushedCount = await this.db.postgresRepo.saveTelemetryBatch(itemsToFlush);
-        } else {
-          for (const item of itemsToFlush) {
-            await this.db.postgresRepo.saveTelemetry(item);
-            flushedCount++;
+    const failedPackets: TelemetryPacket[] = [];
+
+    try {
+      for (const packet of packetsToFlush) {
+        try {
+          // Attempt atomic transaction batch commit for the whole packet (All-or-Nothing)
+          const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(packet.readings);
+          if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
+            flushedPacketCount++;
+            flushedReadingCount += packet.readings.length;
+          } else {
+            packet.attempts = (packet.attempts || 0) + 1;
+            packet.lastAttemptAt = new Date().toISOString();
+            failedPackets.push(packet);
           }
+        } catch (err: any) {
+          console.warn(`[Telemetry Packet Retry Warning] Paket (${packet.packetId}) veritabanına yazılamadı: ${err?.message || err}. Tekrar sıraya alındı.`);
+          packet.attempts = (packet.attempts || 0) + 1;
+          packet.lastAttemptAt = new Date().toISOString();
+          failedPackets.push(packet);
         }
-        console.log(`[Telemetry Persistence] ${flushedCount} adet sıradaki telemetri kaydı PostgreSQL / TimescaleDB'ye başarıyla aktarıldı.`);
-        this.saveDiskQueue();
       }
+
+      if (failedPackets.length > 0) {
+        this.retryQueue.unshift(...failedPackets);
+      }
+
+      if (flushedPacketCount > 0) {
+        console.log(`[Telemetry Persistence] ${flushedPacketCount} adet paket (${flushedReadingCount} metrik kaydı) PostgreSQL / TimescaleDB'ye başarıyla aktarıldı.`);
+      }
+
+      this.saveDiskQueue();
     } catch (err: any) {
-      console.warn(`[Telemetry Persistence Batch Retry Warning] PostgreSQL toplu yazma hatası: ${err?.message || err}. Yeniden denenecek.`);
-      if (itemsToFlush.length > 0) {
-        this.retryQueue.unshift(...itemsToFlush);
+      console.warn(`[Telemetry Persistence Global Retry Error]: ${err?.message || err}`);
+      if (packetsToFlush.length > 0) {
+        this.retryQueue.unshift(...packetsToFlush);
         this.saveDiskQueue();
       }
     } finally {
       this.isFlushingRetryQueue = false;
     }
 
-    return { flushedCount, remainingCount: this.retryQueue.length };
+    const currentRemainingReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+
+    return {
+      flushedPacketCount,
+      flushedReadingCount,
+      remainingPacketCount: this.retryQueue.length,
+      remainingReadingCount: currentRemainingReadings,
+      flushedCount: flushedReadingCount,
+      remainingCount: currentRemainingReadings,
+    };
   }
 
   public getRetryQueueStats() {
@@ -148,12 +251,17 @@ export class TelemetryRepository {
       }
     } catch {}
 
+    const totalReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+
     return {
-      pendingRetryCount: this.retryQueue.length,
+      pendingPacketCount: this.retryQueue.length,
+      pendingReadingCount: totalReadings,
+      pendingRetryCount: totalReadings,
       isFlushing: this.isFlushingRetryQueue,
       persistentQueuePath: this.queueFilePath,
       diskSizeBytes,
       durable: true,
+      model: 'TelemetryPacket (All-or-Nothing Packet Level WAL)',
     };
   }
 
@@ -205,42 +313,103 @@ export class TelemetryRepository {
     queuedForRetry?: boolean;
     error?: string;
   }> {
-    const fullReading: TelemetryReading = {
-      ...reading,
-      id: `tel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      timestamp: new Date().toISOString(),
+    const batchRes = await this.addTelemetryBatchAsync([reading]);
+    return {
+      reading: batchRes.readings[0],
+      persisted: batchRes.persisted,
+      engine: batchRes.engine,
+      rowCount: batchRes.rowCount,
+      queuedForRetry: batchRes.queuedForRetry,
+      error: batchRes.error,
     };
+  }
+
+  // Async Batch Telemetry Ingestion with Single Transaction ACK (Zero Data Loss)
+  public async addTelemetryBatchAsync(readings: Omit<TelemetryReading, 'id' | 'timestamp'>[]): Promise<{
+    readings: TelemetryReading[];
+    persisted: boolean;
+    engine: string;
+    rowCount: number;
+    queuedForRetry: boolean;
+    error?: string;
+  }> {
+    if (!readings || readings.length === 0) {
+      return {
+        readings: [],
+        persisted: true,
+        engine: 'RAM / Empty Batch',
+        rowCount: 0,
+        queuedForRetry: false,
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+    const fullReadings: TelemetryReading[] = readings.map((r, i) => {
+      const id =
+        r.sequence !== undefined && r.sequence !== null
+          ? `tel_${r.deviceId}_seq_${r.sequence}_${r.metric}`
+          : `tel_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+
+      return {
+        ...r,
+        id,
+        timestamp,
+      };
+    });
 
     if (!this.db.data.telemetry) this.db.data.telemetry = [];
-    this.db.data.telemetry.push(fullReading);
+
+    // Filter duplicates for idempotent packet processing when sequence numbers match
+    const newReadingsToInsert: TelemetryReading[] = [];
+    for (const r of fullReadings) {
+      if (r.sequence !== undefined && r.sequence !== null) {
+        const isDuplicate = this.db.data.telemetry.some(
+          (existing) =>
+            existing.id === r.id ||
+            (existing.deviceId === r.deviceId && existing.sequence === r.sequence && existing.metric === r.metric)
+        );
+        if (isDuplicate) {
+          console.log(`[Telemetry Deduplication] Teşhis: Tekrarlanan sıra numarası atlandı (Idempotent): Cihaz=${r.deviceId}, Seq=${r.sequence}, Metrik=${r.metric}`);
+          continue;
+        }
+      }
+      newReadingsToInsert.push(r);
+    }
+
+    if (newReadingsToInsert.length > 0) {
+      this.db.data.telemetry.push(...newReadingsToInsert);
+    }
 
     // High-performance sliding ring buffer (10,000 raw points in memory)
     if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
       this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
     }
 
-    // Update device metrics & last seen
-    const device = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
+    // Update device metrics & last seen for all items in batch
+    const firstReading = fullReadings[0];
+    const device = (this.db.data.devices || []).find((d: Device) => d.id === firstReading.deviceId);
+
     if (device) {
       if (device.status !== 'maintenance' && device.dataFlowActive !== false) {
-        device.lastSeen = fullReading.timestamp;
+        device.lastSeen = timestamp;
         device.status = 'online';
       }
       if (!device.metrics) device.metrics = {};
-      (device.metrics as Record<string, number>)[reading.metric] = reading.value;
-      const lowerKey1 = reading.metric.toLowerCase();
-      if (lowerKey1 !== reading.metric) {
-        (device.metrics as Record<string, number>)[lowerKey1] = reading.value;
+
+      for (const r of fullReadings) {
+        (device.metrics as Record<string, number>)[r.metric] = r.value;
+        const lowerKey = r.metric.toLowerCase();
+        if (lowerKey !== r.metric) {
+          (device.metrics as Record<string, number>)[lowerKey] = r.value;
+        }
+
+        this.processHistory(r, device.isSimulated || false, device.saveSimulatedDataToDb || false);
+        this.evaluateRules(r, device);
       }
 
-      device.updatedAt = fullReading.timestamp;
+      device.updatedAt = timestamp;
       device.version = (device.version || 1) + 1;
-
-      this.processHistory(fullReading, device.isSimulated || false, device.saveSimulatedDataToDb || false);
     }
-
-    // Check threshold rules for notification trigger!
-    this.evaluateRules(fullReading, device);
 
     this.db.scheduleSave();
 
@@ -250,7 +419,7 @@ export class TelemetryRepository {
 
     if (isSimulated && !saveSimulatedDataToDb) {
       return {
-        reading: fullReading,
+        readings: fullReadings,
         persisted: true,
         engine: 'RAM / Sanal Filtre (Veritabanına Yazılmıyor)',
         rowCount: 0,
@@ -258,7 +427,7 @@ export class TelemetryRepository {
       };
     }
 
-    // Direct Write Acknowledgment Check
+    // Direct Write Acknowledgment Check with Transaction
     const isReady = this.db.postgresRepo?.isReady();
     const activeEngine = typeof this.db.getActiveEngine === 'function' ? this.db.getActiveEngine() : 'postgres';
     let persisted = false;
@@ -269,34 +438,24 @@ export class TelemetryRepository {
 
     if (isReady) {
       try {
-        const writeRes = await this.db.postgresRepo.saveTelemetry(fullReading);
-        const rowCount = typeof writeRes?.rowCount === 'number' ? writeRes.rowCount : 1;
-        affectedRows = rowCount;
-        if (rowCount > 0) {
-          engine = 'PostgreSQL / TimescaleDB';
-          persisted = true;
-        } else {
-          errorMsg = 'PostgreSQL INSERT 0 satır etkiledi (yazılamadı)';
-          console.warn(`[Telemetry Persist Warning] ${errorMsg}. Kayıt tekrar sırasına eklendi.`);
-          this.enqueueToRetryQueue(fullReading);
-          engine = 'PostgreSQL (Sırada / Otomatik Tekrar Denenecek)';
-          persisted = false;
-          queuedForRetry = true;
-        }
+        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings);
+        affectedRows = txRes.rowCount;
+        engine = 'PostgreSQL / TimescaleDB (Transaction)';
+        persisted = true;
       } catch (err: any) {
-        errorMsg = err?.message || 'PostgreSQL INSERT hatası';
-        console.warn(`[Telemetry Persist Failure] ${errorMsg}. Kayıt tekrar sırasına eklendi.`);
-        this.enqueueToRetryQueue(fullReading);
-        engine = 'PostgreSQL (Sırada / Otomatik Tekrar Denenecek)';
+        errorMsg = err?.message || 'PostgreSQL Transaction Batch INSERT hatası';
+        console.warn(`[Telemetry Transaction Failure] ${errorMsg}. ${fullReadings.length} metrik paketi birlikte tekrar sırasına eklendi.`);
+        this.enqueuePacketToRetryQueue(fullReadings);
+        engine = 'PostgreSQL (Paket Sırada / Otomatik Tekrar Denenecek)';
         persisted = false;
         queuedForRetry = true;
       }
     } else if (activeEngine === 'postgres' || activeEngine === 'timescaledb') {
-      this.enqueueToRetryQueue(fullReading);
+      this.enqueuePacketToRetryQueue(fullReadings);
       engine = 'RAM Buffer (PostgreSQL Bağlantısı Bekleniyor)';
       persisted = false;
       queuedForRetry = true;
-      errorMsg = 'PostgreSQL sunucusuna ulaşılamadı, veri sıraya alındı';
+      errorMsg = 'PostgreSQL sunucusuna ulaşılamadı, paketteki tüm veriler sıraya alındı';
     } else {
       // Standalone RAM mode
       persisted = true;
@@ -304,7 +463,7 @@ export class TelemetryRepository {
     }
 
     return {
-      reading: fullReading,
+      readings: fullReadings,
       persisted,
       engine,
       rowCount: affectedRows,
@@ -404,62 +563,120 @@ export class TelemetryRepository {
     const pool = this.db.getPgPool?.();
     if (pool) {
       try {
-        const hourlyRes = await pool.query(
-          `
-          SELECT 
-            time_bucket('1 hour', created_at) AS bucket,
-            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
-            COUNT(*)::int AS cnt
-          FROM telemetry_readings
-          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '7 days'
-          GROUP BY bucket
-          ORDER BY bucket ASC;
-        `,
-          [deviceId, metric]
-        );
+        // Query from Continuous Aggregate telemetry_hourly_summary (Fallback to raw time_bucket)
+        let hourlyRows: any[] = [];
+        try {
+          const hourlyRes = await pool.query(
+            `
+            SELECT 
+              bucket AS timestamp,
+              ROUND(avg_val::numeric, 2)::float AS avg_val,
+              reading_count::int AS cnt
+            FROM telemetry_hourly_summary
+            WHERE device_id = $1 AND metric = $2 AND bucket >= NOW() - INTERVAL '7 days'
+            ORDER BY bucket ASC;
+          `,
+            [deviceId, metric]
+          );
+          hourlyRows = hourlyRes.rows || [];
+        } catch {
+          const rawHourly = await pool.query(
+            `
+            SELECT 
+              time_bucket('1 hour', created_at) AS timestamp,
+              ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+              COUNT(*)::int AS cnt
+            FROM telemetry_readings
+            WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '7 days'
+            GROUP BY timestamp
+            ORDER BY timestamp ASC;
+          `,
+            [deviceId, metric]
+          );
+          hourlyRows = rawHourly.rows || [];
+        }
 
-        const dailyRes = await pool.query(
-          `
-          SELECT 
-            time_bucket('1 day', created_at) AS bucket,
-            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
-            COUNT(*)::int AS cnt
-          FROM telemetry_readings
-          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '365 days'
-          GROUP BY bucket
-          ORDER BY bucket ASC;
-        `,
-          [deviceId, metric]
-        );
+        // Query from Continuous Aggregate telemetry_daily_summary
+        let dailyRows: any[] = [];
+        try {
+          const dailyRes = await pool.query(
+            `
+            SELECT 
+              bucket AS timestamp,
+              ROUND(avg_val::numeric, 2)::float AS avg_val,
+              reading_count::int AS cnt
+            FROM telemetry_daily_summary
+            WHERE device_id = $1 AND metric = $2 AND bucket >= NOW() - INTERVAL '365 days'
+            ORDER BY bucket ASC;
+          `,
+            [deviceId, metric]
+          );
+          dailyRows = dailyRes.rows || [];
+        } catch {
+          const rawDaily = await pool.query(
+            `
+            SELECT 
+              time_bucket('1 day', created_at) AS timestamp,
+              ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+              COUNT(*)::int AS cnt
+            FROM telemetry_readings
+            WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '365 days'
+            GROUP BY timestamp
+            ORDER BY timestamp ASC;
+          `,
+            [deviceId, metric]
+          );
+          dailyRows = rawDaily.rows || [];
+        }
 
-        const monthlyRes = await pool.query(
-          `
-          SELECT 
-            time_bucket('1 month', created_at) AS bucket,
-            ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
-            COUNT(*)::int AS cnt
-          FROM telemetry_readings
-          WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '5 years'
-          GROUP BY bucket
-          ORDER BY bucket ASC;
-        `,
-          [deviceId, metric]
-        );
+        // Monthly bucket aggregated from telemetry_daily_summary or raw
+        let monthlyRows: any[] = [];
+        try {
+          const monthlyRes = await pool.query(
+            `
+            SELECT 
+              date_trunc('month', bucket) AS timestamp,
+              ROUND(AVG(avg_val)::numeric, 2)::float AS avg_val,
+              SUM(reading_count)::int AS cnt
+            FROM telemetry_daily_summary
+            WHERE device_id = $1 AND metric = $2 AND bucket >= NOW() - INTERVAL '5 years'
+            GROUP BY date_trunc('month', bucket)
+            ORDER BY timestamp ASC;
+          `,
+            [deviceId, metric]
+          );
+          monthlyRows = monthlyRes.rows || [];
+        } catch {
+          const rawMonthly = await pool.query(
+            `
+            SELECT 
+              time_bucket('1 month', created_at) AS timestamp,
+              ROUND(AVG(metric_value)::numeric, 2)::float AS avg_val,
+              COUNT(*)::int AS cnt
+            FROM telemetry_readings
+            WHERE device_id = $1 AND metric = $2 AND created_at >= NOW() - INTERVAL '5 years'
+            GROUP BY timestamp
+            ORDER BY timestamp ASC;
+          `,
+            [deviceId, metric]
+          );
+          monthlyRows = rawMonthly.rows || [];
+        }
 
-        if (hourlyRes.rows?.length > 0 || dailyRes.rows?.length > 0 || monthlyRes.rows?.length > 0) {
+        if (hourlyRows.length > 0 || dailyRows.length > 0 || monthlyRows.length > 0) {
           return {
-            hourly: (hourlyRes.rows || []).map((r: any) => ({
-              time: new Date(r.bucket).toISOString(),
+            hourly: hourlyRows.map((r: any) => ({
+              time: new Date(r.timestamp).toISOString(),
               value: Number(r.avg_val),
               count: Number(r.cnt),
             })),
-            daily: (dailyRes.rows || []).map((r: any) => ({
-              time: new Date(r.bucket).toISOString(),
+            daily: dailyRows.map((r: any) => ({
+              time: new Date(r.timestamp).toISOString(),
               value: Number(r.avg_val),
               count: Number(r.cnt),
             })),
-            monthly: (monthlyRes.rows || []).map((r: any) => ({
-              time: new Date(r.bucket).toISOString(),
+            monthly: monthlyRows.map((r: any) => ({
+              time: new Date(r.timestamp).toISOString(),
               value: Number(r.avg_val),
               count: Number(r.cnt),
             })),
@@ -500,10 +717,13 @@ export class TelemetryRepository {
   public async getTelemetryAsync(
     deviceId?: string,
     metric?: string,
-    limit = 100,
+    limit = 1000,
     requestingUserId?: string,
-    targetCustomerId?: string
-  ): Promise<TelemetryReading[]> {
+    targetCustomerId?: string,
+    fromStr?: string,
+    toStr?: string,
+    resolutionParam?: string
+  ): Promise<any[]> {
     const pool = this.db.getPgPool?.();
     if (pool) {
       try {
@@ -512,42 +732,183 @@ export class TelemetryRepository {
         if (allowedDeviceIds.length > 0) {
           const queryDev = deviceId && deviceId !== 'all' ? deviceId : null;
           const queryMetric = metric && metric !== 'all' ? metric : null;
-          const numLimit = Math.min(1000, Math.max(1, limit));
+          const numLimit = Math.min(5000, Math.max(1, limit || 1000));
 
-          const sql = `
-            SELECT 
-              id,
-              device_id AS "deviceId",
-              device_name AS "deviceName",
-              metric,
-              metric_value AS value,
-              unit,
-              status_level AS status,
-              created_at AS timestamp
-            FROM telemetry_readings
-            WHERE device_id = ANY($1::text[])
-              AND ($2::text IS NULL OR device_id = $2)
-              AND ($3::text IS NULL OR metric = $3)
-            ORDER BY created_at DESC
-            LIMIT $4;
-          `;
+          const fromDate = fromStr ? new Date(fromStr) : null;
+          const toDate = toStr ? new Date(toStr) : new Date();
+          const validFrom = fromDate && !isNaN(fromDate.getTime()) ? fromDate.toISOString() : null;
+          const validTo = toDate && !isNaN(toDate.getTime()) ? toDate.toISOString() : new Date().toISOString();
 
-          const res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, numLimit]);
-          if (res.rows && res.rows.length > 0) {
-            return res.rows.map((r: any) => ({
-              id: r.id,
+          // Time range delta calculation
+          const deltaMs = fromDate && !isNaN(fromDate.getTime()) ? (toDate.getTime() - fromDate.getTime()) : 0;
+          const deltaHours = deltaMs > 0 ? deltaMs / (1000 * 60 * 60) : 0;
+
+          // Automated Resolution Selector:
+          // Range <= 2 Hours -> Raw Telemetry
+          // 2 Hours < Range <= 24 Hours -> 5m Bucket
+          // 24 Hours < Range <= 30 Days (720h) -> Hourly Continuous Aggregate (telemetry_hourly_summary)
+          // Range > 30 Days -> Daily Continuous Aggregate (telemetry_daily_summary)
+          let selectedResolution = (resolutionParam || 'auto').toLowerCase().trim();
+          if (selectedResolution === 'auto') {
+            if (!validFrom) {
+              selectedResolution = 'raw';
+            } else if (deltaHours <= 2) {
+              selectedResolution = 'raw';
+            } else if (deltaHours <= 24) {
+              selectedResolution = '5m';
+            } else if (deltaHours <= 720) {
+              selectedResolution = '1h';
+            } else {
+              selectedResolution = '1d';
+            }
+          }
+
+          let sql = '';
+          let tierSource = 'telemetry_readings (Raw)';
+
+          if (selectedResolution === '1d') {
+            tierSource = 'telemetry_daily_summary (Continuous Aggregate)';
+            sql = `
+              SELECT 
+                bucket AS timestamp,
+                device_id AS "deviceId",
+                metric,
+                ROUND(avg_val::numeric, 2)::float AS value,
+                ROUND(min_val::numeric, 2)::float AS "minVal",
+                ROUND(max_val::numeric, 2)::float AS "maxVal",
+                reading_count::int AS count
+              FROM telemetry_daily_summary
+              WHERE device_id = ANY($1::text[])
+                AND ($2::text IS NULL OR device_id = $2)
+                AND ($3::text IS NULL OR metric = $3)
+                AND ($4::timestamptz IS NULL OR bucket >= $4)
+                AND ($5::timestamptz IS NULL OR bucket <= $5)
+              ORDER BY bucket ASC
+              LIMIT $6;
+            `;
+          } else if (selectedResolution === '1h') {
+            tierSource = 'telemetry_hourly_summary (Continuous Aggregate)';
+            sql = `
+              SELECT 
+                bucket AS timestamp,
+                device_id AS "deviceId",
+                metric,
+                ROUND(avg_val::numeric, 2)::float AS value,
+                ROUND(min_val::numeric, 2)::float AS "minVal",
+                ROUND(max_val::numeric, 2)::float AS "maxVal",
+                reading_count::int AS count
+              FROM telemetry_hourly_summary
+              WHERE device_id = ANY($1::text[])
+                AND ($2::text IS NULL OR device_id = $2)
+                AND ($3::text IS NULL OR metric = $3)
+                AND ($4::timestamptz IS NULL OR bucket >= $4)
+                AND ($5::timestamptz IS NULL OR bucket <= $5)
+              ORDER BY bucket ASC
+              LIMIT $6;
+            `;
+          } else if (selectedResolution === '5m' || selectedResolution === '15m') {
+            const bucketInterval = selectedResolution === '15m' ? '15 minutes' : '5 minutes';
+            tierSource = `telemetry_readings (Bucket: ${bucketInterval})`;
+            sql = `
+              SELECT 
+                time_bucket('${bucketInterval}', created_at) AS timestamp,
+                device_id AS "deviceId",
+                metric,
+                ROUND(AVG(metric_value)::numeric, 2)::float AS value,
+                ROUND(MIN(metric_value)::numeric, 2)::float AS "minVal",
+                ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
+                COUNT(*)::int AS count
+              FROM telemetry_readings
+              WHERE device_id = ANY($1::text[])
+                AND ($2::text IS NULL OR device_id = $2)
+                AND ($3::text IS NULL OR metric = $3)
+                AND ($4::timestamptz IS NULL OR created_at >= $4)
+                AND ($5::timestamptz IS NULL OR created_at <= $5)
+              GROUP BY timestamp, device_id, metric
+              ORDER BY timestamp ASC
+              LIMIT $6;
+            `;
+          } else {
+            tierSource = 'telemetry_readings (Raw)';
+            sql = `
+              SELECT 
+                id,
+                device_id AS "deviceId",
+                device_name AS "deviceName",
+                metric,
+                metric_value AS value,
+                unit,
+                status_level AS status,
+                created_at AS timestamp
+              FROM telemetry_readings
+              WHERE device_id = ANY($1::text[])
+                AND ($2::text IS NULL OR device_id = $2)
+                AND ($3::text IS NULL OR metric = $3)
+                AND ($4::timestamptz IS NULL OR created_at >= $4)
+                AND ($5::timestamptz IS NULL OR created_at <= $5)
+              ORDER BY created_at ASC
+              LIMIT $6;
+            `;
+          }
+
+          let res;
+          try {
+            res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
+          } catch (tierErr) {
+            console.warn(`[Telemetry Tier Query Fallback] '${tierSource}' sorgusu başarısız (${tierErr}). Ham veriye geçiliyor.`);
+            tierSource = 'telemetry_readings (Raw Fallback)';
+            const fallbackSql = `
+              SELECT 
+                id,
+                device_id AS "deviceId",
+                device_name AS "deviceName",
+                metric,
+                metric_value AS value,
+                unit,
+                status_level AS status,
+                created_at AS timestamp
+              FROM telemetry_readings
+              WHERE device_id = ANY($1::text[])
+                AND ($2::text IS NULL OR device_id = $2)
+                AND ($3::text IS NULL OR metric = $3)
+                AND ($4::timestamptz IS NULL OR created_at >= $4)
+                AND ($5::timestamptz IS NULL OR created_at <= $5)
+              ORDER BY created_at ASC
+              LIMIT $6;
+            `;
+            res = await pool.query(fallbackSql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
+          }
+
+          if (res.rows) {
+            const mapped = res.rows.map((r: any) => ({
+              id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
               deviceId: r.deviceId,
-              deviceName: r.deviceName,
+              deviceName: r.deviceName || r.deviceId,
               metric: r.metric,
               value: Number(r.value),
-              unit: r.unit,
-              status: r.status,
+              minVal: r.minVal !== undefined ? Number(r.minVal) : Number(r.value),
+              maxVal: r.maxVal !== undefined ? Number(r.maxVal) : Number(r.value),
+              count: r.count ? Number(r.count) : 1,
+              unit: r.unit || 'birim',
+              status: r.status || 'normal',
               timestamp: new Date(r.timestamp).toISOString(),
             }));
+
+            // Attach query metadata property
+            (mapped as any).meta = {
+              resolution: selectedResolution,
+              tierSource,
+              from: validFrom,
+              to: validTo,
+              limit: numLimit,
+              totalRecords: mapped.length,
+            };
+
+            return mapped;
           }
         }
-      } catch {
-        // Fallback to in-memory buffer
+      } catch (err: any) {
+        console.warn(`[getTelemetryAsync Error]: ${err?.message || err}`);
       }
     }
     return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);

@@ -182,7 +182,7 @@ export function runSimulationStep() {
         metric: m,
         value: val,
         unit,
-        status: val > 90 ? 'critical' : val > 75 ? 'warning' : 'normal',
+        status: 'normal',
         rawPayload,
       });
 

@@ -183,18 +183,19 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     http.begin(serverUrl);
-    http.addHeader("Content-Type", "text/plain");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-API-Key", deviceToken);
 
-    // Okunan Sensör Değerleri
+    packetSequence++;
     float temp = 25.5 + (random(-10, 10) / 10.0);
     float hum = 60.0 + (random(-20, 20) / 10.0);
 
-    // Format: "TOKEN, CİHAZ_ADI, sıcaklık:VAL, nem:VAL"
-    String payload = String(deviceToken) + ", " + String(deviceName) + 
-                     ", sıcaklık:" + String(temp, 1) + 
-                     ", nem:" + String(hum, 1);
+    // Üretim Formatı JSON Telemetri Paketi
+    String payload = "{\"sequence\":" + String(packetSequence) + 
+                     ",\"metrics\":{\"temperature\":{\"value\":" + String(temp, 1) + ",\"unit\":\"C\"}" +
+                     ",\"humidity\":{\"value\":" + String(hum, 1) + ",\"unit\":\"%\"}}}";
 
-    Serial.println("Gönderilen Paket: " + payload);
+    Serial.println("Gönderilen Üretim Paketi (#" + String(packetSequence) + "): " + payload);
 
     int httpResponseCode = http.POST(payload);
     if (httpResponseCode > 0) {
@@ -212,41 +213,55 @@ void loop() {
   delay(5000); // 5 saniyede bir paket gönder & komutları kontrol et
 }`;
 
-  const pythonCodeSnippet = `# Python Saha Cihazı Veri İletim Scripti
+  const pythonCodeSnippet = `# Python Saha Cihazı Veri İletim Scripti (Üretim Formatı)
 import requests
 import time
 import random
 
-SERVER_URL = "http://${customServerAddress}/api/v1/telemetry"
-DEVICE_TOKEN = "${customApiKey}"
-DEVICE_NAME = "Python_Saha_Node_01"
+SERVER_URL = "http://${customServerAddress}/api/telemetry"
+API_KEY = "${customApiKey}"
+sequence_num = 1000
 
 print(">>> Saha İletişimi Başlatıldı...")
 
 while True:
+    sequence_num += 1
     temp = round(random.uniform(20.0, 45.0), 1)
     power = round(random.uniform(10.0, 95.0), 1)
     
-    # Standart Saha Veri Paketi
-    payload = f"{DEVICE_TOKEN}, {DEVICE_NAME}, sıcaklık:{temp}, power:{power}"
+    # Standart Saha Veri Paketi (JSON)
+    payload = {
+        "sequence": sequence_num,
+        "metrics": {
+            "temperature": {"value": temp, "unit": "°C"},
+            "power": {"value": power, "unit": "kW"}
+        }
+    }
     
     try:
         response = requests.post(
             SERVER_URL,
-            data=payload,
-            headers={"Content-Type": "text/plain"},
+            json=payload,
+            headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
             timeout=5
         )
-        print(f"[{time.strftime('%H:%M:%S')}] Gönderildi -> HTTP {response.status_code}: {response.json()}")
+        print(f"[{time.strftime('%H:%M:%S')}] Gönderildi (# {sequence_num}) -> HTTP {response.status_code}: {response.json()}")
     except Exception as e:
         print(f" Bağlantı Hatası: {e}")
         
     time.sleep(5) # 5 saniyede bir paket gönder`;
 
-  const curlCodeSnippet = `# cURL Saha Paketi Gönderim Komutu (Terminal veya Komut Satırı)
-curl -X POST "http://${customServerAddress}/api/v1/telemetry" \\
-  -H "Content-Type: text/plain" \\
-  -d "${customApiKey}, Saha_Cihazi_1, sıcaklık:38.2, nem:74"`;
+  const curlCodeSnippet = `# cURL Saha Paketi Gönderim Komutu (Terminal)
+curl -X POST "http://${customServerAddress}/api/telemetry" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${customApiKey}" \\
+  -d '{
+    "sequence": 10021,
+    "metrics": {
+      "temperature": { "value": 24.3, "unit": "C" },
+      "humidity": { "value": 58.2, "unit": "%" }
+    }
+  }'`;
 
   const nodeMcuCodeSnippet = `// ================================================================
 // NODEMCU (ESP8266) GERÇEK CİHAZ TEST KODU (HTTP POST)
@@ -352,6 +367,7 @@ const char* serverUrl = "http://${customServerAddress}/api/v1/telemetry";
 // Cihaz API Tokeni ve Kimliği
 const char* deviceToken = "${customApiKey}";
 const char* deviceName = "ESP32_Endustriyel_Node_01";
+unsigned long packetSequence = 1000; // Paket sıra numarası (Sequence Number)
 
 #define STATUS_LED 2  // GPIO2 (Dahili Mavi LED)
 #define RELAY_PIN 23  // GPIO23 (Röle Kontrol Çıkışı)
@@ -385,20 +401,21 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     http.begin(serverUrl);
-    http.addHeader("Content-Type", "text/plain");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-API-Key", deviceToken);
 
-    // Sensör Değerleri (Sıcaklık, Voltaj, Titreşim)
+    // Sensör Değerleri (Sıcaklık, Nem)
     float temp = 26.5 + (random(-30, 70) / 10.0);
-    float voltage = 220.0 + (random(-30, 30) / 10.0);
-    float vibration = 1.4 + (random(0, 20) / 10.0);
+    float hum = 52.0 + (random(-30, 30) / 10.0);
 
-    // Format: "TOKEN, CİHAZ_ADI, sıcaklık:VAL, voltaj:VAL, titreşim:VAL"
-    String payload = String(deviceToken) + ", " + String(deviceName) + 
-                     ", sıcaklık:" + String(temp, 1) + 
-                     ", voltaj:" + String(voltage, 1) + 
-                     ", titreşim:" + String(vibration, 1);
+    packetSequence++; // Her yeni pakette sequence artırılır
 
-    Serial.println("[ESP32 TX] -> " + payload);
+    // JSON Formatı (sequence + metrics)
+    String payload = "{\"sequence\":" + String(packetSequence) + 
+                     ",\"metrics\":{\"temperature\":{\"value\":" + String(temp, 1) + ",\"unit\":\"C\"}" +
+                     ",\"humidity\":{\"value\":" + String(hum, 1) + ",\"unit\":\"%\"}}}";
+
+    Serial.printf("[ESP32 TX] Paket #%lu -> %s\n", packetSequence, payload.c_str());
 
     int httpCode = http.POST(payload);
 

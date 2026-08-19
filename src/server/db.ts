@@ -867,13 +867,14 @@ class LocalDatabase {
   // Telemetry
   public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading { return this.telemetryRepository.addTelemetryReading(reading); }
   public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return this.telemetryRepository.addTelemetryReadingAsync(reading); }
+  public async addTelemetryBatchAsync(readings: Omit<TelemetryReading, 'id' | 'timestamp'>[]): Promise<any> { return this.telemetryRepository.addTelemetryBatchAsync(readings); }
   public async flushTelemetryRetryQueue(): Promise<any> { return this.telemetryRepository.flushRetryQueue(); }
   public getTelemetryRetryQueueStats(): any { return this.telemetryRepository.getRetryQueueStats(); }
   public getTelemetryStats(): any { return this.telemetryRepository.getTelemetryStats(); }
   public getHistory(deviceId: string, metric: string): any { return this.telemetryRepository.getHistory(deviceId, metric); }
   public async getHistoryAsync(deviceId: string, metric: string): Promise<any> { return this.telemetryRepository.getHistoryAsync(deviceId, metric); }
   public getTelemetry(deviceId?: string, metric?: string, limit: number = 100, userId?: string, customerId?: string): TelemetryReading[] { return this.telemetryRepository.getTelemetry(deviceId, metric, limit, userId, customerId); }
-  public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 100, userId?: string, customerId?: string): Promise<TelemetryReading[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId); }
+  public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string): Promise<any[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution); }
     // Notifications
   public getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationItem[] { return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId); }
   public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem { return this.notificationRepository.addNotification(notif); }

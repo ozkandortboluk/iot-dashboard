@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS devices (
     user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(32) NOT NULL,
-    api_key VARCHAR(128) UNIQUE NOT NULL,
+    api_key VARCHAR(128),
+    api_key_prefix VARCHAR(32),
+    api_key_hash VARCHAR(128),
     status VARCHAR(32) DEFAULT 'online',
     location VARCHAR(256),
     ip_address VARCHAR(45),
@@ -54,6 +56,8 @@ CREATE TABLE IF NOT EXISTS devices (
 -- Ensure columns exist for existing databases
 DO $$
 BEGIN
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;
@@ -64,16 +68,26 @@ END $$;
 
 -- 3. Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
 CREATE TABLE IF NOT EXISTS telemetry_readings (
-    id VARCHAR(64) NOT NULL,
+    id VARCHAR(128) NOT NULL,
     device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
     metric_value DOUBLE PRECISION NOT NULL,
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
+    sequence BIGINT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
+
+-- Ensure sequence column and indexes exist on telemetry_readings
+DO $$
+BEGIN
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings sequence column setup notice: %', SQLERRM;
+END $$;
 
 -- Ensure Composite Primary Key (id, created_at) on existing telemetry_readings instances for ON CONFLICT support
 DO $$
@@ -93,6 +107,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_device_seq_metric ON telemetry_readings(device_id, sequence, metric) WHERE sequence IS NOT NULL;
 
 -- Convert to Hypertable (TimescaleDB)
 DO $$
@@ -115,13 +130,17 @@ BEGIN
     END IF;
 END $$;
 
--- 4. Continuous Aggregates (Hourly & Daily Materialized Views)
+-- 4. Continuous Aggregates (Hourly & Daily Materialized Views / Standard Views Fallback)
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_hourly_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY bucket, device_id, metric WITH NO DATA;';
 
         EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_daily_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY bucket, device_id, metric WITH NO DATA;';
+    ELSE
+        EXECUTE 'CREATE OR REPLACE VIEW telemetry_hourly_summary AS SELECT date_trunc(''hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY date_trunc(''hour'', created_at), device_id, metric;';
+
+        EXECUTE 'CREATE OR REPLACE VIEW telemetry_daily_summary AS SELECT date_trunc(''day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY date_trunc(''day'', created_at), device_id, metric;';
     END IF;
 END $$;
 

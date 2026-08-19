@@ -42,6 +42,8 @@ export interface Device {
   name: string;
   type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway';
   apiKey: string;
+  apiKeyPrefix?: string;
+  apiKeyHash?: string;
   status: DeviceStatus;
   location: string;
   ipAddress: string;
@@ -91,6 +93,7 @@ export interface TelemetryReading {
   unit: string;
   status: 'normal' | 'warning' | 'critical';
   rawPayload?: string;
+  sequence?: number;
 }
 
 export interface DeviceCommand {

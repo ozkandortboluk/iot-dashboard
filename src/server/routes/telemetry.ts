@@ -4,8 +4,11 @@ import { authenticateUser } from '../middleware/auth.js';
 
 const router = Router();
 
-// Primary Remote Telemetry Ingestion Handler
-router.all('/', (req, res) => telemetryController.ingest(req, res));
+// Primary Production Remote Telemetry Ingestion Handler (Strict Single JSON Payload)
+router.post('/', (req, res) => telemetryController.ingest(req, res));
+
+// Legacy Multi-Format Ingestion Handler (CSV, Flat Query, Root Array)
+router.post('/legacy', (req, res) => telemetryController.ingestLegacy(req, res));
 
 // Telemetry Historical & Analytics Endpoints
 router.get('/stats', authenticateUser, (req, res) => telemetryController.getStats(req, res));

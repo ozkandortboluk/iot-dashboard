@@ -1,6 +1,21 @@
 import crypto from 'crypto';
 import type { Device, DiscoveredNetworkDevice, TelemetryReading } from '../../types.js';
 
+export function hashApiKey(key: string): string {
+  return crypto.createHash('sha256').update(key.trim()).digest('hex');
+}
+
+export function generateDeviceKeyDetails(providedKey?: string): {
+  rawKey: string;
+  prefix: string;
+  hash: string;
+} {
+  const rawKey = providedKey?.trim() || `nex_${crypto.randomBytes(4).toString('hex')}_${crypto.randomBytes(12).toString('hex')}`;
+  const prefix = rawKey.substring(0, 12);
+  const hash = hashApiKey(rawKey);
+  return { rawKey, prefix, hash };
+}
+
 export class DeviceRepository {
   constructor(private db: any) {}
 
@@ -82,12 +97,22 @@ export class DeviceRepository {
 
   public getDeviceByApiKey(apiKey: string): Device | undefined {
     const token = (apiKey || '').trim();
-    return this.db.data.devices.find((d: Device) => d.apiKey === token || d.id === token || d.name === token);
+    if (!token) return undefined;
+
+    const tokenHash = hashApiKey(token);
+
+    return this.db.data.devices.find((d: Device) => {
+      if (d.apiKeyHash && d.apiKeyHash === tokenHash) return true;
+      if (d.apiKey && d.apiKey === token) return true;
+      if (d.id === token) return true;
+      if (d.name && d.name.toLowerCase() === token.toLowerCase()) return true;
+      return false;
+    });
   }
 
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
     const newId = `dev_${Date.now()}`;
-    const apiKey = deviceData.apiKey?.trim() || `dev_key_${crypto.randomBytes(8).toString('hex')}`;
+    const keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
     const isSimulated = deviceData.isSimulated ?? false;
     const saveSimulatedDataToDb = deviceData.saveSimulatedDataToDb ?? false;
 
@@ -102,7 +127,9 @@ export class DeviceRepository {
       isSimulated,
       saveSimulatedDataToDb,
       id: newId,
-      apiKey,
+      apiKey: keyDetails.rawKey,
+      apiKeyPrefix: keyDetails.prefix,
+      apiKeyHash: keyDetails.hash,
       lastSeen: new Date().toISOString(),
     };
 
@@ -131,7 +158,11 @@ export class DeviceRepository {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
-    dev.apiKey = `dev_key_${crypto.randomBytes(8).toString('hex')}`;
+    const keyDetails = generateDeviceKeyDetails();
+    dev.apiKey = keyDetails.rawKey;
+    dev.apiKeyPrefix = keyDetails.prefix;
+    dev.apiKeyHash = keyDetails.hash;
+
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Yenilendi: ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
 

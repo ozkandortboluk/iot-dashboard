@@ -10,7 +10,8 @@ export class TelemetryService {
     device: Device,
     metricsToProcess: ParsedMetric[],
     finalFormattedPacket: string,
-    devInfoUpdated = false
+    devInfoUpdated = false,
+    sequence?: number
   ) {
     if (!device.metrics) device.metrics = {};
     for (const m of metricsToProcess) {
@@ -21,26 +22,23 @@ export class TelemetryService {
       }
     }
 
-    const addedReadings: TelemetryReading[] = [];
-    const writeResults: Array<{ reading: TelemetryReading; persisted: boolean; engine: string; queuedForRetry?: boolean }> = [];
+    const readingsToInsert = metricsToProcess.map((m) => ({
+      deviceId: device.id,
+      deviceName: device.name,
+      metric: m.metric,
+      value: m.value,
+      unit: m.unit,
+      status: 'normal' as const,
+      rawPayload: finalFormattedPacket,
+      sequence: sequence,
+    }));
 
-    for (const m of metricsToProcess) {
-      const resObj = await db.addTelemetryReadingAsync({
-        deviceId: device.id,
-        deviceName: device.name,
-        metric: m.metric,
-        value: m.value,
-        unit: m.unit,
-        status: m.value > 90 ? 'critical' : m.value > 75 ? 'warning' : 'normal',
-        rawPayload: finalFormattedPacket,
-      });
-
-      incrementTelemetryIngested(1);
-      addedReadings.push(resObj.reading);
-      writeResults.push(resObj);
-    }
+    // Atomik transaction batch INSERT: Tek HTTP POST -> parser -> 8 reading -> Tek Batch Transaction INSERT -> Tek ACK
+    const batchRes = await db.addTelemetryBatchAsync(readingsToInsert);
+    const addedReadings: TelemetryReading[] = batchRes.readings || [];
 
     if (addedReadings.length > 0) {
+      incrementTelemetryIngested(addedReadings.length);
       broadcast('telemetry:batch', addedReadings);
     }
 
@@ -56,15 +54,16 @@ export class TelemetryService {
       broadcast('device:updated', device);
     }
 
-    const allPersisted = writeResults.every((r) => r.persisted);
-    const anyQueued = writeResults.some((r) => r.queuedForRetry);
-
     const writeAck = {
-      persisted: allPersisted,
-      engine: writeResults[0]?.engine || 'PostgreSQL / TimescaleDB',
-      persistedCount: writeResults.filter((r) => r.persisted).length,
-      queuedForRetryCount: writeResults.filter((r) => r.queuedForRetry).length,
-      status: allPersisted ? 'COMMITTED_TO_TIMESCALEDB' : anyQueued ? 'QUEUED_FOR_RETRY' : 'LOCAL_BUFFER',
+      persisted: batchRes.persisted,
+      engine: batchRes.engine || 'PostgreSQL / TimescaleDB (Transaction)',
+      persistedCount: batchRes.persisted ? addedReadings.length : 0,
+      queuedForRetryCount: batchRes.queuedForRetry ? addedReadings.length : 0,
+      status: batchRes.persisted
+        ? 'COMMITTED_TO_TIMESCALEDB'
+        : batchRes.queuedForRetry
+        ? 'QUEUED_FOR_RETRY'
+        : 'LOCAL_BUFFER',
     };
 
     return {
@@ -77,8 +76,8 @@ export class TelemetryService {
     return db.getTelemetry(deviceId, metric, limit, userId, customerId);
   }
 
-  public async getTelemetryAsync(deviceId?: string, metric?: string, limit = 100, userId?: string, customerId?: string) {
-    return db.getTelemetryAsync(deviceId, metric, limit, userId, customerId);
+  public async getTelemetryAsync(deviceId?: string, metric?: string, limit = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string) {
+    return db.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution);
   }
 
   public getTelemetryStats() {
