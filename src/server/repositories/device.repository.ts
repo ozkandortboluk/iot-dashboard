@@ -103,7 +103,7 @@ export class DeviceRepository {
 
     return this.db.data.devices.find((d: Device) => {
       if (d.apiKeyHash && d.apiKeyHash === tokenHash) return true;
-      if (d.apiKey && d.apiKey === token) return true;
+      if (!d.apiKeyHash && d.apiKey && d.apiKey === token) return true;
       return false;
     });
   }
@@ -207,7 +207,11 @@ export class DeviceRepository {
     if (updates.lastSeen !== undefined) dev.lastSeen = updates.lastSeen;
 
     if (updates.apiKey !== undefined && updates.apiKey.trim()) {
-      dev.apiKey = updates.apiKey.trim();
+      const rawKey = updates.apiKey.trim();
+      const keyDetails = generateDeviceKeyDetails(rawKey);
+      dev.apiKey = keyDetails.rawKey;
+      dev.apiKeyPrefix = keyDetails.prefix;
+      dev.apiKeyHash = keyDetails.hash;
       this.db.addAuditLog('system', 'API Manager', `Cihaz Manuel Token / API Key Güncellendi: ${dev.name}`, 'high');
     }
 

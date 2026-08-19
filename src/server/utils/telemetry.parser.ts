@@ -92,12 +92,11 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   const reqHeaders = isExpressReq ? req.headers : {};
   const reqBody = isExpressReq ? req.body : req;
 
-  // STRICT Authentication Token: HTTP Header X-API-Key, Bearer Token, or Query api_key
-  // NEVER use deviceId as authentication credential!
+  // STRICT Authentication Token: HTTP Header X-API-Key or Bearer Token ONLY
+  // NEVER allow query parameters (prevents URL log leaks) or deviceId as credentials!
   const token = (
     (reqHeaders['x-api-key'] as string) ||
     reqHeaders['authorization']?.replace(/^Bearer\s+/i, '') ||
-    (isExpressReq && req.query?.api_key ? String(req.query.api_key) : '') ||
     ''
   ).trim();
 

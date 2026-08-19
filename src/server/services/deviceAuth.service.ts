@@ -124,13 +124,32 @@ export class DeviceAuthService {
         success: false,
         httpStatus: 403,
         errorResponse: {
-          error: 'Geçersiz veya sistemde kayıtlı olmayan Cihaz ID / API Token!',
+          error: 'Geçersiz veya sistemde kayıtlı olmayan API Token!',
           tokenProvided: token,
           ip: clientIp || '—',
           mac: mac || '—',
           status: 'unregistered',
           message:
             'Cihazınız ağda "Kayıtsız Cihaz" olarak kaydedildi. Web Paneli > Cihazlar veya Ağ Taraması sayfasından cihazınızı sisteme ekleyebilirsiniz.',
+        },
+      };
+    }
+
+    // 4. Device ID Mismatch Verification Check
+    if (
+      payload.deviceIdFromPayload &&
+      payload.deviceIdFromPayload !== device.id &&
+      payload.deviceIdFromPayload !== device.name
+    ) {
+      console.warn(`[Device Auth Mismatch] API key belongs to device ${device.id} (${device.name}), but payload specified deviceId=${payload.deviceIdFromPayload}`);
+      return {
+        success: false,
+        httpStatus: 403,
+        errorResponse: {
+          error: 'device_id_mismatch',
+          message: `API Key ile doğrulanan cihaz ID (${device.id}) ile paket içerisindeki deviceId (${payload.deviceIdFromPayload}) eşleşmiyor! Lütfen cihaz konfigürasyonunu kontrol edin.`,
+          authenticatedDeviceId: device.id,
+          payloadDeviceId: payload.deviceIdFromPayload,
         },
       };
     }

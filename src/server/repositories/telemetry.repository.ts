@@ -331,6 +331,7 @@ export class TelemetryRepository {
     engine: string;
     rowCount: number;
     queuedForRetry: boolean;
+    duplicateSkipped?: boolean;
     error?: string;
   }> {
     if (!readings || readings.length === 0) {
@@ -357,37 +358,77 @@ export class TelemetryRepository {
       };
     });
 
-    if (!this.db.data.telemetry) this.db.data.telemetry = [];
+    const firstReading = fullReadings[0];
+    const device = (this.db.data.devices || []).find((d: Device) => d.id === firstReading.deviceId);
 
-    // Filter duplicates for idempotent packet processing when sequence numbers match
-    const newReadingsToInsert: TelemetryReading[] = [];
-    for (const r of fullReadings) {
-      if (r.sequence !== undefined && r.sequence !== null) {
-        const isDuplicate = this.db.data.telemetry.some(
-          (existing) =>
-            existing.id === r.id ||
-            (existing.deviceId === r.deviceId && existing.sequence === r.sequence && existing.metric === r.metric)
-        );
-        if (isDuplicate) {
-          console.log(`[Telemetry Deduplication] Teşhis: Tekrarlanan sıra numarası atlandı (Idempotent): Cihaz=${r.deviceId}, Seq=${r.sequence}, Metrik=${r.metric}`);
-          continue;
-        }
+    // Check virtual device setting: if device is simulated and saveSimulatedDataToDb is false, skip writing to DB
+    const isSimulated = device?.isSimulated || false;
+    const saveSimulatedDataToDb = device?.saveSimulatedDataToDb || false;
+
+    // Direct Write Acknowledgment Check with Transaction BEFORE updating RAM/History
+    const isReady = this.db.postgresRepo?.isReady();
+    const activeEngine = typeof this.db.getActiveEngine === 'function' ? this.db.getActiveEngine() : 'postgres';
+    let persisted = false;
+    let engine = 'RAM / Local Buffer';
+    let queuedForRetry = false;
+    let errorMsg: string | undefined = undefined;
+    let affectedRows = 0;
+    let duplicateSkipped = false;
+
+    if (isReady && (!isSimulated || saveSimulatedDataToDb)) {
+      try {
+        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings);
+        affectedRows = txRes.rowCount;
+        duplicateSkipped = !!txRes.duplicateSkipped;
+        engine = duplicateSkipped
+          ? 'PostgreSQL / TimescaleDB (Duplicate Skipped)'
+          : 'PostgreSQL / TimescaleDB (Transaction)';
+        persisted = true;
+      } catch (err: any) {
+        errorMsg = err?.message || 'PostgreSQL Transaction Batch INSERT hatası';
+        console.warn(`[Telemetry Transaction Failure] ${errorMsg}. ${fullReadings.length} metrik paketi birlikte tekrar sırasına eklendi.`);
+        this.enqueuePacketToRetryQueue(fullReadings);
+        engine = 'PostgreSQL (Paket Sırada / Otomatik Tekrar Denenecek)';
+        persisted = false;
+        queuedForRetry = true;
       }
-      newReadingsToInsert.push(r);
+    } else if (isSimulated && !saveSimulatedDataToDb) {
+      persisted = true;
+      engine = 'RAM / Sanal Filtre (Veritabanına Yazılmıyor)';
+    } else if (activeEngine === 'postgres' || activeEngine === 'timescaledb') {
+      this.enqueuePacketToRetryQueue(fullReadings);
+      engine = 'RAM Buffer (PostgreSQL Bağlantısı Bekleniyor)';
+      persisted = false;
+      queuedForRetry = true;
+      errorMsg = 'PostgreSQL sunucusuna ulaşılamadı, paketteki tüm veriler sıraya alındı';
+    } else {
+      // Standalone RAM mode
+      persisted = true;
+      engine = 'RAM / Local Buffer';
     }
 
-    if (newReadingsToInsert.length > 0) {
-      this.db.data.telemetry.push(...newReadingsToInsert);
+    // IF DUPLICATE SKIPPED IN POSTGRESQL:
+    // Do NOT update RAM history, do NOT evaluate alarm rules, do NOT re-broadcast to WebSocket!
+    if (duplicateSkipped) {
+      console.log(`[Telemetry Repository] Duplicate packet skipped for device=${firstReading.deviceId}, sequence=${firstReading.sequence}`);
+      return {
+        readings: [],
+        persisted: true,
+        engine,
+        rowCount: 0,
+        queuedForRetry: false,
+        duplicateSkipped: true,
+      };
     }
+
+    // ONLY IF NOT DUPLICATE: Update RAM ring buffer, device metrics, history, and evaluate alarm rules!
+    if (!this.db.data.telemetry) this.db.data.telemetry = [];
+    this.db.data.telemetry.push(...fullReadings);
 
     // High-performance sliding ring buffer (10,000 raw points in memory)
     if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
       this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
     }
-
-    // Update device metrics & last seen for all items in batch
-    const firstReading = fullReadings[0];
-    const device = (this.db.data.devices || []).find((d: Device) => d.id === firstReading.deviceId);
 
     if (device) {
       if (device.status !== 'maintenance' && device.dataFlowActive !== false) {
@@ -412,55 +453,6 @@ export class TelemetryRepository {
     }
 
     this.db.scheduleSave();
-
-    // Check virtual device setting: if device is simulated and saveSimulatedDataToDb is false, skip writing to DB
-    const isSimulated = device?.isSimulated || false;
-    const saveSimulatedDataToDb = device?.saveSimulatedDataToDb || false;
-
-    if (isSimulated && !saveSimulatedDataToDb) {
-      return {
-        readings: fullReadings,
-        persisted: true,
-        engine: 'RAM / Sanal Filtre (Veritabanına Yazılmıyor)',
-        rowCount: 0,
-        queuedForRetry: false,
-      };
-    }
-
-    // Direct Write Acknowledgment Check with Transaction
-    const isReady = this.db.postgresRepo?.isReady();
-    const activeEngine = typeof this.db.getActiveEngine === 'function' ? this.db.getActiveEngine() : 'postgres';
-    let persisted = false;
-    let engine = 'RAM / Local Buffer';
-    let queuedForRetry = false;
-    let errorMsg: string | undefined = undefined;
-    let affectedRows = 0;
-
-    if (isReady) {
-      try {
-        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings);
-        affectedRows = txRes.rowCount;
-        engine = 'PostgreSQL / TimescaleDB (Transaction)';
-        persisted = true;
-      } catch (err: any) {
-        errorMsg = err?.message || 'PostgreSQL Transaction Batch INSERT hatası';
-        console.warn(`[Telemetry Transaction Failure] ${errorMsg}. ${fullReadings.length} metrik paketi birlikte tekrar sırasına eklendi.`);
-        this.enqueuePacketToRetryQueue(fullReadings);
-        engine = 'PostgreSQL (Paket Sırada / Otomatik Tekrar Denenecek)';
-        persisted = false;
-        queuedForRetry = true;
-      }
-    } else if (activeEngine === 'postgres' || activeEngine === 'timescaledb') {
-      this.enqueuePacketToRetryQueue(fullReadings);
-      engine = 'RAM Buffer (PostgreSQL Bağlantısı Bekleniyor)';
-      persisted = false;
-      queuedForRetry = true;
-      errorMsg = 'PostgreSQL sunucusuna ulaşılamadı, paketteki tüm veriler sıraya alındı';
-    } else {
-      // Standalone RAM mode
-      persisted = true;
-      engine = 'RAM / Local Buffer';
-    }
 
     return {
       readings: fullReadings,
