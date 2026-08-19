@@ -104,8 +104,6 @@ export class DeviceRepository {
     return this.db.data.devices.find((d: Device) => {
       if (d.apiKeyHash && d.apiKeyHash === tokenHash) return true;
       if (d.apiKey && d.apiKey === token) return true;
-      if (d.id === token) return true;
-      if (d.name && d.name.toLowerCase() === token.toLowerCase()) return true;
       return false;
     });
   }

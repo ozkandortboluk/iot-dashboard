@@ -85,6 +85,7 @@ export interface MetricHistory {
 
 export interface TelemetryReading {
   id: string;
+  packetId?: string;
   deviceId: string;
   deviceName: string;
   timestamp: string;

@@ -9,6 +9,7 @@ export interface ParsedMetric {
 
 export interface ParsedTelemetryPayload {
   token: string;
+  deviceIdFromPayload?: string;
   deviceNameFromPayload: string;
   sequence?: number;
   rawBodyText: string;
@@ -45,10 +46,11 @@ export function buildPacketAck(params: {
 }): PacketAck {
   const { sequence, receivedCount, addedReadingsCount, writeAck, deviceId, error } = params;
 
+  const devPrefix = deviceId ? `${deviceId}:` : '';
   const packetId =
     sequence !== undefined && sequence !== null
-      ? String(sequence)
-      : `pkt_${Date.now()}`;
+      ? `${devPrefix}${sequence}`
+      : `${devPrefix}pkt_${Date.now()}`;
 
   let status: 'accepted' | 'duplicate_skipped' | 'queued' | 'failed' = 'accepted';
 
@@ -90,24 +92,20 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   const reqHeaders = isExpressReq ? req.headers : {};
   const reqBody = isExpressReq ? req.body : req;
 
-  const headerKey = (reqHeaders['x-api-key'] ||
-    reqHeaders['authorization']?.replace('Bearer ', '') ||
-    reqHeaders['x-device-token'] ||
-    reqHeaders['x-device-key'] ||
-    reqHeaders['x-device-id']) as string;
+  // STRICT Authentication Token: HTTP Header X-API-Key, Bearer Token, or Query api_key
+  // NEVER use deviceId as authentication credential!
+  const token = (
+    (reqHeaders['x-api-key'] as string) ||
+    reqHeaders['authorization']?.replace(/^Bearer\s+/i, '') ||
+    (isExpressReq && req.query?.api_key ? String(req.query.api_key) : '') ||
+    ''
+  ).trim();
 
   const bodyObj = reqBody && typeof reqBody === 'object' && !Array.isArray(reqBody) ? reqBody : {};
 
-  // Extract Device Identifier (Header X-API-Key or deviceId in JSON body)
-  const token =
-    (headerKey ? headerKey.trim() : '') ||
-    bodyObj.deviceId ||
-    bodyObj.device_id ||
-    bodyObj.apiKey ||
-    bodyObj.api_key ||
-    '';
-
-  const deviceNameFromPayload = bodyObj.deviceName || bodyObj.device_name || '';
+  // Device Identity Verification Field (deviceId from JSON body or header)
+  const deviceIdFromPayload = (bodyObj.deviceId || bodyObj.device_id || reqHeaders['x-device-id'] || '').toString().trim();
+  const deviceNameFromPayload = (bodyObj.deviceName || bodyObj.device_name || '').toString().trim();
 
   // Extract Sequence Number
   let sequence: number | undefined = undefined;
@@ -124,9 +122,9 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   // Production Standard Format 1: "metrics" object
   // {
   //   "deviceId": "NEXUS_DEV_982341",
-  //   "sequence": 10021,
+  //   "sequence": 1432,
   //   "metrics": {
-  //     "temperature": { "value": 23.4, "unit": "C" },
+  //     "temperature": { "value": 24.5, "unit": "C" },
   //     "humidity": 55.2
   //   }
   // }
@@ -156,11 +154,6 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   }
 
   // Production Standard Format 2: "readings" structured array
-  // {
-  //   "deviceId": "NEXUS_DEV_982341",
-  //   "sequence": 10021,
-  //   "readings": [ { "metric": "temperature", "value": 23.4, "unit": "C" } ]
-  // }
   if (metricsToProcess.length === 0 && Array.isArray(bodyObj.readings)) {
     for (const item of bodyObj.readings) {
       if (item && typeof item === 'object') {
@@ -181,7 +174,6 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   }
 
   // Extract Client IP (Strict Proxy / Nginx Trust: Only use Express req.ip, X-Forwarded-For set by proxy, or socket address)
-  // NEVER trust spoofed x-device-ip, reqBody.ip, or req.query.ip from client!
   const clientIp = isExpressReq
     ? (
         req.ip ||
@@ -204,12 +196,13 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     : '';
 
   const rawBodyText = typeof reqBody === 'string' ? reqBody : JSON.stringify(bodyObj);
-  const finalFormattedPacket = `${token}, ${deviceNameFromPayload || token}, ${metricsToProcess
+  const finalFormattedPacket = `${token || deviceIdFromPayload}, ${deviceNameFromPayload || deviceIdFromPayload || token}, ${metricsToProcess
     .map((m) => `${m.metric}:${m.value}`)
     .join(', ')}`;
 
   return {
     token,
+    deviceIdFromPayload,
     deviceNameFromPayload,
     sequence,
     rawBodyText,

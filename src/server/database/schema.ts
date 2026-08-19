@@ -66,9 +66,22 @@ EXCEPTION
         RAISE NOTICE 'devices table alter notice: %', SQLERRM;
 END $$;
 
--- 3. Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
+-- 3a. Telemetry Packets Table (Packet-Level Sequence Deduplication Table)
+CREATE TABLE IF NOT EXISTS telemetry_packets (
+    id VARCHAR(128) PRIMARY KEY,
+    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    sequence BIGINT NOT NULL,
+    metric_count INT DEFAULT 0,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unq_telemetry_device_sequence UNIQUE(device_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(device_id, sequence);
+
+-- 3b. Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
+    packet_id VARCHAR(128),
     device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -80,14 +93,18 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     PRIMARY KEY (id, created_at)
 );
 
--- Ensure sequence column and indexes exist on telemetry_readings
+-- Ensure packet_id and sequence columns exist on telemetry_readings
 DO $$
 BEGIN
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
 EXCEPTION
     WHEN OTHERS THEN
-        RAISE NOTICE 'telemetry_readings sequence column setup notice: %', SQLERRM;
+        RAISE NOTICE 'telemetry_readings columns setup notice: %', SQLERRM;
 END $$;
+
+-- Drop invalid hypertable unique index if previously created
+DROP INDEX IF EXISTS idx_telemetry_device_seq_metric;
 
 -- Ensure Composite Primary Key (id, created_at) on existing telemetry_readings instances for ON CONFLICT support
 DO $$
@@ -107,7 +124,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_device_seq_metric ON telemetry_readings(device_id, sequence, metric) WHERE sequence IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_telemetry_packet ON telemetry_readings(packet_id);
 
 -- Convert to Hypertable (TimescaleDB)
 DO $$

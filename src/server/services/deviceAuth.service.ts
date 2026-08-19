@@ -91,13 +91,8 @@ export class DeviceAuthService {
       };
     }
 
-    // 2. Lookup Device in Database
-    let device = db.getDeviceByApiKey(token);
-    if (!device) {
-      device = db
-        .getDevices()
-        .find((d) => d.id === token || d.apiKey === token || d.name.toLowerCase() === token.toLowerCase());
-    }
+    // 2. Lookup Device in Database strictly by API Key
+    const device = db.getDeviceByApiKey(token);
 
     // 3. Unregistered/Invalid Token Device Check
     if (!device) {

@@ -211,51 +211,11 @@ export class PostgresRepository {
   }
 
   public async saveTelemetryBatch(readings: TelemetryReading[]): Promise<number> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
-    }
-    if (!readings || readings.length === 0) return 0;
-
-    const chunkSize = 100;
-    let totalInserted = 0;
-
-    for (let i = 0; i < readings.length; i += chunkSize) {
-      const chunk = readings.slice(i, i + chunkSize);
-      const valueTuples: string[] = [];
-      const params: any[] = [];
-      let paramIdx = 1;
-
-      for (const r of chunk) {
-        valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
-        params.push(
-          r.id,
-          r.deviceId,
-          r.deviceName || r.deviceId,
-          r.metric,
-          Number(r.value),
-          r.unit || '',
-          r.status || 'normal',
-          r.sequence ?? null,
-          r.timestamp || new Date().toISOString()
-        );
-        paramIdx += 9;
-      }
-
-      const sql = `
-        INSERT INTO telemetry_readings (
-          id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
-        ) VALUES ${valueTuples.join(', ')}
-        ON CONFLICT DO NOTHING;
-      `;
-
-      const res = await this.query(sql, params);
-      totalInserted += res?.rowCount ?? chunk.length;
-    }
-
-    return totalInserted;
+    const res = await this.saveTelemetryBatchInTransaction(readings);
+    return res.rowCount;
   }
 
-  public async saveTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number }> {
+  public async saveTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number; duplicateSkipped?: boolean }> {
     if (!this.pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
     }
@@ -264,6 +224,36 @@ export class PostgresRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      const first = readings[0];
+      const deviceId = first.deviceId;
+      const sequence = first.sequence;
+      let packetId: string | null = first.packetId || null;
+
+      // Packet-Level Sequence Deduplication
+      if (deviceId && sequence !== undefined && sequence !== null) {
+        packetId = packetId || `pkt_${deviceId}_seq_${sequence}`;
+        const packetSql = `
+          INSERT INTO telemetry_packets (id, device_id, sequence, metric_count, received_at)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (device_id, sequence) DO NOTHING
+          RETURNING id;
+        `;
+        const pktRes = await client.query(packetSql, [
+          packetId,
+          deviceId,
+          sequence,
+          readings.length,
+          first.timestamp || new Date().toISOString(),
+        ]);
+
+        if (!pktRes.rows || pktRes.rows.length === 0) {
+          // Conflict occurred: Packet sequence was already processed!
+          await client.query('COMMIT');
+          console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, Sequence=${sequence} daha önce işlenmiş.`);
+          return { success: true, rowCount: 0, duplicateSkipped: true };
+        }
+      }
 
       const chunkSize = 100;
       let totalInserted = 0;
@@ -275,9 +265,10 @@ export class PostgresRepository {
         let paramIdx = 1;
 
         for (const r of chunk) {
-          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`);
+          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`);
           params.push(
             r.id,
+            packetId,
             r.deviceId,
             r.deviceName || r.deviceId,
             r.metric,
@@ -287,12 +278,12 @@ export class PostgresRepository {
             r.sequence ?? null,
             r.timestamp || new Date().toISOString()
           );
-          paramIdx += 9;
+          paramIdx += 10;
         }
 
         const sql = `
           INSERT INTO telemetry_readings (
-            id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
+            id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
           ) VALUES ${valueTuples.join(', ')}
           ON CONFLICT DO NOTHING;
         `;

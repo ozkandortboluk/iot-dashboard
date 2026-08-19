@@ -8,14 +8,19 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 export class TelemetryController {
   public async ingest(req: express.Request, res: express.Response) {
-    return this.processIngest(req, res, parseProductionTelemetryPayload);
+    return this.processIngest(req, res, parseProductionTelemetryPayload, true);
   }
 
   public async ingestLegacy(req: express.Request, res: express.Response) {
-    return this.processIngest(req, res, parseLegacyTelemetryPayload);
+    return this.processIngest(req, res, parseLegacyTelemetryPayload, false);
   }
 
-  private async processIngest(req: express.Request, res: express.Response, parserFn: (r: any) => any) {
+  private async processIngest(
+    req: express.Request,
+    res: express.Response,
+    parserFn: (r: any) => any,
+    requireSequence: boolean = false
+  ) {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'X-API-Key, Authorization, Content-Type, X-Token, X-Device-Id, X-MAC-Address');
     res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -49,6 +54,21 @@ export class TelemetryController {
 
     // 1. Parse Telemetry Payload with selected parser
     const parsedPayload = parserFn(req);
+
+    // 2. Enforce Mandatory Sequence Number on Production Endpoint
+    if (requireSequence && (parsedPayload.sequence === undefined || parsedPayload.sequence === null)) {
+      return res.status(400).json({
+        error: 'sequence_required',
+        message: 'Üretim ortamındaki telemetri paketlerinde sequence (paket sıra numarası) zorunludur.',
+        expectedFormat: {
+          deviceId: 'NEXUS_DEV_982341',
+          sequence: 1432,
+          metrics: {
+            temperature: { value: 24.5, unit: 'C' },
+          },
+        },
+      });
+    }
 
     // 2. Authenticate & Prepare Device (including Rate Limit checks)
     const authResult = deviceAuthService.authenticateDevice(parsedPayload);
