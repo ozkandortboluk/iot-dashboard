@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { broadcast } from './websocket.js';
-import type { TelemetryReading } from '../../types.js';
+import type { TelemetryReading, Device } from '../../types.js';
 
 export let simulatorActive = true;
 export let simulatorIntervalMs = 2000;
@@ -136,8 +136,8 @@ export function runSimulationStep() {
   // CRITICAL PROTECTION RULE:
   // Simulator MUST ONLY generate fake data for explicitly marked SIMULATED devices (isSimulated === true).
   // Real physical hardware devices (isSimulated === false) will NEVER receive fake simulator data.
-  const devices = db.getDevices().filter(
-    (d) => d.isSimulated === true && d.dataFlowActive !== false && d.status === 'online'
+  const devices = (db.getDevices() || []).filter(
+    (d: Device) => d.isSimulated === true && d.dataFlowActive !== false && d.status !== 'maintenance'
   );
   if (!devices.length) return;
 
@@ -146,6 +146,10 @@ export function runSimulationStep() {
   const stepReadings: TelemetryReading[] = [];
 
   for (const dev of devices) {
+    // Keep device online and refresh lastSeen on every simulation tick
+    dev.status = 'online';
+    dev.lastSeen = new Date().toISOString();
+
     let metricsToGenerate: string[] = [];
 
     if (activeScenario === 'overheat') {
@@ -154,7 +158,7 @@ export function runSimulationStep() {
       metricsToGenerate = ['vibration'];
     } else if (activeScenario === 'sine_wave') {
       metricsToGenerate = ['power'];
-    } else if (Array.isArray(dev.simulatedMetrics)) {
+    } else if (Array.isArray(dev.simulatedMetrics) && dev.simulatedMetrics.length > 0) {
       metricsToGenerate = dev.simulatedMetrics;
     } else {
       if (dev.type === 'server') {
@@ -162,10 +166,14 @@ export function runSimulationStep() {
       } else if (dev.type === 'sensor') {
         metricsToGenerate = ['temperature', 'humidity', 'pressure', 'vibration', 'co2_ppm'];
       } else if (dev.type === 'meter' || dev.type === 'inverter') {
-        metricsToGenerate = ['power', 'voltage', 'current', 'frequency'];
+        metricsToGenerate = ['l1', 'l2', 'l3', 'ri', 'rc', 'p', 'pct_ri', 'pct_rc', 'power', 'voltage', 'current', 'frequency'];
       } else {
-        metricsToGenerate = ['power', 'voltage', 'current'];
+        metricsToGenerate = ['l1', 'l2', 'l3', 'ri', 'rc', 'p', 'temperature', 'humidity'];
       }
+    }
+
+    if (!metricsToGenerate || metricsToGenerate.length === 0) {
+      metricsToGenerate = ['l1', 'l2', 'l3', 'ri', 'rc', 'p', 'temperature', 'humidity'];
     }
 
     const calculatedValues: Record<string, number> = {};
@@ -174,7 +182,7 @@ export function runSimulationStep() {
       const { val, unit } = computeValueForMetric(m, isAnomaly, stepCounter, calculatedValues);
       calculatedValues[m.toLowerCase()] = val;
 
-      const rawPayload = `${dev.apiKey}, ${dev.name}, ${m}:${val}`;
+      const rawPayload = `${dev.apiKey}, ${dev.name}, ${m}:${val}:${unit}`;
 
       const reading = db.addTelemetryReading({
         deviceId: dev.id,

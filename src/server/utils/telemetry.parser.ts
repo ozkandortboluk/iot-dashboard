@@ -84,7 +84,31 @@ export function getUnitForMetric(mKey: string): string {
   if (lk.includes('volt')) return 'V';
   if (lk.includes('akım') || lk.includes('amp')) return 'A';
   if (lk.includes('basınç') || lk.includes('bar')) return 'hPa';
+  if (lk.includes('ping')) return 'ms';
+  if (lk.includes('rssi')) return 'dBm';
+  if (lk.includes('heartbeat')) return 'hb';
   return 'birim';
+}
+
+export function parseMetricPair(item: string): ParsedMetric | null {
+  const trimmed = item.trim();
+  if (!trimmed || !trimmed.includes(':')) return null;
+
+  const parts = trimmed.split(':').map((s) => s.trim());
+  if (parts.length < 2) return null;
+
+  const metric = parts[0];
+  const valStr = parts[1];
+  const unit = parts[2] ? parts[2] : getUnitForMetric(metric);
+  const num = parseFloat(valStr);
+
+  if (isNaN(num)) return null;
+
+  return {
+    metric,
+    value: num,
+    unit: unit || getUnitForMetric(metric),
+  };
 }
 
 export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayload {
@@ -92,24 +116,64 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   const reqHeaders = isExpressReq ? req.headers : {};
   const reqBody = isExpressReq ? req.body : req;
 
-  // STRICT Authentication Token: HTTP Header X-API-Key or Bearer Token ONLY
-  // NEVER allow query parameters (prevents URL log leaks) or deviceId as credentials!
-  const token = (
+  // Header token or Bearer
+  let token = (
     (reqHeaders['x-api-key'] as string) ||
     reqHeaders['authorization']?.replace(/^Bearer\s+/i, '') ||
+    (reqHeaders['x-token'] as string) ||
     ''
   ).trim();
 
-  const bodyObj = reqBody && typeof reqBody === 'object' && !Array.isArray(reqBody) ? reqBody : {};
+  let rawBodyText = '';
+  if (typeof reqBody === 'string') {
+    rawBodyText = reqBody.trim();
+  } else if (Buffer.isBuffer(reqBody)) {
+    rawBodyText = reqBody.toString('utf8').trim();
+  } else if (reqBody && typeof reqBody === 'object') {
+    if (typeof reqBody.payload === 'string') rawBodyText = reqBody.payload.trim();
+    else if (typeof reqBody.raw === 'string') rawBodyText = reqBody.raw.trim();
+    else if (typeof reqBody.data === 'string') rawBodyText = reqBody.data.trim();
+    else if (typeof reqBody.text === 'string') rawBodyText = reqBody.text.trim();
+  }
 
-  // Device Identity Verification Field (deviceId from JSON body or header)
-  const deviceIdFromPayload = (bodyObj.deviceId || bodyObj.device_id || reqHeaders['x-device-id'] || '').toString().trim();
-  const deviceNameFromPayload = (bodyObj.deviceName || bodyObj.device_name || '').toString().trim();
+  let bodyObj: any = {};
+  if (reqBody && typeof reqBody === 'object' && !Array.isArray(reqBody)) {
+    bodyObj = reqBody;
+  } else if (rawBodyText.startsWith('{') || rawBodyText.startsWith('[')) {
+    try {
+      bodyObj = JSON.parse(rawBodyText);
+    } catch {
+      bodyObj = {};
+    }
+  }
+
+  // Device Identity & Name
+  let deviceIdFromPayload = (
+    bodyObj.deviceId ||
+    bodyObj.device_id ||
+    bodyObj.id ||
+    reqHeaders['x-device-id'] ||
+    ''
+  ).toString().trim();
+
+  let deviceNameFromPayload = (
+    bodyObj.deviceName ||
+    bodyObj.device_name ||
+    bodyObj.name ||
+    ''
+  ).toString().trim();
 
   // Extract Sequence Number
   let sequence: number | undefined = undefined;
-  const rawSeq = bodyObj.sequence ?? bodyObj.seq ?? bodyObj.packetId;
-  if (rawSeq !== undefined && rawSeq !== null) {
+  const rawSeq =
+    bodyObj.sequence ??
+    bodyObj.seq ??
+    bodyObj.packetId ??
+    bodyObj.packet_id ??
+    reqHeaders['x-sequence'] ??
+    reqHeaders['x-packet-id'];
+
+  if (rawSeq !== undefined && rawSeq !== null && rawSeq !== '') {
     const parsedSeq = typeof rawSeq === 'number' ? rawSeq : parseInt(String(rawSeq), 10);
     if (!isNaN(parsedSeq)) {
       sequence = parsedSeq;
@@ -118,16 +182,44 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
 
   const metricsToProcess: ParsedMetric[] = [];
 
-  // Production Standard Format 1: "metrics" object
-  // {
-  //   "deviceId": "NEXUS_DEV_982341",
-  //   "sequence": 1432,
-  //   "metrics": {
-  //     "temperature": { "value": 24.5, "unit": "C" },
-  //     "humidity": 55.2
-  //   }
-  // }
-  if (bodyObj.metrics && typeof bodyObj.metrics === 'object' && !Array.isArray(bodyObj.metrics)) {
+  // 1. Direct CSV Format Support:
+  // "dev_key_536fd2cc77a2a52c, [Sanal] araç beton, sıcaklık:37.5:C, nem:85:%"
+  // or "dev_key_536fd2cc77a2a52c, sıcaklık:37.5:C, nem:85:%"
+  if (rawBodyText && rawBodyText.includes(',')) {
+    const csvParts = rawBodyText.split(',').map((p) => p.trim()).filter(Boolean);
+    let startIndex = 0;
+
+    // Check first element (token / deviceId / name)
+    if (csvParts[0] && !csvParts[0].includes(':')) {
+      if (!token) token = csvParts[0];
+      if (!deviceIdFromPayload) deviceIdFromPayload = csvParts[0];
+      startIndex = 1;
+
+      // Check second element (device name / device id)
+      if (csvParts[1] && !csvParts[1].includes(':')) {
+        if (!deviceNameFromPayload) deviceNameFromPayload = csvParts[1];
+        startIndex = 2;
+      }
+    }
+
+    for (let i = startIndex; i < csvParts.length; i++) {
+      const metricItem = parseMetricPair(csvParts[i]);
+      if (metricItem) {
+        metricsToProcess.push(metricItem);
+      }
+    }
+  }
+
+  // 2. Single Key:Value:Unit format (e.g. "sıcaklık:37.5:C")
+  if (metricsToProcess.length === 0 && rawBodyText && rawBodyText.includes(':') && !rawBodyText.startsWith('{')) {
+    const metricItem = parseMetricPair(rawBodyText);
+    if (metricItem) {
+      metricsToProcess.push(metricItem);
+    }
+  }
+
+  // 3. Structured JSON "metrics" object
+  if (metricsToProcess.length === 0 && bodyObj.metrics && typeof bodyObj.metrics === 'object' && !Array.isArray(bodyObj.metrics)) {
     for (const [mKey, mVal] of Object.entries(bodyObj.metrics)) {
       if (mVal !== null && typeof mVal === 'object') {
         const nestedVal = (mVal as any).value ?? (mVal as any).val;
@@ -152,7 +244,7 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     }
   }
 
-  // Production Standard Format 2: "readings" structured array
+  // 4. Structured JSON "readings" array
   if (metricsToProcess.length === 0 && Array.isArray(bodyObj.readings)) {
     for (const item of bodyObj.readings) {
       if (item && typeof item === 'object') {
@@ -172,7 +264,55 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     }
   }
 
-  // Extract Client IP (Strict Proxy / Nginx Trust: Only use Express req.ip, X-Forwarded-For set by proxy, or socket address)
+  // 5. Flat top-level JSON fields
+  if (metricsToProcess.length === 0 && typeof bodyObj === 'object' && Object.keys(bodyObj).length > 0) {
+    const ignoredKeys = new Set([
+      'deviceid', 'device_id', 'devicename', 'device_name', 'id', 'name',
+      'sequence', 'seq', 'packetid', 'packet_id',
+      'apikey', 'api_key', 'token', 'mac', 'macaddress', 'mac_address',
+      'ip', 'ipaddress', 'ip_address', 'timestamp', 'time', 'date'
+    ]);
+
+    for (const [k, v] of Object.entries(bodyObj)) {
+      if (ignoredKeys.has(k.toLowerCase())) continue;
+
+      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+        const nestedVal = (v as any).value ?? (v as any).val;
+        const num = typeof nestedVal === 'number' ? nestedVal : parseFloat(String(nestedVal));
+        if (!isNaN(num)) {
+          metricsToProcess.push({
+            metric: k,
+            value: num,
+            unit: (v as any).unit || getUnitForMetric(k),
+          });
+        }
+      } else if (v !== null && v !== undefined && typeof v !== 'object') {
+        const num = typeof v === 'number' ? v : parseFloat(String(v));
+        if (!isNaN(num)) {
+          metricsToProcess.push({
+            metric: k,
+            value: num,
+            unit: getUnitForMetric(k),
+          });
+        }
+      }
+    }
+  }
+
+  // Also look for token inside body if not yet found
+  if (!token) {
+    token = (
+      bodyObj.apiKey ||
+      bodyObj.api_key ||
+      bodyObj.token ||
+      bodyObj.deviceId ||
+      bodyObj.device_id ||
+      bodyObj.id ||
+      ''
+    ).toString().trim();
+  }
+
+  // Extract Client IP
   const clientIp = isExpressReq
     ? (
         req.ip ||
@@ -194,9 +334,8 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
       ).toString().trim()
     : '';
 
-  const rawBodyText = typeof reqBody === 'string' ? reqBody : JSON.stringify(bodyObj);
   const finalFormattedPacket = `${token || deviceIdFromPayload}, ${deviceNameFromPayload || deviceIdFromPayload || token}, ${metricsToProcess
-    .map((m) => `${m.metric}:${m.value}`)
+    .map((m) => `${m.metric}:${m.value}:${m.unit}`)
     .join(', ')}`;
 
   return {
@@ -204,7 +343,7 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     deviceIdFromPayload,
     deviceNameFromPayload,
     sequence,
-    rawBodyText,
+    rawBodyText: rawBodyText || (typeof reqBody === 'string' ? reqBody : JSON.stringify(bodyObj)),
     metricsToProcess,
     clientIp,
     mac,
@@ -291,23 +430,18 @@ export function parseLegacyTelemetryPayload(req: any): ParsedTelemetryPayload {
       }
     }
     for (let i = idx; i < parts.length; i++) {
-      const p = parts[i];
-      if (p.includes(':')) {
-        const [mKey, mValStr] = p.split(':').map((s) => s.trim());
-        const numVal = parseFloat(mValStr);
-        if (!isNaN(numVal)) {
-          metricsToProcess.push({ metric: mKey, value: numVal, unit: getUnitForMetric(mKey) });
-        }
+      const metricItem = parseMetricPair(parts[i]);
+      if (metricItem) {
+        metricsToProcess.push(metricItem);
       }
     }
   }
 
   // Key:Value format
   if (metricsToProcess.length === 0 && rawBodyText && rawBodyText.includes(':') && !rawBodyText.startsWith('{')) {
-    const [mKey, mValStr] = rawBodyText.split(':').map((s) => s.trim());
-    const numVal = parseFloat(mValStr);
-    if (!isNaN(numVal)) {
-      metricsToProcess.push({ metric: mKey, value: numVal, unit: getUnitForMetric(mKey) });
+    const metricItem = parseMetricPair(rawBodyText);
+    if (metricItem) {
+      metricsToProcess.push(metricItem);
     }
   }
 

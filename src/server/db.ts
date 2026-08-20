@@ -857,7 +857,7 @@ class LocalDatabase {
   public getDevices(userId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(userId, customerId); }
   public assignDeviceOwner(deviceId: string, targetUserId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetUserId); }
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
-  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { apiKey?: string; isSimulated?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
+  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
   public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }
   public updateDevice(deviceId: string, updates: Partial<Device>): Device { return this.deviceRepository.updateDevice(deviceId, updates); }
   public deleteDevice(deviceId: string): void { return this.deviceRepository.deleteDevice(deviceId); }

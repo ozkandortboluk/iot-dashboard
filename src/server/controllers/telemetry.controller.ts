@@ -8,11 +8,79 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 export class TelemetryController {
   public async ingest(req: express.Request, res: express.Response) {
-    return this.processIngest(req, res, parseProductionTelemetryPayload, true);
+    return this.processIngest(req, res, parseProductionTelemetryPayload, false);
   }
 
   public async ingestLegacy(req: express.Request, res: express.Response) {
     return this.processIngest(req, res, parseLegacyTelemetryPayload, false);
+  }
+
+  public async ping(req: express.Request, res: express.Response) {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'X-API-Key, Authorization, Content-Type, X-Token, X-Device-Id, X-MAC-Address, X-Ping-Ms, X-RSSI');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(200).send('OK');
+    }
+
+    const parsedPayload = parseProductionTelemetryPayload(req);
+
+    // If query string has apiKey or deviceId or token, extract it
+    if (!parsedPayload.token && req.query.apiKey) {
+      parsedPayload.token = String(req.query.apiKey).trim();
+    } else if (!parsedPayload.token && req.query.token) {
+      parsedPayload.token = String(req.query.token).trim();
+    }
+    if (!parsedPayload.deviceIdFromPayload && req.query.deviceId) {
+      parsedPayload.deviceIdFromPayload = String(req.query.deviceId).trim();
+    }
+
+    const authResult = deviceAuthService.authenticateDevice(parsedPayload);
+    if (authResult.rateLimitHeaders) {
+      for (const [hKey, hVal] of Object.entries(authResult.rateLimitHeaders)) {
+        res.setHeader(hKey, hVal);
+      }
+    }
+
+    if (!authResult.success) {
+      return res.status(authResult.httpStatus || 400).json(authResult.errorResponse);
+    }
+
+    const device = authResult.device!;
+    const clientPing = req.headers['x-ping-ms'] ? Number(req.headers['x-ping-ms']) : undefined;
+    const clientRssi = req.headers['x-rssi'] ? Number(req.headers['x-rssi']) : undefined;
+
+    if (clientPing !== undefined && !isNaN(clientPing)) device.pingMs = clientPing;
+    if (clientRssi !== undefined && !isNaN(clientRssi)) device.rssi = clientRssi;
+
+    device.lastSeen = new Date().toISOString();
+    if (device.status !== 'online') {
+      device.status = 'online';
+    }
+
+    db.updateDevice(device.id, {
+      lastSeen: device.lastSeen,
+      status: device.status,
+      pingMs: device.pingMs,
+      rssi: device.rssi,
+      ipAddress: device.ipAddress,
+    });
+
+    const commands = commandService.getAndDeliverPendingCommands(device.id);
+
+    return res.status(200).json({
+      status: 'ok',
+      type: 'heartbeat_ack',
+      deviceId: device.id,
+      deviceName: device.name,
+      deviceStatus: device.status,
+      lastSeen: device.lastSeen,
+      heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds || 300,
+      commands,
+      serverTime: new Date().toISOString(),
+      message: 'ESP Ping / Heartbeat sinyali başarıyla alındı ve cihaz ÇEVRİMİÇİ olarak onaylandı.',
+    });
   }
 
   private async processIngest(
@@ -84,8 +152,35 @@ export class TelemetryController {
 
     const device = authResult.device!;
 
-    // 3. Check for Empty Metrics
+    // 3. Check for Empty Metrics vs Explicit Ping Heartbeat
     if (parsedPayload.metricsToProcess.length === 0) {
+      const rawText = (parsedPayload.rawBodyText || '').toLowerCase();
+      const isPing = rawText.includes('ping') || rawText.includes('heartbeat') || rawText.includes('nabiz');
+
+      if (isPing) {
+        device.lastSeen = new Date().toISOString();
+        if (device.status !== 'online') device.status = 'online';
+        db.updateDevice(device.id, {
+          lastSeen: device.lastSeen,
+          status: device.status,
+          ipAddress: device.ipAddress,
+        });
+        const commands = commandService.getAndDeliverPendingCommands(device.id);
+
+        return res.status(200).json({
+          status: 'ok',
+          type: 'heartbeat_ack',
+          deviceId: device.id,
+          deviceName: device.name,
+          deviceStatus: device.status,
+          lastSeen: device.lastSeen,
+          heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds || 300,
+          commands,
+          serverTime: new Date().toISOString(),
+          message: 'ESP Heartbeat / Ping sinyali işlendi. Cihaz çevrimiçi.',
+        });
+      }
+
       return res.status(400).json({
         error: 'Veri paketinde geçerli metrik bulunamadı.',
         expectedFormat: {

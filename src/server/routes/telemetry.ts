@@ -4,6 +4,9 @@ import { authenticateUser } from '../middleware/auth.js';
 
 const router = Router();
 
+// Lightweight ESP Ping / Heartbeat Handler (GET & POST)
+router.all('/ping', (req, res) => telemetryController.ping(req, res));
+
 // Primary Production Remote Telemetry Ingestion Handler (Strict Single JSON Payload)
 router.post('/', (req, res) => telemetryController.ingest(req, res));
 

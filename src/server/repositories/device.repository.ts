@@ -25,6 +25,25 @@ export class DeviceRepository {
     this.db.data.devices.forEach((dev: Device) => {
       if (dev.status === 'maintenance') return;
 
+      // 1. Virtual / Simulated Devices:
+      // If user opened the device (dataFlowActive !== false), KEEP IT ONLINE permanently.
+      if (dev.isSimulated) {
+        if (dev.dataFlowActive !== false) {
+          if (dev.status !== 'online') {
+            dev.status = 'online';
+            dev.lastSeen = new Date().toISOString();
+            hasChanges = true;
+          }
+        } else {
+          if (dev.status !== 'offline') {
+            dev.status = 'offline';
+            hasChanges = true;
+          }
+        }
+        return;
+      }
+
+      // 2. Real Physical IoT Hardware Devices:
       if (!dev.lastSeen) {
         if (dev.status !== 'offline') {
           dev.status = 'offline';
@@ -32,31 +51,50 @@ export class DeviceRepository {
         }
       } else {
         const elapsedMs = now - new Date(dev.lastSeen).getTime();
-        // If data flow is disabled or no telemetry received for > 40 seconds, automatically mark offline
-        if (dev.dataFlowActive === false || elapsedMs > 40000) {
+        // Configurable IoT Watchdog: Uses device.heartbeatTimeoutSeconds (default 300s / 5 mins)
+        const timeoutSec = dev.heartbeatTimeoutSeconds && dev.heartbeatTimeoutSeconds > 0 ? dev.heartbeatTimeoutSeconds : 300;
+        const offlineTimeoutMs = timeoutSec * 1000;
+        const warningTimeoutMs = offlineTimeoutMs * 0.75;
+
+        // If user manually switched device off (dataFlowActive === false), keep it offline
+        if (dev.dataFlowActive === false) {
+          if (dev.status !== 'offline') {
+            dev.status = 'offline';
+            hasChanges = true;
+          }
+        } else if (elapsedMs > offlineTimeoutMs) {
           if (dev.status !== 'offline') {
             dev.status = 'offline';
             hasChanges = true;
 
+            const timeFormatted = timeoutSec >= 3600 
+              ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} saattir` 
+              : `${Math.round(timeoutSec / 60)} dakikadır`;
+
             this.db.addAuditLog(
               dev.userId || 'system',
               'Sistem Sinyal Takibi',
-              `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress}) 40 saniyedir sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
+              `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) ${timeFormatted} sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
               'high'
             );
 
             this.db.addNotification({
               userId: dev.userId || 'usr_admin',
               title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
-              message: `${dev.name} cihazından 40 saniyedir sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti.`,
+              message: `${dev.name} cihazından ${timeFormatted} sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
               severity: 'critical',
               deviceId: dev.id,
               deviceName: dev.name,
             });
           }
-        } else if (elapsedMs > 18000) {
+        } else if (elapsedMs > warningTimeoutMs) {
           if (dev.status === 'online') {
             dev.status = 'warning';
+            hasChanges = true;
+          }
+        } else {
+          if (dev.status !== 'online') {
+            dev.status = 'online';
             hasChanges = true;
           }
         }
@@ -108,8 +146,8 @@ export class DeviceRepository {
     });
   }
 
-  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
-    const newId = `dev_${Date.now()}`;
+  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
+    const newId = (deviceData.id && deviceData.id.trim()) ? deviceData.id.trim() : `dev_${Date.now()}`;
     const keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
     const isSimulated = deviceData.isSimulated ?? false;
     const saveSimulatedDataToDb = deviceData.saveSimulatedDataToDb ?? false;
@@ -128,6 +166,8 @@ export class DeviceRepository {
       apiKey: keyDetails.rawKey,
       apiKeyPrefix: keyDetails.prefix,
       apiKeyHash: keyDetails.hash,
+      heartbeatTimeoutSeconds: deviceData.heartbeatTimeoutSeconds || 300,
+      dataFlowActive: deviceData.dataFlowActive !== false,
       lastSeen: new Date().toISOString(),
     };
 
@@ -181,6 +221,8 @@ export class DeviceRepository {
       'userId',
       'rateLimitPerMin',
       'encryptionMethod',
+      'heartbeatTimeoutSeconds',
+      'expectedIntervalSeconds',
       'isSimulated',
       'saveSimulatedDataToDb',
       'simulatedMetrics',
@@ -195,6 +237,8 @@ export class DeviceRepository {
     if (updates.userId !== undefined) dev.userId = updates.userId;
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
+    if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
+    if (updates.expectedIntervalSeconds !== undefined) dev.expectedIntervalSeconds = updates.expectedIntervalSeconds;
     if (updates.isSimulated !== undefined) dev.isSimulated = updates.isSimulated;
     if (updates.saveSimulatedDataToDb !== undefined) dev.saveSimulatedDataToDb = updates.saveSimulatedDataToDb;
     if (updates.simulatedMetrics !== undefined) dev.simulatedMetrics = updates.simulatedMetrics;
@@ -220,15 +264,14 @@ export class DeviceRepository {
       if (updates.dataFlowActive === true) {
         dev.lastSeen = new Date().toISOString();
         dev.status = 'online';
+      } else {
+        dev.status = 'offline';
       }
     }
 
     if (updates.status !== undefined) {
       dev.status = updates.status;
-      if (updates.status === 'offline') {
-        dev.dataFlowActive = false;
-      } else if (updates.status === 'online') {
-        dev.dataFlowActive = true;
+      if (updates.status === 'online') {
         dev.lastSeen = new Date().toISOString();
       }
     }

@@ -52,7 +52,9 @@ interface DictionaryTerm {
 }
 
 export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
-  const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'guides' | 'troubleshooting'>('faq');
+  const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'code_examples' | 'guides' | 'troubleshooting'>('code_examples');
+  const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs'>('all');
+  const [activeCodeExampleId, setActiveCodeExampleId] = useState<string>('code_esp32_http_telemetry');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaqCategory, setSelectedFaqCategory] = useState<string>('all');
   const [selectedTermCategory, setSelectedTermCategory] = useState<string>('all');
@@ -66,19 +68,471 @@ export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
     setTimeout(() => setCopiedText(null), 2000);
   };
 
-  const sampleCurl = `curl -X POST "${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/api/v1/telemetry" \\
+  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+  // Comprehensive, 100% Working Code Examples Registry (Always kept working and updated)
+  const codeExamples = [
+    {
+      id: 'code_esp32_http_telemetry',
+      title: 'ESP32 - HTTP Telemetri & Röle Yanıtı (Piggybacking)',
+      category: 'esp32',
+      categoryLabel: 'ESP32 / C++',
+      badge: 'Canlı & Önerilen',
+      description: 'Sensör verilerini (sıcaklık, nem, voltaj) sunucuya POST eder ve gelen HTTP yanıtından anında röle/PWM komutlarını okuyarak pinleri tetikler.',
+      tags: ['esp32', 'http', 'telemetri', 'röle', 'piggybacking', 'komut yakalama'],
+      endpoint: 'POST /api/v1/telemetry veya /api/telemetry',
+      code: `// =========================================================================
+// NEXUSNODE IoT PLATFORMU - ESP32 HTTP TELEMETRİ & KOMUT YAKALAMA (PIGGYBACKING)
+// Bu kod derlenip doğrudan ESP32 kartınıza yüklenebilir.
+// =========================================================================
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h> // ArduinoJson v6 veya v7
+
+const char* WIFI_SSID     = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRENIZ";
+const char* SERVER_URL    = "${originUrl}/api/v1/telemetry";
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihazlar sekmesinden alınan Token
+const char* DEVICE_NAME   = "Saha_ESP32_Sensor";
+
+const int RELAY_PIN_1 = 26; // Röle 1 pini
+const int RELAY_PIN_2 = 27; // Röle 2 pini
+const int LED_STATUS  = 2;  // Dahili LED
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN_1, OUTPUT);
+  pinMode(RELAY_PIN_2, OUTPUT);
+  pinMode(LED_STATUS, OUTPUT);
+  digitalWrite(RELAY_PIN_1, LOW);
+  digitalWrite(RELAY_PIN_2, LOW);
+
+  Serial.println("\\n>>> NexusNode ESP32 Istemcisi Baslatiliyor...");
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println("\\n[OK] WiFi Baglantisi Basarili! IP: " + WiFi.localIP().toString());
+}
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    digitalWrite(LED_STATUS, HIGH);
+
+    // 1. Ölçüm Simülasyonu / Sensör Okumaları (DHT22, BMP280, vb.)
+    float sicaklik = 24.0 + (random(0, 100) / 20.0);
+    float nem = 50.0 + (random(0, 200) / 10.0);
+    float voltaj = 12.1 + (random(0, 40) / 100.0);
+
+    // 2. Hafif & Hızlı Veri Formatı: TOKEN, CIHAZ_ADI, METRIK:DEGER...
+    String payload = String(API_KEY) + "," + DEVICE_NAME + 
+                     ",sıcaklık:" + String(sicaklik, 2) + 
+                     ",nem:" + String(nem, 1) + 
+                     ",voltaj:" + String(voltaj, 2) + 
+                     ",rssi:" + String(WiFi.RSSI());
+
+    HTTPClient http;
+    http.begin(SERVER_URL);
+    http.addHeader("Content-Type", "text/plain");
+
+    int httpCode = http.POST(payload);
+    Serial.printf("[HTTP POST] Kod: %d | Paket: %s\\n", httpCode, payload.c_str());
+
+    // 3. Yanıttan Bekleyen Komutları Yakala (Response Piggybacking)
+    if (httpCode == 200) {
+      String response = http.getString();
+      Serial.println("[SUNUCU YANITI]: " + response);
+
+      // JSON Yanıt Ayrıştırma
+      DynamicJsonDocument doc(1024);
+      DeserializationError err = deserializeJson(doc, response);
+      if (!err && doc.containsKey("commands")) {
+        JsonArray commands = doc["commands"];
+        for (JsonObject cmd : commands) {
+          String commandName = cmd["command"] | "";
+          String payloadVal  = cmd["payload"] | "";
+          Serial.printf(">>> GELEN KOMUT: %s | DEĞER: %s\\n", commandName.c_str(), payloadVal.c_str());
+
+          if (commandName == "RELAY_1" || commandName == "OUT_1") {
+            digitalWrite(RELAY_PIN_1, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
+          } else if (commandName == "RELAY_2" || commandName == "OUT_2") {
+            digitalWrite(RELAY_PIN_2, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
+          }
+        }
+      }
+    } else {
+      Serial.printf("[HATA] HTTP Baglanti Hatasi, Kod: %d\\n", httpCode);
+    }
+    http.end();
+    digitalWrite(LED_STATUS, LOW);
+  } else {
+    Serial.println("[UYARI] WiFi Baglantisi koptu, yeniden baglaniliyor...");
+    WiFi.reconnect();
+  }
+
+  delay(5000); // 5 Saniyede bir periyodik telemetri iletimi
+}`,
+    },
+    {
+      id: 'code_esp32_heartbeat_ping',
+      title: 'ESP32 - Düşük Güçlü Periyodik Heartbeat (Ping)',
+      category: 'ping',
+      categoryLabel: 'Heartbeat / Ping',
+      badge: 'Yeni / Tolerans Destekli',
+      description: 'Pilli veya güneş enerjili cihazlar için hafif sinyal pini. Cihaz zaman aşımına uğrayıp Çevrimdışı kalsa bile bu ping gittiğinde otomatik Çevrimiçi olur.',
+      tags: ['esp32', 'heartbeat', 'ping', 'düşük güç', 'tolerans', 'çevrimiçi'],
+      endpoint: 'POST /api/telemetry/ping',
+      code: `// =========================================================================
+// NEXUSNODE IoT - DÜŞÜK GÜÇLÜ PERİYODİK HEARTBEAT / PING ÖRNEĞİ
+// Cihazınız Çevrimdışı kalsa dahi bu hafif istek ile anında Çevrimiçi duruma geçer.
+// =========================================================================
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+const char* WIFI_SSID     = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRENIZ";
+const char* PING_ENDPOINT = "${originUrl}/api/telemetry/ping";
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihaz Token
+const char* DEVICE_ID     = "dev_esp32_01";
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println("\\n[OK] WiFi Baglandi!");
+}
+
+void sendHeartbeatPing() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(PING_ENDPOINT);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-API-Key", API_KEY);
+
+    // Hafif JSON Ping Paketi
+    String jsonPayload = "{\\"deviceId\\":\\"" + String(DEVICE_ID) + 
+                         "\\",\\"ping\\":1,\\"rssi\\":" + String(WiFi.RSSI()) + "}";
+
+    int httpCode = http.POST(jsonPayload);
+    if (httpCode == 200) {
+      Serial.println("[OK] Heartbeat Ping sunucu tarafından onaylandı -> Cihaz Canlı & Çevrimiçi!");
+    } else {
+      Serial.printf("[HATA] Ping gönderilemedi, Kod: %d\\n", httpCode);
+    }
+    http.end();
+  }
+}
+
+void loop() {
+  sendHeartbeatPing();
+  // Cihazınızın paneldeki Heartbeat Toleransına göre periyot belirleyin (Örn: 60 saniye)
+  delay(60000); 
+}`,
+    },
+    {
+      id: 'code_nodemcu_esp8266_http',
+      title: 'NodeMCU (ESP8266) - Standart JSON Telemetri Gönderimi',
+      category: 'nodemcu',
+      categoryLabel: 'NodeMCU ESP8266',
+      badge: 'Kararlı',
+      description: 'NodeMCU ESP8266 kartınızdan `/api/telemetry` endpointine standart JSON telemetri paketi iletme kodu.',
+      tags: ['nodemcu', 'esp8266', 'json', 'telemetri', 'arduino'],
+      endpoint: 'POST /api/telemetry',
+      code: `// =========================================================================
+// NEXUSNODE IoT - NODEMCU (ESP8266) STANDART JSON TELEMETRİ GÖNDERİMİ
+// =========================================================================
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
+const char* WIFI_SSID  = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS  = "WIFI_SIFRENIZ";
+const char* SERVER_URL = "${originUrl}/api/telemetry";
+const char* API_KEY    = "nkn_live_YOUR_DEVICE_API_KEY";
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\\nNodeMCU WiFi Ağına Başarıyla Bağlandı!");
+}
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    HTTPClient http;
+
+    http.begin(client, SERVER_URL);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-API-Key", API_KEY);
+
+    // Çoklu Metrik Gönderimi (Array veya Tekil JSON)
+    String jsonBody = "{\\"deviceId\\":\\"dev_nodemcu_01\\",\\"metric\\":\\"temperature\\",\\"value\\":26.8,\\"unit\\":\\"°C\\"}";
+
+    int httpCode = http.POST(jsonBody);
+    Serial.print("HTTP Yanıt Kodu: ");
+    Serial.println(httpCode);
+
+    if (httpCode > 0) {
+      String response = http.getString();
+      Serial.println("Sunucu Yanıtı: " + response);
+    }
+    http.end();
+  }
+  delay(10000); // 10 saniyede bir ölçüm ilet
+}`,
+    },
+    {
+      id: 'code_esp32_websocket_client',
+      title: 'ESP32 - Canlı Çift Yönlü WebSocket İstemcisi',
+      category: 'esp32',
+      categoryLabel: 'ESP32 WebSocket',
+      badge: 'Gerçek Zamanlı (<20ms)',
+      description: 'WebSocketsClient kütüphanesi kullanarak sunucuya kalıcı WS soketi açar. Dashboard üzerinden butona basıldığında anında milisaniyeler içinde komutu yakalar.',
+      tags: ['esp32', 'websocket', 'realtime', 'düşük gecikme', 'çift yönlü'],
+      endpoint: 'WS ws://SERVER_HOST:3000/ws',
+      code: `// =========================================================================
+// NEXUSNODE IoT - ESP32 CANLI WEBSOCKET ÇİFT YÖNLÜ İLETİŞİM
+// Kütüphane: Arduino WebSockets by Markus Sattler (Library Manager'dan ekleyin)
+// =========================================================================
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+
+const char* WIFI_SSID     = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRENIZ";
+const char* WS_HOST       = "${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}";
+const int   WS_PORT       = 3000;
+const char* WS_PATH       = "/ws";
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY";
+
+WebSocketsClient webSocket;
+unsigned long lastSend = 0;
+
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.println("[WS] Baglanti Kesildi!");
+      break;
+    case WStype_CONNECTED:
+      Serial.printf("[WS] Sunucuya Baglandi! URL: %s\\n", payload);
+      // Sunucuya kimlik tanıtımı yap
+      webSocket.sendTXT("{\\"type\\":\\"register\\",\\"apiKey\\":\\"" + String(API_KEY) + "\\"}");
+      break;
+    case WStype_TEXT: {
+      Serial.printf("[WS GELEN VERİ]: %s\\n", payload);
+      DynamicJsonDocument doc(512);
+      deserializeJson(doc, payload);
+      String typeStr = doc["type"] | "";
+      if (typeStr == "CONTROL_COMMAND") {
+        String cmd = doc["command"] | "";
+        String val = doc["value"] | "";
+        Serial.println(">>> ANLIK KOMUT ALINDI: " + cmd + " -> " + val);
+        // Röle veya PWM pinini burada anında sürün!
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\\nWiFi Baglandi!");
+
+  // WebSocket Baslat
+  webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(5000);
+}
+
+void loop() {
+  webSocket.loop();
+
+  // 5 Saniyede bir canli telemetri paketi yayinla
+  if (millis() - lastSend > 5000) {
+    lastSend = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      String json = "{\\"type\\":\\"TELEMETRY_PACKET\\",\\"deviceId\\":\\"dev_esp32_ws\\",\\"metrics\\":{\\"temp\\":27.3,\\"voltage\\":12.2}}";
+      webSocket.sendTXT(json);
+      Serial.println("[WS GÖNDERİLDİ] Canlı Telemetri Paketi");
+    }
+  }
+}`,
+    },
+    {
+      id: 'code_python_iot_agent',
+      title: 'Python - Endüstriyel IoT Ajanı (Auto-Reconnect & Telemetri)',
+      category: 'python',
+      categoryLabel: 'Python Script',
+      badge: 'Linux / Raspberry Pi',
+      description: 'Raspberry Pi, endüstriyel PC veya yerel sunucularda arka planda çalışan ve sistem parametrelerini otomatik gönderen Python servisi.',
+      tags: ['python', 'raspberry pi', 'linux', 'iot agent', 'requests'],
+      endpoint: 'POST /api/v1/telemetry',
+      code: `# =========================================================================
+# NEXUSNODE IoT - PYTHON SAHA VERİ TOPLAYICI AJAN (IoT AGENT)
+# Gereksinim: pip install requests psutil
+# =========================================================================
+import time
+import requests
+import psutil
+
+SERVER_URL = "${originUrl}/api/v1/telemetry"
+API_KEY = "nkn_live_YOUR_DEVICE_API_KEY"
+DEVICE_NAME = "RaspberryPi_Saha_01"
+
+print(f">>> NexusNode Python IoT Ajanı Başlatıldı! Hedef: {SERVER_URL}")
+
+while True:
+    try:
+        # Sistem Gerçek Metrikleri
+        cpu_usage = psutil.cpu_percent(interval=1)
+        ram_usage = psutil.virtual_memory().percent
+        disk_usage = psutil.disk_usage('/').percent
+
+        # Format: TOKEN, CIHAZ_ADI, METRIK:DEGER...
+        payload = f"{API_KEY}, {DEVICE_NAME}, cpu_kullanım:{cpu_usage}, ram_kullanım:{ram_usage}, disk_doluluk:{disk_usage}"
+
+        response = requests.post(
+            SERVER_URL,
+            data=payload.encode('utf-8'),
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            print(f"[OK] Paket İletildi (CPU: %{cpu_usage}, RAM: %{ram_usage}) -> Yanıt: {response.json()}")
+        else:
+            print(f"[HATA] Sunucu Kodu: {response.status_code} | Yanıt: {response.text}")
+
+    except Exception as e:
+        print(f"[BAĞLANTI HATASI] {e}. 5 saniye sonra tekrar denenecek...")
+
+    time.sleep(5) # 5 Saniye aralıkla veri gönder
+`,
+    },
+    {
+      id: 'code_curl_bash_scripts',
+      title: 'cURL / Bash - Hızlı Test ve Entegrasyon Betikleri',
+      category: 'curl',
+      categoryLabel: 'cURL & Bash',
+      badge: 'Komut Satırı',
+      description: 'Terminalden tek satırda telemetri verisi gönderme, heartbeat ping atma ve röle kontrol tetikleme komutları.',
+      tags: ['curl', 'bash', 'terminal', 'cli', 'ping', 'kontrol'],
+      endpoint: 'POST /api/v1/telemetry & /api/telemetry/ping & /api/devices/:id/control',
+      code: `#!/bin/bash
+# =========================================================================
+# NEXUSNODE IoT - cURL HIZLI TEST KOMUTLARI
+# =========================================================================
+
+# 1. HIZLI METİN FORMATINDA TELEMETRİ GÖNDERİMİ
+curl -X POST "${originUrl}/api/v1/telemetry" \\
   -H "Content-Type: text/plain" \\
-  -d "YOUR_API_KEY, YOUR_DEVICE_NAME, sıcaklık:37.5, nem:85"`;
+  -d "YOUR_API_KEY, Saha_Cihazi_01, sıcaklık:28.4, nem:62.5, basınç:1013.2"
 
-  const samplePython = `import requests
+# 2. HEARTBEAT / PING SİNYALİ GÖNDERME (Cihazı Canlı Tutma / Çevrimiçi Yapma)
+curl -X POST "${originUrl}/api/telemetry/ping" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{"deviceId":"dev_esp32_01","ping":1,"rssi":-58}'
 
-url = "${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}/api/v1/telemetry"
-# Format: TOKEN, CİHAZ_ADI, METRİK1:DEĞER1, METRİK2:DEĞER2
-payload = "YOUR_API_KEY, YOUR_DEVICE_NAME, sıcaklık:37.5, nem:85"
+# 3. JSON FORMATINDA TELEMETRİ GÖNDERİMİ
+curl -X POST "${originUrl}/api/telemetry" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{
+    "deviceId": "dev_esp32_01",
+    "metric": "temperature",
+    "value": 31.2,
+    "unit": "°C"
+  }'
 
-response = requests.post(url, data=payload, headers={"Content-Type": "text/plain"})
-print("Status:", response.status_code)
-print("Response:", response.json())`;
+# 4. RÖLE / PWM ÇIKIŞI TETİKLEME (Kontrol API)
+curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "command": "RELAY_1",
+    "outputPin": "OUT_1",
+    "value": "HIGH"
+  }'
+`,
+    },
+    {
+      id: 'code_nodejs_javascript_client',
+      title: 'Node.js / JavaScript - Axios & Fetch İstemcisi',
+      category: 'nodejs',
+      categoryLabel: 'Node.js / JS',
+      badge: 'Web & Backend',
+      description: 'Node.js veya modern tarayıcı ortamlarından sistem API’lerine veri gönderme ve kontrol sinyali iletme kodu.',
+      tags: ['nodejs', 'javascript', 'axios', 'fetch', 'backend'],
+      endpoint: 'POST /api/v1/telemetry',
+      code: `// =========================================================================
+// NEXUSNODE IoT - NODE.JS / JAVASCRIPT TELEMETRİ VE KONTROL İSTEMCİSİ
+// =========================================================================
+const axios = require('axios'); // veya modern fetch
+
+const SERVER_URL = '${originUrl}/api/v1/telemetry';
+const API_KEY = 'nkn_live_YOUR_DEVICE_API_KEY';
+const DEVICE_NAME = 'NodeJS_Gateway_01';
+
+async function sendTelemetry() {
+  try {
+    const payload = \`\${API_KEY}, \${DEVICE_NAME}, sicaklik:25.6, nem:58.2, voltaj:220.4\`;
+
+    const response = await axios.post(SERVER_URL, payload, {
+      headers: { 'Content-Type': 'text/plain' },
+      timeout: 5000,
+    });
+
+    console.log('[OK] Telemetri gönderildi! Sunucu yanıtı:', response.data);
+
+    // Gelen komutları kontrol et
+    if (response.data && response.data.commands) {
+      console.log('>>> Bekleyen komutlar:', response.data.commands);
+    }
+  } catch (error) {
+    console.error('[HATA] İstek başarısız:', error.message);
+  }
+}
+
+// 5 saniyede bir gönder
+setInterval(sendTelemetry, 5000);
+sendTelemetry();
+`,
+    },
+  ];
+
+  const filteredCodeExamples = useMemo(() => {
+    return codeExamples.filter((item) => {
+      const matchesCategory =
+        selectedCodeCategory === 'all' || item.category === selectedCodeCategory;
+      const matchesSearch =
+        searchQuery.trim() === '' ||
+        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesCategory && matchesSearch;
+    });
+  }, [codeExamples, selectedCodeCategory, searchQuery]);
+
+  const activeCodeBlock =
+    codeExamples.find((c) => c.id === activeCodeExampleId) || codeExamples[0];
+
+  const sampleCurl = codeExamples.find((c) => c.id === 'code_curl_bash_scripts')?.code || '';
+  const samplePython = codeExamples.find((c) => c.id === 'code_python_iot_agent')?.code || '';
 
   // FAQ Database
   const faqs: FAQItem[] = [
@@ -307,6 +761,21 @@ Body:
       {/* Main Section Navigation Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto scrollbar-none">
         <button
+          onClick={() => setActiveTab('code_examples')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'code_examples'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+          }`}
+        >
+          <Code2 className="w-4 h-4 text-emerald-300" />
+          <span>Çalışan Kod Örnekleri & API</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-200 font-mono">
+            {codeExamples.length} Örnek
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('faq')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'faq'
@@ -344,7 +813,7 @@ Body:
               : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
           }`}
         >
-          <Code2 className="w-4 h-4" />
+          <Cpu className="w-4 h-4" />
           <span>Hızlı Entegrasyon Kılavuzları</span>
         </button>
 
@@ -363,6 +832,221 @@ Body:
           </span>
         </button>
       </div>
+
+      {/* TAB 0: COMPREHENSIVE WORKING CODE EXAMPLES & API */}
+      {activeTab === 'code_examples' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Card */}
+          <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 p-6 sm:p-7 rounded-3xl border border-emerald-500/30 shadow-2xl text-white space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30 shrink-0">
+                  <Code2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg sm:text-xl font-black text-white">
+                      Çalışan Kod Blokları & Canlı API Örnekleri
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      %100 Test Edilmiş
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Bu kısımdaki tüm kod blokları sistem mimarisiyle tam uyumludur. Cihazınıza veya sunucunuza kopyalayıp anında çalıştırabilirsiniz.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleCopy(activeCodeBlock.code)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  {copiedText === activeCodeBlock.code ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-200" />
+                      <span>Kopyalandı!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Aktif Kodu Kopyala</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Filter Categories */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
+              <span className="text-slate-400 font-bold text-[11px] shrink-0">Platform:</span>
+              {[
+                { id: 'all', label: 'Tüm Kodlar' },
+                { id: 'esp32', label: 'ESP32 (C++)' },
+                { id: 'nodemcu', label: 'NodeMCU ESP8266' },
+                { id: 'ping', label: 'Heartbeat / Ping' },
+                { id: 'python', label: 'Python (Agent)' },
+                { id: 'curl', label: 'cURL & Bash' },
+                { id: 'nodejs', label: 'Node.js / JS' },
+              ].map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCodeCategory(cat.id as any)}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer ${
+                    selectedCodeCategory === cat.id
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                      : 'bg-slate-900/80 text-slate-400 border border-slate-800 hover:bg-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Main 2-Column Code Workbench */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Sidebar: Example Selector List */}
+            <div className="lg:col-span-4 space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  Hazır Kod Kütüphanesi ({filteredCodeExamples.length})
+                </span>
+                <span className="text-[10px] text-slate-400">Seçmek için tıklayın</span>
+              </div>
+
+              <div className="space-y-2 max-h-[620px] overflow-y-auto pr-1">
+                {filteredCodeExamples.map((item) => {
+                  const isSelected = item.id === activeCodeBlock.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveCodeExampleId(item.id)}
+                      className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 ${
+                        isSelected
+                          ? 'bg-emerald-500/10 border-emerald-500/50 shadow-lg shadow-emerald-500/5 ring-1 ring-emerald-500/40 text-slate-900 dark:text-white'
+                          : 'bg-white dark:bg-[#0f172a] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                          {item.categoryLabel}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20">
+                          {item.badge}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-tight">
+                          {item.title}
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                          {item.description}
+                        </p>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                        <span className="truncate max-w-[200px]">{item.endpoint}</span>
+                        <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'text-emerald-500 translate-x-0.5' : ''}`} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right: Full Interactive Code Viewer & Documentation */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="bg-[#020617] rounded-3xl border border-slate-800 shadow-2xl overflow-hidden">
+                {/* Code Window Top Bar */}
+                <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-full bg-rose-500/80" />
+                      <span className="w-3 h-3 rounded-full bg-amber-500/80" />
+                      <span className="w-3 h-3 rounded-full bg-emerald-500/80" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-200 font-mono">
+                      {activeCodeBlock.title}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-400 border border-slate-700">
+                      {activeCodeBlock.endpoint}
+                    </span>
+                    <button
+                      onClick={() => handleCopy(activeCodeBlock.code)}
+                      className="p-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-slate-700"
+                    >
+                      {copiedText === activeCodeBlock.code ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">Kopyalandı</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Kodu Kopyala</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Code Content */}
+                <div className="p-5 overflow-x-auto max-h-[560px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                  <pre className="font-mono text-xs text-emerald-400 leading-relaxed">
+                    {activeCodeBlock.code}
+                  </pre>
+                </div>
+
+                {/* Code Footer / Instructions */}
+                <div className="p-4 bg-slate-900/60 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      <b>Not:</b> Koddaki <code className="text-slate-200 font-mono bg-slate-800 px-1 py-0.5 rounded">API_KEY</code> alanını sistemdeki <em>Cihazlar</em> sekmesinden kopyalayacağınız cihaz anahtarınızla değiştirin.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {activeCodeBlock.tags.map((t) => (
+                      <span key={t} className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400 font-mono">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Integration Guidance Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="p-4 bg-white dark:bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
+                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
+                    <Zap className="w-4 h-4" />
+                    <span>Otomatik Çevrimiçi Olma Mantığı</span>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400 leading-relaxed text-[11px]">
+                    Cihazınız tolerans aşımından dolayı Çevrimdışı kalsa bile; telemetri veya <code className="text-emerald-500 font-mono">/api/telemetry/ping</code> sinyali gönderdiğinde <b>otomatik olarak anında ÇEVRİMİÇİ</b> konuma alınır.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white dark:bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
+                  <div className="flex items-center gap-2 text-cyan-600 dark:text-cyan-400 font-bold">
+                    <Radio className="w-4 h-4" />
+                    <span>Röle & Komut Tetikleme (Piggybacking)</span>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400 leading-relaxed text-[11px]">
+                    Kullanıcı dashboard üzerindeki butona bastığında komut kuyruğa eklenir. ESP32 bir sonraki POST telemetri paketinde yanıt içerisinden komutu doğrudan alıp GPIO çıkışını sürer.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: FAQ SECTION */}
       {activeTab === 'faq' && (

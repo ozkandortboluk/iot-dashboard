@@ -135,11 +135,12 @@ export class DeviceAuthService {
       };
     }
 
-    // 4. Device ID Mismatch Verification Check
+    // 4. Device ID Mismatch Verification Check (Optional check: Only verifies if deviceId is explicitly provided and doesn't match)
     if (
       payload.deviceIdFromPayload &&
       payload.deviceIdFromPayload !== device.id &&
-      payload.deviceIdFromPayload !== device.name
+      payload.deviceIdFromPayload !== device.name &&
+      payload.deviceIdFromPayload !== device.apiKeyPrefix
     ) {
       console.warn(`[Device Auth Mismatch] API key belongs to device ${device.id} (${device.name}), but payload specified deviceId=${payload.deviceIdFromPayload}`);
       return {
@@ -147,7 +148,7 @@ export class DeviceAuthService {
         httpStatus: 403,
         errorResponse: {
           error: 'device_id_mismatch',
-          message: `API Key ile doğrulanan cihaz ID (${device.id}) ile paket içerisindeki deviceId (${payload.deviceIdFromPayload}) eşleşmiyor! Lütfen cihaz konfigürasyonunu kontrol edin.`,
+          message: `API Key ile doğrulanan cihaz ID (${device.id} / "${device.name}") ile paket içerisindeki deviceId (${payload.deviceIdFromPayload}) eşleşmiyor! Paketten deviceId alanını kaldırabilir veya cihaz ID'sini '${device.id}' olarak güncelleyebilirsiniz.`,
           authenticatedDeviceId: device.id,
           payloadDeviceId: payload.deviceIdFromPayload,
         },

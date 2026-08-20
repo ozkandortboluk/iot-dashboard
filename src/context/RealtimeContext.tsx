@@ -765,7 +765,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(err.error || 'Cihaz güncellenemedi');
       }
       const updated: Device = await res.json();
-      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
+      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updated } : d)));
       return updated;
     } catch (e: any) {
       console.error('updateDevice error:', e);

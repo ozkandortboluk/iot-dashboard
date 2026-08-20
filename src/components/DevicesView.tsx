@@ -15,6 +15,7 @@ import {
   Trash2,
   Terminal,
   Send,
+  Code,
   Code2,
   Lock,
   Globe,
@@ -77,6 +78,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [ipAddress, setIpAddress] = useState('192.168.1.150');
   const [targetOwnerId, setTargetOwnerId] = useState<string>('usr_admin');
   const [manualApiKey, setManualApiKey] = useState('');
+  const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(300);
   const [isSimulated, setIsSimulated] = useState<boolean>(false);
   const [saveSimulatedDataToDb, setSaveSimulatedDataToDb] = useState<boolean>(false);
   const [addSimMetrics, setAddSimMetrics] = useState<string[]>(['l1', 'l2', 'l3', 'ri', 'rc', 'p']);
@@ -93,6 +95,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editEncryption, setEditEncryption] = useState('AES-256-GCM');
   const [editStatus, setEditStatus] = useState<Device['status']>('online');
   const [editApiKey, setEditApiKey] = useState('');
+  const [editHeartbeatTimeout, setEditHeartbeatTimeout] = useState<number>(300);
   const [editIsSimulated, setEditIsSimulated] = useState<boolean>(false);
   const [editSaveSimulatedDataToDb, setEditSaveSimulatedDataToDb] = useState<boolean>(false);
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
@@ -116,6 +119,8 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [clearedLogsAt, setClearedLogsAt] = useState<number>(0);
   const [lastResponse, setLastResponse] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [activeCodeTab, setActiveCodeTab] = useState<'esp32_ping' | 'curl_ping' | 'curl_telemetry' | 'python'>('esp32_ping');
+  const [showCodeGuide, setShowCodeGuide] = useState(false);
 
   const activeDevice =
     (selectedDevice ? devices.find((d) => d.id === selectedDevice.id) : null) ||
@@ -276,6 +281,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         ipAddress,
         userId: ownerId,
         apiKey: manualApiKey.trim() || undefined,
+        heartbeatTimeoutSeconds: addHeartbeatTimeout,
         isSimulated,
         saveSimulatedDataToDb: isSimulated ? saveSimulatedDataToDb : false,
         simulatedMetrics: isSimulated ? addSimMetrics : [],
@@ -283,6 +289,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       setShowAddModal(false);
       setName('');
       setManualApiKey('');
+      setAddHeartbeatTimeout(300);
       setIsSimulated(false);
       setSaveSimulatedDataToDb(false);
       setSelectedDevice(dev);
@@ -302,6 +309,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
     setEditStatus(dev.status);
     setEditApiKey(dev.apiKey);
+    setEditHeartbeatTimeout(dev.heartbeatTimeoutSeconds || 300);
     setEditIsSimulated(dev.isSimulated ?? false);
     setEditSaveSimulatedDataToDb(dev.saveSimulatedDataToDb ?? false);
     setEditSimMetrics(dev.simulatedMetrics || (dev.isSimulated ? ['l1', 'l2', 'l3', 'ri', 'rc', 'p'] : ['l1', 'l2', 'l3', 'ri', 'rc', 'p']));
@@ -309,7 +317,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
     if (!editingDevice) return;
     try {
       const updated = await updateDevice(editingDevice.id, {
@@ -322,6 +329,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         encryptionMethod: editEncryption,
         status: editStatus,
         apiKey: editApiKey.trim() || undefined,
+        heartbeatTimeoutSeconds: editHeartbeatTimeout,
         isSimulated: editIsSimulated,
         saveSimulatedDataToDb: editIsSimulated ? editSaveSimulatedDataToDb : false,
         simulatedMetrics: editIsSimulated ? editSimMetrics : [],
@@ -538,10 +546,94 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     );
   };
 
+  const renderHeartbeatSelector = (
+    timeoutSec: number,
+    setTimeoutSec: (val: number) => void
+  ) => {
+    const presets = [
+      { label: '⚡ 30 Saniye', sub: 'Hızlı Test', val: 30 },
+      { label: '⏱️ 1 Dakika', sub: 'Sık Veri', val: 60 },
+      { label: '🛡️ 5 Dakika', sub: 'Standart IoT', val: 300 },
+      { label: '📡 15 Dakika', sub: 'Güneş / Sayaç', val: 900 },
+      { label: '🔋 1 Saat', sub: 'Düşük Güç', val: 3600 },
+      { label: '⏳ 6 Saat', sub: 'Geniş Aralık', val: 21600 },
+      { label: '📅 24 Saat', sub: 'Günde 1 Kez', val: 86400 },
+    ];
+
+    return (
+      <div className="p-4 bg-indigo-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 text-xs">
+            <Radio className="w-4 h-4" />
+            <span>Sinyal & Heartbeat Toleransı (Çevrimdışı Olma Süresi)</span>
+          </label>
+          <span className="text-[10px] px-2.5 py-0.5 font-mono font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 rounded-full border border-indigo-500/30">
+            {timeoutSec >= 3600
+              ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} Saat`
+              : `${Math.round(timeoutSec / 60)} Dk (${timeoutSec} sn)`}
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+          Cihazınızın veri gönderme periyoduna göre tolerans belirleyin (Örn: Saatte 1 gönderen pilli cihazlar için <strong>1 Saat</strong>). Cihaz zaman aşımına uğrayıp Çevrimdışı olsa bile, yeni veri veya <code>/api/telemetry/ping</code> sinyali geldiğinde <strong>otomatik olarak Çevrimiçi</strong> olur.
+        </p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {presets.map((p) => {
+            const isSelected = timeoutSec === p.val;
+            return (
+              <button
+                key={p.val}
+                type="button"
+                onClick={() => setTimeoutSec(p.val)}
+                className={`p-2 rounded-xl text-left border transition cursor-pointer ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/20 ring-2 ring-indigo-500/30'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                }`}
+              >
+                <div className="text-xs font-bold">{p.label}</div>
+                <div className={`text-[10px] ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                  {p.sub}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 flex items-center gap-2">
+          <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
+            Özel Süre (Saniye):
+          </label>
+          <input
+            type="number"
+            min={10}
+            max={604800}
+            value={timeoutSec}
+            onChange={(e) => setTimeoutSec(Math.max(10, Number(e.target.value)))}
+            className="w-32 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs font-bold dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+          />
+          <span className="text-[10px] text-slate-400">
+            {timeoutSec >= 3600
+              ? `≈ ${(timeoutSec / 3600).toFixed(2)} saat`
+              : `≈ ${(timeoutSec / 60).toFixed(1)} dakika`}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const curlExample = activeDevice
     ? `curl -X POST "${window.location.origin}/api/v1/telemetry" \\
   -H "Content-Type: text/plain" \\
   -d "${activeDevice.apiKey}, ${activeDevice.name}, sıcaklık:37.5, nem:85"`
+    : '';
+
+  const curlPingExample = activeDevice
+    ? `curl -X POST "${window.location.origin}/api/telemetry/ping" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${activeDevice.apiKey}" \\
+  -d '{"deviceId":"${activeDevice.id}","ping":1}'`
     : '';
 
   const pythonExample = activeDevice
@@ -554,6 +646,31 @@ payload = "${activeDevice.apiKey}, ${activeDevice.name}, sıcaklık:37.5, nem:85
 response = requests.post(url, data=payload, headers={"Content-Type": "text/plain"})
 print("Status:", response.status_code)
 print("Response:", response.json())`
+    : '';
+
+  const espPingExample = activeDevice
+    ? `// ESP32 Düşük Güçlü Periyodik Ping / Heartbeat Örneği (Sinyal Periyodu: ${
+        (activeDevice.heartbeatTimeoutSeconds || 300) >= 3600
+          ? `${((activeDevice.heartbeatTimeoutSeconds || 300) / 3600).toFixed(1)} Saat`
+          : `${Math.round((activeDevice.heartbeatTimeoutSeconds || 300) / 60)} Dakika`
+      })
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+void sendHeartbeat() {
+  HTTPClient http;
+  http.begin("${window.location.origin}/api/telemetry/ping");
+  http.addHeader("X-API-Key", "${activeDevice.apiKey}");
+  http.addHeader("Content-Type", "application/json");
+
+  String payload = "{\\"deviceId\\":\\"${activeDevice.id}\\",\\"ping\\":1,\\"rssi\\":" + String(WiFi.RSSI()) + "}";
+  int httpCode = http.POST(payload);
+  
+  if (httpCode == 200) {
+    Serial.println(">>> Heartbeat onaylandı! Cihaz Çevrimiçi.");
+  }
+  http.end();
+}`
     : '';
 
   return (
@@ -893,7 +1010,7 @@ print("Response:", response.json())`
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-500 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-slate-500 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <div>
                   <span>Rate Limit:</span>{' '}
                   <strong className="text-slate-800 dark:text-slate-200">
@@ -906,6 +1023,31 @@ print("Response:", response.json())`
                     {formatDateTime(activeDevice.lastSeen)}
                   </strong>
                 </div>
+                <div>
+                  <span>Heartbeat Toleransı:</span>{' '}
+                  <strong className="text-indigo-600 dark:text-indigo-400">
+                    {(activeDevice.heartbeatTimeoutSeconds || 300) >= 3600
+                      ? `${((activeDevice.heartbeatTimeoutSeconds || 300) / 3600).toFixed(1).replace('.0', '')} Saat`
+                      : `${Math.round((activeDevice.heartbeatTimeoutSeconds || 300) / 60)} Dk`}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Heartbeat Status Notice */}
+              <div className="p-2.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-[10px] text-slate-600 dark:text-slate-300 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Radio className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="truncate">
+                    Cihaz zaman aşımına uğrarsa çevrimdışı olur; yeni veri veya ping ile <strong>otomatik çevrimiçi</strong> açılır.
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowCodeGuide(!showCodeGuide)}
+                  className="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg shrink-0 cursor-pointer flex items-center gap-1"
+                >
+                  <Code className="w-3 h-3" />
+                  <span>{showCodeGuide ? 'Kodu Gizle' : 'ESP32 / API Kodu'}</span>
+                </button>
               </div>
 
               {activeDevice.isSimulated && (
@@ -1191,6 +1333,94 @@ print("Response:", response.json())`
                 </>
               )}
             </div>
+
+            {/* Code Integration & ESP32 Heartbeat Guides */}
+            {showCodeGuide && (
+              <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Code className="w-4 h-4 text-indigo-500" />
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                        Saha Cihazı Entegrasyonu & Heartbeat Kılavuzu
+                      </h3>
+                      <p className="text-[10px] text-slate-500">
+                        Cihaz: <strong className="text-indigo-600 dark:text-indigo-400">{activeDevice.name}</strong> | API Token: <code className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded font-mono">{activeDevice.apiKey}</code>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-[10px]">
+                    <button
+                      onClick={() => setActiveCodeTab('esp32_ping')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                        activeCodeTab === 'esp32_ping'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      ⚡ ESP32 Heartbeat
+                    </button>
+                    <button
+                      onClick={() => setActiveCodeTab('curl_ping')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                        activeCodeTab === 'curl_ping'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      📡 cURL Ping
+                    </button>
+                    <button
+                      onClick={() => setActiveCodeTab('curl_telemetry')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                        activeCodeTab === 'curl_telemetry'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      📊 cURL Telemetri
+                    </button>
+                    <button
+                      onClick={() => setActiveCodeTab('python')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                        activeCodeTab === 'python'
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      🐍 Python
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <pre className="p-4 bg-slate-950 text-slate-200 rounded-2xl border border-slate-800 font-mono text-xs overflow-x-auto leading-relaxed">
+                    {activeCodeTab === 'esp32_ping' && espPingExample}
+                    {activeCodeTab === 'curl_ping' && curlPingExample}
+                    {activeCodeTab === 'curl_telemetry' && curlExample}
+                    {activeCodeTab === 'python' && pythonExample}
+                  </pre>
+                  <button
+                    onClick={() => {
+                      const text =
+                        activeCodeTab === 'esp32_ping'
+                          ? espPingExample
+                          : activeCodeTab === 'curl_ping'
+                          ? curlPingExample
+                          : activeCodeTab === 'curl_telemetry'
+                          ? curlExample
+                          : pythonExample;
+                      handleCopy(text);
+                    }}
+                    className="absolute top-3 right-3 px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-white rounded-xl text-[10px] font-bold flex items-center gap-1 backdrop-blur border border-slate-700 cursor-pointer shadow-lg"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Kodu Kopyala</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1402,7 +1632,10 @@ print("Response:", response.json())`
                 </div>
               </div>
 
-              {/* Section 5: Admin Customer Assignment */}
+              {/* Section 5: Sinyal & Heartbeat Toleransı */}
+              {renderHeartbeatSelector(addHeartbeatTimeout, setAddHeartbeatTimeout)}
+
+              {/* Section 6: Admin Customer Assignment */}
               {user?.role === 'admin' && (
                 <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-200/60 dark:border-purple-800/40 space-y-2">
                   <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-bold text-xs uppercase tracking-wider">
@@ -1713,7 +1946,10 @@ print("Response:", response.json())`
                 </div>
               </div>
 
-              {/* Section 4: Müşteri / Firma Sorumlusu (Admin Only) */}
+              {/* Section 4: Sinyal & Heartbeat Toleransı */}
+              {renderHeartbeatSelector(editHeartbeatTimeout, setEditHeartbeatTimeout)}
+
+              {/* Section 5: Müşteri / Firma Sorumlusu (Admin Only) */}
               {user?.role === 'admin' && (
                 <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-200/60 dark:border-purple-800/40 space-y-2">
                   <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-bold text-xs uppercase tracking-wider">

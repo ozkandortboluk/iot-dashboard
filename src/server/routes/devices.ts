@@ -1,9 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
+import { runSimulationStep } from '../services/simulator.js';
+import { telemetryController } from '../controllers/telemetry.controller.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
+
+// Dedicated Ping / Heartbeat route for IoT Hardware
+router.all('/ping', (req, res) => telemetryController.ping(req, res));
 
 // Devices Endpoints (Protected with Role-based filtering)
 router.get('/', authenticateUser, (req, res) => {
@@ -23,7 +28,7 @@ router.get('/', authenticateUser, (req, res) => {
 router.post('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const { userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated, saveSimulatedDataToDb } = req.body;
+  const { id, userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated, saveSimulatedDataToDb, heartbeatTimeoutSeconds, expectedIntervalSeconds } = req.body;
 
   if (!name || !type) {
     return res.status(400).json({ error: 'Cihaz adı ve türü zorunludur.' });
@@ -33,6 +38,7 @@ router.post('/', authenticateUser, (req, res) => {
   const targetOwnerId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
 
   const device = db.createDevice({
+    id: id && id.trim() ? id.trim() : undefined,
     userId: targetOwnerId,
     name,
     type,
@@ -43,6 +49,8 @@ router.post('/', authenticateUser, (req, res) => {
     rateLimitPerMin: rateLimitPerMin || 120,
     encryptionMethod: encryptionMethod || 'AES-256-GCM',
     apiKey: apiKey && apiKey.trim() ? apiKey.trim() : undefined,
+    heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 300,
+    expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : undefined,
     isSimulated: isSimulated !== undefined ? Boolean(isSimulated) : false,
     saveSimulatedDataToDb: saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
     metrics: {},
@@ -53,7 +61,11 @@ router.post('/', authenticateUser, (req, res) => {
   if (name) db.removeUnregisteredDevice(name);
 
   broadcast('device:created', device);
+  broadcast('devices:updated', db.getDevices());
   broadcast('network:updated', db.getDiscoveredDevices());
+  if (device.isSimulated && device.dataFlowActive !== false) {
+    runSimulationStep();
+  }
   res.status(201).json(device);
 });
 
@@ -80,6 +92,9 @@ router.put('/:id', authenticateUser, (req, res) => {
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     broadcast('network:updated', db.getDiscoveredDevices());
+    if (updated.isSimulated && updated.dataFlowActive !== false) {
+      runSimulationStep();
+    }
     res.json(updated);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Cihaz güncellenemedi.';

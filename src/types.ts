@@ -54,6 +54,8 @@ export interface Device {
   rateLimitPerMin: number;
   encryptionMethod: string;
   dataFlowActive?: boolean;
+  heartbeatTimeoutSeconds?: number;
+  expectedIntervalSeconds?: number;
   isSimulated?: boolean;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
