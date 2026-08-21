@@ -17,6 +17,8 @@ import {
   GitBranch,
   ExternalLink,
   UserCog,
+  UploadCloud,
+  HardDrive,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -79,6 +81,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'devices',
           label: 'Tüm Saha Cihazları',
           icon: Cpu,
+        },
+        {
+          id: 'firmware_ota',
+          label: 'Firmware & OTA Yönetimi',
+          icon: HardDrive,
+          badge: 'OTA',
         },
         {
           id: 'network_discovery',

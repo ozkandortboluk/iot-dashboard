@@ -35,12 +35,17 @@ export interface UserSession {
 }
 
 export type DeviceStatus = 'online' | 'offline' | 'warning' | 'maintenance';
+export type OtaStatus = 'IDLE' | 'PENDING' | 'DOWNLOADING' | 'SUCCESS' | 'FAILED';
 
 export interface Device {
   id: string;
   userId: string;
   name: string;
-  type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway';
+  type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway' | string;
+  roleKey?: string; // Görev Kimliği (Örn: "PUMP_CTRL", "VALVE_CTRL", "METER_MAIN")
+  deviceType?: string; // Cihaz Tipi kopyası/detayı (Örn: "pump_controller", "energy_meter")
+  hardwareModel?: string; // Donanım Modeli (Örn: "ESP32_WROOM_32", "ESP8266_NODEMCU")
+  firmwareVersion?: string; // Mevcut Sürüm (Örn: "v1.0.0")
   apiKey: string;
   apiKeyPrefix?: string;
   apiKeyHash?: string;
@@ -69,8 +74,54 @@ export interface Device {
     bandwidth?: number;
     voltage?: number;
   };
+
+  // OTA Updates State & Progress
+  otaStatus?: OtaStatus;
+  otaTargetFirmwareId?: string;
+  otaProgress?: number; // 0 - 100
+  otaErrorMessage?: string;
+  otaLastCheckAt?: string;
+  otaUpdatedAt?: string;
+
   updatedAt?: string;
   version?: number;
+}
+
+export interface Firmware {
+  id: string;
+  name: string; // Örn: "Saha Pompa Kontrolörü Sürüm 1.2.0"
+  deviceType: string; // Örn: "pump_controller"
+  roleKey: string; // Örn: "PUMP_CTRL"
+  hardwareModel: string; // Örn: "ESP32_WROOM_32", "ESP8266_NODEMCU" veya "ALL"
+  version: string; // Örn: "v1.2.0"
+  description?: string;
+  binaryData?: string; // Base64 encoded binary file data
+  binarySize: number; // Bytes
+  sha256: string; // Hash
+  minHardwareRevision?: string;
+  isActive: boolean;
+  uploadedBy: string; // User ID veya Adı
+  created_at: string;
+  updatedAt?: string;
+}
+
+export interface OtaDeploymentJob {
+  id: string;
+  firmwareId: string;
+  firmwareVersion: string;
+  firmwareName: string;
+  deviceId: string;
+  deviceName: string;
+  deviceType: string;
+  roleKey: string;
+  targetScope: 'single' | 'selected' | 'role_key' | 'device_type';
+  status: 'PENDING' | 'DOWNLOADING' | 'SUCCESS' | 'FAILED';
+  progressPercent?: number;
+  errorMessage?: string;
+  initiatedBy: string;
+  created_at: string;
+  updatedAt?: string;
+  completedAt?: string;
 }
 
 export interface HistoryBucket {

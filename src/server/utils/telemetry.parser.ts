@@ -191,11 +191,16 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
 
     // Check first element (token / deviceId / name)
     if (csvParts[0] && !csvParts[0].includes(':')) {
-      if (!token) token = csvParts[0];
-      if (!deviceIdFromPayload) deviceIdFromPayload = csvParts[0];
+      const firstPart = csvParts[0];
+      if (!token) token = firstPart;
+      
+      const looksLikeApiKey = firstPart.startsWith('dev_key_') || firstPart.startsWith('nex_') || firstPart.startsWith('nkn_') || firstPart.length >= 24;
+      if (!looksLikeApiKey && !deviceIdFromPayload) {
+        deviceIdFromPayload = firstPart;
+      }
       startIndex = 1;
 
-      // Check second element (device name / device id)
+      // Check second element (device name / device id alias)
       if (csvParts[1] && !csvParts[1].includes(':')) {
         if (!deviceNameFromPayload) deviceNameFromPayload = csvParts[1];
         startIndex = 2;

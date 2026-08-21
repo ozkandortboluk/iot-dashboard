@@ -51,21 +51,23 @@ export class TelemetryController {
     const clientPing = req.headers['x-ping-ms'] ? Number(req.headers['x-ping-ms']) : undefined;
     const clientRssi = req.headers['x-rssi'] ? Number(req.headers['x-rssi']) : undefined;
 
-    if (clientPing !== undefined && !isNaN(clientPing)) device.pingMs = clientPing;
-    if (clientRssi !== undefined && !isNaN(clientRssi)) device.rssi = clientRssi;
+    const roleKey = req.headers['x-role-key'] || req.body?.roleKey || req.body?.role_key || req.query.roleKey || req.query.role_key;
+    const deviceType = req.headers['x-device-type'] || req.body?.deviceType || req.body?.device_type || req.query.deviceType || req.query.device_type;
+    const hardwareModel = req.headers['x-hardware-model'] || req.body?.hardwareModel || req.body?.hardware_model || req.query.hardwareModel || req.query.hardware_model;
+    const firmwareVersion = req.headers['x-firmware-version'] || req.body?.firmwareVersion || req.body?.firmware_version || req.query.firmwareVersion || req.query.firmware_version;
 
-    device.lastSeen = new Date().toISOString();
-    if (device.status !== 'online') {
-      device.status = 'online';
-    }
+    const devUpdates: Partial<import('../../types.js').Device> = {
+      lastSeen: new Date().toISOString(),
+      status: 'online',
+    };
+    if (clientPing !== undefined && !isNaN(clientPing)) devUpdates.pingMs = clientPing;
+    if (clientRssi !== undefined && !isNaN(clientRssi)) devUpdates.rssi = clientRssi;
+    if (roleKey) devUpdates.roleKey = roleKey.toString();
+    if (deviceType) devUpdates.deviceType = deviceType.toString();
+    if (hardwareModel) devUpdates.hardwareModel = hardwareModel.toString();
+    if (firmwareVersion) devUpdates.firmwareVersion = firmwareVersion.toString();
 
-    db.updateDevice(device.id, {
-      lastSeen: device.lastSeen,
-      status: device.status,
-      pingMs: device.pingMs,
-      rssi: device.rssi,
-      ipAddress: device.ipAddress,
-    });
+    db.updateDevice(device.id, devUpdates);
 
     const commands = commandService.getAndDeliverPendingCommands(device.id);
 

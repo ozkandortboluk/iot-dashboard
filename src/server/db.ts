@@ -51,6 +51,8 @@ import type {
   PostgresSetupGuide,
   DataRetentionPolicies,
   RetentionCleanupResult,
+  Firmware,
+  OtaDeploymentJob,
 } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
 import { PostgresRepository } from './database/postgres.js';
@@ -74,6 +76,8 @@ interface DatabaseSchema {
   dispatchLogs?: DispatchLogItem[];
   serviceConfig?: NotificationServiceConfig;
   auditLogs: AuditLog[];
+  firmwares?: Firmware[];
+  otaJobs?: OtaDeploymentJob[];
   history?: Record<string, Record<string, import('../types.js').MetricHistory>>;
   retentionPolicies?: DataRetentionPolicies;
   databaseSettings?: {
@@ -2479,6 +2483,66 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
 
     // Check every hour if automated retention cleanup needs to run
     setInterval(runWorkerCheck, 60 * 60 * 1000);
+  }
+
+  // ==========================================
+  // FIRMWARE & OTA MANAGEMENT
+  // ==========================================
+  public getFirmwares(): Firmware[] {
+    if (!this.data.firmwares) {
+      this.data.firmwares = [];
+    }
+    return this.data.firmwares;
+  }
+
+  public getFirmwareById(id: string): Firmware | undefined {
+    return this.getFirmwares().find((f) => f.id === id);
+  }
+
+  public saveFirmware(fw: Firmware): Firmware {
+    if (!this.data.firmwares) {
+      this.data.firmwares = [];
+    }
+    const idx = this.data.firmwares.findIndex((f) => f.id === fw.id);
+    if (idx !== -1) {
+      this.data.firmwares[idx] = { ...this.data.firmwares[idx], ...fw, updatedAt: new Date().toISOString() };
+    } else {
+      this.data.firmwares.push(fw);
+    }
+    this.saveData(this.data);
+    return fw;
+  }
+
+  public deleteFirmware(id: string): boolean {
+    if (!this.data.firmwares) return false;
+    const idx = this.data.firmwares.findIndex((f) => f.id === id);
+    if (idx !== -1) {
+      this.data.firmwares.splice(idx, 1);
+      this.saveData(this.data);
+      return true;
+    }
+    return false;
+  }
+
+  public getOtaJobs(): OtaDeploymentJob[] {
+    if (!this.data.otaJobs) {
+      this.data.otaJobs = [];
+    }
+    return this.data.otaJobs;
+  }
+
+  public saveOtaJob(job: OtaDeploymentJob): OtaDeploymentJob {
+    if (!this.data.otaJobs) {
+      this.data.otaJobs = [];
+    }
+    const idx = this.data.otaJobs.findIndex((j) => j.id === job.id);
+    if (idx !== -1) {
+      this.data.otaJobs[idx] = { ...this.data.otaJobs[idx], ...job, updatedAt: new Date().toISOString() };
+    } else {
+      this.data.otaJobs.push(job);
+    }
+    this.saveData(this.data);
+    return job;
   }
 }
 

@@ -135,24 +135,38 @@ export class DeviceAuthService {
       };
     }
 
-    // 4. Device ID Mismatch Verification Check (Optional check: Only verifies if deviceId is explicitly provided and doesn't match)
+    // 4. Device ID Verification & Auto-Resolution
+    // If device is authenticated via valid API Key, we accept it.
+    // We only alert if the payload explicitly contains another distinct registered device's ID.
     if (
       payload.deviceIdFromPayload &&
       payload.deviceIdFromPayload !== device.id &&
       payload.deviceIdFromPayload !== device.name &&
-      payload.deviceIdFromPayload !== device.apiKeyPrefix
+      payload.deviceIdFromPayload !== device.apiKey &&
+      payload.deviceIdFromPayload !== device.apiKeyPrefix &&
+      payload.deviceIdFromPayload !== token &&
+      payload.deviceIdFromPayload !== payload.token
     ) {
-      console.warn(`[Device Auth Mismatch] API key belongs to device ${device.id} (${device.name}), but payload specified deviceId=${payload.deviceIdFromPayload}`);
-      return {
-        success: false,
-        httpStatus: 403,
-        errorResponse: {
-          error: 'device_id_mismatch',
-          message: `API Key ile doğrulanan cihaz ID (${device.id} / "${device.name}") ile paket içerisindeki deviceId (${payload.deviceIdFromPayload}) eşleşmiyor! Paketten deviceId alanını kaldırabilir veya cihaz ID'sini '${device.id}' olarak güncelleyebilirsiniz.`,
-          authenticatedDeviceId: device.id,
-          payloadDeviceId: payload.deviceIdFromPayload,
-        },
-      };
+      // Check if payload specified an ID of a DIFFERENT registered device
+      const conflictingDevice = (db.getDevices() || []).find(
+        (d: Device) => d.id === payload.deviceIdFromPayload && d.id !== device.id
+      );
+
+      if (conflictingDevice) {
+        console.warn(`[Device Auth Mismatch] API key belongs to device ${device.id} (${device.name}), but payload specified another device's ID (${conflictingDevice.id} / ${conflictingDevice.name})`);
+        return {
+          success: false,
+          httpStatus: 403,
+          errorResponse: {
+            error: 'device_id_mismatch',
+            message: `Kullanılan API Key "${device.name}" (${device.id}) cihazına ait; ancak gönderilen pakette başka bir cihazın (${conflictingDevice.name} / ${conflictingDevice.id}) ID'si belirtilmiş!`,
+            authenticatedDeviceId: device.id,
+            authenticatedDeviceName: device.name,
+            payloadDeviceId: payload.deviceIdFromPayload,
+          },
+        };
+      }
+      // If it's just a custom label or hardware alias (e.g. NEXUS_DEV_982341), accept it smoothly
     }
 
     // 4. Check If Device Data Flow Is Disabled (Offline Mode)
@@ -165,6 +179,25 @@ export class DeviceAuthService {
           message: 'Cihaz veri akışı panellerden kapatıldı (Offline modu). Gönderilen telemetri işlenmedi.',
         },
       };
+    }
+
+    // Automatically convert simulated device to real hardware upon receiving real physical telemetry
+    if (device.isSimulated) {
+      console.log(`[Device Auth] Fiziki donanımdan canlı veri alındı: ${device.name} (${device.id}). Simülatör modu kapatıldı.`);
+      device.isSimulated = false;
+      device.saveSimulatedDataToDb = false;
+      if (device.name.includes('[Sanal]')) {
+        device.name = device.name.replace(/\[Sanal\]\s*/gi, '').trim();
+      }
+      // Reset simulator dummy metrics so they do not pollute real sensor readings
+      device.metrics = {};
+      db.updateDevice(device.id, {
+        isSimulated: false,
+        saveSimulatedDataToDb: false,
+        name: device.name,
+        metrics: {},
+      });
+      broadcast('device:updated', device);
     }
 
     // 5. Check Device-Specific Rate Limit (rateLimitPerMin)

@@ -231,6 +231,15 @@ export class DeviceRepository {
 
     if (updates.name !== undefined) dev.name = updates.name;
     if (updates.type !== undefined) dev.type = updates.type;
+    if (updates.deviceType !== undefined) dev.deviceType = updates.deviceType;
+    if (updates.roleKey !== undefined) dev.roleKey = updates.roleKey;
+    if (updates.hardwareModel !== undefined) dev.hardwareModel = updates.hardwareModel;
+    if (updates.firmwareVersion !== undefined) dev.firmwareVersion = updates.firmwareVersion;
+    if (updates.otaStatus !== undefined) dev.otaStatus = updates.otaStatus;
+    if (updates.otaTargetFirmwareId !== undefined) dev.otaTargetFirmwareId = updates.otaTargetFirmwareId;
+    if (updates.otaProgress !== undefined) dev.otaProgress = updates.otaProgress;
+    if (updates.otaErrorMessage !== undefined) dev.otaErrorMessage = updates.otaErrorMessage;
+    if (updates.otaLastCheckAt !== undefined) dev.otaLastCheckAt = updates.otaLastCheckAt;
     if (updates.location !== undefined) dev.location = updates.location;
     if (updates.ipAddress !== undefined) dev.ipAddress = updates.ipAddress;
     if (updates.macAddress !== undefined) dev.macAddress = updates.macAddress;

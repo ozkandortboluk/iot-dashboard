@@ -128,8 +128,9 @@ export class PostgresRepository {
         id, user_id, name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
         ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
-        save_simulated_data_to_db, simulated_metrics, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        save_simulated_data_to_db, simulated_metrics, role_key, hardware_model, firmware_version,
+        ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
@@ -148,13 +149,21 @@ export class PostgresRepository {
         data_flow_active = EXCLUDED.data_flow_active,
         is_simulated = EXCLUDED.is_simulated,
         save_simulated_data_to_db = EXCLUDED.save_simulated_data_to_db,
-        simulated_metrics = EXCLUDED.simulated_metrics;
+        simulated_metrics = EXCLUDED.simulated_metrics,
+        role_key = EXCLUDED.role_key,
+        hardware_model = EXCLUDED.hardware_model,
+        firmware_version = EXCLUDED.firmware_version,
+        ota_status = EXCLUDED.ota_status,
+        ota_target_firmware_id = EXCLUDED.ota_target_firmware_id,
+        ota_progress = EXCLUDED.ota_progress,
+        ota_error_message = EXCLUDED.ota_error_message,
+        ota_last_check_at = EXCLUDED.ota_last_check_at;
     `;
     await this.query(sql, [
       dev.id,
       dev.userId || null,
       dev.name,
-      dev.type || 'sensor',
+      dev.deviceType || dev.type || 'sensor',
       dev.apiKey || null,
       dev.apiKeyPrefix || null,
       dev.apiKeyHash || null,
@@ -170,6 +179,14 @@ export class PostgresRepository {
       Boolean(dev.isSimulated),
       Boolean(dev.saveSimulatedDataToDb),
       JSON.stringify(dev.simulatedMetrics || []),
+      dev.roleKey || null,
+      dev.hardwareModel || null,
+      dev.firmwareVersion || null,
+      dev.otaStatus || 'IDLE',
+      dev.otaTargetFirmwareId || null,
+      dev.otaProgress || 0,
+      dev.otaErrorMessage || null,
+      dev.otaLastCheckAt || null,
       new Date().toISOString(),
     ]);
   }
@@ -812,6 +829,10 @@ export class PostgresRepository {
             userId: r.user_id,
             name: r.name,
             type: r.device_type,
+            deviceType: r.device_type,
+            roleKey: r.role_key || undefined,
+            hardwareModel: r.hardware_model || undefined,
+            firmwareVersion: r.firmware_version || undefined,
             apiKey: r.api_key || '',
             apiKeyPrefix: r.api_key_prefix || (r.api_key ? r.api_key.substring(0, 12) : undefined),
             apiKeyHash: r.api_key_hash,
@@ -827,6 +848,11 @@ export class PostgresRepository {
             isSimulated: r.is_simulated !== undefined && r.is_simulated !== null ? Boolean(r.is_simulated) : (r.name?.includes('[Sanal]') || r.id?.startsWith('dev_0') || r.id?.startsWith('sim_')),
             saveSimulatedDataToDb: Boolean(r.save_simulated_data_to_db),
             simulatedMetrics: Array.isArray(r.simulated_metrics) ? r.simulated_metrics : (typeof r.simulated_metrics === 'string' ? JSON.parse(r.simulated_metrics) : undefined),
+            otaStatus: r.ota_status || 'IDLE',
+            otaTargetFirmwareId: r.ota_target_firmware_id || undefined,
+            otaProgress: r.ota_progress || 0,
+            otaErrorMessage: r.ota_error_message || undefined,
+            otaLastCheckAt: r.ota_last_check_at ? new Date(r.ota_last_check_at).toISOString() : undefined,
           });
         });
       }

@@ -18,6 +18,7 @@ import { AddWidgetModal } from './components/AddWidgetModal';
 import { LoginView } from './components/LoginView';
 import { HelpView } from './components/HelpView';
 import { AccountSettingsView } from './components/AccountSettingsView';
+import { FirmwareView } from './components/FirmwareView';
 import {
   LayoutDashboard,
   Cpu,
@@ -48,7 +49,7 @@ function DashboardContent() {
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const { user, logout } = useAuth();
-  const { selectedCustomerForAdmin, customersList } = useRealtime();
+  const { selectedCustomerForAdmin, customersList, devices, refreshData } = useRealtime();
 
   if (!user) {
     return <LoginView />;
@@ -64,6 +65,7 @@ function DashboardContent() {
   const tabTitles: Record<string, string> = {
     dashboard: isCustomer ? 'Özel Dashboard\'um' : 'Canlı İzleme Dashboard',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Tüm Saha Cihazları',
+    firmware_ota: 'Firmware & OTA Yönetimi',
     network_discovery: 'Ağdaki Cihazlar & Tarayıcı',
     customers: 'Müşteri Yönetimi & Hesaplar',
     generator: 'Sanal Veri & Telemetri Üreteci',
@@ -140,6 +142,13 @@ function DashboardContent() {
           )}
           {safeActiveTab === 'devices' && (
             <DevicesView onNavigateToHelp={() => setActiveTab('help')} />
+          )}
+          {safeActiveTab === 'firmware_ota' && (
+            <FirmwareView
+              currentUser={user}
+              devices={devices}
+              onRefreshDevices={refreshData}
+            />
           )}
           {safeActiveTab === 'network_discovery' && (
             <NetworkDiscoveryView

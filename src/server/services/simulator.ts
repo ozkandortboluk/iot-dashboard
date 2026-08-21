@@ -146,6 +146,8 @@ export function runSimulationStep() {
   const stepReadings: TelemetryReading[] = [];
 
   for (const dev of devices) {
+    if (!dev.isSimulated) continue;
+
     // Keep device online and refresh lastSeen on every simulation tick
     dev.status = 'online';
     dev.lastSeen = new Date().toISOString();

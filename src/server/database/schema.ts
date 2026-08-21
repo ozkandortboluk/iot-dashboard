@@ -352,5 +352,57 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAUL
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM';
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS metrics JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_status VARCHAR(32) DEFAULT 'IDLE';
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_firmware_id VARCHAR(64);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_progress INT DEFAULT 0;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_error_message TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_last_check_at TIMESTAMP WITH TIME ZONE;
+
+-- 6. Firmware Binaries & Multi-Version OTA Repository
+CREATE TABLE IF NOT EXISTS firmwares (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    device_type VARCHAR(64) NOT NULL,
+    role_key VARCHAR(64) NOT NULL,
+    hardware_model VARCHAR(64) DEFAULT 'ALL',
+    version VARCHAR(32) NOT NULL,
+    description TEXT,
+    binary_data TEXT,
+    binary_size INT DEFAULT 0,
+    sha256 VARCHAR(128) NOT NULL,
+    min_hardware_revision VARCHAR(64),
+    is_active BOOLEAN DEFAULT TRUE,
+    uploaded_by VARCHAR(128) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_firmwares_type_role ON firmwares(device_type, role_key);
+
+-- 7. OTA Deployment Jobs Tracking
+CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
+    id VARCHAR(64) PRIMARY KEY,
+    firmware_id VARCHAR(64) REFERENCES firmwares(id) ON DELETE CASCADE,
+    firmware_version VARCHAR(32) NOT NULL,
+    firmware_name VARCHAR(128) NOT NULL,
+    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    device_name VARCHAR(128) NOT NULL,
+    device_type VARCHAR(64) NOT NULL,
+    role_key VARCHAR(64) NOT NULL,
+    target_scope VARCHAR(32) DEFAULT 'single',
+    status VARCHAR(32) DEFAULT 'PENDING',
+    progress_percent INT DEFAULT 0,
+    error_message TEXT,
+    initiated_by VARCHAR(128) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ota_jobs_device ON ota_deployment_jobs(device_id);
+CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_deployment_jobs(status);
 `;
 

@@ -53,7 +53,7 @@ interface DictionaryTerm {
 
 export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
   const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'code_examples' | 'guides' | 'troubleshooting'>('code_examples');
-  const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs'>('all');
+  const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ota' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs'>('all');
   const [activeCodeExampleId, setActiveCodeExampleId] = useState<string>('code_esp32_http_telemetry');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaqCategory, setSelectedFaqCategory] = useState<string>('all');
@@ -231,6 +231,138 @@ void loop() {
   sendHeartbeatPing();
   // Cihazınızın paneldeki Heartbeat Toleransına göre periyot belirleyin (Örn: 60 saniye)
   delay(60000); 
+}`,
+    },
+    {
+      id: 'code_esp32_ota_update',
+      title: 'ESP32 / ESP8266 - Çoklu Firmware OTA Kontrolü & Otomatik Flashing (HTTPUpdate)',
+      category: 'esp32',
+      categoryLabel: 'ESP32 / ESP8266 OTA',
+      badge: 'Çoklu Firmware & OTA',
+      description: 'ESP32/ESP8266 kartınız sunucuya cihaz kimliklerini (device_type, role_key, firmware_version) gönderir. Yeni sürüm yayınlandığında otomatik OTA güncellemesini indirip flash eder.',
+      tags: ['esp32', 'esp8266', 'ota', 'firmware', 'httpupdate', 'role_key'],
+      endpoint: 'POST /api/ota/check & GET /api/firmwares/:id/download',
+      code: `// =========================================================================
+// NEXUSNODE IoT - ESP32 / ESP8266 ÇOKLU FIRMWARE OTA GÜNCELLEME İSTEMCİSİ
+// Bu kod periyodik olarak sunucudan cihaz tipine (device_type) ve görev kimliğine (role_key) 
+// uygun yeni firmware kontrolü yapar ve otomatik günceller.
+// =========================================================================
+#include <WiFi.h> // ESP8266 için: #include <ESP8266WiFi.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h> // ESP8266 için: #include <ESP8266httpUpdate.h>
+#include <ArduinoJson.h>
+
+const char* WIFI_SSID       = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS       = "WIFI_SIFRENIZ";
+const char* OTA_CHECK_URL   = "${originUrl}/api/ota/check";
+const char* OTA_STATUS_URL  = "${originUrl}/api/ota/status";
+const char* API_KEY         = "nkn_live_YOUR_DEVICE_API_KEY";
+
+// CİHAZ GÖREV KİMLİK BİLGİLERİ (Cihaz bu bilgileri sunucuya beyan eder)
+const char* DEVICE_TYPE      = "pump_controller";
+const char* DEVICE_ROLE_KEY  = "PUMP_CTRL";
+const char* HARDWARE_MODEL   = "ESP32_WROOM_32";
+const char* FIRMWARE_VERSION = "v1.0.0";
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\\n>>> ESP32 OTA Istemcisi Baslatiliyor...");
+  Serial.printf("Gorev Kimligi (role_key): %s | Mevcut Surum: %s\\n", DEVICE_ROLE_KEY, FIRMWARE_VERSION);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println("\\n[OK] WiFi Baglandi!");
+}
+
+void reportOtaStatus(const char* status, int progress, const char* errorMsg = "") {
+  if (WiFi.status() != WL_CONNECTED) return;
+  HTTPClient http;
+  http.begin(OTA_STATUS_URL);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-API-Key", API_KEY);
+
+  String json = "{\\"status\\":\\"" + String(status) + 
+                "\\",\\"progressPercent\\":" + String(progress) + 
+                ",\\"errorMessage\\":\\"" + String(errorMsg) + "\\"}";
+
+  http.POST(json);
+  http.end();
+}
+
+void checkAndPerformOTA() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  Serial.println("[OTA] Sunucudan uygun Firmware guncellemesi sorgulaniyor...");
+  HTTPClient http;
+  http.begin(OTA_CHECK_URL);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-API-Key", API_KEY);
+
+  // Cihaz Kimlik Handshake Paketi
+  String body = "{\\"device_type\\":\\"" + String(DEVICE_TYPE) + 
+                "\\",\\"role_key\\":\\"" + String(DEVICE_ROLE_KEY) + 
+                "\\",\\"hardware_model\\":\\"" + String(HARDWARE_MODEL) + 
+                "\\",\\"firmware_version\\":\\"" + String(FIRMWARE_VERSION) + "\\"}";
+
+  int httpCode = http.POST(body);
+  if (httpCode == 200) {
+    String response = http.getString();
+    DynamicJsonDocument doc(1024);
+    deserializeJson(doc, response);
+
+    bool updateAvailable = doc["updateAvailable"] | false;
+    if (updateAvailable) {
+      String downloadUrl = doc["downloadUrl"] | "";
+      String newVersion  = doc["version"] | "";
+      String sha256      = doc["sha256"] | "";
+
+      Serial.printf("[OTA] YENİ FIRMWARE BULUNDU! Versiyon: %s\\n", newVersion.c_str());
+      Serial.println("[OTA] Indirme Adresi: " + downloadUrl);
+
+      // Sunucuya indirme basladigini bildir
+      reportOtaStatus("DOWNLOADING", 10);
+
+      // HTTPUpdate ile Binaries Indir & Flash Et
+      t_httpUpdate_return ret = httpUpdate.update(http, "${originUrl}" + downloadUrl);
+
+      switch (ret) {
+        case HTTP_UPDATE_FAILED:
+          Serial.printf("[OTA] Guncelleme Basarisiz! Hata koda: (%d): %s\\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+          reportOtaStatus("FAILED", 0, httpUpdate.getLastErrorString().c_str());
+          break;
+
+        case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("[OTA] Sunucuda yeni guncelleme yok.");
+          break;
+
+        case HTTP_UPDATE_OK:
+          Serial.println("[OTA] GUNCELLEME BASARIYLA TAMAMLANDI! Cihaz yeniden baslatiliyor...");
+          reportOtaStatus("SUCCESS", 100);
+          delay(1000);
+          ESP.restart(); // Otomatik reboot
+          break;
+      }
+    } else {
+      Serial.println("[OTA] Firmware guncel.");
+    }
+  } else {
+    Serial.printf("[OTA] Sunucu sorgu hatasi: %d\\n", httpCode);
+  }
+  http.end();
+}
+
+void loop() {
+  // Her 5 dakikada bir (300.000 ms) OTA guncelleme kontrolu yap
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck > 300000 || lastCheck == 0) {
+    lastCheck = millis();
+    checkAndPerformOTA();
+  }
+
+  delay(1000);
 }`,
     },
     {
@@ -518,7 +650,9 @@ sendTelemetry();
   const filteredCodeExamples = useMemo(() => {
     return codeExamples.filter((item) => {
       const matchesCategory =
-        selectedCodeCategory === 'all' || item.category === selectedCodeCategory;
+        selectedCodeCategory === 'all' ||
+        item.category === selectedCodeCategory ||
+        (selectedCodeCategory === 'ota' && (item.category === 'ota' || item.tags.includes('ota')));
       const matchesSearch =
         searchQuery.trim() === '' ||
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -885,6 +1019,7 @@ Body:
                 { id: 'all', label: 'Tüm Kodlar' },
                 { id: 'esp32', label: 'ESP32 (C++)' },
                 { id: 'nodemcu', label: 'NodeMCU ESP8266' },
+                { id: 'ota', label: 'OTA & Firmware' },
                 { id: 'ping', label: 'Heartbeat / Ping' },
                 { id: 'python', label: 'Python (Agent)' },
                 { id: 'curl', label: 'cURL & Bash' },
