@@ -203,6 +203,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const devicesRef = useRef(devices);
   const notificationsRef = useRef(notifications);
   const isConnectedRef = useRef(isConnected);
+  const activeSubscriptionsRef = useRef<Set<'physical' | 'simulation'>>(new Set(['physical']));
 
   useEffect(() => {
     isConnectedRef.current = isConnected;
@@ -373,14 +374,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(authPayload));
 
-            // Default subscription: ALWAYS ONLY physical channel on connect!
-            // Simulation channel is subscribed on-demand when visiting the simulator view.
-            ws.send(
-              JSON.stringify({
-                event: 'subscribe',
-                channels: ['physical'],
-              })
-            );
+            // Resubscribe to all active channels (physical, simulation, etc.)
+            const channelsToSub = Array.from(activeSubscriptionsRef.current);
+            if (channelsToSub.length > 0) {
+              ws.send(
+                JSON.stringify({
+                  event: 'subscribe',
+                  channels: channelsToSub,
+                })
+              );
+            }
           }
 
           // Periodic ping for latency calculation & connection keepalive
@@ -899,6 +902,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const subscribeChannel = useCallback((channel: 'physical' | 'simulation') => {
+    activeSubscriptionsRef.current.add(channel);
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
@@ -910,6 +914,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const unsubscribeChannel = useCallback((channel: 'physical' | 'simulation') => {
+    activeSubscriptionsRef.current.delete(channel);
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
@@ -963,6 +968,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       rateLimitPerMin: data.rateLimitPerMin || 120,
       encryptionMethod: data.encryptionMethod || 'AES-256-GCM',
       apiKey: data.apiKey,
+      heartbeatTimeoutSeconds: data.heartbeatTimeoutSeconds,
+      saveSimulatedDataToDb: data.saveSimulatedDataToDb,
+      simulatedMetrics: data.simulatedMetrics,
       isSimulated: data.isSimulated ?? false,
     };
 
@@ -979,12 +987,17 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       const created: Device = await res.json();
+      setDevices((prev) => {
+        const exists = prev.some((d) => d.id === created.id);
+        return exists ? prev.map((d) => (d.id === created.id ? created : d)) : [...prev, created];
+      });
+      await fetchDevices();
       return created;
     } catch (e: any) {
       console.error('createNewDevice error:', e);
       throw new Error(e.message || 'Cihaz oluşturulamadı', { cause: e });
     }
-  }, [user, selectedCustomerForAdmin]);
+  }, [user, selectedCustomerForAdmin, fetchDevices]);
 
   const updateDevice = useCallback(async (id: string, updates: Partial<Device>): Promise<Device> => {
     const dev = devices.find((d) => d.id === id);

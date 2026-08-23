@@ -28,7 +28,7 @@ router.get('/', authenticateUser, (req, res) => {
 router.post('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const { id, userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated, saveSimulatedDataToDb, heartbeatTimeoutSeconds, expectedIntervalSeconds } = req.body;
+  const { id, userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated, saveSimulatedDataToDb, heartbeatTimeoutSeconds, expectedIntervalSeconds, simulatedMetrics } = req.body;
 
   if (!name || !type) {
     return res.status(400).json({ error: 'Cihaz adı ve türü zorunludur.' });
@@ -54,6 +54,7 @@ router.post('/', authenticateUser, (req, res) => {
     expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : undefined,
     isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
     saveSimulatedDataToDb: allowSimulated && saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
+    simulatedMetrics: allowSimulated && Array.isArray(simulatedMetrics) ? simulatedMetrics : undefined,
     metrics: {},
   });
 
