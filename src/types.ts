@@ -118,7 +118,7 @@ export interface OtaDeploymentJob {
   deviceName: string;
   deviceType: string;
   roleKey: string;
-  targetScope: 'single' | 'selected' | 'role_key' | 'device_type';
+  targetScope: 'single' | 'selected' | 'role_key' | 'device_type' | 'auto';
   status: OtaStatus;
   progressPercent?: number;
   errorMessage?: string;

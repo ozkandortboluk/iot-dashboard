@@ -24,33 +24,61 @@ let cachedKeyPair: KeyPair | null = null;
 export function getEd25519KeyPair(): KeyPair {
   if (cachedKeyPair) return cachedKeyPair;
 
-  const privPath = path.join(KEYS_DIR, 'ed25519_private.pem');
-  const pubPath = path.join(KEYS_DIR, 'ed25519_public.pem');
-
-  if (fs.existsSync(privPath) && fs.existsSync(pubPath)) {
+  // 1. Check direct PEM string from environment
+  if (process.env.OTA_SIGNING_PRIVATE_KEY) {
     try {
-      const privateKeyPem = fs.readFileSync(privPath, 'utf8');
-      const publicKeyPem = fs.readFileSync(pubPath, 'utf8');
-      const pubKeyObject = crypto.createPublicKey(publicKeyPem);
-      const publicKeyHex = pubKeyObject.export({ type: 'spki', format: 'der' }).toString('hex');
+      const privateKeyPem = process.env.OTA_SIGNING_PRIVATE_KEY.replace(/\\n/g, '\n');
+      const privKeyObj = crypto.createPrivateKey(privateKeyPem);
+      const pubKeyObj = crypto.createPublicKey(privKeyObj);
+      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
+      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
       cachedKeyPair = { privateKeyPem, publicKeyPem, publicKeyHex };
       return cachedKeyPair;
-    } catch {
-      // Regenerate if error
+    } catch (err: any) {
+      console.error('[OTA Crypto] OTA_SIGNING_PRIVATE_KEY ortam değişkeni ayrıştırılamadı:', err.message);
     }
   }
 
-  // Generate new keypair
+  // 2. Check custom path from environment or default file path
+  const privPath = process.env.OTA_SIGNING_PRIVATE_KEY_PATH || path.join(KEYS_DIR, 'ed25519_private.pem');
+  const pubPath = path.join(path.dirname(privPath), 'ed25519_public.pem');
+
+  if (fs.existsSync(privPath)) {
+    try {
+      const privateKeyPem = fs.readFileSync(privPath, 'utf8');
+      const privKeyObj = crypto.createPrivateKey(privateKeyPem);
+      const pubKeyObj = crypto.createPublicKey(privKeyObj);
+      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
+      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
+      
+      if (!fs.existsSync(pubPath)) {
+        try { fs.writeFileSync(pubPath, publicKeyPem, 'utf8'); } catch {}
+      }
+
+      cachedKeyPair = { privateKeyPem, publicKeyPem, publicKeyHex };
+      return cachedKeyPair;
+    } catch (err: any) {
+      console.error(`[OTA Crypto] ${privPath} özel anahtarı okunamadı:`, err.message);
+    }
+  }
+
+  // In strict production, warn if key is automatically generated on ephemeral filesystem
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[OTA Crypto WARNING] Üretim (Production) ortamında kalıcı Ed25519 özel anahtarı bulunamadı! Lütfen OTA_SIGNING_PRIVATE_KEY veya OTA_SIGNING_PRIVATE_KEY_PATH tanımlayın.');
+  }
+
+  // 3. Generate new Ed25519 keypair
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   });
 
   try {
+    fs.mkdirSync(path.dirname(privPath), { recursive: true });
     fs.writeFileSync(privPath, privateKey, 'utf8');
     fs.writeFileSync(pubPath, publicKey, 'utf8');
   } catch {
-    // Ignore write error if read-only
+    // Ignore write error if filesystem is read-only
   }
 
   const pubKeyObject = crypto.createPublicKey(publicKey);
@@ -64,6 +92,14 @@ export function getEd25519KeyPair(): KeyPair {
 
   return cachedKeyPair;
 }
+
+/**
+ * Generates a secure single-use download token hash
+ */
+export function hashDownloadToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
+
 
 export function signBinaryBuffer(buffer: Buffer): { sha256: string; signatureHex: string; publicKeyPem: string } {
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');

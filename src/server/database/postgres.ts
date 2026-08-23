@@ -11,7 +11,10 @@ import type {
   DeviceCommand,
   UserSession,
   DispatchLogItem,
+  Firmware,
+  OtaDeploymentJob,
 } from '../../types.js';
+
 
 export class PostgresRepository {
   private pool: Pool | null = null;
@@ -840,7 +843,10 @@ export class PostgresRepository {
     dispatchLogs?: DispatchLogItem[];
     commands?: DeviceCommand[];
     sessions?: any[];
+    firmwares?: Firmware[];
+    otaJobs?: OtaDeploymentJob[];
   } | null> {
+
     if (!this.pool) return null;
     try {
       // 1. Users
@@ -1111,6 +1117,67 @@ export class PostgresRepository {
         });
       }
 
+      // 12. Firmwares
+      const fwRes = await this.query(`SELECT * FROM firmwares ORDER BY created_at DESC;`);
+      const firmwares: Firmware[] = [];
+      if (fwRes?.rows) {
+        fwRes.rows.forEach((r: any) => {
+          firmwares.push({
+            id: r.id,
+            name: r.name,
+            deviceType: r.device_type,
+            roleKey: r.role_key,
+            hardwareModel: r.hardware_model || 'ALL',
+            version: r.version,
+            description: r.description || undefined,
+            binarySize: Number(r.binary_size) || 0,
+            sha256: r.sha256,
+            signature: r.signature || undefined,
+            filePath: r.file_path || undefined,
+            minHardwareRevision: r.min_hardware_revision || undefined,
+            isActive: r.is_active !== false,
+            uploadedBy: r.uploaded_by,
+            created_at: new Date(r.created_at).toISOString(),
+            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+
+          });
+        });
+      }
+
+      // 13. OTA Deployment Jobs
+      const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs ORDER BY created_at DESC;`);
+      const otaJobs: OtaDeploymentJob[] = [];
+      if (otaRes?.rows) {
+        otaRes.rows.forEach((r: any) => {
+          otaJobs.push({
+            id: r.id,
+            firmwareId: r.firmware_id,
+            firmwareVersion: r.firmware_version,
+            firmwareName: r.firmware_name,
+            deviceId: r.device_id,
+            deviceName: r.device_name,
+            deviceType: r.device_type,
+            roleKey: r.role_key,
+            targetScope: r.target_scope || 'single',
+            status: r.status || 'PENDING',
+            progressPercent: Number(r.progress_percent) || 0,
+            errorMessage: r.error_message || undefined,
+            initiatedBy: r.initiated_by,
+            downloadToken: r.download_token || undefined,
+            expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
+            attemptCount: Number(r.attempt_count) || 0,
+            maxAttempts: Number(r.max_attempts) || 3,
+            lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
+            nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
+            downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
+            bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
+            created_at: new Date(r.created_at).toISOString(),
+            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+            completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
+          });
+        });
+      }
+
       return {
         users,
         passwords,
@@ -1124,12 +1191,125 @@ export class PostgresRepository {
         dispatchLogs,
         commands,
         sessions,
+        firmwares,
+        otaJobs,
       };
     } catch (err: any) {
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
       return null;
     }
   }
+
+  // ==========================================
+  // FIRMWARE & OTA POSTGRES REPOSITORY METHODS
+  // ==========================================
+  public async saveFirmware(fw: Firmware): Promise<void> {
+    if (!this.pool) return;
+    const sql = `
+      INSERT INTO firmwares (
+        id, name, device_type, role_key, hardware_model, version, description,
+        binary_data, binary_size, sha256, signature, file_path, min_hardware_revision,
+        is_active, uploaded_by, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        device_type = EXCLUDED.device_type,
+        role_key = EXCLUDED.role_key,
+        hardware_model = EXCLUDED.hardware_model,
+        version = EXCLUDED.version,
+        description = EXCLUDED.description,
+        binary_data = EXCLUDED.binary_data,
+        binary_size = EXCLUDED.binary_size,
+        sha256 = EXCLUDED.sha256,
+        signature = EXCLUDED.signature,
+        file_path = EXCLUDED.file_path,
+        min_hardware_revision = EXCLUDED.min_hardware_revision,
+        is_active = EXCLUDED.is_active,
+        uploaded_by = EXCLUDED.uploaded_by,
+        updated_at = EXCLUDED.updated_at;
+    `;
+    const now = new Date().toISOString();
+    await this.query(sql, [
+      fw.id,
+      fw.name,
+      fw.deviceType,
+      fw.roleKey,
+      fw.hardwareModel || 'ALL',
+      fw.version,
+      fw.description || null,
+      fw.binaryData || null,
+      fw.binarySize || 0,
+      fw.sha256,
+      fw.signature || null,
+      fw.filePath || null,
+      fw.minHardwareRevision || null,
+      fw.isActive !== false,
+      fw.uploadedBy,
+      fw.created_at || now,
+      now,
+
+    ]);
+  }
+
+  public async deleteFirmware(id: string): Promise<void> {
+    if (!this.pool) return;
+    await this.query(`DELETE FROM firmwares WHERE id = $1;`, [id]);
+  }
+
+  public async saveOtaJob(job: OtaDeploymentJob): Promise<void> {
+    if (!this.pool) return;
+    const sql = `
+      INSERT INTO ota_deployment_jobs (
+        id, firmware_id, firmware_version, firmware_name, device_id, device_name,
+        device_type, role_key, target_scope, status, progress_percent, error_message,
+        initiated_by, download_token, expires_at, attempt_count, max_attempts,
+        last_attempt_at, next_retry_at, download_started_at, boot_confirmed_at,
+        created_at, updated_at, completed_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        progress_percent = EXCLUDED.progress_percent,
+        error_message = EXCLUDED.error_message,
+        download_token = EXCLUDED.download_token,
+        expires_at = EXCLUDED.expires_at,
+        attempt_count = EXCLUDED.attempt_count,
+        max_attempts = EXCLUDED.max_attempts,
+        last_attempt_at = EXCLUDED.last_attempt_at,
+        next_retry_at = EXCLUDED.next_retry_at,
+        download_started_at = EXCLUDED.download_started_at,
+        boot_confirmed_at = EXCLUDED.boot_confirmed_at,
+        updated_at = EXCLUDED.updated_at,
+        completed_at = EXCLUDED.completed_at;
+    `;
+    const now = new Date().toISOString();
+    await this.query(sql, [
+      job.id,
+      job.firmwareId,
+      job.firmwareVersion,
+      job.firmwareName,
+      job.deviceId,
+      job.deviceName,
+      job.deviceType,
+      job.roleKey,
+      job.targetScope || 'single',
+      job.status || 'PENDING',
+      job.progressPercent || 0,
+      job.errorMessage || null,
+      job.initiatedBy,
+      job.downloadToken || null,
+      job.expiresAt || null,
+      job.attemptCount || 0,
+      job.maxAttempts || 3,
+      job.lastAttemptAt || null,
+      job.nextRetryAt || null,
+      job.downloadStartedAt || null,
+      job.bootConfirmedAt || null,
+      job.created_at || now,
+      now,
+      job.completedAt || null,
+    ]);
+  }
+
 
   // ==========================================
   // FULL SEED / SYNC-ALL TO POSTGRES

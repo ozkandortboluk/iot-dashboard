@@ -437,7 +437,24 @@ class LocalDatabase {
             }
           }
 
+          if (hydrated.firmwares && hydrated.firmwares.length > 0) {
+            this.data.firmwares = hydrated.firmwares;
+          } else if (this.data.firmwares && this.data.firmwares.length > 0) {
+            for (const fw of this.data.firmwares) {
+              await this.postgresRepo.saveFirmware(fw).catch((err) => console.warn('[PostgreSQL Firmwares Seed Error]', err));
+            }
+          }
+
+          if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
+            this.data.otaJobs = hydrated.otaJobs;
+          } else if (this.data.otaJobs && this.data.otaJobs.length > 0) {
+            for (const job of this.data.otaJobs) {
+              await this.postgresRepo.saveOtaJob(job).catch((err) => console.warn('[PostgreSQL OtaJobs Seed Error]', err));
+            }
+          }
+
           this.saveData(this.data);
+
           console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
         }
       } catch (hydrateErr: any) {
@@ -860,6 +877,7 @@ class LocalDatabase {
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
     public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
   public getDevices(userId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(userId, customerId); }
+  public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
   public assignDeviceOwner(deviceId: string, targetUserId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetUserId); }
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
@@ -2512,6 +2530,13 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       this.data.firmwares.push(fw);
     }
     this.saveData(this.data);
+
+    if (this.postgresRepo.isReady()) {
+      this.postgresRepo.saveFirmware(fw).catch((err) => {
+        console.error('[PostgreSQL Save Firmware Error]:', err?.message || err);
+      });
+    }
+
     return fw;
   }
 
@@ -2521,6 +2546,13 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     if (idx !== -1) {
       this.data.firmwares.splice(idx, 1);
       this.saveData(this.data);
+
+      if (this.postgresRepo.isReady()) {
+        this.postgresRepo.deleteFirmware(id).catch((err) => {
+          console.error('[PostgreSQL Delete Firmware Error]:', err?.message || err);
+        });
+      }
+
       return true;
     }
     return false;
@@ -2544,8 +2576,16 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       this.data.otaJobs.push(job);
     }
     this.saveData(this.data);
+
+    if (this.postgresRepo.isReady()) {
+      this.postgresRepo.saveOtaJob(job).catch((err) => {
+        console.error('[PostgreSQL Save OTA Job Error]:', err?.message || err);
+      });
+    }
+
     return job;
   }
+
 }
 
 

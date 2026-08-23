@@ -5,7 +5,8 @@ import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import type { Firmware, Device } from '../../types.js';
-import { isValidSemver } from '../utils/semver.js';
+import { isValidSemver, isHardwareModelCompatible, isHardwareRevisionCompatible } from '../utils/semver.js';
+
 import {
   signBinaryBuffer,
   validateEspBinary,
@@ -236,10 +237,156 @@ firmwareRouter.delete('/:id', authenticateUser, requireAdmin, (req: Request, res
   res.json({ success: true, message: 'Firmware başarıyla silindi.' });
 });
 
+// POST /api/firmwares/upload - Multipart / Stream upload for large binaries (Admin only)
+firmwareRouter.post('/upload', authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
+
+  try {
+    const contentType = req.headers['content-type'] || '';
+    let name = (req.query.name || req.headers['x-firmware-name'] || '').toString();
+    let deviceType = (req.query.deviceType || req.headers['x-firmware-device-type'] || '').toString();
+    let roleKey = (req.query.roleKey || req.headers['x-firmware-role-key'] || '').toString();
+    let hardwareModel = (req.query.hardwareModel || req.headers['x-firmware-hardware-model'] || 'ALL').toString();
+    let version = (req.query.version || req.headers['x-firmware-version'] || '').toString();
+    let description = (req.query.description || req.headers['x-firmware-description'] || '').toString();
+    let minHardwareRevision = (req.query.minHardwareRevision || req.headers['x-firmware-min-hardware-revision'] || '').toString();
+
+    let binaryBuffer: Buffer;
+
+    if (contentType.includes('multipart/form-data')) {
+      // Simple multipart/form-data parser for express stream
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk as Buffer);
+      }
+      const fullBuffer = Buffer.concat(chunks);
+      
+      const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+      const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+
+      if (!boundary) {
+        return res.status(400).json({ error: 'Geçersiz multipart boundary.' });
+      }
+
+      const parts = fullBuffer.toString('binary').split('--' + boundary);
+      let foundBinary: Buffer | null = null;
+
+      for (const part of parts) {
+        if (part.includes('filename=')) {
+          const headerEnd = part.indexOf('\r\n\r\n');
+          if (headerEnd !== -1) {
+            const bodyBinary = part.substring(headerEnd + 4, part.length - 2);
+            foundBinary = Buffer.from(bodyBinary, 'binary');
+          }
+        } else {
+          // Parse text fields from multipart form
+          if (part.includes('name="name"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) name = val.trim();
+          }
+          if (part.includes('name="deviceType"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) deviceType = val.trim();
+          }
+          if (part.includes('name="roleKey"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) roleKey = val.trim();
+          }
+          if (part.includes('name="hardwareModel"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) hardwareModel = val.trim();
+          }
+          if (part.includes('name="version"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) version = val.trim();
+          }
+          if (part.includes('name="description"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) description = val.trim();
+          }
+          if (part.includes('name="minHardwareRevision"')) {
+            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
+            if (val) minHardwareRevision = val.trim();
+          }
+        }
+      }
+
+      if (!foundBinary) {
+        return res.status(400).json({ error: 'Yüklenen form verisinde .bin dosyası bulunamadı.' });
+      }
+      binaryBuffer = foundBinary;
+    } else {
+      // Octet stream direct binary upload
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk as Buffer);
+      }
+      binaryBuffer = Buffer.concat(chunks);
+    }
+
+    if (!name || !deviceType || !roleKey || !version) {
+      return res.status(400).json({
+        error: 'Firmware adı, cihaz tipi, görev kimliği (roleKey) ve sürüm zorunludur.',
+      });
+    }
+
+    if (!isValidSemver(version)) {
+      return res.status(400).json({
+        error: `Geçersiz SemVer sürüm formatı (${version}). Örnek: 1.0.0, v2.1.0`,
+      });
+    }
+
+    const validation = validateEspBinary(binaryBuffer);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+
+    const { sha256, signatureHex } = signBinaryBuffer(binaryBuffer);
+    const id = `fw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    const filePath = saveFirmwareFileToDisk(id, binaryBuffer);
+
+    const newFirmware: Firmware = {
+      id,
+      name: name.trim(),
+      deviceType: deviceType.trim().toLowerCase(),
+      roleKey: roleKey.trim().toUpperCase(),
+      hardwareModel: hardwareModel ? hardwareModel.trim().toUpperCase() : 'ALL',
+      version: version.trim(),
+      description: description ? description.trim() : '',
+      filePath,
+      binarySize: binaryBuffer.length,
+      sha256,
+      signature: signatureHex,
+      minHardwareRevision: minHardwareRevision ? minHardwareRevision.trim() : undefined,
+      isActive: true,
+      uploadedBy: user.name || user.email,
+      created_at: new Date().toISOString(),
+    };
+
+    db.saveFirmware(newFirmware);
+
+    db.addAuditLog(
+      user.id,
+      user.name,
+      `Firmware Akış Yüklemesi ile Oluşturuldu: ${newFirmware.name} (${newFirmware.version})`,
+      'high'
+    );
+
+    const safeFw = sanitizeFirmware(newFirmware);
+    broadcast('firmware:created', safeFw);
+    broadcast('firmwares:updated', db.getFirmwares().map(sanitizeFirmware));
+
+    res.status(201).json(safeFw);
+  } catch (err: any) {
+    res.status(500).json({ error: `Firmware yükleme hatası: ${err.message}` });
+  }
+});
+
 // GET /api/firmwares/:id/download - Secure binary download for authorized devices & user sessions
 firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
   const { id } = req.params;
-  const downloadToken = req.query.token?.toString().trim();
+  const downloadToken = (req.headers['x-ota-token'] || req.query.token || '').toString().trim();
 
   // Strict Authentication: Either authenticated user session OR authenticated device X-API-Key header
   const authHeader = req.headers['authorization'];
@@ -274,7 +421,6 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
     return res.status(403).send('Bu firmware sürümü pasif durumdadır.');
   }
 
-  // Point 6 & 14: Strict Device & Customer Authorization
   if (dev) {
     // Device must have an active assigned OTA job for this specific firmware ID!
     const activeJob = db.getOtaJobs().find(
@@ -291,13 +437,12 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
       return res.status(403).send('Bu cihaz için istenen firmware atanmış aktif bir OTA güncelleme görevi bulunmuyor.');
     }
 
-    // Donanım modeli ve revizyon uyumluluğu kontrolü (Point 4)
+    // Exact model & revision checks (Requirements 9 & 10)
     const devRole = (dev.roleKey || '').toUpperCase();
     const devType = (dev.deviceType || dev.type || '').toLowerCase();
     const devModel = (dev.hardwareModel || '').toUpperCase();
     const fwRole = fw.roleKey.toUpperCase();
     const fwType = fw.deviceType.toLowerCase();
-    const fwModel = (fw.hardwareModel || 'ALL').toUpperCase();
 
     if (devRole && devRole !== fwRole) {
       return res.status(403).send(`Uyumsuz Firmware Görev Kimliği (Cihaz: ${devRole}, Firmware: ${fwRole}).`);
@@ -305,11 +450,24 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
     if (devType && devType !== fwType && fwType !== 'all') {
       return res.status(403).send(`Uyumsuz Donanım Tipi (Cihaz: ${devType}, Firmware: ${fwType}).`);
     }
-    if (fwModel !== 'ALL' && devModel && !devModel.includes(fwModel) && !fwModel.includes(devModel)) {
-      return res.status(403).send(`Uyumsuz Donanım Modeli (Cihaz: ${devModel}, Firmware: ${fwModel}).`);
+    if (!isHardwareModelCompatible(devModel, fw.hardwareModel)) {
+      return res.status(403).send(`Uyumsuz Donanım Modeli (Cihaz: ${devModel}, Firmware: ${fw.hardwareModel}). Exact model match required.`);
     }
+    if (!isHardwareRevisionCompatible(dev.hardwareRevision, fw.minHardwareRevision)) {
+      return res.status(403).send(`Donanım revizyonu yetersiz (Cihaz: ${dev.hardwareRevision || 'bilinmiyor'}, Gerekli En Az: ${fw.minHardwareRevision}).`);
+    }
+
+    // Update state to DOWNLOADING and consume single-use token upon download
+    if (activeJob) {
+      activeJob.status = 'DOWNLOADING';
+      activeJob.downloadStartedAt = new Date().toISOString();
+      activeJob.updatedAt = new Date().toISOString();
+      db.saveOtaJob(activeJob);
+    }
+    dev.otaStatus = 'DOWNLOADING';
+    db.updateDevice(dev.id, dev);
+
   } else if (userReq) {
-    // Customer Authorization (Point 13 & 14): Admin or Customer owning device assigned to this firmware
     if (userReq.role !== 'admin') {
       const userOwnsTargetDevice = db.getDevices().some(
         (d) => d.userId === userReq!.id && (d.otaTargetFirmwareId === fw.id || (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase())
@@ -320,7 +478,6 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
     }
   }
 
-  // Load binary buffer from disk or fallback to legacy base64
   let binaryBuffer: Buffer | null = null;
   if (fw.filePath) {
     binaryBuffer = readFirmwareFileFromDisk(fw.filePath);
@@ -347,4 +504,5 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
 
   res.send(binaryBuffer);
 });
+
 

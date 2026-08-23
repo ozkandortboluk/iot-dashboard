@@ -6,6 +6,8 @@ import { createServer as createViteServer } from 'vite';
 // Services & Database
 import { initWebSocketServer } from './src/server/services/websocket.js';
 import { initSimulator } from './src/server/services/simulator.js';
+import { startOtaWorker } from './src/server/services/otaWorker.js';
+
 
 // Route Handlers
 import { authRouter, profileRouter, customersRouter } from './src/server/routes/auth.js';
@@ -85,9 +87,11 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// Initialize WebSocket & Background Simulation Engines
+// Initialize WebSocket, OTA Worker & Background Simulation Engines
 initWebSocketServer(server);
 initSimulator();
+startOtaWorker();
+
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {

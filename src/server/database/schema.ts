@@ -438,12 +438,17 @@ CREATE TABLE IF NOT EXISTS firmwares (
     binary_data TEXT,
     binary_size INT DEFAULT 0,
     sha256 VARCHAR(128) NOT NULL,
+    signature TEXT,
+    file_path TEXT,
     min_hardware_revision VARCHAR(64),
     is_active BOOLEAN DEFAULT TRUE,
     uploaded_by VARCHAR(128) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS signature TEXT;
+ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS file_path TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_firmwares_type_role ON firmwares(device_type, role_key);
 
@@ -462,10 +467,27 @@ CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
     progress_percent INT DEFAULT 0,
     error_message TEXT,
     initiated_by VARCHAR(128) NOT NULL,
+    download_token VARCHAR(128),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    attempt_count INT DEFAULT 0,
+    max_attempts INT DEFAULT 3,
+    last_attempt_at TIMESTAMP WITH TIME ZONE,
+    next_retry_at TIMESTAMP WITH TIME ZONE,
+    download_started_at TIMESTAMP WITH TIME ZONE,
+    boot_confirmed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP WITH TIME ZONE
 );
+
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_token VARCHAR(128);
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 0;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS max_attempts INT DEFAULT 3;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_started_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS boot_confirmed_at TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX IF NOT EXISTS idx_ota_jobs_device ON ota_deployment_jobs(device_id);
 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_deployment_jobs(status);

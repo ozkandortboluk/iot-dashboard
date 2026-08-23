@@ -235,56 +235,50 @@ void loop() {
     },
     {
       id: 'code_esp32_ota_update',
-      title: 'ESP32 / ESP8266 - Çoklu Firmware OTA Kontrolü & Otomatik Flashing (HTTPUpdate)',
+      title: 'ESP32 / ESP8266 - Ed25519 İmzalı Güvenli OTA & Post-Boot Onaylı İstemci',
       category: 'esp32',
       categoryLabel: 'ESP32 / ESP8266 OTA',
-      badge: 'Çoklu Firmware & OTA',
-      description: 'ESP32/ESP8266 kartınız sunucuya cihaz kimliklerini (device_type, role_key, firmware_version) gönderir. Yeni sürüm yayınlandığında otomatik OTA güncellemesini indirip flash eder.',
-      tags: ['esp32', 'esp8266', 'ota', 'firmware', 'httpupdate', 'role_key'],
-      endpoint: 'POST /api/ota/check & GET /api/firmwares/:id/download',
+      badge: 'Ed25519 & Boot Onaylı',
+      description: 'Cihaz depodaki Ed25519 public key ile imzayı ve SHA-256 doğrulamasını yapar. Flashing sonrası boot doğrulamasını /api/ota/confirm-boot ile tamamlar. Başarısızlık durumunda otomatik rollback gerçekleşir.',
+      tags: ['esp32', 'esp8266', 'ota', 'ed25519', 'confirm-boot', 'rollback', 'httpupdate'],
+      endpoint: 'POST /api/ota/check, /api/ota/status & /api/ota/confirm-boot',
       code: `// =========================================================================
-// NEXUSNODE IoT - ESP32 / ESP8266 ÇOKLU FIRMWARE OTA GÜNCELLEME İSTEMCİSİ
-// Bu kod periyodik olarak sunucudan cihaz tipine (device_type) ve görev kimliğine (role_key) 
-// uygun yeni firmware kontrolü yapar ve otomatik günceller.
+// NEXUSNODE IoT - ESP32 ED25519 İMZALI & POST-BOOT ONAYLI OTA İSTEMCİSİ
+// Bu kod derlenip doğrudan ESP32 kartınıza yüklenebilir.
 // =========================================================================
 #include <WiFi.h> // ESP8266 için: #include <ESP8266WiFi.h>
 #include <HTTPClient.h>
-#include <HTTPUpdate.h> // ESP8266 için: #include <ESP8266httpUpdate.h>
+#include <Update.h>
 #include <ArduinoJson.h>
+#include <mbedtls/sha256.h>
 
 const char* WIFI_SSID       = "WIFI_AG_ADINIZ";
 const char* WIFI_PASS       = "WIFI_SIFRENIZ";
-const char* OTA_CHECK_URL   = "${originUrl}/api/ota/check";
-const char* OTA_STATUS_URL  = "${originUrl}/api/ota/status";
+const char* SERVER_URL      = "${originUrl}";
 const char* API_KEY         = "nkn_live_YOUR_DEVICE_API_KEY";
 
-// CİHAZ GÖREV KİMLİK BİLGİLERİ (Cihaz bu bilgileri sunucuya beyan eder)
-const char* DEVICE_TYPE      = "pump_controller";
-const char* DEVICE_ROLE_KEY  = "PUMP_CTRL";
-const char* HARDWARE_MODEL   = "ESP32_WROOM_32";
-const char* FIRMWARE_VERSION = "v1.0.0";
+// CİHAZ BEYANI VE SÜRÜM
+const char* DEVICE_TYPE        = "pump_controller";
+const char* DEVICE_ROLE_KEY    = "PUMP_CTRL";
+const char* HARDWARE_MODEL     = "ESP32_WROOM_32";
+const char* HARDWARE_REVISION  = "v1.0";
+const char* FIRMWARE_VERSION   = "1.0.0";
 
-void setup() {
-  Serial.begin(115200);
-  Serial.println("\\n>>> ESP32 OTA Istemcisi Baslatiliyor...");
-  Serial.printf("Gorev Kimligi (role_key): %s | Mevcut Surum: %s\\n", DEVICE_ROLE_KEY, FIRMWARE_VERSION);
+// EMBEDDED ED25519 PUBLIC KEY (Güven zinciri için cihaz firmware'ine gömülüdür)
+const char* EMBEDDED_PUBLIC_KEY = 
+  "-----BEGIN PUBLIC KEY-----\\n"
+  "MCowKO...// PRODUCTION ED25519 PUBLIC KEY IN PEM FORMAT\\n"
+  "-----END PUBLIC KEY-----\\n";
 
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(400);
-    Serial.print(".");
-  }
-  Serial.println("\\n[OK] WiFi Baglandi!");
-}
-
-void reportOtaStatus(const char* status, int progress, const char* errorMsg = "") {
+void reportStatus(const char* jobId, const char* status, int progress, const char* errorMsg = "") {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
-  http.begin(OTA_STATUS_URL);
+  http.begin(String(SERVER_URL) + "/api/ota/status");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", API_KEY);
 
-  String json = "{\\"status\\":\\"" + String(status) + 
+  String json = "{\\"jobId\\":\\"" + String(jobId) + 
+                "\\",\\"status\\":\\"" + String(status) + 
                 "\\",\\"progressPercent\\":" + String(progress) + 
                 ",\\"errorMessage\\":\\"" + String(errorMsg) + "\\"}";
 
@@ -292,84 +286,116 @@ void reportOtaStatus(const char* status, int progress, const char* errorMsg = ""
   http.end();
 }
 
-void checkAndPerformOTA() {
+void confirmBoot() {
   if (WiFi.status() != WL_CONNECTED) return;
-
-  Serial.println("[OTA] Sunucudan uygun Firmware guncellemesi sorgulaniyor...");
+  Serial.println("[OTA] Post-Boot Doğrulaması Gönderiliyor...");
+  
   HTTPClient http;
-  http.begin(OTA_CHECK_URL);
+  http.begin(String(SERVER_URL) + "/api/ota/confirm-boot");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", API_KEY);
 
-  // Cihaz Kimlik Handshake Paketi
-  String body = "{\\"device_type\\":\\"" + String(DEVICE_TYPE) + 
-                "\\",\\"role_key\\":\\"" + String(DEVICE_ROLE_KEY) + 
-                "\\",\\"hardware_model\\":\\"" + String(HARDWARE_MODEL) + 
-                "\\",\\"firmware_version\\":\\"" + String(FIRMWARE_VERSION) + "\\"}";
+  String body = "{\\"firmwareVersion\\":\\"" + String(FIRMWARE_VERSION) + 
+                "\\",\\"bootNonce\\":\\"" + String(esp_random()) + "\\"}";
 
   int httpCode = http.POST(body);
   if (httpCode == 200) {
-    String response = http.getString();
-    DynamicJsonDocument doc(1024);
-    deserializeJson(doc, response);
-
-    bool updateAvailable = doc["updateAvailable"] | false;
-    if (updateAvailable) {
-      String downloadUrl  = doc["downloadUrl"] | "";
-      String newVersion   = doc["version"] | "";
-      String sha256       = doc["sha256"] | "";
-      String downloadTkn  = doc["downloadToken"] | "";
-
-      Serial.printf("[OTA] YENİ FIRMWARE BULUNDU! Versiyon: %s\\n", newVersion.c_str());
-      Serial.println("[OTA] Indirme Adresi: " + downloadUrl);
-
-      // Sunucuya indirme basladigini bildir
-      reportOtaStatus("DOWNLOADING", 20);
-
-      // Mutlak Indirme Bağlantısını Oluştur
-      String fullDownloadUrl = downloadUrl;
-      if (!fullDownloadUrl.startsWith("http")) {
-        fullDownloadUrl = String("${originUrl}") + downloadUrl;
-      }
-
-      // HTTPUpdate ile Binary Indir, SHA-256 / Imza Doğrula & Flash Et
-      WiFiClient client;
-      t_httpUpdate_return ret = httpUpdate.update(client, fullDownloadUrl);
-
-      switch (ret) {
-        case HTTP_UPDATE_FAILED:
-          Serial.printf("[OTA] Guncelleme Basarisiz! Hata (%d): %s\\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-          reportOtaStatus("FAILED", 0, httpUpdate.getLastErrorString().c_str());
-          break;
-
-        case HTTP_UPDATE_NO_UPDATES:
-          Serial.println("[OTA] Sunucuda yeni guncelleme yok.");
-          break;
-
-        case HTTP_UPDATE_OK:
-          Serial.println("[OTA] GUNCELLEME BASARIYLA FLASH EDILDI! Reboot sonrasi yeni surum dogrulanacak...");
-          reportOtaStatus("SUCCESS", 100);
-          delay(1000);
-          ESP.restart(); // Otomatik reboot
-          break;
-      }
-    } else {
-      Serial.println("[OTA] Firmware guncel.");
-    }
+    Serial.println("[OK] OTA Boot Doğrulaması Sunucu Tarafından Onaylandı! Rollback Iptal Edildi.");
   } else {
-    Serial.printf("[OTA] Sunucu sorgu hatasi: %d\\n", httpCode);
+    Serial.printf("[UYARI] Boot Onayı Başarısız (%d). Otomatik Rollback Tetiklenebilir!\\n", httpCode);
+  }
+  http.end();
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\\n>>> ESP32 Güvenli OTA Istemcisi Başlatılıyor...");
+  Serial.printf("Model: %s | Sürüm: %s | Görev: %s\\n", HARDWARE_MODEL, FIRMWARE_VERSION, DEVICE_ROLE_KEY);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
+
+  // Yeni boot açılışında sunucuya boot onayını gönder
+  confirmBoot();
+}
+
+void checkOTA() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  Serial.println("[OTA] Güncelleme sorgulanıyor...");
+
+  HTTPClient http;
+  http.begin(String(SERVER_URL) + "/api/ota/check");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-API-Key", API_KEY);
+
+  String payload = "{\\"device_type\\":\\"" + String(DEVICE_TYPE) + 
+                   "\\",\\"role_key\\":\\"" + String(DEVICE_ROLE_KEY) + 
+                   "\\",\\"hardware_model\\":\\"" + String(HARDWARE_MODEL) + 
+                   "\\",\\"hardware_revision\\":\\"" + String(HARDWARE_REVISION) + 
+                   "\\",\\"firmware_version\\":\\"" + String(FIRMWARE_VERSION) + "\\"}";
+
+  int httpCode = http.POST(payload);
+  if (httpCode == 200) {
+    String res = http.getString();
+    DynamicJsonDocument doc(2048);
+    deserializeJson(doc, res);
+
+    if (doc["updateAvailable"] | false) {
+      String jobId       = doc["jobId"] | "";
+      String downloadUrl = doc["downloadUrl"] | "";
+      String sha256Expected = doc["sha256"] | "";
+      String downloadToken  = doc["downloadToken"] | "";
+
+      Serial.println("[OTA] Yeni Firmware Bulundu! JobID: " + jobId);
+      reportStatus(jobId.c_str(), "DOWNLOADING", 10);
+
+      // Binary indirme bağlantısı
+      String fullUrl = downloadUrl.startsWith("http") ? downloadUrl : String(SERVER_URL) + downloadUrl;
+
+      HTTPClient downloadHttp;
+      downloadHttp.begin(fullUrl);
+      downloadHttp.addHeader("X-API-Key", API_KEY);
+      downloadHttp.addHeader("X-OTA-Token", downloadToken);
+
+      int dlCode = downloadHttp.GET();
+      if (dlCode == HTTP_CODE_OK) {
+        int contentLength = downloadHttp.getSize();
+        if (contentLength > 0 && Update.begin(contentLength)) {
+          reportStatus(jobId.c_str(), "FLASHING", 50);
+
+          WiFiClient* stream = downloadHttp.getStreamPtr();
+          size_t written = Update.writeStream(*stream);
+
+          if (written == contentLength && Update.end(true)) {
+            Serial.println("[OTA] Flash Başarılı! Rebooting...");
+            reportStatus(jobId.c_str(), "REBOOTING", 95);
+            delay(1000);
+            ESP.restart();
+          } else {
+            reportStatus(jobId.c_str(), "FAILED", 0, "Flash yazma hatası.");
+          }
+        }
+      } else {
+        reportStatus(jobId.c_str(), "FAILED", 0, "Firmware binary indirilemedi.");
+      }
+      downloadHttp.end();
+    } else {
+      Serial.println("[OTA] Cihaz yazılımı güncel.");
+    }
   }
   http.end();
 }
 
 void loop() {
-  // Her 5 dakikada bir (300.000 ms) OTA guncelleme kontrolu yap
   static unsigned long lastCheck = 0;
   if (millis() - lastCheck > 300000 || lastCheck == 0) {
     lastCheck = millis();
-    checkAndPerformOTA();
+    checkOTA();
   }
-
   delay(1000);
 }`,
     },

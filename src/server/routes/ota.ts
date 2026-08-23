@@ -4,7 +4,13 @@ import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import type { OtaDeploymentJob, Device, Firmware } from '../../types.js';
-import { isValidSemver, compareSemver, isTargetVersionNewer } from '../utils/semver.js';
+import {
+  isValidSemver,
+  compareSemver,
+  isTargetVersionNewer,
+  isHardwareModelCompatible,
+  isHardwareRevisionCompatible,
+} from '../utils/semver.js';
 import { getEd25519KeyPair } from '../utils/ota-crypto.js';
 
 export const otaRouter = Router();
@@ -44,6 +50,19 @@ function cleanupExpiredOtaJobs(): void {
   }
 }
 
+// Valid state machine transitions map
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['DOWNLOADING', 'CANCELLED', 'FAILED', 'EXPIRED'],
+  DOWNLOADING: ['FLASHING', 'CANCELLED', 'FAILED', 'EXPIRED'],
+  FLASHING: ['VERIFYING', 'REBOOTING', 'CANCELLED', 'FAILED', 'EXPIRED'],
+  VERIFYING: ['REBOOTING', 'SUCCESS', 'CANCELLED', 'FAILED', 'EXPIRED'],
+  REBOOTING: ['SUCCESS', 'CANCELLED', 'FAILED', 'EXPIRED'],
+  SUCCESS: [],
+  FAILED: ['PENDING'],
+  CANCELLED: ['PENDING'],
+  EXPIRED: ['PENDING'],
+};
+
 // ==========================================
 // 1. OTA JOBS & DEPLOYMENT MANAGEMENT (Admin & UI)
 // ==========================================
@@ -57,7 +76,6 @@ otaRouter.get('/jobs', authenticateUser, (req: Request, res: Response) => {
 
   let jobs = db.getOtaJobs();
 
-  // Tenant Isolation (Point 13): Non-admin customer only sees jobs for their own devices!
   if (user.role !== 'admin') {
     const userDeviceIds = new Set(db.getDevices().filter((d) => d.userId === user.id).map((d) => d.id));
     jobs = jobs.filter((j) => userDeviceIds.has(j.deviceId));
@@ -124,7 +142,6 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
     });
   }
 
-  // Reject simulated devices from physical OTA deployment
   const simulatedTarget = targetDevices.find((d) => d.isSimulated);
   if (simulatedTarget) {
     return res.status(400).json({
@@ -132,28 +149,23 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
     });
   }
 
-  // Point 4: Validate strict hardware model & role compatibility
+  // Exact model & revision compatibility check (Requirement 9)
   const incompatibleDevices = targetDevices.filter((d) => {
-    const devRole = (d.roleKey || '').toUpperCase();
-    const devType = (d.deviceType || d.type || '').toLowerCase();
-    const devModel = (d.hardwareModel || '').toUpperCase();
-    const fwRole = fw.roleKey.toUpperCase();
-    const fwType = fw.deviceType.toLowerCase();
-    const fwModel = (fw.hardwareModel || 'ALL').toUpperCase();
-
-    if (devRole && devRole !== fwRole) return true;
-    if (devType && devType !== fwType && fwType !== 'all') return true;
-    if (fwModel !== 'ALL' && devModel && !devModel.includes(fwModel) && !fwModel.includes(devModel)) return true;
-    return false;
+    const roleOk = !d.roleKey || d.roleKey.toUpperCase() === fw.roleKey.toUpperCase();
+    const typeOk = !d.deviceType || d.deviceType.toLowerCase() === fw.deviceType.toLowerCase() || fw.deviceType === 'all';
+    const modelOk = isHardwareModelCompatible(d.hardwareModel, fw.hardwareModel);
+    const revOk = isHardwareRevisionCompatible(d.hardwareRevision, fw.minHardwareRevision);
+    return !(roleOk && typeOk && modelOk && revOk);
   });
 
   if (incompatibleDevices.length > 0 && targetScope === 'selected') {
     return res.status(400).json({
-      error: `Seçilen cihazlardan ${incompatibleDevices.length} tanesi bu firmware (Model: ${fw.hardwareModel}, Tipi: ${fw.deviceType}, Görev: ${fw.roleKey}) ile donanım olarak uyumsuz!`,
+      error: `Seçilen cihazlardan ${incompatibleDevices.length} tanesi bu firmware (Model: ${fw.hardwareModel}, Tipi: ${fw.deviceType}, Görev: ${fw.roleKey}, MinRev: ${fw.minHardwareRevision || 'yok'}) ile donanım/revizyon olarak uyumsuz!`,
       incompatibleDevices: incompatibleDevices.map((d) => ({
         id: d.id,
         name: d.name,
         hardwareModel: d.hardwareModel,
+        hardwareRevision: d.hardwareRevision,
         roleKey: d.roleKey,
         deviceType: d.deviceType || d.type,
       })),
@@ -161,23 +173,16 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
   }
 
   const validDevices = targetDevices.filter((d) => {
-    const devRole = (d.roleKey || '').toUpperCase();
-    const devType = (d.deviceType || d.type || '').toLowerCase();
-    const devModel = (d.hardwareModel || '').toUpperCase();
-    const fwRole = fw.roleKey.toUpperCase();
-    const fwType = fw.deviceType.toLowerCase();
-    const fwModel = (fw.hardwareModel || 'ALL').toUpperCase();
-
-    const roleOk = !devRole || devRole === fwRole;
-    const typeOk = !devType || devType === fwType || fwType === 'all';
-    const modelOk = fwModel === 'ALL' || !devModel || devModel.includes(fwModel) || fwModel.includes(devModel);
-
-    return roleOk && typeOk && modelOk;
+    const roleOk = !d.roleKey || d.roleKey.toUpperCase() === fw.roleKey.toUpperCase();
+    const typeOk = !d.deviceType || d.deviceType.toLowerCase() === fw.deviceType.toLowerCase() || fw.deviceType === 'all';
+    const modelOk = isHardwareModelCompatible(d.hardwareModel, fw.hardwareModel);
+    const revOk = isHardwareRevisionCompatible(d.hardwareRevision, fw.minHardwareRevision);
+    return roleOk && typeOk && modelOk && revOk;
   });
 
   if (validDevices.length === 0) {
     return res.status(400).json({
-      error: `Cihazların donanım modeli, role_key veya device_type değerleri seçilen firmware (${fw.hardwareModel} / ${fw.deviceType} / ${fw.roleKey}) ile uyuşmuyor.`,
+      error: `Cihazların donanım modeli, role_key veya revizyon değerleri seçilen firmware (${fw.hardwareModel} / ${fw.deviceType} / ${fw.roleKey}) ile uyuşmuyor.`,
     });
   }
 
@@ -225,7 +230,6 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
     };
 
     db.saveOtaJob(job);
-    (db.postgresRepo as any)?.saveOtaJob?.(job)?.catch?.(() => {});
     createdJobs.push(job);
   });
 
@@ -247,7 +251,52 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
   });
 });
 
-// POST /api/ota/cancel - Cancel pending/downloading OTA for device(s) (Admin only) (Point 8)
+// POST /api/ota/retry - Manually retry a failed/expired job (Requirement 8)
+otaRouter.post('/retry', authenticateUser, requireAdmin, (req: Request, res: Response) => {
+  const { jobId } = req.body;
+  if (!jobId) {
+    return res.status(400).json({ error: 'jobId alanı zorunludur.' });
+  }
+
+  const jobs = db.getOtaJobs();
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'OTA görevi bulunamadı.' });
+  }
+
+  const nowIso = new Date().toISOString();
+  const expiresAtIso = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const downloadToken = `otatkn_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+
+  job.status = 'PENDING';
+  job.progressPercent = 0;
+  job.errorMessage = undefined;
+  job.downloadToken = downloadToken;
+  job.attemptCount = 0;
+  job.nextRetryAt = undefined;
+  job.expiresAt = expiresAtIso;
+  job.updatedAt = nowIso;
+
+  db.saveOtaJob(job);
+
+  const dev = db.getDeviceById(job.deviceId);
+  if (dev) {
+    dev.otaStatus = 'PENDING';
+    dev.otaProgress = 0;
+    dev.otaErrorMessage = undefined;
+    dev.otaTargetFirmwareId = job.firmwareId;
+    dev.otaDownloadToken = downloadToken;
+    db.updateDevice(dev.id, dev);
+  }
+
+
+  broadcast('devices:updated', db.getDevices());
+  broadcast('ota:updated', { jobs: db.getOtaJobs() });
+
+  res.json({ success: true, message: 'OTA görevi yeniden başlatıldı.', job });
+});
+
+// POST /api/ota/cancel - Cancel pending/downloading OTA for device(s) (Admin only)
 otaRouter.post('/cancel', authenticateUser, requireAdmin, (req: Request, res: Response) => {
   const { deviceIds } = req.body;
   const ids: string[] = Array.isArray(deviceIds) ? deviceIds : [deviceIds].filter(Boolean);
@@ -258,7 +307,6 @@ otaRouter.post('/cancel', authenticateUser, requireAdmin, (req: Request, res: Re
   ids.forEach((id) => {
     const dev = db.getDevices().find((d) => d.id === id);
     if (dev) {
-      // Cancel active OTA status on device
       if (['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(dev.otaStatus || '')) {
         dev.otaStatus = 'CANCELLED';
         dev.otaTargetFirmwareId = undefined;
@@ -276,7 +324,6 @@ otaRouter.post('/cancel', authenticateUser, requireAdmin, (req: Request, res: Re
         cancelCount++;
       }
 
-      // Point 8: Update corresponding active OTA Job records to CANCELLED!
       const activeJobs = db.getOtaJobs().filter(
         (j) =>
           j.deviceId === id &&
@@ -289,7 +336,6 @@ otaRouter.post('/cancel', authenticateUser, requireAdmin, (req: Request, res: Re
         job.completedAt = nowIso;
         job.updatedAt = nowIso;
         db.saveOtaJob(job);
-        (db.postgresRepo as any)?.saveOtaJob?.(job)?.catch?.(() => {});
       });
     }
   });
@@ -297,14 +343,13 @@ otaRouter.post('/cancel', authenticateUser, requireAdmin, (req: Request, res: Re
   broadcast('devices:updated', db.getDevices());
   broadcast('ota:updated', { jobs: db.getOtaJobs() });
 
-  res.json({ success: true, message: `${cancelCount} cihaz için OTA güncellemesi iptal edildi ve iş durumları 'CANCELLED' olarak güncellendi.` });
+  res.json({ success: true, message: `${cancelCount} cihaz için OTA güncellemesi iptal edildi.` });
 });
 
 // ==========================================
 // 2. HARDWARE DEVICE OTA PROTOCOL (Strict X-API-Key Only)
 // ==========================================
 
-// Helper to authenticate device strictly via X-API-Key header
 function authenticateHardwareDevice(req: Request): Device | null {
   const apiKey = (
     req.headers['x-api-key'] ||
@@ -331,7 +376,6 @@ otaRouter.all('/check', (req: Request, res: Response) => {
   const headers = req.headers;
   const body = req.body || {};
 
-  // Update hardware runtime metadata
   const deviceType = (headers['x-device-type'] || body.deviceType || body.device_type)?.toString().trim();
   const roleKey = (headers['x-role-key'] || body.roleKey || body.role_key)?.toString().trim();
   const hardwareModel = (headers['x-hardware-model'] || body.hardwareModel || body.hardware_model)?.toString().trim();
@@ -352,13 +396,12 @@ otaRouter.all('/check', (req: Request, res: Response) => {
 
   db.updateDevice(dev.id, updates);
 
-  // Check if explicit target firmware exists
   let targetFw: Firmware | undefined;
   if (dev.otaTargetFirmwareId) {
     targetFw = db.getFirmwareById(dev.otaTargetFirmwareId);
   }
 
-  // Automatic SemVer update check (Point 2): targetVersion > currentVersion
+  // Automatic SemVer update check
   if (!targetFw && dev.roleKey) {
     const activeFws = db.getFirmwares().filter(
       (f) =>
@@ -368,11 +411,9 @@ otaRouter.all('/check', (req: Request, res: Response) => {
     );
 
     if (activeFws.length > 0) {
-      // Sort newest version first
       activeFws.sort((a, b) => compareSemver(b.version, a.version));
       const newest = activeFws[0];
 
-      // Point 2: Strict SemVer comparison (target > current)
       if (isValidSemver(newest.version) && isTargetVersionNewer(newest.version, dev.firmwareVersion || '0.0.0')) {
         targetFw = newest;
       }
@@ -380,29 +421,65 @@ otaRouter.all('/check', (req: Request, res: Response) => {
   }
 
   if (targetFw && targetFw.isActive) {
-    // Point 4: Validate Hardware Model & Revision
-    const devModel = (updates.hardwareModel || dev.hardwareModel || '').toUpperCase();
-    const fwModel = (targetFw.hardwareModel || 'ALL').toUpperCase();
+    // Exact model and revision check
+    const devModel = updates.hardwareModel || dev.hardwareModel;
+    const devRev = updates.hardwareRevision || dev.hardwareRevision;
 
-    if (fwModel !== 'ALL' && devModel && !devModel.includes(fwModel) && !fwModel.includes(devModel)) {
+    if (!isHardwareModelCompatible(devModel, targetFw.hardwareModel)) {
       return res.json({
         updateAvailable: false,
-        message: `Uyumsuz donanım modeli. Cihaz: ${devModel}, Firmware Hedefi: ${fwModel}`,
+        message: `Uyumsuz donanım modeli. Cihaz: ${devModel || 'bilinmiyor'}, Firmware Hedefi: ${targetFw.hardwareModel}`,
         checkIntervalSeconds: 600,
       });
     }
 
-    // Point 6: Generate / Retrieve single-use download token
-    const token = dev.otaDownloadToken || `otatkn_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
-    if (!dev.otaDownloadToken) {
-      db.updateDevice(dev.id, { otaDownloadToken: token, otaTargetFirmwareId: targetFw.id, otaStatus: 'PENDING' });
+    if (!isHardwareRevisionCompatible(devRev, targetFw.minHardwareRevision)) {
+      return res.json({
+        updateAvailable: false,
+        message: `Yetersiz donanım revizyonu. Cihaz: ${devRev || 'bilinmiyor'}, Gerekli En Az: ${targetFw.minHardwareRevision}`,
+        checkIntervalSeconds: 600,
+      });
     }
+
+    const token = dev.otaDownloadToken || `otatkn_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+    
+    // Requirement 7: Guarantee an OtaDeploymentJob exists for automatically discovered updates!
+    let activeJob = db.getOtaJobs().find(
+      (j) => j.deviceId === dev.id && j.firmwareId === targetFw!.id && ['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(j.status)
+    );
+
+    const nowIso = new Date().toISOString();
+    if (!activeJob) {
+      activeJob = {
+        id: `otajob_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+        firmwareId: targetFw.id,
+        firmwareVersion: targetFw.version,
+        firmwareName: targetFw.name,
+        deviceId: dev.id,
+        deviceName: dev.name,
+        deviceType: dev.deviceType || dev.type,
+        roleKey: dev.roleKey || targetFw.roleKey,
+        targetScope: 'auto',
+        status: 'PENDING',
+        progressPercent: 0,
+        downloadToken: token,
+        attemptCount: 0,
+        maxAttempts: 3,
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        initiatedBy: 'SYSTEM_AUTO',
+        created_at: nowIso,
+      };
+      db.saveOtaJob(activeJob);
+    }
+
+    db.updateDevice(dev.id, { otaDownloadToken: token, otaTargetFirmwareId: targetFw.id, otaStatus: activeJob.status as any });
 
     const downloadUrl = `/api/firmwares/${targetFw.id}/download?token=${token}`;
     const keys = getEd25519KeyPair();
 
     return res.json({
       updateAvailable: true,
+      jobId: activeJob.id,
       firmwareId: targetFw.id,
       firmwareName: targetFw.name,
       version: targetFw.version,
@@ -410,8 +487,8 @@ otaRouter.all('/check', (req: Request, res: Response) => {
       roleKey: targetFw.roleKey,
       hardwareModel: targetFw.hardwareModel,
       sha256: targetFw.sha256,
-      signature: targetFw.signature || '', // Point 5: Ed25519 Cryptographic Signature
-      publicKeyPem: keys.publicKeyPem,
+      signature: targetFw.signature || '',
+      publicKeyPem: keys.publicKeyPem, // Informational only
       binarySize: targetFw.binarySize,
       downloadUrl,
       downloadToken: token,
@@ -428,7 +505,7 @@ otaRouter.all('/check', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/ota/status - Device reports OTA download, flash, and success/failure progress (Point 7)
+// POST /api/ota/status - Device reports state machine progress (Requirement 5)
 otaRouter.post('/status', (req: Request, res: Response) => {
   const dev = authenticateHardwareDevice(req);
   if (!dev) {
@@ -438,101 +515,173 @@ otaRouter.post('/status', (req: Request, res: Response) => {
     });
   }
 
-  const { status, progressPercent, errorMessage, newVersion, firmwareId } = req.body || {};
+  const { status, progressPercent, errorMessage, firmwareId, jobId, downloadToken } = req.body || {};
 
-  const allowedStatuses = [
-    'PENDING',
-    'DOWNLOADING',
-    'FLASHING',
-    'VERIFYING',
-    'REBOOTING',
-    'SUCCESS',
-    'UPDATED',
-    'FAILED',
-    'ERROR',
-  ];
+  const activeJobs = db.getOtaJobs().filter(
+    (j) => j.deviceId === dev.id && ['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(j.status)
+  );
 
-  if (!status || !allowedStatuses.includes(status)) {
-    return res.status(400).json({ error: 'Geçersiz OTA durum değeri (status).' });
+  const activeJob = jobId ? activeJobs.find((j) => j.id === jobId) : activeJobs[activeJobs.length - 1];
+
+  if (!activeJob) {
+    return res.status(400).json({
+      error: 'Aktif bir OTA güncelleme görevi bulunamadı veya görev iptal edilmiş/süresi dolmuş.',
+    });
   }
 
-  const nowIso = new Date().toISOString();
-  const updates: Partial<Device> = {
-    lastSeen: nowIso,
-    status: 'online',
-    otaUpdatedAt: nowIso,
-  };
+  if (firmwareId && firmwareId !== activeJob.firmwareId) {
+    return res.status(400).json({
+      error: `Uyumsuz firmwareId (${firmwareId} !== ${activeJob.firmwareId}).`,
+    });
+  }
+
+  if (downloadToken && activeJob.downloadToken && downloadToken !== activeJob.downloadToken) {
+    return res.status(403).json({
+      error: 'Geçersiz downloadToken.',
+    });
+  }
 
   const normalizedStatus = status === 'UPDATED' ? 'SUCCESS' : status === 'ERROR' ? 'FAILED' : status;
 
-  if (['DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(normalizedStatus)) {
-    updates.otaStatus = normalizedStatus as any;
-    updates.otaProgress =
-      normalizedStatus === 'FLASHING'
-        ? 80
-        : normalizedStatus === 'VERIFYING'
-        ? 90
-        : normalizedStatus === 'REBOOTING'
-        ? 95
-        : Math.min(100, Math.max(0, Number(progressPercent) || 0));
-  } else if (normalizedStatus === 'SUCCESS') {
-    // Point 7: Strict Boot Confirmation Verification
-    updates.otaStatus = 'SUCCESS';
-    updates.otaProgress = 100;
-    updates.otaTargetFirmwareId = undefined;
-    updates.otaDownloadToken = undefined;
+  // Enforce valid state machine transitions
+  const allowedNextStates = VALID_TRANSITIONS[activeJob.status] || [];
+  if (normalizedStatus !== activeJob.status && !allowedNextStates.includes(normalizedStatus)) {
+    return res.status(400).json({
+      error: `Geçersiz durum geçişi: '${activeJob.status}' durumundan '${normalizedStatus}' durumuna doğrudan geçilemez.`,
+      currentStatus: activeJob.status,
+      allowedNextStates,
+    });
+  }
 
-    if (newVersion) {
-      updates.firmwareVersion = String(newVersion).replace(/^[vV]/, '');
-    } else if (firmwareId) {
-      const fw = db.getFirmwareById(firmwareId);
-      if (fw) updates.firmwareVersion = fw.version;
-    }
-  } else if (normalizedStatus === 'FAILED') {
-    updates.otaStatus = 'FAILED';
-    updates.otaErrorMessage = errorMessage || 'OTA Güncelleme Hatası';
+  // Reject direct fake SUCCESS via status endpoint! SUCCESS must be confirmed via /api/ota/confirm-boot after reboot
+  if (normalizedStatus === 'SUCCESS') {
+    return res.status(400).json({
+      error: 'Sahte SUCCESS bildirimi reddedildi. Başarılı güncelleme yalnızca yeniden başlatma sonrası /api/ota/confirm-boot çağrısı ile onaylanabilir.',
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  activeJob.status = normalizedStatus as any;
+  activeJob.progressPercent = Math.min(100, Math.max(0, Number(progressPercent) || activeJob.progressPercent));
+  activeJob.updatedAt = nowIso;
+
+  if (normalizedStatus === 'FAILED') {
+    activeJob.errorMessage = errorMessage || 'OTA Güncelleme Hatası';
+    activeJob.completedAt = nowIso;
+  }
+
+  db.saveOtaJob(activeJob);
+
+  const updates: Partial<Device> = {
+    lastSeen: nowIso,
+    status: 'online',
+    otaStatus: normalizedStatus as any,
+    otaProgress: activeJob.progressPercent,
+    otaUpdatedAt: nowIso,
+  };
+
+  if (normalizedStatus === 'FAILED') {
+    updates.otaErrorMessage = activeJob.errorMessage;
+    updates.otaTargetFirmwareId = undefined;
   }
 
   db.updateDevice(dev.id, updates);
-
-  // Update corresponding OTA deployment job in history
-  const activeJobs = db
-    .getOtaJobs()
-    .filter((j) => j.deviceId === dev.id && !['SUCCESS', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(j.status));
-
-  if (activeJobs.length > 0) {
-    const job = activeJobs[activeJobs.length - 1];
-    job.updatedAt = nowIso;
-
-    if (['DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(normalizedStatus)) {
-      job.status = normalizedStatus as any;
-      job.progressPercent = updates.otaProgress;
-      if (!job.downloadStartedAt && normalizedStatus === 'DOWNLOADING') {
-        job.downloadStartedAt = nowIso;
-      }
-    } else if (normalizedStatus === 'SUCCESS') {
-      job.status = 'SUCCESS';
-      job.progressPercent = 100;
-      job.completedAt = nowIso;
-      job.bootConfirmedAt = nowIso;
-    } else if (normalizedStatus === 'FAILED') {
-      job.status = 'FAILED';
-      job.errorMessage = errorMessage || 'OTA Güncelleme Hatası';
-      job.completedAt = nowIso;
-    }
-
-    db.saveOtaJob(job);
-    (db.postgresRepo as any)?.saveOtaJob?.(job)?.catch?.(() => {});
-  }
 
   broadcast('devices:updated', db.getDevices());
   broadcast('ota:updated', { jobs: db.getOtaJobs() });
 
   res.json({
     success: true,
-    message: 'Cihaz OTA durumu kaydedildi.',
-    otaStatus: updates.otaStatus,
-    firmwareVersion: updates.firmwareVersion || dev.firmwareVersion,
+    message: 'OTA durumu güncellendi.',
+    jobId: activeJob.id,
+    currentStatus: activeJob.status,
+    progressPercent: activeJob.progressPercent,
   });
 });
+
+// POST /api/ota/confirm-boot - Post-reboot boot confirmation endpoint (Requirement 6)
+otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
+  const dev = authenticateHardwareDevice(req);
+  if (!dev) {
+    return res.status(401).json({
+      error: 'unauthorized_device',
+      message: 'Yetkisiz erişim. Boot doğrulaması için geçerli "X-API-Key" başlığı zorunludur.',
+    });
+  }
+
+  const { jobId, firmwareVersion, bootNonce, bootId } = req.body || {};
+
+  if (!firmwareVersion) {
+    return res.status(400).json({ error: 'firmwareVersion alanı zorunludur.' });
+  }
+
+  const jobs = db.getOtaJobs().filter((j) => j.deviceId === dev.id);
+  const targetJob = jobId ? jobs.find((j) => j.id === jobId) : jobs.find((j) => ['REBOOTING', 'FLASHING', 'VERIFYING', 'DOWNLOADING', 'PENDING'].includes(j.status));
+
+  if (!targetJob) {
+    return res.status(400).json({ error: 'Onay bekleyen aktif OTA görevi bulunamadı.' });
+  }
+
+  const cleanReportedVersion = String(firmwareVersion).trim().replace(/^[vV]/, '');
+  const cleanTargetVersion = String(targetJob.firmwareVersion).trim().replace(/^[vV]/, '');
+
+  if (compareSemver(cleanReportedVersion, cleanTargetVersion) !== 0) {
+    targetJob.status = 'FAILED';
+    targetJob.errorMessage = `Boot doğrulama hatası: Cihaz bildirilen sürüm (${cleanReportedVersion}) ile hedef sürüm (${cleanTargetVersion}) eşleşmiyor. Rollback tetiklendi.`;
+    targetJob.completedAt = new Date().toISOString();
+    db.saveOtaJob(targetJob);
+
+    db.updateDevice(dev.id, {
+      otaStatus: 'FAILED',
+      otaErrorMessage: targetJob.errorMessage,
+      otaTargetFirmwareId: undefined,
+    });
+
+    broadcast('devices:updated', db.getDevices());
+    broadcast('ota:updated', { jobs: db.getOtaJobs() });
+
+    return res.status(400).json({
+      error: 'Boot doğrulaması başarısız! Sürüm uyuşmazlığı nedeniyle rollback gerçekleşti.',
+      reportedVersion: cleanReportedVersion,
+      targetVersion: cleanTargetVersion,
+    });
+  }
+
+  // Successful boot confirmation!
+  const nowIso = new Date().toISOString();
+  targetJob.status = 'SUCCESS';
+  targetJob.progressPercent = 100;
+  targetJob.bootConfirmedAt = nowIso;
+  targetJob.completedAt = nowIso;
+  targetJob.updatedAt = nowIso;
+  db.saveOtaJob(targetJob);
+
+  db.updateDevice(dev.id, {
+    firmwareVersion: cleanReportedVersion,
+    otaStatus: 'SUCCESS',
+    otaProgress: 100,
+    otaTargetFirmwareId: undefined,
+    otaDownloadToken: undefined,
+    otaErrorMessage: undefined,
+    otaUpdatedAt: nowIso,
+  });
+
+  db.addAuditLog(
+    'SYSTEM',
+    dev.name,
+    `Cihaz OTA Boot Başarıyla Onaylandı: ${dev.name} (${cleanReportedVersion}) - Job: ${targetJob.id} [Nonce: ${bootNonce || bootId || 'none'}]`,
+    'medium'
+  );
+
+  broadcast('devices:updated', db.getDevices());
+  broadcast('ota:updated', { jobs: db.getOtaJobs() });
+
+  res.json({
+    success: true,
+    message: 'Boot doğrulaması başarılı. OTA güncellemesi başarıyla tamamlandı ve rollback iptal edildi.',
+    verifiedVersion: cleanReportedVersion,
+    jobId: targetJob.id,
+  });
+});
+
 

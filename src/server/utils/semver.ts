@@ -51,3 +51,39 @@ export function compareSemver(v1: string, v2: string): number {
 export function isTargetVersionNewer(targetVersion: string, currentVersion: string): boolean {
   return compareSemver(targetVersion, currentVersion) > 0;
 }
+
+export function normalizeHardwareModel(model?: string): string {
+  if (!model || typeof model !== 'string') return 'UNKNOWN';
+  const clean = model.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return clean || 'UNKNOWN';
+}
+
+export function isHardwareModelCompatible(deviceModel?: string, firmwareModel?: string): boolean {
+  if (!firmwareModel || firmwareModel.toUpperCase() === 'ALL') return true;
+  if (!deviceModel) return false;
+  return normalizeHardwareModel(deviceModel) === normalizeHardwareModel(firmwareModel);
+}
+
+export function isHardwareRevisionCompatible(deviceRevision?: string, minRequiredRevision?: string): boolean {
+  if (!minRequiredRevision) return true;
+  if (!deviceRevision) return false;
+
+  const devRevClean = deviceRevision.trim().replace(/^[vV]/, '');
+  const reqRevClean = minRequiredRevision.trim().replace(/^[vV]/, '');
+
+  const devSem = parseSemver(devRevClean);
+  const reqSem = parseSemver(reqRevClean);
+
+  if (devSem && reqSem) {
+    return compareSemver(devRevClean, reqRevClean) >= 0;
+  }
+
+  const devNum = parseFloat(devRevClean);
+  const reqNum = parseFloat(reqRevClean);
+  if (!isNaN(devNum) && !isNaN(reqNum)) {
+    return devNum >= reqNum;
+  }
+
+  return devRevClean.localeCompare(reqRevClean, undefined, { numeric: true }) >= 0;
+}
+

@@ -8,3 +8,5 @@ coverage/
 !.env.example
 data/
 db.json
+uploads/keys/
+uploads/firmware/
