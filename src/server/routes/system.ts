@@ -334,6 +334,14 @@ const handleSimulatorInject = async (req: any, res: any) => {
     return res.status(404).json({ error: 'Belirtilen cihaz bulunamadı.' });
   }
 
+  // 1. KURAL / GÜVENLİK KORUMASI: Manuel test verisi yalnızca SANAL cihazlara gönderilebilir!
+  if (!dev.isSimulated) {
+    return res.status(403).json({
+      error: 'physical_device_not_allowed_in_simulator',
+      message: 'Manuel test verisi yalnızca sanal cihazlara gönderilebilir. Fiziksel saha donanımlarına sahte test verisi enjekte edilemez.',
+    });
+  }
+
   const metricsToProcess: { metric: string; value: number; unit?: string }[] = [];
   if (Array.isArray(readings) && readings.length > 0) {
     for (const r of readings) {
@@ -386,14 +394,15 @@ const handleSimulatorInject = async (req: any, res: any) => {
   });
 
   // Broadcast strictly to simulation channel
-  broadcast('telemetry:simulation:batch', generatedReadings);
   if (generatedReadings.length === 1) {
     broadcast('telemetry:simulation:new', generatedReadings[0]);
+  } else if (generatedReadings.length > 1) {
+    broadcast('telemetry:simulation:batch', generatedReadings);
   }
 
   res.status(201).json({
     success: true,
-    message: 'Test telemetrisi simülasyon motoruna başarıyla enjekte edildi.',
+    message: 'Test telemetrisi sanal cihaza ve simülasyon motoruna başarıyla enjekte edildi.',
     deviceId: dev.id,
     deviceName: dev.name,
     injectedCount: generatedReadings.length,
@@ -447,24 +456,37 @@ simulatorRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   });
 });
 
-simulatorRouter.post('/batch', authenticateUser, (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
+simulatorRouter.post('/batch', authenticateUser, requireAdmin, (req, res) => {
   const { count = 10, deviceId, metric, value, unit } = req.body;
   const numCount = Math.min(200, Math.max(1, Number(count)));
-  let devices = db.getDevices().filter((d) => d.dataFlowActive !== false && d.status !== 'maintenance');
+  
+  // Yalnızca sanal cihazlara simülasyon batch verisi üretilir
+  const simulatedDevices = db.getDevices().filter(
+    (d) => d.isSimulated === true && d.dataFlowActive !== false && d.status !== 'maintenance'
+  );
 
-  if (currentUser.role !== 'admin') {
-    devices = devices.filter((d) => d.userId === currentUser.id);
+  if (deviceId) {
+    const targetDev = db.getDevices().find((d) => d.id === deviceId || d.apiKey === deviceId);
+    if (!targetDev) {
+      return res.status(404).json({ error: 'Belirtilen cihaz bulunamadı.' });
+    }
+    if (!targetDev.isSimulated) {
+      return res.status(403).json({
+        error: 'physical_device_not_allowed_in_simulator',
+        message: 'Toplu simülasyon testi yalnızca sanal cihazlara gönderilebilir.',
+      });
+    }
   }
 
-  if (!devices.length) {
-    return res.status(400).json({ error: 'Sistemde aktif veri akışına izin verilen cihazınız bulunamadı.' });
+  if (!simulatedDevices.length) {
+    return res.status(400).json({ error: 'Sistemde aktif sanal test cihazı bulunamadı. Lütfen önce bir sanal cihaz oluşturun.' });
   }
 
   const generatedReadings = [];
   for (let i = 0; i < numCount; i++) {
-    const dev = deviceId ? devices.find((d) => d.id === deviceId) || devices[0] : devices[Math.floor(Math.random() * devices.length)];
+    const dev = deviceId
+      ? simulatedDevices.find((d) => d.id === deviceId) || simulatedDevices[0]
+      : simulatedDevices[Math.floor(Math.random() * simulatedDevices.length)];
     const m = metric || (dev.type === 'sensor' ? 'temperature' : dev.type === 'server' ? 'cpu' : 'power');
     const u = unit || (m === 'temperature' ? '°C' : m === 'power' ? 'kW' : '%');
     const val = value !== undefined ? Number(value) : Number((20 + Math.random() * 60).toFixed(1));
@@ -478,14 +500,14 @@ simulatorRouter.post('/batch', authenticateUser, (req, res) => {
       unit: u,
       status: 'normal',
       rawPayload,
-      source: 'manual_test',
+      source: 'simulator',
       environment: 'sandbox',
     });
     generatedReadings.push(reading);
   }
 
   if (generatedReadings.length > 0) {
-    broadcast('telemetry:batch', generatedReadings);
+    broadcast('telemetry:simulation:batch', generatedReadings);
   }
 
   res.json({

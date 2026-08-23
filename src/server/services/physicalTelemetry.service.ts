@@ -61,9 +61,10 @@ export class PhysicalTelemetryService {
 
     // 4. Broadcast to Production WebSocket Channels
     if (addedReadings.length > 0) {
-      broadcast('telemetry:physical:batch', addedReadings);
       if (addedReadings.length === 1) {
         broadcast('telemetry:physical:new', addedReadings[0]);
+      } else {
+        broadcast('telemetry:physical:batch', addedReadings);
       }
     }
 

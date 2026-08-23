@@ -97,11 +97,9 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'rules:updated', payload: db.getRules(user.id, user.id) }));
     }
 
-    // Default channels assignment if not already set
+    // Default channels assignment: ALL connections (admin & customer) default to ONLY physical channel
     if (!ws.subscribedChannels) {
-      ws.subscribedChannels = user.role === 'admin'
-        ? new Set(['physical', 'simulation'])
-        : new Set(['physical']);
+      ws.subscribedChannels = new Set(['physical']);
     }
 
     const recentTelemetries = db.getTelemetry(undefined, undefined, 50, user.id, user.role === 'admin' ? undefined : user.id);
@@ -111,7 +109,6 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
 
       if (physicalTelemetries.length > 0 && ws.subscribedChannels.has('physical')) {
         safeSend(ws, JSON.stringify({ event: 'telemetry:physical:batch', payload: physicalTelemetries }));
-        safeSend(ws, JSON.stringify({ event: 'telemetry:batch', payload: physicalTelemetries }));
       }
 
       if (simTelemetries.length > 0 && user.role === 'admin' && ws.subscribedChannels.has('simulation')) {
@@ -142,7 +139,7 @@ export function broadcast(event: string, payload: unknown) {
 
     const clientUser = client.user;
     const isAdmin = clientUser.role === 'admin';
-    const subChannels = client.subscribedChannels || (isAdmin ? new Set(['physical', 'simulation']) : new Set(['physical']));
+    const subChannels = client.subscribedChannels || new Set(['physical']);
 
     // 1. Telemetry broadcasts (Strict Physical vs Simulation Channel Isolation)
     if (
@@ -151,9 +148,7 @@ export function broadcast(event: string, payload: unknown) {
       event === 'telemetry:physical:new' ||
       event === 'telemetry:physical:batch' ||
       event === 'telemetry:simulation:new' ||
-      event === 'telemetry:simulation:batch' ||
-      event === 'simulator:batch' ||
-      event === 'simulator:telemetry'
+      event === 'telemetry:simulation:batch'
     ) {
       let readings: TelemetryReading[] = [];
       if (Array.isArray(payload)) {
@@ -165,7 +160,7 @@ export function broadcast(event: string, payload: unknown) {
       if (readings.length === 0) return;
 
       // Classify readings based on origin
-      const isSimEvent = event.startsWith('telemetry:simulation') || event.startsWith('simulator:');
+      const isSimEvent = event.startsWith('telemetry:simulation');
       const isPhysEvent = event.startsWith('telemetry:physical');
 
       const physicalReadings = isSimEvent
@@ -180,7 +175,7 @@ export function broadcast(event: string, payload: unknown) {
             (r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox'
           );
 
-      // Deliver PHYSICAL channel readings
+      // Deliver PHYSICAL channel readings (Single event, no duplicates)
       if (physicalReadings.length > 0 && subChannels.has('physical')) {
         let allowedPhysical = physicalReadings;
         if (!isAdmin) {
@@ -194,27 +189,21 @@ export function broadcast(event: string, payload: unknown) {
           const timestamp = new Date().toISOString();
           if (allowedPhysical.length === 1) {
             safeSend(client, JSON.stringify({ event: 'telemetry:physical:new', payload: allowedPhysical[0], timestamp }));
-            safeSend(client, JSON.stringify({ event: 'telemetry:new', payload: allowedPhysical[0], timestamp }));
           } else {
             safeSend(client, JSON.stringify({ event: 'telemetry:physical:batch', payload: allowedPhysical, timestamp }));
-            safeSend(client, JSON.stringify({ event: 'telemetry:batch', payload: allowedPhysical, timestamp }));
           }
         }
       }
 
       // Deliver SIMULATION channel readings
       // 1. KURAL / STRICT TENANT ISOLATION: Non-admins NEVER receive simulation readings.
-      // Admins receive simulation readings ONLY if subscribed to 'simulation'.
+      // Admins receive simulation readings ONLY if explicitly subscribed to 'simulation'.
       if (simulationReadings.length > 0 && isAdmin && subChannels.has('simulation')) {
         const timestamp = new Date().toISOString();
         if (simulationReadings.length === 1) {
           safeSend(client, JSON.stringify({ event: 'telemetry:simulation:new', payload: simulationReadings[0], timestamp }));
-          safeSend(client, JSON.stringify({ event: 'simulator:telemetry', payload: simulationReadings[0], timestamp }));
-          safeSend(client, JSON.stringify({ event: 'telemetry:new', payload: simulationReadings[0], timestamp }));
         } else {
           safeSend(client, JSON.stringify({ event: 'telemetry:simulation:batch', payload: simulationReadings, timestamp }));
-          safeSend(client, JSON.stringify({ event: 'simulator:batch', payload: simulationReadings, timestamp }));
-          safeSend(client, JSON.stringify({ event: 'telemetry:batch', payload: simulationReadings, timestamp }));
         }
       }
 

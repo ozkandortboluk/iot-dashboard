@@ -20,6 +20,10 @@ interface RealtimeContextType {
   wsLatency: number;
   devices: Device[];
   latestTelemetry: TelemetryReading[];
+  physicalTelemetry: TelemetryReading[];
+  simulationTelemetry: TelemetryReading[];
+  subscribeChannel: (channel: 'physical' | 'simulation') => void;
+  unsubscribeChannel: (channel: 'physical' | 'simulation') => void;
   notifications: NotificationItem[];
   unreadCount: number;
   widgets: WidgetConfig[];
@@ -76,6 +80,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [wsLatency, setWsLatency] = useState(12);
   const [devices, setDevices] = useState<Device[]>([]);
   const [latestTelemetry, setLatestTelemetry] = useState<TelemetryReading[]>([]);
+  const [physicalTelemetry, setPhysicalTelemetry] = useState<TelemetryReading[]>([]);
+  const [simulationTelemetry, setSimulationTelemetry] = useState<TelemetryReading[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
   const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
@@ -240,7 +246,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           uniqueHistory.sort(
             (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
           );
-          setLatestTelemetry(uniqueHistory);
+          
+          const physicalHistory = uniqueHistory.filter((r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox'));
+          const simHistory = uniqueHistory.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
+
+          setPhysicalTelemetry(physicalHistory);
+          setLatestTelemetry(physicalHistory);
+          if (user?.role === 'admin') {
+            setSimulationTelemetry(simHistory);
+          }
         }
 
         const simRes = await fetch('/api/simulator/status');
@@ -314,12 +328,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(authPayload));
 
-            // Subscribe to channels based on role (Customer -> physical only; Admin -> physical + simulation)
-            const initialChannels = user?.role === 'admin' ? ['physical', 'simulation'] : ['physical'];
+            // Default subscription: ALWAYS ONLY physical channel on connect!
+            // Simulation channel is subscribed on-demand when visiting the simulator view.
             ws.send(
               JSON.stringify({
                 event: 'subscribe',
-                channels: initialChannels,
+                channels: ['physical'],
               })
             );
           }
@@ -359,15 +373,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setIsConnected(true);
               setConnectionStatus('connected');
             } else if (
-              data.event === 'telemetry:new' ||
-              data.event === 'telemetry:batch' ||
               data.event === 'telemetry:physical:new' ||
               data.event === 'telemetry:physical:batch' ||
-              data.event === 'telemetry:simulation:new' ||
-              data.event === 'telemetry:simulation:batch' ||
-              data.event === 'simulator:telemetry' ||
-              data.event === 'simulator:batch'
+              data.event === 'telemetry:new' ||
+              data.event === 'telemetry:batch'
             ) {
+              // 1. PHYSICAL TELEMETRY STREAM
               const rawPayload = data.payload;
               const readings: TelemetryReading[] = Array.isArray(rawPayload)
                 ? rawPayload
@@ -385,7 +396,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 });
 
                 if (allowedReadings.length > 0) {
-                  // Collect metric updates per canonical device
+                  // Collect metric updates for physical devices only
                   const deviceUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
                   for (const reading of allowedReadings) {
                     if (!reading.metric || typeof reading.value !== 'number' || isNaN(reading.value)) {
@@ -402,7 +413,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                       metrics: {},
                     };
                     existing.lastSeen = reading.timestamp || new Date().toISOString();
-                    // Store both original metric key and lowercase metric key to guarantee match
                     existing.metrics[reading.metric] = reading.value;
                     existing.metrics[reading.metric.toLowerCase()] = reading.value;
                     deviceUpdatesMap.set(devId, existing);
@@ -429,13 +439,82 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                     })
                   );
 
-                  // Batch update latestTelemetry state once
+                  // Update physical telemetry states (isolated from simulation)
+                  setPhysicalTelemetry((prev) => {
+                    const newIds = new Set(allowedReadings.map((r) => r.id));
+                    const filteredPrev = prev.filter((item) => !newIds.has(item.id));
+                    return [...allowedReadings, ...filteredPrev].slice(0, 500);
+                  });
                   setLatestTelemetry((prev) => {
                     const newIds = new Set(allowedReadings.map((r) => r.id));
                     const filteredPrev = prev.filter((item) => !newIds.has(item.id));
                     return [...allowedReadings, ...filteredPrev].slice(0, 500);
                   });
                 }
+              }
+            } else if (
+              data.event === 'telemetry:simulation:new' ||
+              data.event === 'telemetry:simulation:batch'
+            ) {
+              // 2. SIMULATION TELEMETRY STREAM (Strictly isolated for admin simulator)
+              if (user?.role !== 'admin') return;
+
+              const rawPayload = data.payload;
+              const readings: TelemetryReading[] = Array.isArray(rawPayload)
+                ? rawPayload
+                : rawPayload && typeof rawPayload === 'object' && (rawPayload as TelemetryReading).deviceId
+                ? [rawPayload as TelemetryReading]
+                : [];
+
+              if (readings.length > 0) {
+                // Update simulated devices metrics only (NEVER touch physical devices)
+                const simUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
+                for (const reading of readings) {
+                  if (!reading.metric || typeof reading.value !== 'number' || isNaN(reading.value)) {
+                    continue;
+                  }
+                  const targetDev = devicesRef.current.find(
+                    (d) => (d.id === reading.deviceId || d.apiKey === reading.deviceId) && d.isSimulated === true
+                  );
+                  if (!targetDev) continue;
+
+                  const existing = simUpdatesMap.get(targetDev.id) || {
+                    lastSeen: reading.timestamp || new Date().toISOString(),
+                    metrics: {},
+                  };
+                  existing.lastSeen = reading.timestamp || new Date().toISOString();
+                  existing.metrics[reading.metric] = reading.value;
+                  existing.metrics[reading.metric.toLowerCase()] = reading.value;
+                  simUpdatesMap.set(targetDev.id, existing);
+                }
+
+                if (simUpdatesMap.size > 0) {
+                  setDevices((prevDevs) =>
+                    prevDevs.map((dev) => {
+                      if (!dev.isSimulated) return dev; // Never touch physical hardware
+                      const update = simUpdatesMap.get(dev.id);
+                      if (update) {
+                        return {
+                          ...dev,
+                          lastSeen: dev.dataFlowActive !== false ? update.lastSeen : dev.lastSeen,
+                          status: dev.dataFlowActive !== false ? 'online' : dev.status,
+                          metrics: {
+                            ...(dev.metrics || {}),
+                            ...update.metrics,
+                          },
+                        };
+                      }
+                      return dev;
+                    })
+                  );
+                }
+
+                // Update simulation-only telemetry state
+                setSimulationTelemetry((prev) => {
+                  const newIds = new Set(readings.map((r) => r.id));
+                  const filteredPrev = prev.filter((item) => !newIds.has(item.id));
+                  return [...readings, ...filteredPrev].slice(0, 500);
+                });
               }
             } else if (data.event === 'system:connected') {
               setIsConnected(true);
@@ -710,9 +789,36 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  const subscribeChannel = useCallback((channel: 'physical' | 'simulation') => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          event: 'subscribe',
+          channels: [channel],
+        })
+      );
+    }
+  }, []);
+
+  const unsubscribeChannel = useCallback((channel: 'physical' | 'simulation') => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          event: 'unsubscribe',
+          channels: [channel],
+        })
+      );
+    }
+  }, []);
+
   const triggerTestTelemetry = useCallback(async (deviceId: string, metric: string, value: number, unit?: string) => {
     const dev = devices.find((d) => d.id === deviceId);
     if (!dev) return;
+
+    if (!dev.isSimulated) {
+      console.warn('triggerTestTelemetry: Manuel test verisi yalnızca sanal cihazlara gönderilebilir.');
+      return;
+    }
 
     try {
       await fetch('/api/simulator/v1/inject', {
@@ -900,6 +1006,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       wsLatency,
       devices,
       latestTelemetry,
+      physicalTelemetry,
+      simulationTelemetry,
+      subscribeChannel,
+      unsubscribeChannel,
       notifications,
       unreadCount,
       widgets,
@@ -933,6 +1043,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       wsLatency,
       devices,
       latestTelemetry,
+      physicalTelemetry,
+      simulationTelemetry,
+      subscribeChannel,
+      unsubscribeChannel,
       notifications,
       unreadCount,
       widgets,

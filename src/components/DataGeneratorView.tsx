@@ -31,7 +31,7 @@ import { COMMON_UNITS, getMetricUnit } from '../lib/utils';
 
 export const DataGeneratorView: React.FC = () => {
   const { user } = useAuth();
-  const { devices, latestTelemetry, simulatorActive, toggleSimulator } = useRealtime();
+  const { devices, simulationTelemetry, simulatorActive, toggleSimulator, subscribeChannel, unsubscribeChannel } = useRealtime();
 
   // Admin Role Check
   const isAdmin = user?.role === 'admin';
@@ -57,21 +57,34 @@ export const DataGeneratorView: React.FC = () => {
   // Console Log filters
   const [logFilterMetric, setLogFilterMetric] = useState<string>('all');
   const [logPaused, setLogPaused] = useState<boolean>(false);
-  const [localLogs, setLocalLogs] = useState<typeof latestTelemetry>([]);
+  const [localLogs, setLocalLogs] = useState<typeof simulationTelemetry>([]);
+
+  // Subscribe to simulation channel when entering this page, unsubscribe when leaving
+  useEffect(() => {
+    if (isAdmin) {
+      subscribeChannel('simulation');
+      return () => {
+        unsubscribeChannel('simulation');
+      };
+    }
+  }, [isAdmin, subscribeChannel, unsubscribeChannel]);
+
+  // Only allow simulated devices
+  const simulatedDevices = devices.filter((d) => d.isSimulated);
 
   // Set default selected device once loaded
   useEffect(() => {
-    if (devices.length > 0 && !selectedDeviceId) {
-      setSelectedDeviceId(devices[0].id);
+    if (simulatedDevices.length > 0 && (!selectedDeviceId || !simulatedDevices.some((d) => d.id === selectedDeviceId))) {
+      setSelectedDeviceId(simulatedDevices[0].id);
     }
-  }, [devices, selectedDeviceId]);
+  }, [simulatedDevices, selectedDeviceId]);
 
-  // Keep track of live telemetry logs
+  // Keep track of live simulation telemetry logs
   useEffect(() => {
     if (!logPaused) {
-      setLocalLogs(latestTelemetry.slice(0, 80));
+      setLocalLogs(simulationTelemetry.slice(0, 80));
     }
-  }, [latestTelemetry, logPaused]);
+  }, [simulationTelemetry, logPaused]);
 
   // Fetch initial simulator status
   useEffect(() => {
@@ -113,8 +126,11 @@ export const DataGeneratorView: React.FC = () => {
 
   // Handle Manual Data Injection
   const handleInjectData = async (valueToUse?: number, overrideMetric?: string, overrideUnit?: string) => {
-    const dev = devices.find((d) => d.id === selectedDeviceId) || devices[0];
-    if (!dev) return;
+    const dev = simulatedDevices.find((d) => d.id === selectedDeviceId) || simulatedDevices[0];
+    if (!dev) {
+      alert('Lütfen önce bir sanal cihaz seçin.');
+      return;
+    }
 
     setSending(true);
     const m = overrideMetric || metricKey;
@@ -140,7 +156,7 @@ export const DataGeneratorView: React.FC = () => {
         setSuccessMessage(`Test Verisi Enjekte Edildi: [${dev.name}] -> ${m}: ${v} ${u}`);
         setTimeout(() => setSuccessMessage(null), 3500);
       } else {
-        alert(data.error || 'Veri gönderilemedi');
+        alert(data.message || data.error || 'Veri gönderilemedi');
       }
     } catch (err) {
       console.error(err);
@@ -153,7 +169,7 @@ export const DataGeneratorView: React.FC = () => {
   const handleBatchInject = async () => {
     setBatchSending(true);
     try {
-      const dev = devices.find((d) => d.id === selectedDeviceId);
+      const dev = simulatedDevices.find((d) => d.id === selectedDeviceId);
       const res = await fetch('/api/simulator/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -169,6 +185,8 @@ export const DataGeneratorView: React.FC = () => {
       if (res.ok) {
         setSuccessMessage(`Toplu Akış Gönderildi: ${data.generatedCount} adet sanal paket canlı yayına verildi!`);
         setTimeout(() => setSuccessMessage(null), 4000);
+      } else {
+        alert(data.message || data.error || 'Toplu veri basılamadı');
       }
     } catch (e) {
       console.error(e);
@@ -177,24 +195,24 @@ export const DataGeneratorView: React.FC = () => {
     }
   };
 
-  // If no devices available for this user
-  if (devices.length === 0) {
+  // If no simulated devices available
+  if (simulatedDevices.length === 0) {
     return (
       <div className="p-8 max-w-3xl mx-auto">
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-4">
           <div className="w-16 h-16 bg-amber-500/20 text-amber-400 rounded-full flex items-center justify-center mx-auto">
             <Cpu className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-white">Aktif Cihazınız Bulunmuyor</h2>
+          <h2 className="text-xl font-bold text-white">Aktif Sanal Cihazınız Bulunmuyor</h2>
           <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
-            Sanal veri üretmek ve telemetri testi yapmak için önce <strong>Cihazlar</strong> sayfasından sanal veya fiziksel bir cihaz ekleyin.
+            Sanal veri üretmek ve telemetri testi yapmak için <strong>Cihazlar</strong> sayfasından en az bir <strong>Sanal Cihaz</strong> ekleyin. Fiziksel donanımlara simülasyon verisi gönderilmez.
           </p>
         </div>
       </div>
     );
   }
 
-  const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || devices[0];
+  const selectedDevice = simulatedDevices.find((d) => d.id === selectedDeviceId) || simulatedDevices[0];
 
   return (
     <div className="space-y-6 pb-12">
@@ -343,23 +361,23 @@ export const DataGeneratorView: React.FC = () => {
                 <Send className="w-4 h-4 text-indigo-400" />
                 <h3 className="font-bold text-sm text-white">Anlık Elle Telemetri Gönder</h3>
               </div>
-              <span className="text-[11px] text-slate-400 font-mono">POST /api/v1/telemetry</span>
+              <span className="text-[11px] text-slate-400 font-mono">POST /api/simulator/v1/inject</span>
             </div>
 
             <div className="space-y-4 text-xs">
               {/* Target Device Dropdown */}
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  Hedef Cihaz Seçin
+                  Hedef Sanal Cihaz Seçin
                 </label>
                 <select
                   value={selectedDeviceId}
                   onChange={(e) => setSelectedDeviceId(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                 >
-                  {devices.map((d) => (
+                  {simulatedDevices.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.isSimulated ? '🟣 [SANAL]' : '🔵 [GERÇEK DONANIM]'} {d.name} ({d.type.toUpperCase()}) — Konum: {d.location}
+                      🟣 [SANAL] {d.name} ({d.type.toUpperCase()}) — Konum: {d.location}
                     </option>
                   ))}
                 </select>
@@ -368,8 +386,8 @@ export const DataGeneratorView: React.FC = () => {
                     <span>
                       API Key: <strong className="text-amber-400">{selectedDevice.apiKey}</strong>
                     </span>
-                    <span className={selectedDevice.isSimulated ? 'text-cyan-400 font-bold' : 'text-emerald-400 font-bold'}>
-                      {selectedDevice.isSimulated ? '🤖 Sanal Simülatör Cihazı' : '⚡ Gerçek Fiziki Donanım'}
+                    <span className="text-cyan-400 font-bold">
+                      🤖 Sanal Simülatör Cihazı
                     </span>
                   </div>
                 )}

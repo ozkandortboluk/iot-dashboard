@@ -65,12 +65,11 @@ export class SimulationTelemetryService {
     if (addedReadings.length > 0) {
       incrementTelemetryIngested(addedReadings.length);
       // Simulation WebSocket Broadcast channels (strictly isolated for admin simulation subscribers)
-      broadcast('telemetry:simulation:batch', addedReadings);
       if (addedReadings.length === 1) {
         broadcast('telemetry:simulation:new', addedReadings[0]);
+      } else {
+        broadcast('telemetry:simulation:batch', addedReadings);
       }
-      broadcast('simulator:batch', addedReadings);
-      broadcast('simulator:telemetry', addedReadings[0]);
     }
 
     // 4. Update Simulated Device Status & Metrics

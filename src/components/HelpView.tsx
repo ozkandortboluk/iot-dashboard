@@ -705,11 +705,12 @@ curl -X POST "${originUrl}/api/simulator/v1/telemetry" \\
 # 4. MANUEL TEST TELEMETRİ ENJEKSİYONU (Yönetici Oturumu & Cihaz API Anahtarsız)
 # Uç Nokta: POST /api/simulator/v1/inject
 # Kural: Cihaz API anahtarı KULLANILMAZ. Yönetici oturum token'ı (Authorization: Bearer <TOKEN>) ile doğrulanır.
+# Güvenlik Kuralı: Yalnızca isSimulated === true olan sanal cihazlara gönderilebilir; fiziksel cihazlar korunur (403 Forbidden).
 curl -X POST "${originUrl}/api/simulator/v1/inject" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_ADMIN_SESSION_TOKEN" \\
   -d '{
-    "deviceId": "dev_esp32_saha_01",
+    "deviceId": "sim_dev_server_01",
     "metric": "temperature",
     "value": 38.5,
     "unit": "°C"
@@ -719,9 +720,10 @@ curl -X POST "${originUrl}/api/simulator/v1/inject" \\
 # Kanallar:
 #   - telemetry:physical:batch (ve telemetry:physical:new) -> Gerçek donanım verileri
 #   - telemetry:simulation:batch (ve telemetry:simulation:new) -> Sanal simülasyon/test verileri
-# İstemci Abonelik Mesajı:
-#   { "event": "subscribe", "channels": ["physical"] }           # Müşteri kullanıcıları
-#   { "event": "subscribe", "channels": ["physical", "simulation"] } # Yönetici paneli
+# İstemci Abonelik Akışı:
+#   - Bağlantı açıldığında varsayılan: { "event": "subscribe", "channels": ["physical"] }
+#   - Sanal Veri Üreteci sayfasına girildiğinde: { "event": "subscribe", "channels": ["simulation"] }
+#   - Sayfadan çıkıldığında: { "event": "unsubscribe", "channels": ["simulation"] }
 `,
     },
   ];
