@@ -420,6 +420,19 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'auth:success') {
               setIsConnected(true);
               setConnectionStatus('connected');
+
+              // Automatically resubscribe to all active channels (physical & simulation) upon auth confirmation
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                const channelsToSub = Array.from(activeSubscriptionsRef.current);
+                if (channelsToSub.length > 0) {
+                  ws.send(
+                    JSON.stringify({
+                      event: 'subscribe',
+                      channels: channelsToSub,
+                    })
+                  );
+                }
+              }
             } else if (
               data.event === 'telemetry:physical:new' ||
               data.event === 'telemetry:physical:batch' ||

@@ -59,16 +59,6 @@ export const DataGeneratorView: React.FC = () => {
   const [logPaused, setLogPaused] = useState<boolean>(false);
   const [localLogs, setLocalLogs] = useState<typeof simulationTelemetry>([]);
 
-  // Subscribe to simulation channel when entering this page, unsubscribe when leaving
-  useEffect(() => {
-    if (isAdmin) {
-      subscribeChannel('simulation');
-      return () => {
-        unsubscribeChannel('simulation');
-      };
-    }
-  }, [isAdmin, subscribeChannel, unsubscribeChannel]);
-
   // Only allow simulated devices
   const simulatedDevices = devices.filter((d) => d.isSimulated);
 

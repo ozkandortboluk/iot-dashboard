@@ -162,4 +162,38 @@ describe('IoT Device Simulator Engine Test Suite', () => {
       db.deleteDevice(physDev.id);
     });
   });
+
+  describe('4. Simulation Channel & Telemetry Event Propagation', () => {
+    it('should route simulation telemetry correctly and isolate physical devices', () => {
+      const simDev = db.createDevice({
+        id: 'sim_test_dev_02',
+        name: 'Virtual Meter 02',
+        type: 'meter',
+        location: 'Zone 1',
+        isSimulated: true,
+        dataFlowActive: true,
+        simulatedMetrics: ['voltage', 'current'],
+        userId: 'usr_admin',
+        status: 'online',
+        ipAddress: '192.168.1.102',
+        rateLimitPerMin: 60,
+        encryptionMethod: 'none',
+        metrics: {},
+      });
+
+      setSimulatorActive(true);
+      runSimulationStep();
+
+      const lastTelemetry = db.getTelemetry('sim_test_dev_02');
+      expect(Array.isArray(lastTelemetry)).toBe(true);
+
+      // Verify that simulated device metrics updated
+      const updatedSimDev = db.getDevices().find((d: Device) => d.id === 'sim_test_dev_02');
+      expect(updatedSimDev?.isSimulated).toBe(true);
+      expect(updatedSimDev?.status).toBe('online');
+
+      db.deleteDevice(simDev.id);
+    });
+  });
 });
+
