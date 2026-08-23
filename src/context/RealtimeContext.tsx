@@ -202,6 +202,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const devicesRef = useRef(devices);
   const notificationsRef = useRef(notifications);
+  const isConnectedRef = useRef(isConnected);
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
   
   useEffect(() => {
     devicesRef.current = devices;
@@ -233,7 +238,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         const res = await fetch(url);
         const history = await safeJson<TelemetryReading[]>(res, []);
-        if (Array.isArray(history)) {
+        if (Array.isArray(history) && history.length > 0) {
           const seen = new Set<string>();
           const uniqueHistory: TelemetryReading[] = [];
           for (const h of history) {
@@ -250,10 +255,47 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const physicalHistory = uniqueHistory.filter((r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox'));
           const simHistory = uniqueHistory.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
 
-          setPhysicalTelemetry(physicalHistory);
-          setLatestTelemetry(physicalHistory);
-          if (user?.role === 'admin') {
-            setSimulationTelemetry(simHistory);
+          if (physicalHistory.length > 0) {
+            setPhysicalTelemetry((prev) => {
+              const merged = [...prev, ...physicalHistory];
+              const unique = Array.from(
+                new Map(merged.map((item) => [item.id, item])).values()
+              );
+              return unique
+                .sort(
+                  (a, b) =>
+                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                )
+                .slice(0, 500);
+            });
+
+            setLatestTelemetry((prev) => {
+              const merged = [...prev, ...physicalHistory];
+              const unique = Array.from(
+                new Map(merged.map((item) => [item.id, item])).values()
+              );
+              return unique
+                .sort(
+                  (a, b) =>
+                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                )
+                .slice(0, 500);
+            });
+          }
+
+          if (user?.role === 'admin' && simHistory.length > 0) {
+            setSimulationTelemetry((prev) => {
+              const merged = [...prev, ...simHistory];
+              const unique = Array.from(
+                new Map(merged.map((item) => [item.id, item])).values()
+              );
+              return unique
+                .sort(
+                  (a, b) =>
+                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                )
+                .slice(0, 500);
+            });
           }
         }
 
@@ -301,6 +343,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         ws.onopen = () => {
           if (isCleanedUp) return;
+          isConnectedRef.current = true;
           setIsConnected(true);
           setConnectionStatus('connected');
           lastMessageReceivedAt = Date.now();
@@ -419,8 +462,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   }
 
                   // Batch update devices state once (immutable merge)
-                  setDevices((prevDevs) =>
-                    prevDevs.map((dev) => {
+                  setDevices((prevDevs) => {
+                    const updated = prevDevs.map((dev) => {
                       const update =
                         deviceUpdatesMap.get(dev.id) ||
                         (dev.apiKey ? deviceUpdatesMap.get(dev.apiKey) : undefined);
@@ -436,8 +479,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                         };
                       }
                       return dev;
-                    })
-                  );
+                    });
+                    devicesRef.current = updated;
+                    return updated;
+                  });
 
                   // Update physical telemetry states (isolated from simulation)
                   setPhysicalTelemetry((prev) => {
@@ -489,8 +534,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 }
 
                 if (simUpdatesMap.size > 0) {
-                  setDevices((prevDevs) =>
-                    prevDevs.map((dev) => {
+                  setDevices((prevDevs) => {
+                    const updated = prevDevs.map((dev) => {
                       if (!dev.isSimulated) return dev; // Never touch physical hardware
                       const update = simUpdatesMap.get(dev.id);
                       if (update) {
@@ -505,8 +550,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                         };
                       }
                       return dev;
-                    })
-                  );
+                    });
+                    devicesRef.current = updated;
+                    return updated;
+                  });
                 }
 
                 // Update simulation-only telemetry state
@@ -613,7 +660,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             } else if (data.event === 'devices:updated') {
               if (Array.isArray(data.payload)) {
-                setDevices(data.payload);
+                const incomingDevs = data.payload as Device[];
+                const filtered = user?.role === 'admin'
+                  ? (selectedCustomerForAdmin === 'all' ? incomingDevs : incomingDevs.filter((d: Device) => d.userId === selectedCustomerForAdmin))
+                  : incomingDevs.filter((d: Device) => d.userId === user?.id);
+                setDevices(filtered);
+                devicesRef.current = filtered;
               } else {
                 fetchDevices();
               }
@@ -660,6 +712,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         ws.onclose = () => {
           if (isCleanedUp) return;
+          isConnectedRef.current = false;
           setIsConnected(false);
           setConnectionStatus('reconnecting');
           clearInterval(pingTimer);
@@ -694,7 +747,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Fallback polling: When disconnected, poll REST API every 6 seconds
     const fallbackPollInterval = setInterval(() => {
-      if (!isCleanedUp && !isConnected && user) {
+      if (!isCleanedUp && !isConnectedRef.current && user) {
         fetchDevices();
         fetchHistory();
       }

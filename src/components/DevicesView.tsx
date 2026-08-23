@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Device, TelemetryReading } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
-import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric } from '../lib/utils';
+import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import {
   Cpu,
@@ -56,22 +56,17 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   } = useRealtime();
   const { user } = useAuth();
 
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(devices[0] || null);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Sync selectedDevice when devices list updates or when switching customer context
-  useEffect(() => {
-    if (devices.length > 0) {
-      if (!selectedDevice || !devices.some((d) => d.id === selectedDevice.id)) {
-        setSelectedDevice(devices[0]);
-      } else {
-        const fresh = devices.find((d) => d.id === selectedDevice.id);
-        if (fresh) setSelectedDevice(fresh);
-      }
-    } else {
-      setSelectedDevice(null);
+  // Stable selected device resolution by ID (prevents flapping/disconnect ghosting)
+  const selectedDevice = React.useMemo(() => {
+    if (selectedDeviceId) {
+      const match = devices.find((d) => d.id === selectedDeviceId);
+      if (match) return match;
     }
-  }, [devices]);
+    return devices[0] || null;
+  }, [devices, selectedDeviceId]);
 
   // Conversion state
   const [convertingDevice, setConvertingDevice] = useState<Device | null>(null);
@@ -131,11 +126,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [showCodeGuide, setShowCodeGuide] = useState(false);
   const [metricsScope, setMetricsScope] = useState<'selected' | 'all'>('selected');
 
-  const activeDevice =
-    (selectedDevice ? devices.find((d) => d.id === selectedDevice.id) : null) ||
-    devices.find((d) => d.status === 'online') ||
-    devices[0] ||
-    selectedDevice;
+  const activeDevice = selectedDevice;
 
   // Active System Metrics: Strictly isolates to the active selected device (or all devices if toggled)
   const activeSystemMetrics = React.useMemo(() => {
@@ -163,7 +154,29 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const isPhysical = !activeDevice.isSimulated;
       const telemetrySource = isPhysical ? physicalTelemetry : simulationTelemetry;
 
-      // Scan telemetry matching ONLY this activeDevice
+      // Seed from activeDevice.metrics (ensures all 8 reported metrics are immediately available without flapping)
+      if (activeDevice.metrics && typeof activeDevice.metrics === 'object') {
+        for (const [mKey, mVal] of Object.entries(activeDevice.metrics)) {
+          if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
+          const lowerKey = mKey.toLowerCase();
+          const unit = getMetricUnit(mKey);
+          const lastTs = activeDevice.lastSeen || new Date().toISOString();
+          const ageSec = Math.max(0, Math.floor((now - new Date(lastTs).getTime()) / 1000));
+          const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+
+          metricMap.set(lowerKey, {
+            name: mKey,
+            latestValue: mVal,
+            unit,
+            lastTimestamp: lastTs,
+            ageText,
+            deviceNames: new Set([targetName || targetDevId]),
+            isFresh: ageSec < 180,
+          });
+        }
+      }
+
+      // Overlay from telemetrySource stream for precise per-metric timestamps and units
       for (const t of telemetrySource) {
         if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
 
@@ -186,21 +199,21 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
           metricMap.set(lowerKey, {
             name: t.metric,
             latestValue: t.value,
-            unit: t.unit || '',
+            unit: t.unit || getMetricUnit(t.metric),
             lastTimestamp: t.timestamp,
             ageText,
             deviceNames: new Set([targetName || targetDevId]),
-            isFresh: ageSec < 120,
+            isFresh: ageSec < 180,
           });
         } else {
           const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
-          if (ts > existingTs) {
+          if (ts >= existingTs) {
             existing.name = t.metric;
             existing.latestValue = t.value;
-            existing.unit = t.unit || '';
+            if (t.unit) existing.unit = t.unit;
             existing.lastTimestamp = t.timestamp;
             existing.ageText = ageText;
-            existing.isFresh = ageSec < 120;
+            existing.isFresh = ageSec < 180;
           }
         }
       }
@@ -420,7 +433,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       setAddHeartbeatTimeout(300);
       setIsSimulated(false);
       setSaveSimulatedDataToDb(false);
-      setSelectedDevice(dev);
+      setSelectedDeviceId(dev.id);
     } catch (err) {
       alert('Cihaz eklenemedi');
     }
@@ -464,7 +477,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       });
       setEditingDevice(null);
       if (selectedDevice?.id === editingDevice.id) {
-        setSelectedDevice(updated);
+        setSelectedDeviceId(updated.id);
       }
     } catch (err) {
       alert('Cihaz ayarları güncellenemedi.');
@@ -483,7 +496,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const updated = await updateDevice(activeDevice.id, {
         apiKey: inlineTokenInput.trim(),
       });
-      setSelectedDevice(updated);
+      setSelectedDeviceId(updated.id);
       setIsEditingTokenInline(false);
       setTokenSaveSuccess(true);
       setTimeout(() => setTokenSaveSuccess(false), 3000);
@@ -499,7 +512,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const result = await convertToPhysicalDevice(convertingDevice.id);
       setConvertingDevice(null);
       if (selectedDevice?.id === convertingDevice.id) {
-        setSelectedDevice(result.device);
+        setSelectedDeviceId(result.device.id);
       }
       setConversionSuccessInfo(result);
     } catch (err: any) {
@@ -524,7 +537,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       if (res.ok) {
         const data = await res.json();
         if (data.device && selectedDevice?.id === deviceId) {
-          setSelectedDevice(data.device);
+          setSelectedDeviceId(data.device.id);
         }
       }
     } catch (err) {
@@ -539,7 +552,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     try {
       await deleteDevice(deletingDevice.id);
       if (selectedDevice?.id === deletingDevice.id) {
-        setSelectedDevice(null);
+        setSelectedDeviceId(null);
       }
       setDeletingDevice(null);
     } catch (err) {
@@ -885,7 +898,7 @@ void sendHeartbeat() {
                 return (
                   <div
                     key={`${dev.id}_${idx}`}
-                    onClick={() => setSelectedDevice(dev)}
+                    onClick={() => setSelectedDeviceId(dev.id)}
                     className={`p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 ${
                       isSelected
                         ? 'bg-indigo-500/10 border-l-4 border-l-indigo-500'

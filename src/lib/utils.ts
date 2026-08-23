@@ -61,13 +61,14 @@ export function getMetricUnit(metricKey: string): string {
   if (k.includes('temp') || k.includes('sicaklik') || k.includes('heat') || k.includes('celsius')) return '°C';
   if (k.includes('hum') || k.includes('nem') || k.includes('moist') || k.includes('rutubet')) return '%';
   if (k.includes('cpu') || k.includes('ram') || k.includes('mem') || k.includes('disk') || k.includes('battery') || k.includes('pil') || k.includes('pct') || k.includes('percent') || k.includes('yuzde') || k.includes('soc') || k.includes('load') || k.includes('yuk')) return '%';
+  if (k === 'l1' || k === 'l2' || k === 'l3' || k.startsWith('v_') || k.includes('volt') || k.includes('gerilim')) return 'V';
+  if (k === 'ri' || k === 'rc' || k.includes('reactive') || k.includes('reaktif') || k.includes('kvar')) return 'kVAr';
+  if (k === 'p' || k.includes('power') || k.includes('guc') || k.includes('watt') || k.includes('kw')) return 'kW';
   if (k.includes('kwh') || k.includes('enerji') || k.includes('energy') || k.includes('tuketim')) return 'kWh';
-  if (k.includes('power') || k.includes('guc') || k.includes('watt') || k.includes('kw')) return 'kW';
   if (k.includes('bar')) return 'bar';
   if (k.includes('psi')) return 'psi';
   if (k.includes('press') || k.includes('basinc') || k.includes('hpa')) return 'hPa';
-  if (k.includes('volt') || k.includes('gerilim')) return 'V';
-  if (k.includes('amp') || k.includes('akim') || k.includes('curr')) return 'A';
+  if (k.includes('amp') || k.includes('akim') || k.includes('curr') || k === 'i1' || k === 'i2' || k === 'i3') return 'A';
   if (k.includes('freq') || k.includes('frekans') || k.includes('hz')) return 'Hz';
   if (k.includes('vibrat') || k.includes('titresim') || k.includes('vibr')) return 'mm/s';
   if (k.includes('debi') || k.includes('m3/h') || k.includes('m3h')) return 'm³/h';
