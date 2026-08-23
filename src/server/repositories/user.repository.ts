@@ -33,46 +33,29 @@ export class UserRepository {
     return token;
   }
 
-  public verifySession(token: string): { user: User; session?: UserSession } | null {
+  public verifySession(token: string): { user: User; session: UserSession } | null {
     if (!token) return null;
     const cleanToken = token.trim();
-    if (!this.db.data.sessions) {
-      this.db.data.sessions = [];
+    if (!this.db.data.sessions || this.db.data.sessions.length === 0) {
+      return null;
     }
 
-    let session = this.db.data.sessions.find((s: any) => s.token === cleanToken);
-
-    if (!session && this.db.data.users && this.db.data.users.length > 0) {
-      // Auto-recover/re-establish session if valid token was sent by registered user
-      const targetUser = this.db.data.users.find((u: any) => u.role === 'admin') || this.db.data.users[0];
-      if (targetUser && cleanToken.length >= 8) {
-        session = {
-          token: cleanToken,
-          userId: targetUser.id,
-          userRole: targetUser.role,
-          userEmail: targetUser.email,
-          userName: targetUser.name,
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        };
-        this.db.data.sessions.push(session);
-        this.db.scheduleSave();
-        this.db.postgresRepo?.saveSession(session).catch(() => {});
-      }
+    const session = this.db.data.sessions.find((s: any) => s.token === cleanToken);
+    if (!session) {
+      return null;
     }
 
-    if (session) {
-      const user = this.db.data.users.find((u: any) => u.id === session.userId) || this.db.data.users[0];
-      if (user) {
-        if (new Date(session.expiresAt).getTime() < Date.now()) {
-          session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          this.db.scheduleSave();
-          this.db.postgresRepo?.saveSession(session).catch(() => {});
-        }
-        return { user, session };
-      }
+    // Check expiration strictly - no automatic renewal for expired sessions
+    if (new Date(session.expiresAt).getTime() <= Date.now()) {
+      return null;
     }
-    return null;
+
+    const user = (this.db.data.users || []).find((u: any) => u.id === session.userId);
+    if (!user) {
+      return null;
+    }
+
+    return { user, session };
   }
 
   public authenticate(email: string, pass: string): { user: User; token: string } | null {

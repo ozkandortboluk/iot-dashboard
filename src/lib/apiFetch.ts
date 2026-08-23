@@ -11,8 +11,12 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     }
   }
 
+  const method = (init?.method || 'GET').toUpperCase();
+  const isIdempotent = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(method);
+
   let attempts = 0;
-  const maxAttempts = 2;
+  const maxAttempts = isIdempotent ? 2 : 1;
+
   while (attempts < maxAttempts) {
     try {
       attempts++;

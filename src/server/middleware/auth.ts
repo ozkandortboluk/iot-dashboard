@@ -7,10 +7,10 @@ export interface AuthenticatedRequest extends express.Request {
   sessionToken?: string;
 }
 
-// Authentication Middleware: Verifies authorization token from headers or query
+// Authentication Middleware: Verifies authorization token from headers ONLY (no query-string tokens)
 export function authenticateUser(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers['authorization'];
-  let token = (req.headers['x-auth-token'] as string) || (req.query.token as string);
+  let token = req.headers['x-auth-token'] as string;
 
   if (!token && authHeader) {
     if (authHeader.startsWith('Bearer ')) {
@@ -20,13 +20,13 @@ export function authenticateUser(req: express.Request, res: express.Response, ne
     }
   }
 
-  if (!token) {
+  if (!token || !token.trim()) {
     return res.status(401).json({
       error: 'Erişim Engellendi (401): Kimlik doğrulama jetonu (Authorization Token) eksik. Lütfen sisteme giriş yapın.',
     });
   }
 
-  const verified = db.verifySession(token);
+  const verified = db.verifySession(token.trim());
   if (!verified) {
     return res.status(401).json({
       error: 'Erişim Engellendi (401): Geçersiz veya süresi dolmuş oturum jetonu. Lütfen yeniden giriş yapın.',
@@ -34,7 +34,7 @@ export function authenticateUser(req: express.Request, res: express.Response, ne
   }
 
   (req as AuthenticatedRequest).user = verified.user;
-  (req as AuthenticatedRequest).sessionToken = token;
+  (req as AuthenticatedRequest).sessionToken = token.trim();
   next();
 }
 

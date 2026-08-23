@@ -29,6 +29,7 @@ import {
   simulatorRouter,
 } from './src/server/routes/system.js';
 import { firmwareRouter } from './src/server/routes/firmware.js';
+import { otaRouter } from './src/server/routes/ota.js';
 
 const app = express();
 app.set('trust proxy', true);
@@ -75,7 +76,7 @@ app.use('/api/database', databaseRouter);
 app.use('/api/timescale', timescaleRouter);
 app.use('/api/simulator', simulatorRouter);
 app.use('/api/firmwares', firmwareRouter);
-app.use('/api/ota', firmwareRouter);
+app.use('/api/ota', otaRouter);
 
 // API 404 Handler: Ensure non-existent /api routes return JSON error, not SPA index.html
 app.all('/api/*', (req, res) => {

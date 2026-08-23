@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
+import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -13,6 +14,15 @@ router.get('/setup-status', (req, res) => {
 });
 
 router.post('/setup', (req, res) => {
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const rateLimit = rateLimiterService.checkIpRateLimit(`setup:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: 'Çok fazla istek gönderildi. Lütfen bir süre sonra tekrar deneyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   const users = db.getUsers();
   const hasAdmin = users.some((u) => u.role === 'admin');
   if (hasAdmin) {
@@ -46,6 +56,15 @@ router.post('/setup', (req, res) => {
 
 // Auth Endpoints (Public)
 router.post('/login', (req, res) => {
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const rateLimit = rateLimiterService.checkIpRateLimit(`login:${clientIp}`, 20);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: 'Çok fazla başarısız veya hızlı giriş denemesi. Lütfen bir dakika bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'E-posta ve şifre gereklidir.' });
@@ -64,6 +83,15 @@ router.post('/login', (req, res) => {
 });
 
 router.post('/register', (req, res) => {
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const rateLimit = rateLimiterService.checkIpRateLimit(`reg:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: 'Çok fazla kayıt denemesi. Lütfen bir süre sonra tekrar deneyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   const { name, email, password } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Tüm alanları doldurunuz.' });

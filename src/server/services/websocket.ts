@@ -426,22 +426,14 @@ export function initWebSocketServer(server: http.Server) {
       ws.isAlive = true;
     });
 
-    // Check if valid session token exists in URL query params
-    if (req?.url) {
-      try {
-        const urlObj = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
-        const token = urlObj.searchParams.get('token');
-
-        if (token) {
-          const verifiedUser = resolveUser(token);
-          if (verifiedUser) {
-            ws.isAuth = true;
-            ws.user = verifiedUser;
-            console.log(`[WebSocket] URL token ile anında doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
-          }
-        }
-      } catch {
-        // Ignore parse error
+    // Check if token exists in Sec-WebSocket-Protocol or Authorization header (URL query tokens removed for security)
+    if (req?.headers?.authorization) {
+      const authHeader = req.headers.authorization;
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+      const verifiedUser = resolveUser(token);
+      if (verifiedUser) {
+        ws.isAuth = true;
+        ws.user = verifiedUser;
       }
     }
 

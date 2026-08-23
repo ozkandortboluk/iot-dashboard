@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../lib/apiFetch';
 import {
   Cpu,
   DownloadCloud,
@@ -72,10 +73,7 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 
   const fetchFirmwares = async () => {
     try {
-      const token = localStorage.getItem('auth_token') || '';
-      const res = await fetch('/api/firmwares', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch('/api/firmwares');
       if (res.ok) {
         const data = await res.json();
         setFirmwares(data);
@@ -87,10 +85,7 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 
   const fetchOtaJobs = async () => {
     try {
-      const token = localStorage.getItem('auth_token') || '';
-      const res = await fetch('/api/ota/jobs', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch('/api/ota/jobs');
       if (res.ok) {
         const data = await res.json();
         setOtaJobs(data);
@@ -139,12 +134,10 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
         binaryDataStr = btoa(`DUMMY_ESP32_BINARY_${uploadVersion}_ROLE_${uploadRoleKey}`);
       }
 
-      const token = localStorage.getItem('auth_token') || '';
-      const res = await fetch('/api/firmwares', {
+      const res = await apiFetch('/api/firmwares', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           name: uploadName,
@@ -179,10 +172,8 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
     if (!window.confirm(`'${name}' firmware dosyasını silmek istediğinize emin misiniz?`)) return;
 
     try {
-      const token = localStorage.getItem('auth_token') || '';
-      const res = await fetch(`/api/firmwares/${id}`, {
+      const res = await apiFetch(`/api/firmwares/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         setActionMessage({ type: 'success', text: `'${name}' silindi.` });
@@ -208,7 +199,6 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 
     try {
       const fw = firmwares.find((f) => f.id === selectedFirmwareId);
-      const token = localStorage.getItem('auth_token') || '';
 
       let payloadTargetIds: any = undefined;
       let payloadTargetValue: any = undefined;
@@ -223,11 +213,10 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
         payloadTargetValue = targetTypeValue || fw?.deviceType;
       }
 
-      const res = await fetch('/api/ota/deploy', {
+      const res = await apiFetch('/api/ota/deploy', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           firmwareId: selectedFirmwareId,
@@ -255,12 +244,10 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 
   const handleCancelOta = async (deviceId: string) => {
     try {
-      const token = localStorage.getItem('auth_token') || '';
-      const res = await fetch('/api/ota/cancel', {
+      const res = await apiFetch('/api/ota/cancel', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ deviceIds: [deviceId] }),
       });
