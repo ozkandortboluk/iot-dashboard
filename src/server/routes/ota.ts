@@ -11,7 +11,7 @@ import {
   isHardwareModelCompatible,
   isHardwareRevisionCompatible,
 } from '../utils/semver.js';
-import { getEd25519KeyPair } from '../utils/ota-crypto.js';
+import { getEd25519KeyPair, compareTokensSafe, hashDownloadToken } from '../utils/ota-crypto.js';
 
 export const otaRouter = Router();
 
@@ -441,14 +441,20 @@ otaRouter.all('/check', (req: Request, res: Response) => {
       });
     }
 
-    const token = dev.otaDownloadToken || `otatkn_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
-    
-    // Requirement 7: Guarantee an OtaDeploymentJob exists for automatically discovered updates!
+    const token = dev.otaDownloadToken || `otatkn_${Date.now()}_${crypto.randomBytes(12).toString('hex')}`;
+    const tokenHash = hashDownloadToken(token);
+
     let activeJob = db.getOtaJobs().find(
       (j) => j.deviceId === dev.id && j.firmwareId === targetFw!.id && ['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(j.status)
     );
 
     const nowIso = new Date().toISOString();
+    let nonce = activeJob?.bootNonce;
+    if (!nonce) {
+      nonce = `boot_${Date.now()}_${crypto.randomBytes(12).toString('hex')}`;
+    }
+    const nonceHash = hashDownloadToken(nonce);
+
     if (!activeJob) {
       activeJob = {
         id: `otajob_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
@@ -463,12 +469,21 @@ otaRouter.all('/check', (req: Request, res: Response) => {
         status: 'PENDING',
         progressPercent: 0,
         downloadToken: token,
+        downloadTokenHash: tokenHash,
+        bootNonce: nonce,
+        bootNonceHash: nonceHash,
         attemptCount: 0,
         maxAttempts: 3,
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         initiatedBy: 'SYSTEM_AUTO',
         created_at: nowIso,
       };
+      db.saveOtaJob(activeJob);
+    } else {
+      activeJob.downloadToken = token;
+      activeJob.downloadTokenHash = tokenHash;
+      activeJob.bootNonce = nonce;
+      activeJob.bootNonceHash = nonceHash;
       db.saveOtaJob(activeJob);
     }
 
@@ -492,6 +507,7 @@ otaRouter.all('/check', (req: Request, res: Response) => {
       binarySize: targetFw.binarySize,
       downloadUrl,
       downloadToken: token,
+      bootNonce: nonce,
       checkIntervalSeconds: 300,
     });
   }
@@ -505,7 +521,7 @@ otaRouter.all('/check', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/ota/status - Device reports state machine progress (Requirement 5)
+// POST /api/ota/status - Device reports state machine progress (Requirement 3 & 5)
 otaRouter.post('/status', (req: Request, res: Response) => {
   const dev = authenticateHardwareDevice(req);
   if (!dev) {
@@ -517,27 +533,39 @@ otaRouter.post('/status', (req: Request, res: Response) => {
 
   const { status, progressPercent, errorMessage, firmwareId, jobId, downloadToken } = req.body || {};
 
+  // Requirement 3: Enforce mandatory fields
+  if (!jobId || !firmwareId || !downloadToken || !status) {
+    return res.status(400).json({
+      error: 'Eksik parametre. OTA durum bildirimi için "jobId", "firmwareId", "downloadToken" ve "status" alanlarının tümü zorunludur.',
+    });
+  }
+
   const activeJobs = db.getOtaJobs().filter(
     (j) => j.deviceId === dev.id && ['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(j.status)
   );
 
-  const activeJob = jobId ? activeJobs.find((j) => j.id === jobId) : activeJobs[activeJobs.length - 1];
+  const activeJob = activeJobs.find((j) => j.id === jobId);
 
   if (!activeJob) {
     return res.status(400).json({
-      error: 'Aktif bir OTA güncelleme görevi bulunamadı veya görev iptal edilmiş/süresi dolmuş.',
+      error: `ID'si (${jobId}) olan aktif bir OTA güncelleme görevi bulunamadı veya görev iptal edilmiş/süresi dolmuş.`,
     });
   }
 
-  if (firmwareId && firmwareId !== activeJob.firmwareId) {
+  if (firmwareId !== activeJob.firmwareId) {
     return res.status(400).json({
       error: `Uyumsuz firmwareId (${firmwareId} !== ${activeJob.firmwareId}).`,
     });
   }
 
-  if (downloadToken && activeJob.downloadToken && downloadToken !== activeJob.downloadToken) {
+  // Requirement 3: Timing-safe token comparison
+  const isTokenMatch =
+    compareTokensSafe(downloadToken, activeJob.downloadTokenHash || activeJob.downloadToken || '') ||
+    compareTokensSafe(downloadToken, dev.otaDownloadToken || '');
+
+  if (!isTokenMatch) {
     return res.status(403).json({
-      error: 'Geçersiz downloadToken.',
+      error: 'Geçersiz veya eşleşmeyen downloadToken.',
     });
   }
 
@@ -599,7 +627,7 @@ otaRouter.post('/status', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/ota/confirm-boot - Post-reboot boot confirmation endpoint (Requirement 6)
+// POST /api/ota/confirm-boot - Post-reboot boot confirmation endpoint (Requirement 4 & 6)
 otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
   const dev = authenticateHardwareDevice(req);
   if (!dev) {
@@ -609,17 +637,36 @@ otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
     });
   }
 
-  const { jobId, firmwareVersion, bootNonce, bootId } = req.body || {};
+  const { jobId, firmwareVersion, bootNonce } = req.body || {};
 
-  if (!firmwareVersion) {
-    return res.status(400).json({ error: 'firmwareVersion alanı zorunludur.' });
+  if (!jobId || !firmwareVersion || !bootNonce) {
+    return res.status(400).json({
+      error: 'Eksik parametre. Boot doğrulaması için "jobId", "firmwareVersion" ve "bootNonce" alanlarının tümü zorunludur.',
+    });
   }
 
   const jobs = db.getOtaJobs().filter((j) => j.deviceId === dev.id);
-  const targetJob = jobId ? jobs.find((j) => j.id === jobId) : jobs.find((j) => ['REBOOTING', 'FLASHING', 'VERIFYING', 'DOWNLOADING', 'PENDING'].includes(j.status));
+  const targetJob = jobs.find((j) => j.id === jobId);
 
   if (!targetJob) {
-    return res.status(400).json({ error: 'Onay bekleyen aktif OTA görevi bulunamadı.' });
+    return res.status(400).json({ error: `ID'si (${jobId}) olan OTA görevi bulunamadı.` });
+  }
+
+  // Requirement 4: Restrict to REBOOTING -> SUCCESS transition ONLY!
+  if (targetJob.status !== 'REBOOTING') {
+    return res.status(400).json({
+      error: `Geçersiz boot onay durumu. Boot doğrulaması yalnızca 'REBOOTING' durumundaki görevler için yapılabilir (Mevcut Durum: ${targetJob.status}).`,
+    });
+  }
+
+  // Requirement 4: Verify bootNonce!
+  const isNonceMatch = compareTokensSafe(bootNonce, targetJob.bootNonceHash || targetJob.bootNonce || '');
+  if (!isNonceMatch) {
+    return res.status(403).json({ error: 'Geçersiz veya eşleşmeyen bootNonce.' });
+  }
+
+  if (targetJob.bootNonceUsedAt) {
+    return res.status(403).json({ error: 'Bu bootNonce daha önce kullanılmıştır (Replay attack engellendi).' });
   }
 
   const cleanReportedVersion = String(firmwareVersion).trim().replace(/^[vV]/, '');
@@ -629,6 +676,7 @@ otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
     targetJob.status = 'FAILED';
     targetJob.errorMessage = `Boot doğrulama hatası: Cihaz bildirilen sürüm (${cleanReportedVersion}) ile hedef sürüm (${cleanTargetVersion}) eşleşmiyor. Rollback tetiklendi.`;
     targetJob.completedAt = new Date().toISOString();
+    targetJob.bootNonceUsedAt = new Date().toISOString();
     db.saveOtaJob(targetJob);
 
     db.updateDevice(dev.id, {
@@ -651,6 +699,7 @@ otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
   const nowIso = new Date().toISOString();
   targetJob.status = 'SUCCESS';
   targetJob.progressPercent = 100;
+  targetJob.bootNonceUsedAt = nowIso;
   targetJob.bootConfirmedAt = nowIso;
   targetJob.completedAt = nowIso;
   targetJob.updatedAt = nowIso;
@@ -669,7 +718,7 @@ otaRouter.post('/confirm-boot', (req: Request, res: Response) => {
   db.addAuditLog(
     'SYSTEM',
     dev.name,
-    `Cihaz OTA Boot Başarıyla Onaylandı: ${dev.name} (${cleanReportedVersion}) - Job: ${targetJob.id} [Nonce: ${bootNonce || bootId || 'none'}]`,
+    `Cihaz OTA Boot Başarıyla Onaylandı: ${dev.name} (${cleanReportedVersion}) - Job: ${targetJob.id} [Nonce: ${bootNonce}]`,
     'medium'
   );
 

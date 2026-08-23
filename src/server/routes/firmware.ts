@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
+import Busboy from 'busboy';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -13,6 +15,8 @@ import {
   saveFirmwareFileToDisk,
   readFirmwareFileFromDisk,
   getEd25519KeyPair,
+  compareTokensSafe,
+  hashDownloadToken,
 } from '../utils/ota-crypto.js';
 
 export const firmwareRouter = Router();
@@ -237,134 +241,151 @@ firmwareRouter.delete('/:id', authenticateUser, requireAdmin, (req: Request, res
   res.json({ success: true, message: 'Firmware başarıyla silindi.' });
 });
 
-// POST /api/firmwares/upload - Multipart / Stream upload for large binaries (Admin only)
-firmwareRouter.post('/upload', authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+// POST /api/firmwares/upload - Streaming Busboy parser for binaries (Admin only)
+firmwareRouter.post('/upload', authenticateUser, requireAdmin, (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
   const user = authReq.user!;
 
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return res.status(400).json({ error: 'İçerik türü multipart/form-data olmalıdır.' });
+  }
+
+  let busboy: any;
   try {
-    const contentType = req.headers['content-type'] || '';
-    let name = (req.query.name || req.headers['x-firmware-name'] || '').toString();
-    let deviceType = (req.query.deviceType || req.headers['x-firmware-device-type'] || '').toString();
-    let roleKey = (req.query.roleKey || req.headers['x-firmware-role-key'] || '').toString();
-    let hardwareModel = (req.query.hardwareModel || req.headers['x-firmware-hardware-model'] || 'ALL').toString();
-    let version = (req.query.version || req.headers['x-firmware-version'] || '').toString();
-    let description = (req.query.description || req.headers['x-firmware-description'] || '').toString();
-    let minHardwareRevision = (req.query.minHardwareRevision || req.headers['x-firmware-min-hardware-revision'] || '').toString();
+    busboy = Busboy({
+      headers: req.headers,
+      limits: {
+        fileSize: 16 * 1024 * 1024, // 16 MB limit
+        files: 1, // Single file
+      },
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: `Busboy başlatılamadı: ${err.message}` });
+  }
 
-    let binaryBuffer: Buffer;
+  const fields: Record<string, string> = {};
+  const tempId = `temp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  const tempPath = path.join(process.cwd(), 'uploads', 'firmware', `${tempId}.tmp`);
 
-    if (contentType.includes('multipart/form-data')) {
-      // Simple multipart/form-data parser for express stream
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-      }
-      const fullBuffer = Buffer.concat(chunks);
-      
-      const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-      const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+  let fileWriteError: string | null = null;
+  let fileUploaded = false;
+  let fileTruncated = false;
 
-      if (!boundary) {
-        return res.status(400).json({ error: 'Geçersiz multipart boundary.' });
-      }
+  busboy.on('field', (fieldname, val) => {
+    fields[fieldname] = val;
+  });
 
-      const parts = fullBuffer.toString('binary').split('--' + boundary);
-      let foundBinary: Buffer | null = null;
-
-      for (const part of parts) {
-        if (part.includes('filename=')) {
-          const headerEnd = part.indexOf('\r\n\r\n');
-          if (headerEnd !== -1) {
-            const bodyBinary = part.substring(headerEnd + 4, part.length - 2);
-            foundBinary = Buffer.from(bodyBinary, 'binary');
-          }
-        } else {
-          // Parse text fields from multipart form
-          if (part.includes('name="name"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) name = val.trim();
-          }
-          if (part.includes('name="deviceType"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) deviceType = val.trim();
-          }
-          if (part.includes('name="roleKey"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) roleKey = val.trim();
-          }
-          if (part.includes('name="hardwareModel"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) hardwareModel = val.trim();
-          }
-          if (part.includes('name="version"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) version = val.trim();
-          }
-          if (part.includes('name="description"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) description = val.trim();
-          }
-          if (part.includes('name="minHardwareRevision"')) {
-            const val = part.split('\r\n\r\n')[1]?.split('\r\n')[0];
-            if (val) minHardwareRevision = val.trim();
-          }
-        }
-      }
-
-      if (!foundBinary) {
-        return res.status(400).json({ error: 'Yüklenen form verisinde .bin dosyası bulunamadı.' });
-      }
-      binaryBuffer = foundBinary;
-    } else {
-      // Octet stream direct binary upload
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-      }
-      binaryBuffer = Buffer.concat(chunks);
+  busboy.on('file', (fieldname, fileStream, info) => {
+    const filename = info.filename || '';
+    if (!filename.toLowerCase().endsWith('.bin')) {
+      fileWriteError = 'Yalnızca .bin uzantılı ikili firmware dosyaları kabul edilir.';
+      fileStream.resume();
+      return;
     }
 
+    fileUploaded = true;
+    const writeStream = fs.createWriteStream(tempPath);
+
+    fileStream.on('limit', () => {
+      fileTruncated = true;
+      fileWriteError = 'Dosya boyutu maksimum sınırı (16 MB) aştı.';
+    });
+
+    fileStream.pipe(writeStream);
+
+    writeStream.on('error', (err) => {
+      fileWriteError = `Geçici dosyaya yazma hatası: ${err.message}`;
+    });
+  });
+
+  busboy.on('error', (err: any) => {
+    if (fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch {}
+    }
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Yükleme hatası: ${err.message}` });
+    }
+  });
+
+  busboy.on('finish', () => {
+    if (fileWriteError || fileTruncated) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
+      return res.status(400).json({ error: fileWriteError || 'Dosya yükleme sınırı aşıldı.' });
+    }
+
+    if (!fileUploaded || !fs.existsSync(tempPath)) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
+      return res.status(400).json({ error: 'Yüklenen form verisinde geçerli .bin dosyası bulunamadı.' });
+    }
+
+    const name = fields.name || req.query.name || fields.firmwareName;
+    const deviceType = fields.deviceType || req.query.deviceType;
+    const roleKey = fields.roleKey || req.query.roleKey;
+    const version = fields.version || req.query.version;
+    const hardwareModel = fields.hardwareModel || req.query.hardwareModel || 'ALL';
+    const description = fields.description || req.query.description || '';
+    const minHardwareRevision = fields.minHardwareRevision || req.query.minHardwareRevision;
+
     if (!name || !deviceType || !roleKey || !version) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
       return res.status(400).json({
         error: 'Firmware adı, cihaz tipi, görev kimliği (roleKey) ve sürüm zorunludur.',
       });
     }
 
-    if (!isValidSemver(version)) {
+    if (!isValidSemver(String(version))) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
       return res.status(400).json({
         error: `Geçersiz SemVer sürüm formatı (${version}). Örnek: 1.0.0, v2.1.0`,
       });
     }
 
+    let binaryBuffer: Buffer;
+    try {
+      binaryBuffer = fs.readFileSync(tempPath);
+    } catch (err: any) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
+      return res.status(500).json({ error: `Geçici dosya okunamadı: ${err.message}` });
+    }
+
     const validation = validateEspBinary(binaryBuffer);
     if (!validation.valid) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
       return res.status(400).json({ error: validation.error });
     }
 
     const { sha256, signatureHex } = signBinaryBuffer(binaryBuffer);
     const id = `fw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-    const filePath = saveFirmwareFileToDisk(id, binaryBuffer);
+    const permPath = path.join(process.cwd(), 'uploads', 'firmware', `${id}.bin`);
+
+    try {
+      fs.renameSync(tempPath, permPath);
+    } catch {
+      fs.writeFileSync(permPath, binaryBuffer);
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch {}
+    }
 
     const newFirmware: Firmware = {
       id,
-      name: name.trim(),
-      deviceType: deviceType.trim().toLowerCase(),
-      roleKey: roleKey.trim().toUpperCase(),
-      hardwareModel: hardwareModel ? hardwareModel.trim().toUpperCase() : 'ALL',
-      version: version.trim(),
-      description: description ? description.trim() : '',
-      filePath,
+      name: String(name).trim(),
+      deviceType: String(deviceType).trim().toLowerCase(),
+      roleKey: String(roleKey).trim().toUpperCase(),
+      hardwareModel: hardwareModel ? String(hardwareModel).trim().toUpperCase() : 'ALL',
+      version: String(version).trim(),
+      description: description ? String(description).trim() : '',
+      filePath: permPath,
       binarySize: binaryBuffer.length,
       sha256,
       signature: signatureHex,
-      minHardwareRevision: minHardwareRevision ? minHardwareRevision.trim() : undefined,
+      minHardwareRevision: minHardwareRevision ? String(minHardwareRevision).trim() : undefined,
       isActive: true,
       uploadedBy: user.name || user.email,
       created_at: new Date().toISOString(),
     };
 
     db.saveFirmware(newFirmware);
+    (db.postgresRepo as any)?.saveFirmware?.(newFirmware)?.catch?.(() => {});
 
     db.addAuditLog(
       user.id,
@@ -378,9 +399,9 @@ firmwareRouter.post('/upload', authenticateUser, requireAdmin, async (req: Reque
     broadcast('firmwares:updated', db.getFirmwares().map(sanitizeFirmware));
 
     res.status(201).json(safeFw);
-  } catch (err: any) {
-    res.status(500).json({ error: `Firmware yükleme hatası: ${err.message}` });
-  }
+  });
+
+  req.pipe(busboy);
 });
 
 // GET /api/firmwares/:id/download - Secure binary download for authorized devices & user sessions
@@ -422,7 +443,7 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
   }
 
   if (dev) {
-    // Device must have an active assigned OTA job for this specific firmware ID!
+    // Exact Requirement 1: MUST have activeJob AND downloadToken AND valid token match!
     const activeJob = db.getOtaJobs().find(
       (j) =>
         j.deviceId === dev!.id &&
@@ -430,14 +451,32 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
         ['PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING'].includes(j.status)
     );
 
-    const isAssignedToDevice = dev.otaTargetFirmwareId === fw.id || activeJob !== undefined;
-    const isTokenMatch = downloadToken && (dev.otaDownloadToken === downloadToken || activeJob?.downloadToken === downloadToken);
-
-    if (!isAssignedToDevice && !isTokenMatch) {
+    if (!activeJob) {
       return res.status(403).send('Bu cihaz için istenen firmware atanmış aktif bir OTA güncelleme görevi bulunmuyor.');
     }
 
-    // Exact model & revision checks (Requirements 9 & 10)
+    if (!downloadToken) {
+      return res.status(403).send('Firmware indirmek için "downloadToken" (token query parametresi veya X-OTA-Token başlığı) zorunludur.');
+    }
+
+    const isTokenMatch =
+      compareTokensSafe(downloadToken, activeJob.downloadTokenHash || activeJob.downloadToken || '') ||
+      compareTokensSafe(downloadToken, dev.otaDownloadToken || '');
+
+    if (!isTokenMatch) {
+      return res.status(403).send('Geçersiz veya eşleşmeyen OTA indirme tokenı.');
+    }
+
+    // Exact Requirement 2: Token single-use and expiration checks!
+    if (activeJob.downloadTokenUsedAt) {
+      return res.status(403).send('Bu OTA indirme tokenı daha önce kullanılmıştır. İndirme için /api/ota/check üzerinden yeni bir token temin edin.');
+    }
+
+    if (activeJob.expiresAt && new Date() > new Date(activeJob.expiresAt)) {
+      return res.status(403).send('OTA güncelleme ve indirme tokenının süresi dolmuştur.');
+    }
+
+    // Exact model & revision checks
     const devRole = (dev.roleKey || '').toUpperCase();
     const devType = (dev.deviceType || dev.type || '').toLowerCase();
     const devModel = (dev.hardwareModel || '').toUpperCase();
@@ -451,20 +490,22 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
       return res.status(403).send(`Uyumsuz Donanım Tipi (Cihaz: ${devType}, Firmware: ${fwType}).`);
     }
     if (!isHardwareModelCompatible(devModel, fw.hardwareModel)) {
-      return res.status(403).send(`Uyumsuz Donanım Modeli (Cihaz: ${devModel}, Firmware: ${fw.hardwareModel}). Exact model match required.`);
+      return res.status(403).send(`Uyumsuz Donanım Modeli (Cihaz: ${devModel}, Firmware: ${fw.hardwareModel}).`);
     }
     if (!isHardwareRevisionCompatible(dev.hardwareRevision, fw.minHardwareRevision)) {
       return res.status(403).send(`Donanım revizyonu yetersiz (Cihaz: ${dev.hardwareRevision || 'bilinmiyor'}, Gerekli En Az: ${fw.minHardwareRevision}).`);
     }
 
-    // Update state to DOWNLOADING and consume single-use token upon download
-    if (activeJob) {
-      activeJob.status = 'DOWNLOADING';
-      activeJob.downloadStartedAt = new Date().toISOString();
-      activeJob.updatedAt = new Date().toISOString();
-      db.saveOtaJob(activeJob);
-    }
+    // Consume single-use token immediately upon download initiation
+    const nowIso = new Date().toISOString();
+    activeJob.status = 'DOWNLOADING';
+    activeJob.downloadTokenUsedAt = nowIso;
+    activeJob.downloadStartedAt = nowIso;
+    activeJob.updatedAt = nowIso;
+    db.saveOtaJob(activeJob);
+
     dev.otaStatus = 'DOWNLOADING';
+    dev.otaDownloadToken = undefined; // Consumed
     db.updateDevice(dev.id, dev);
 
   } else if (userReq) {

@@ -250,7 +250,6 @@ void loop() {
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ArduinoJson.h>
-#include <mbedtls/sha256.h>
 
 const char* WIFI_SSID       = "WIFI_AG_ADINIZ";
 const char* WIFI_PASS       = "WIFI_SIFRENIZ";
@@ -270,7 +269,7 @@ const char* EMBEDDED_PUBLIC_KEY =
   "MCowKO...// PRODUCTION ED25519 PUBLIC KEY IN PEM FORMAT\\n"
   "-----END PUBLIC KEY-----\\n";
 
-void reportStatus(const char* jobId, const char* status, int progress, const char* errorMsg = "") {
+void reportStatus(const char* jobId, const char* firmwareId, const char* downloadToken, const char* status, int progress, const char* errorMsg = "") {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
   http.begin(String(SERVER_URL) + "/api/ota/status");
@@ -278,6 +277,8 @@ void reportStatus(const char* jobId, const char* status, int progress, const cha
   http.addHeader("X-API-Key", API_KEY);
 
   String json = "{\\"jobId\\":\\"" + String(jobId) + 
+                "\\",\\"firmwareId\\":\\"" + String(firmwareId) + 
+                "\\",\\"downloadToken\\":\\"" + String(downloadToken) + 
                 "\\",\\"status\\":\\"" + String(status) + 
                 "\\",\\"progressPercent\\":" + String(progress) + 
                 ",\\"errorMessage\\":\\"" + String(errorMsg) + "\\"}";
@@ -286,8 +287,8 @@ void reportStatus(const char* jobId, const char* status, int progress, const cha
   http.end();
 }
 
-void confirmBoot() {
-  if (WiFi.status() != WL_CONNECTED) return;
+void confirmBoot(const char* jobId, const char* bootNonce) {
+  if (WiFi.status() != WL_CONNECTED || !jobId || !bootNonce) return;
   Serial.println("[OTA] Post-Boot Doğrulaması Gönderiliyor...");
   
   HTTPClient http;
@@ -295,8 +296,9 @@ void confirmBoot() {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-API-Key", API_KEY);
 
-  String body = "{\\"firmwareVersion\\":\\"" + String(FIRMWARE_VERSION) + 
-                "\\",\\"bootNonce\\":\\"" + String(esp_random()) + "\\"}";
+  String body = "{\\"jobId\\":\\"" + String(jobId) + 
+                "\\",\\"firmwareVersion\\":\\"" + String(FIRMWARE_VERSION) + 
+                "\\",\\"bootNonce\\":\\"" + String(bootNonce) + "\\"}";
 
   int httpCode = http.POST(body);
   if (httpCode == 200) {
@@ -309,7 +311,7 @@ void confirmBoot() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\\n>>> ESP32 Güvenli OTA Istemcisi Başlatılıyor...");
+  Serial.println("\\n>>> ESP32 Güvenli OTA İstemcisi Başlatılıyor...");
   Serial.printf("Model: %s | Sürüm: %s | Görev: %s\\n", HARDWARE_MODEL, FIRMWARE_VERSION, DEVICE_ROLE_KEY);
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -318,9 +320,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
-
-  // Yeni boot açılışında sunucuya boot onayını gönder
-  confirmBoot();
 }
 
 void checkOTA() {
@@ -345,15 +344,16 @@ void checkOTA() {
     deserializeJson(doc, res);
 
     if (doc["updateAvailable"] | false) {
-      String jobId       = doc["jobId"] | "";
-      String downloadUrl = doc["downloadUrl"] | "";
+      String jobId          = doc["jobId"] | "";
+      String firmwareId     = doc["firmwareId"] | "";
+      String downloadUrl    = doc["downloadUrl"] | "";
       String sha256Expected = doc["sha256"] | "";
       String downloadToken  = doc["downloadToken"] | "";
+      String bootNonce      = doc["bootNonce"] | "";
 
       Serial.println("[OTA] Yeni Firmware Bulundu! JobID: " + jobId);
-      reportStatus(jobId.c_str(), "DOWNLOADING", 10);
+      reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "DOWNLOADING", 10);
 
-      // Binary indirme bağlantısı
       String fullUrl = downloadUrl.startsWith("http") ? downloadUrl : String(SERVER_URL) + downloadUrl;
 
       HTTPClient downloadHttp;
@@ -365,22 +365,22 @@ void checkOTA() {
       if (dlCode == HTTP_CODE_OK) {
         int contentLength = downloadHttp.getSize();
         if (contentLength > 0 && Update.begin(contentLength)) {
-          reportStatus(jobId.c_str(), "FLASHING", 50);
+          reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "FLASHING", 50);
 
           WiFiClient* stream = downloadHttp.getStreamPtr();
           size_t written = Update.writeStream(*stream);
 
           if (written == contentLength && Update.end(true)) {
             Serial.println("[OTA] Flash Başarılı! Rebooting...");
-            reportStatus(jobId.c_str(), "REBOOTING", 95);
+            reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "REBOOTING", 95);
             delay(1000);
             ESP.restart();
           } else {
-            reportStatus(jobId.c_str(), "FAILED", 0, "Flash yazma hatası.");
+            reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "FAILED", 0, "Flash yazma hatası.");
           }
         }
       } else {
-        reportStatus(jobId.c_str(), "FAILED", 0, "Firmware binary indirilemedi.");
+        reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "FAILED", 0, "Firmware binary indirilemedi.");
       }
       downloadHttp.end();
     } else {

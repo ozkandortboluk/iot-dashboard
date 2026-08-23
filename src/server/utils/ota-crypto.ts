@@ -62,9 +62,10 @@ export function getEd25519KeyPair(): KeyPair {
     }
   }
 
-  // In strict production, warn if key is automatically generated on ephemeral filesystem
+  // In strict production, throw error if key is missing on persistent storage
   if (process.env.NODE_ENV === 'production') {
-    console.warn('[OTA Crypto WARNING] Üretim (Production) ortamında kalıcı Ed25519 özel anahtarı bulunamadı! Lütfen OTA_SIGNING_PRIVATE_KEY veya OTA_SIGNING_PRIVATE_KEY_PATH tanımlayın.');
+    console.error('[OTA Crypto ERROR] Üretim (Production) ortamında kalıcı Ed25519 özel anahtarı bulunamadı! Lütfen OTA_SIGNING_PRIVATE_KEY veya OTA_SIGNING_PRIVATE_KEY_PATH tanımlayın.');
+    throw new Error('Kalıcı OTA imzalama anahtarı bulunamadı (OTA_SIGNING_PRIVATE_KEY veya OTA_SIGNING_PRIVATE_KEY_PATH zorunludur).');
   }
 
   // 3. Generate new Ed25519 keypair
@@ -98,6 +99,21 @@ export function getEd25519KeyPair(): KeyPair {
  */
 export function hashDownloadToken(token: string): string {
   return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
+
+/**
+ * Timing-safe token string comparison
+ */
+export function compareTokensSafe(rawOrHashed1: string, rawOrHashed2: string): boolean {
+  if (!rawOrHashed1 || !rawOrHashed2) return false;
+  const h1 = rawOrHashed1.length === 64 ? rawOrHashed1 : hashDownloadToken(rawOrHashed1);
+  const h2 = rawOrHashed2.length === 64 ? rawOrHashed2 : hashDownloadToken(rawOrHashed2);
+  
+  const buf1 = Buffer.from(h1, 'hex');
+  const buf2 = Buffer.from(h2, 'hex');
+
+  if (buf1.length !== buf2.length) return false;
+  return crypto.timingSafeEqual(buf1, buf2);
 }
 
 

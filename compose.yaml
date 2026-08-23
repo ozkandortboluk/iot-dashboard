@@ -1,0 +1,24 @@
+services:
+  iot-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot-platform-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - firmware_data:/app/uploads/firmware
+      - keys_data:/app/uploads/keys
+      - app_data:/app/data
+    restart: always
+
+volumes:
+  firmware_data:
+    driver: local
+  keys_data:
+    driver: local
+  app_data:
+    driver: local

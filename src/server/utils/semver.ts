@@ -1,5 +1,7 @@
 // Helper utilities for SemVer version parsing, comparison and validation
 
+import semver from 'semver';
+
 export interface SemVer {
   major: number;
   minor: number;
@@ -10,46 +12,44 @@ export interface SemVer {
 
 export function parseSemver(v: string): SemVer | null {
   if (!v || typeof v !== 'string') return null;
-  const raw = v.trim();
-  const clean = raw.replace(/^[vV]/, '');
-  const match = clean.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/);
-  if (!match) return null;
+  const cleaned = semver.clean(v.trim(), { loose: true }) || semver.valid(v.trim(), { loose: true });
+  if (!cleaned) return null;
+  const parsed = semver.parse(cleaned);
+  if (!parsed) return null;
 
   return {
-    major: parseInt(match[1], 10),
-    minor: parseInt(match[2], 10),
-    patch: parseInt(match[3], 10),
-    prerelease: match[4] || '',
-    raw,
+    major: parsed.major,
+    minor: parsed.minor,
+    patch: parsed.patch,
+    prerelease: parsed.prerelease.join('.'),
+    raw: v,
   };
 }
 
 export function isValidSemver(v: string): boolean {
-  return parseSemver(v) !== null;
+  if (!v || typeof v !== 'string') return false;
+  return semver.valid(v.trim(), { loose: true }) !== null;
 }
 
 export function compareSemver(v1: string, v2: string): number {
-  const p1 = parseSemver(v1);
-  const p2 = parseSemver(v2);
+  const c1 = semver.clean(v1.trim(), { loose: true }) || semver.valid(v1.trim(), { loose: true });
+  const c2 = semver.clean(v2.trim(), { loose: true }) || semver.valid(v2.trim(), { loose: true });
 
-  if (!p1 && !p2) return 0;
-  if (!p1) return -1;
-  if (!p2) return 1;
+  if (!c1 && !c2) return 0;
+  if (!c1) return -1;
+  if (!c2) return 1;
 
-  if (p1.major !== p2.major) return p1.major > p2.major ? 1 : -1;
-  if (p1.minor !== p2.minor) return p1.minor > p2.minor ? 1 : -1;
-  if (p1.patch !== p2.patch) return p1.patch > p2.patch ? 1 : -1;
-
-  // Release without prerelease is newer than a prerelease version (e.g. 1.0.0 > 1.0.0-beta)
-  if (!p1.prerelease && p2.prerelease) return 1;
-  if (p1.prerelease && !p2.prerelease) return -1;
-  if (p1.prerelease !== p2.prerelease) return p1.prerelease.localeCompare(p2.prerelease);
-
-  return 0;
+  return semver.compare(c1, c2);
 }
 
 export function isTargetVersionNewer(targetVersion: string, currentVersion: string): boolean {
-  return compareSemver(targetVersion, currentVersion) > 0;
+  const cTarget = semver.clean(targetVersion.trim(), { loose: true }) || semver.valid(targetVersion.trim(), { loose: true });
+  const cCurrent = semver.clean(currentVersion.trim(), { loose: true }) || semver.valid(currentVersion.trim(), { loose: true });
+
+  if (!cTarget) return false;
+  if (!cCurrent) return true; // If current is unparseable, target is newer
+
+  return semver.gt(cTarget, cCurrent);
 }
 
 export function normalizeHardwareModel(model?: string): string {

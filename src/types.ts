@@ -124,6 +124,11 @@ export interface OtaDeploymentJob {
   errorMessage?: string;
   initiatedBy: string;
   downloadToken?: string;
+  downloadTokenHash?: string;
+  downloadTokenUsedAt?: string;
+  bootNonce?: string;
+  bootNonceHash?: string;
+  bootNonceUsedAt?: string;
   expiresAt?: string;
   attemptCount?: number;
   maxAttempts?: number;

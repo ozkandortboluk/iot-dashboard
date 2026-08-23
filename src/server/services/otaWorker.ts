@@ -41,10 +41,10 @@ export async function processOtaJobsWorker(): Promise<{ processedCount: number; 
       const staledDurationMs = nowMs - lastUpdated;
 
       if (staledDurationMs > 15 * 60 * 1000) {
-        job.attemptCount = (job.attemptCount || 1);
+        job.attemptCount = (job.attemptCount || 0) + 1;
         if (job.attemptCount >= (job.maxAttempts || 3)) {
           job.status = 'FAILED';
-          job.errorMessage = 'Cihaz güncelleme sonrası boot doğrulaması göndermedi (Zaman aşımı / Staled timeout). Rollback tetiklendi.';
+          job.errorMessage = `Cihaz güncelleme sonrası boot doğrulaması göndermedi (${job.attemptCount}/${job.maxAttempts || 3} deneme tamamlandı). Cihazın yerel partition rollback çalıştırmış olması bekleniyor.`;
           job.completedAt = new Date().toISOString();
         } else {
           job.status = 'PENDING';

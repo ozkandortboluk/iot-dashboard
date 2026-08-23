@@ -126,33 +126,29 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
         return;
       }
 
-      const buffer = await uploadFile.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+      if (!uploadFile.name.toLowerCase().endsWith('.bin')) {
+        setActionMessage({ type: 'error', text: 'Yalnızca .bin uzantılı ikili dosya yüklenebilir.' });
+        setUploading(false);
+        return;
       }
-      const binaryDataStr = btoa(binary);
 
-      const res = await apiFetch('/api/firmwares', {
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+      formData.append('name', uploadName);
+      formData.append('deviceType', uploadDeviceType);
+      formData.append('roleKey', uploadRoleKey);
+      formData.append('hardwareModel', uploadHardwareModel);
+      formData.append('version', uploadVersion);
+      if (uploadDescription) formData.append('description', uploadDescription);
+
+      const res = await apiFetch('/api/firmwares/upload', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: uploadName,
-          deviceType: uploadDeviceType,
-          roleKey: uploadRoleKey,
-          hardwareModel: uploadHardwareModel,
-          version: uploadVersion,
-          description: uploadDescription,
-          binaryData: binaryDataStr,
-        }),
+        body: formData,
       });
 
       const data = await res.json();
       if (res.ok) {
-        setActionMessage({ type: 'success', text: `Firmware '${data.name}' (${data.version}) yüklendi!` });
+        setActionMessage({ type: 'success', text: `Firmware '${data.name}' (${data.version}) başarıyla akış olarak yüklendi!` });
         setShowUploadModal(false);
         setUploadName('');
         setUploadDescription('');
