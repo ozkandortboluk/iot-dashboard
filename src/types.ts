@@ -35,7 +35,7 @@ export interface UserSession {
 }
 
 export type DeviceStatus = 'online' | 'offline' | 'warning' | 'maintenance';
-export type OtaStatus = 'IDLE' | 'PENDING' | 'DOWNLOADING' | 'SUCCESS' | 'FAILED';
+export type OtaStatus = 'IDLE' | 'PENDING' | 'DOWNLOADING' | 'FLASHING' | 'VERIFYING' | 'REBOOTING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'ROLLED_BACK';
 
 export interface Device {
   id: string;
@@ -45,6 +45,7 @@ export interface Device {
   roleKey?: string; // Görev Kimliği (Örn: "PUMP_CTRL", "VALVE_CTRL", "METER_MAIN")
   deviceType?: string; // Cihaz Tipi kopyası/detayı (Örn: "pump_controller", "energy_meter")
   hardwareModel?: string; // Donanım Modeli (Örn: "ESP32_WROOM_32", "ESP8266_NODEMCU")
+  hardwareRevision?: string; // Donanım Revizyonu (Örn: "v1.0")
   firmwareVersion?: string; // Mevcut Sürüm (Örn: "v1.0.0")
   apiKey: string;
   apiKeyPrefix?: string;
@@ -82,6 +83,7 @@ export interface Device {
   otaErrorMessage?: string;
   otaLastCheckAt?: string;
   otaUpdatedAt?: string;
+  otaDownloadToken?: string;
 
   updatedAt?: string;
   version?: number;
@@ -95,9 +97,11 @@ export interface Firmware {
   hardwareModel: string; // Örn: "ESP32_WROOM_32", "ESP8266_NODEMCU" veya "ALL"
   version: string; // Örn: "v1.2.0"
   description?: string;
-  binaryData?: string; // Base64 encoded binary file data
+  binaryData?: string; // Base64 encoded binary file data (legacy)
   binarySize: number; // Bytes
   sha256: string; // Hash
+  signature?: string; // Ed25519 signature
+  filePath?: string; // Disk path (uploads/firmware/:id.bin)
   minHardwareRevision?: string;
   isActive: boolean;
   uploadedBy: string; // User ID veya Adı
@@ -115,10 +119,18 @@ export interface OtaDeploymentJob {
   deviceType: string;
   roleKey: string;
   targetScope: 'single' | 'selected' | 'role_key' | 'device_type';
-  status: 'PENDING' | 'DOWNLOADING' | 'SUCCESS' | 'FAILED';
+  status: OtaStatus;
   progressPercent?: number;
   errorMessage?: string;
   initiatedBy: string;
+  downloadToken?: string;
+  expiresAt?: string;
+  attemptCount?: number;
+  maxAttempts?: number;
+  lastAttemptAt?: string;
+  nextRetryAt?: string;
+  downloadStartedAt?: string;
+  bootConfirmedAt?: string;
   created_at: string;
   updatedAt?: string;
   completedAt?: string;

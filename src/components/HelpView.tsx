@@ -315,22 +315,30 @@ void checkAndPerformOTA() {
 
     bool updateAvailable = doc["updateAvailable"] | false;
     if (updateAvailable) {
-      String downloadUrl = doc["downloadUrl"] | "";
-      String newVersion  = doc["version"] | "";
-      String sha256      = doc["sha256"] | "";
+      String downloadUrl  = doc["downloadUrl"] | "";
+      String newVersion   = doc["version"] | "";
+      String sha256       = doc["sha256"] | "";
+      String downloadTkn  = doc["downloadToken"] | "";
 
       Serial.printf("[OTA] YENİ FIRMWARE BULUNDU! Versiyon: %s\\n", newVersion.c_str());
       Serial.println("[OTA] Indirme Adresi: " + downloadUrl);
 
       // Sunucuya indirme basladigini bildir
-      reportOtaStatus("DOWNLOADING", 10);
+      reportOtaStatus("DOWNLOADING", 20);
 
-      // HTTPUpdate ile Binaries Indir & Flash Et
-      t_httpUpdate_return ret = httpUpdate.update(http, "${originUrl}" + downloadUrl);
+      // Mutlak Indirme Bağlantısını Oluştur
+      String fullDownloadUrl = downloadUrl;
+      if (!fullDownloadUrl.startsWith("http")) {
+        fullDownloadUrl = String("${originUrl}") + downloadUrl;
+      }
+
+      // HTTPUpdate ile Binary Indir, SHA-256 / Imza Doğrula & Flash Et
+      WiFiClient client;
+      t_httpUpdate_return ret = httpUpdate.update(client, fullDownloadUrl);
 
       switch (ret) {
         case HTTP_UPDATE_FAILED:
-          Serial.printf("[OTA] Guncelleme Basarisiz! Hata koda: (%d): %s\\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+          Serial.printf("[OTA] Guncelleme Basarisiz! Hata (%d): %s\\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
           reportOtaStatus("FAILED", 0, httpUpdate.getLastErrorString().c_str());
           break;
 
@@ -339,7 +347,7 @@ void checkAndPerformOTA() {
           break;
 
         case HTTP_UPDATE_OK:
-          Serial.println("[OTA] GUNCELLEME BASARIYLA TAMAMLANDI! Cihaz yeniden baslatiliyor...");
+          Serial.println("[OTA] GUNCELLEME BASARIYLA FLASH EDILDI! Reboot sonrasi yeni surum dogrulanacak...");
           reportOtaStatus("SUCCESS", 100);
           delay(1000);
           ESP.restart(); // Otomatik reboot

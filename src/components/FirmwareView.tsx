@@ -120,19 +120,19 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
     setActionMessage(null);
 
     try {
-      let binaryDataStr = '';
-      if (uploadFile) {
-        const buffer = await uploadFile.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        binaryDataStr = btoa(binary);
-      } else {
-        // Fallback demo binary payload if no file provided
-        binaryDataStr = btoa(`DUMMY_ESP32_BINARY_${uploadVersion}_ROLE_${uploadRoleKey}`);
+      if (!uploadFile) {
+        setActionMessage({ type: 'error', text: 'Lütfen derlenmiş geçerli bir ESP (.bin) firmware ikili dosyası seçiniz. Dosya seçilmeden yükleme yapılamaz.' });
+        setUploading(false);
+        return;
       }
+
+      const buffer = await uploadFile.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const binaryDataStr = btoa(binary);
 
       const res = await apiFetch('/api/firmwares', {
         method: 'POST',
