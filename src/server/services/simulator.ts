@@ -140,7 +140,7 @@ export function computeValueForMetric(
     return { val: Number((49.8 + Math.random() * 0.4).toFixed(2)), unit: 'Hz' };
   }
 
-  return { val: Number((10 + Math.random() * 80).toFixed(1)), unit: 'birim' };
+  return { val: Number((10 + Math.random() * 80).toFixed(1)), unit: '' };
 }
 
 export function runSimulationStep() {

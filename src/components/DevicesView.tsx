@@ -129,6 +129,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [isSending, setIsSending] = useState(false);
   const [activeCodeTab, setActiveCodeTab] = useState<'esp32_ping' | 'curl_ping' | 'curl_telemetry' | 'python'>('esp32_ping');
   const [showCodeGuide, setShowCodeGuide] = useState(false);
+  const [metricsScope, setMetricsScope] = useState<'selected' | 'all'>('selected');
 
   const activeDevice =
     (selectedDevice ? devices.find((d) => d.id === selectedDevice.id) : null) ||
@@ -136,7 +137,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     devices[0] ||
     selectedDevice;
 
-  // Active System Metrics: Strictly reflects metrics actively received within the last 10 minutes from online devices
+  // Active System Metrics: Strictly isolates to the active selected device (or all devices if toggled)
   const activeSystemMetrics = React.useMemo(() => {
     const metricMap = new Map<string, {
       name: string;
@@ -151,71 +152,66 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     const now = Date.now();
     const RECENCY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes window
 
-    // Identify active & online devices
-    const onlineDevices = devices.filter((d) => d.status === 'online' && d.dataFlowActive !== false);
-    const onlineDevIds = new Set(onlineDevices.map((d) => d.id));
-    const onlineDevTokens = new Set(onlineDevices.map((d) => d.apiKey).filter(Boolean));
-    const onlineDevNames = new Set(onlineDevices.map((d) => d.name).filter(Boolean));
+    if (metricsScope === 'selected' && activeDevice) {
+      // 1. STRICT SELECTED DEVICE ISOLATION:
+      // Real physical hardware devices ONLY query physicalTelemetry.
+      // Virtual/simulated devices ONLY query simulationTelemetry.
+      const targetDevId = activeDevice.id;
+      const targetApiKey = activeDevice.apiKey;
+      const targetName = activeDevice.name;
 
-    // Gather telemetry pool based on role
-    const telemetryPool: TelemetryReading[] = [
-      ...physicalTelemetry,
-      ...(user?.role === 'admin' ? simulationTelemetry : []),
-    ];
+      const isPhysical = !activeDevice.isSimulated;
+      const telemetrySource = isPhysical ? physicalTelemetry : simulationTelemetry;
 
-    // 1. Scan recent telemetry items within recency window
-    for (const t of telemetryPool) {
-      if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
+      // Scan telemetry matching ONLY this activeDevice
+      for (const t of telemetrySource) {
+        if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
 
-      const isFromOnlineDev =
-        onlineDevIds.has(t.deviceId) ||
-        onlineDevTokens.has(t.deviceId) ||
-        onlineDevNames.has(t.deviceName);
+        const isMatch =
+          t.deviceId === targetDevId ||
+          (targetApiKey && t.deviceId === targetApiKey) ||
+          (targetName && t.deviceName === targetName);
 
-      if (!isFromOnlineDev) continue;
+        if (!isMatch) continue;
 
-      const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
-      // Stale metric older than 10 minutes is filtered out
-      if (!ts || now - ts > RECENCY_WINDOW_MS) continue;
+        const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
+        if (!ts || now - ts > RECENCY_WINDOW_MS) continue;
 
-      const lowerKey = t.metric.toLowerCase();
-      const ageSec = Math.max(0, Math.floor((now - ts) / 1000));
-      const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+        const lowerKey = t.metric.toLowerCase();
+        const ageSec = Math.max(0, Math.floor((now - ts) / 1000));
+        const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
 
-      const existing = metricMap.get(lowerKey);
-      if (!existing) {
-        metricMap.set(lowerKey, {
-          name: t.metric,
-          latestValue: t.value,
-          unit: t.unit || '',
-          lastTimestamp: t.timestamp,
-          ageText,
-          deviceNames: new Set([t.deviceName || t.deviceId]),
-          isFresh: ageSec < 120,
-        });
-      } else {
-        existing.deviceNames.add(t.deviceName || t.deviceId);
-        const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
-        if (ts > existingTs) {
-          existing.latestValue = t.value;
-          if (t.unit) existing.unit = t.unit;
-          existing.lastTimestamp = t.timestamp;
-          existing.ageText = ageText;
-          existing.isFresh = ageSec < 120;
+        const existing = metricMap.get(lowerKey);
+        if (!existing) {
+          metricMap.set(lowerKey, {
+            name: t.metric,
+            latestValue: t.value,
+            unit: t.unit || '',
+            lastTimestamp: t.timestamp,
+            ageText,
+            deviceNames: new Set([targetName || targetDevId]),
+            isFresh: ageSec < 120,
+          });
+        } else {
+          const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
+          if (ts > existingTs) {
+            existing.name = t.metric;
+            existing.latestValue = t.value;
+            existing.unit = t.unit || '';
+            existing.lastTimestamp = t.timestamp;
+            existing.ageText = ageText;
+            existing.isFresh = ageSec < 120;
+          }
         }
       }
-    }
 
-    // 2. Scan online devices with recently updated metrics (lastSeen <= 10m)
-    for (const dev of onlineDevices) {
-      const devLastSeenTs = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
-      const isRecentlySeen = devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS;
-
-      if (isRecentlySeen && dev.metrics) {
+      // Check activeDevice.metrics dictionary if recently online
+      const devLastSeenTs = activeDevice.lastSeen ? new Date(activeDevice.lastSeen).getTime() : 0;
+      if (devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS && activeDevice.metrics) {
         const ageSec = Math.max(0, Math.floor((now - devLastSeenTs) / 1000));
         const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
 
-        for (const [mKey, mVal] of Object.entries(dev.metrics as Record<string, number>)) {
+        for (const [mKey, mVal] of Object.entries(activeDevice.metrics as Record<string, number>)) {
           if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
           const lowerKey = mKey.toLowerCase();
           if (!metricMap.has(lowerKey)) {
@@ -223,11 +219,89 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
               name: mKey,
               latestValue: mVal,
               unit: '',
-              lastTimestamp: dev.lastSeen,
+              lastTimestamp: activeDevice.lastSeen,
               ageText,
-              deviceNames: new Set([dev.name]),
+              deviceNames: new Set([targetName]),
               isFresh: ageSec < 120,
             });
+          }
+        }
+      }
+    } else {
+      // 2. ALL DEVICES AGGREGATION MODE (Only user's visible online devices)
+      const onlineDevices = devices.filter((d) => d.status === 'online' && d.dataFlowActive !== false);
+      const onlineDevIds = new Set(onlineDevices.map((d) => d.id));
+      const onlineDevTokens = new Set(onlineDevices.map((d) => d.apiKey).filter(Boolean));
+      const onlineDevNames = new Set(onlineDevices.map((d) => d.name).filter(Boolean));
+
+      const telemetryPool: TelemetryReading[] = [
+        ...physicalTelemetry,
+        ...(user?.role === 'admin' ? simulationTelemetry : []),
+      ];
+
+      for (const t of telemetryPool) {
+        if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
+
+        const isFromOnlineDev =
+          onlineDevIds.has(t.deviceId) ||
+          onlineDevTokens.has(t.deviceId) ||
+          onlineDevNames.has(t.deviceName);
+
+        if (!isFromOnlineDev) continue;
+
+        const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
+        if (!ts || now - ts > RECENCY_WINDOW_MS) continue;
+
+        const lowerKey = t.metric.toLowerCase();
+        const ageSec = Math.max(0, Math.floor((now - ts) / 1000));
+        const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+
+        const existing = metricMap.get(lowerKey);
+        if (!existing) {
+          metricMap.set(lowerKey, {
+            name: t.metric,
+            latestValue: t.value,
+            unit: t.unit || '',
+            lastTimestamp: t.timestamp,
+            ageText,
+            deviceNames: new Set([t.deviceName || t.deviceId]),
+            isFresh: ageSec < 120,
+          });
+        } else {
+          existing.deviceNames.add(t.deviceName || t.deviceId);
+          const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
+          if (ts > existingTs) {
+            existing.latestValue = t.value;
+            if (t.unit) existing.unit = t.unit;
+            existing.lastTimestamp = t.timestamp;
+            existing.ageText = ageText;
+            existing.isFresh = ageSec < 120;
+          }
+        }
+      }
+
+      for (const dev of onlineDevices) {
+        const devLastSeenTs = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
+        const isRecentlySeen = devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS;
+
+        if (isRecentlySeen && dev.metrics) {
+          const ageSec = Math.max(0, Math.floor((now - devLastSeenTs) / 1000));
+          const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+
+          for (const [mKey, mVal] of Object.entries(dev.metrics as Record<string, number>)) {
+            if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
+            const lowerKey = mKey.toLowerCase();
+            if (!metricMap.has(lowerKey)) {
+              metricMap.set(lowerKey, {
+                name: mKey,
+                latestValue: mVal,
+                unit: '',
+                lastTimestamp: dev.lastSeen,
+                ageText,
+                deviceNames: new Set([dev.name]),
+                isFresh: ageSec < 120,
+              });
+            }
           }
         }
       }
@@ -238,7 +312,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const tB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0;
       return tB - tA;
     });
-  }, [physicalTelemetry, simulationTelemetry, devices, user?.role]);
+  }, [metricsScope, activeDevice, physicalTelemetry, simulationTelemetry, devices, user?.role]);
 
   const getFilteredTerminalLogs = () => {
     let list: TelemetryReading[] = [];
@@ -986,14 +1060,59 @@ void sendHeartbeat() {
 
           {/* Active System Metrics Card */}
           <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 gap-2">
               <div className="flex items-center gap-2">
                 <Activity className="w-4 h-4 text-cyan-500" />
                 <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Sistemden Gelen Aktif Metrikler ({activeSystemMetrics.length})
+                  {metricsScope === 'selected' && activeDevice
+                    ? `${activeDevice.name} Aktif Metrikleri (${activeSystemMetrics.length})`
+                    : `Sistemden Gelen Aktif Metrikler (${activeSystemMetrics.length})`}
                 </h3>
               </div>
-              <span className="text-[10px] text-slate-400">Saha cihazlarından algılanan canlı parametreler</span>
+
+              {/* Scope Switcher: Selected Device vs All Devices */}
+              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setMetricsScope('selected')}
+                  className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                    metricsScope === 'selected'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title={activeDevice ? `${activeDevice.name} cihazına ait parametreleri filtrele` : 'Seçili cihaz'}
+                >
+                  <Cpu className="w-3 h-3" />
+                  <span>Seçili Cihaz {activeDevice ? `(${activeDevice.name})` : ''}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMetricsScope('all')}
+                  className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                    metricsScope === 'all'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tüm kayıtlı cihazların metriklerini göster"
+                >
+                  <Activity className="w-3 h-3" />
+                  <span>Tüm Cihazlar</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+              <span>
+                {metricsScope === 'selected' && activeDevice ? (
+                  <>
+                    <strong className="text-slate-800 dark:text-slate-200">{activeDevice.name}</strong> (
+                    {activeDevice.isSimulated ? 'Sanal Simülasyon Cihazı' : 'Fiziksel Saha Donanımı'}
+                    ) tarafından son 10 dakikada iletilen canlı parametreler
+                  </>
+                ) : (
+                  'Çevrim içi cihazlardan son 10 dakikada algılanan canlı parametreler'
+                )}
+              </span>
             </div>
 
             {activeSystemMetrics.length > 0 ? (
@@ -1023,11 +1142,20 @@ void sendHeartbeat() {
                         ({m.ageText})
                       </span>
                     )}
+                    {metricsScope === 'all' && m.deviceNames.size > 0 && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-sans font-medium">
+                        {Array.from(m.deviceNames).join(', ')}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-slate-400 italic">Son 10 dakika içinde aktif metrik verisi algılanmadı.</p>
+              <p className="text-xs text-slate-400 italic py-2">
+                {metricsScope === 'selected' && activeDevice
+                  ? `"${activeDevice.name}" için son 10 dakika içinde aktif telemetri verisi algılanmadı.`
+                  : 'Son 10 dakika içinde aktif metrik verisi algılanmadı.'}
+              </p>
             )}
           </div>
         </div>
