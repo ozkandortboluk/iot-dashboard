@@ -160,6 +160,31 @@ router.post('/:id/regen-key', authenticateUser, (req, res) => {
   }
 });
 
+router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const devices = db.getDevices();
+  const existingDev = devices.find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim!' });
+  }
+
+  try {
+    const updated = db.updateDevice(deviceId, { metrics: {} });
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    res.json({ success: true, message: 'Cihaz metrik önbelleği temizlendi.', device: updated });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || 'Metrikler temizlenemedi.' });
+  }
+});
+
 router.post('/:id/control', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;

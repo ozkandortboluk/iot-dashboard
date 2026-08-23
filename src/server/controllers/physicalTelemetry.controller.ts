@@ -244,8 +244,8 @@ export class PhysicalTelemetryController {
       deviceId: device.id,
     });
 
-    // 9. Return Clean Success Response
-    return res.status(201).json({
+    // 9. Return Clean Success Response (HTTP 200 OK for standard Arduino/ESP HTTPClient compatibility)
+    return res.status(200).json({
       status: packetAck.status,
       packetId: packetAck.packetId,
       received: packetAck.received,

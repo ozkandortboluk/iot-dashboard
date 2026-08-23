@@ -78,16 +78,20 @@ export function buildPacketAck(params: {
 
 export function getUnitForMetric(mKey: string): string {
   const lk = mKey.toLowerCase();
-  if (lk.includes('sıcaklık') || lk.includes('temp')) return '°C';
-  if (lk.includes('nem') || lk.includes('hum') || lk.includes('cpu') || lk.includes('memory')) return '%';
-  if (lk.includes('güç') || lk.includes('power')) return 'kW';
-  if (lk.includes('volt')) return 'V';
-  if (lk.includes('akım') || lk.includes('amp')) return 'A';
-  if (lk.includes('basınç') || lk.includes('bar')) return 'hPa';
+  if (lk.includes('sıcaklık') || lk.includes('temp') || lk.includes('sicaklik') || lk.includes('temperature') || lk.includes('isi')) return '°C';
+  if (lk.includes('nem') || lk.includes('hum') || lk.includes('humidity') || lk.includes('cpu') || lk.includes('memory') || lk.includes('ram') || lk.includes('disk') || lk.startsWith('pct_') || lk.endsWith('_percent')) return '%';
+  if (lk === 'p' || lk.includes('güç') || lk.includes('power') || lk.includes('guc') || lk.includes('active_power') || lk.includes('kw')) return 'kW';
+  if (['l1', 'l2', 'l3', 'v1', 'v2', 'v3', 'volt', 'voltage', 'gerilim'].includes(lk) || lk.includes('volt')) return 'V';
+  if (['i', 'i1', 'i2', 'i3', 'current', 'akım', 'akim', 'amp'].includes(lk) || lk.includes('akım') || lk.includes('akim')) return 'A';
+  if (['ri', 'rc', 'q', 'kvar', 'var', 'reaktif', 'reactive'].includes(lk)) return 'kVAr';
+  if (['f', 'f1', 'f2', 'freq', 'frekans', 'frequency', 'hz'].includes(lk)) return 'Hz';
+  if (lk.includes('basınç') || lk.includes('basinc') || lk.includes('pressure') || lk.includes('bar') || lk.includes('hpa')) return 'hPa';
   if (lk.includes('ping')) return 'ms';
   if (lk.includes('rssi')) return 'dBm';
   if (lk.includes('heartbeat')) return 'hb';
-  return 'birim';
+  if (lk.includes('co2')) return 'ppm';
+  if (lk.includes('titresim') || lk.includes('vibration')) return 'mm/s';
+  return '';
 }
 
 export function parseMetricPair(item: string): ParsedMetric | null {
@@ -339,9 +343,18 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
       ).toString().trim()
     : '';
 
-  const finalFormattedPacket = `${token || deviceIdFromPayload}, ${deviceNameFromPayload || deviceIdFromPayload || token}, ${metricsToProcess
-    .map((m) => `${m.metric}:${m.value}:${m.unit}`)
-    .join(', ')}`;
+  const prefixParts: string[] = [];
+  if (token) prefixParts.push(token);
+  if (deviceIdFromPayload && deviceIdFromPayload !== token) prefixParts.push(deviceIdFromPayload);
+  if (deviceNameFromPayload && deviceNameFromPayload !== token && deviceNameFromPayload !== deviceIdFromPayload) prefixParts.push(deviceNameFromPayload);
+
+  const metricsStr = metricsToProcess
+    .map((m) => (m.unit ? `${m.metric}:${m.value}:${m.unit}` : `${m.metric}:${m.value}`))
+    .join(', ');
+
+  const finalFormattedPacket = prefixParts.length > 0
+    ? `${prefixParts.join(', ')}, ${metricsStr}`
+    : (rawBodyText || metricsStr);
 
   return {
     token,
@@ -495,7 +508,14 @@ export function parseLegacyTelemetryPayload(req: any): ParsedTelemetryPayload {
     ? ((reqHeaders['x-mac-address'] as string) || (reqHeaders['x-mac'] as string) || (reqBody && (reqBody.mac || reqBody.macAddress)) || '').toString().trim()
     : '';
 
-  const finalFormattedPacket = `${token}, ${deviceNameFromPayload || token}, ${metricsToProcess.map((m) => `${m.metric}:${m.value}`).join(', ')}`;
+  const legacyPrefixParts: string[] = [];
+  if (token) legacyPrefixParts.push(token);
+  if (deviceNameFromPayload && deviceNameFromPayload !== token) legacyPrefixParts.push(deviceNameFromPayload);
+
+  const legacyMetricsStr = metricsToProcess.map((m) => (m.unit ? `${m.metric}:${m.value}:${m.unit}` : `${m.metric}:${m.value}`)).join(', ');
+  const finalFormattedPacket = legacyPrefixParts.length > 0
+    ? `${legacyPrefixParts.join(', ')}, ${legacyMetricsStr}`
+    : (rawBodyText || legacyMetricsStr);
 
   return {
     token,

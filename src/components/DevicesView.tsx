@@ -204,29 +204,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
           }
         }
       }
-
-      // Check activeDevice.metrics dictionary if recently online
-      const devLastSeenTs = activeDevice.lastSeen ? new Date(activeDevice.lastSeen).getTime() : 0;
-      if (devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS && activeDevice.metrics) {
-        const ageSec = Math.max(0, Math.floor((now - devLastSeenTs) / 1000));
-        const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
-
-        for (const [mKey, mVal] of Object.entries(activeDevice.metrics as Record<string, number>)) {
-          if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
-          const lowerKey = mKey.toLowerCase();
-          if (!metricMap.has(lowerKey)) {
-            metricMap.set(lowerKey, {
-              name: mKey,
-              latestValue: mVal,
-              unit: '',
-              lastTimestamp: activeDevice.lastSeen,
-              ageText,
-              deviceNames: new Set([targetName]),
-              isFresh: ageSec < 120,
-            });
-          }
-        }
-      }
     } else {
       // 2. ALL DEVICES AGGREGATION MODE (Only user's visible online devices)
       const onlineDevices = devices.filter((d) => d.status === 'online' && d.dataFlowActive !== false);
@@ -276,32 +253,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             existing.lastTimestamp = t.timestamp;
             existing.ageText = ageText;
             existing.isFresh = ageSec < 120;
-          }
-        }
-      }
-
-      for (const dev of onlineDevices) {
-        const devLastSeenTs = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
-        const isRecentlySeen = devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS;
-
-        if (isRecentlySeen && dev.metrics) {
-          const ageSec = Math.max(0, Math.floor((now - devLastSeenTs) / 1000));
-          const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
-
-          for (const [mKey, mVal] of Object.entries(dev.metrics as Record<string, number>)) {
-            if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
-            const lowerKey = mKey.toLowerCase();
-            if (!metricMap.has(lowerKey)) {
-              metricMap.set(lowerKey, {
-                name: mKey,
-                latestValue: mVal,
-                unit: '',
-                lastTimestamp: dev.lastSeen,
-                ageText,
-                deviceNames: new Set([dev.name]),
-                isFresh: ageSec < 120,
-              });
-            }
           }
         }
       }
@@ -555,6 +506,31 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       alert(err.message || 'Cihaz dönüştürülemedi.');
     } finally {
       setIsConverting(false);
+    }
+  };
+
+  const [clearingMetrics, setClearingMetrics] = useState(false);
+  const handleClearDeviceMetrics = async (deviceId: string) => {
+    if (!window.confirm('Bu cihazın kayıtlı metrik önbelleği temizlensin mi?')) return;
+    setClearingMetrics(true);
+    try {
+      const res = await fetch(`/api/devices/${deviceId}/clear-metrics`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.device && selectedDevice?.id === deviceId) {
+          setSelectedDevice(data.device);
+        }
+      }
+    } catch (err) {
+      console.error('Metrikler temizlenirken hata oluştu:', err);
+    } finally {
+      setClearingMetrics(false);
     }
   };
 
@@ -1070,34 +1046,50 @@ void sendHeartbeat() {
                 </h3>
               </div>
 
-              {/* Scope Switcher: Selected Device vs All Devices */}
-              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setMetricsScope('selected')}
-                  className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-                    metricsScope === 'selected'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                  title={activeDevice ? `${activeDevice.name} cihazına ait parametreleri filtrele` : 'Seçili cihaz'}
-                >
-                  <Cpu className="w-3 h-3" />
-                  <span>Seçili Cihaz {activeDevice ? `(${activeDevice.name})` : ''}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMetricsScope('all')}
-                  className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-                    metricsScope === 'all'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                  title="Tüm kayıtlı cihazların metriklerini göster"
-                >
-                  <Activity className="w-3 h-3" />
-                  <span>Tüm Cihazlar</span>
-                </button>
+              {/* Controls: Clear Metrics & Scope Switcher */}
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                {metricsScope === 'selected' && activeDevice && (
+                  <button
+                    type="button"
+                    disabled={clearingMetrics}
+                    onClick={() => handleClearDeviceMetrics(activeDevice.id)}
+                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 disabled:opacity-50"
+                    title="Cihazın kayıtlı eski metrik önbelleğini sıfırlar"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>{clearingMetrics ? 'Temizleniyor...' : 'Önbelleği Sıfırla'}</span>
+                  </button>
+                )}
+
+                {/* Scope Switcher: Selected Device vs All Devices */}
+                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <button
+                    type="button"
+                    onClick={() => setMetricsScope('selected')}
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                      metricsScope === 'selected'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title={activeDevice ? `${activeDevice.name} cihazına ait parametreleri filtrele` : 'Seçili cihaz'}
+                  >
+                    <Cpu className="w-3 h-3" />
+                    <span>Seçili Cihaz {activeDevice ? `(${activeDevice.name})` : ''}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMetricsScope('all')}
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                      metricsScope === 'all'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="Tüm kayıtlı cihazların metriklerini göster"
+                  >
+                    <Activity className="w-3 h-3" />
+                    <span>Tüm Cihazlar</span>
+                  </button>
+                </div>
               </div>
             </div>
 
