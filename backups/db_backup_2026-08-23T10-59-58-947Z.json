@@ -1,0 +1,50 @@
+{
+  "users": [],
+  "passwords": {},
+  "devices": [
+    {
+      "name": "[Sanal] Unit-Test Virtual ESP32",
+      "type": "sensor",
+      "location": "Lab Room A",
+      "isSimulated": true,
+      "dataFlowActive": true,
+      "simulatedMetrics": [
+        "temperature",
+        "humidity",
+        "pressure"
+      ],
+      "saveSimulatedDataToDb": false,
+      "id": "dev_1787482798947",
+      "apiKey": "nex_c457b0b7_23c3b2a4a65a48f411288116",
+      "apiKeyPrefix": "nex_c457b0b7",
+      "apiKeyHash": "70d2c0be194abfdecb9f2e9de661250b20ef040bbc2ca5393d0aab314988ba8c",
+      "heartbeatTimeoutSeconds": 300,
+      "lastSeen": "2026-08-23T10:59:58.947Z"
+    }
+  ],
+  "telemetry": [],
+  "dashboards": [],
+  "sessions": [],
+  "notifications": [],
+  "rules": [],
+  "auditLogs": [
+    {
+      "id": "log_1787482798947_dm0",
+      "timestamp": "2026-08-23T10:59:58.947Z",
+      "userName": "Sistem",
+      "action": "Yeni Cihaz Eklendi: [Sanal] Unit-Test Virtual ESP32 (IP: undefined)",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    }
+  ],
+  "retentionPolicies": {
+    "enabled": true,
+    "autoCleanupIntervalHours": 24,
+    "telemetryDays": 90,
+    "resolvedAlarmsDays": 30,
+    "readNotificationsDays": 30,
+    "auditLogsDays": 90,
+    "dispatchLogsDays": 30,
+    "deviceCommandsDays": 15
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "users": [],
+  "passwords": {},
+  "devices": [
+    {
+      "id": "sim_test_dev_01",
+      "name": "[Sanal] Unit-Test Virtual ESP32",
+      "type": "sensor",
+      "location": "Lab Room A",
+      "isSimulated": true,
+      "dataFlowActive": true,
+      "simulatedMetrics": [
+        "temperature",
+        "humidity",
+        "pressure"
+      ],
+      "saveSimulatedDataToDb": false,
+      "apiKey": "nex_8599fa5f_366c7279ada18d562fdb4a23",
+      "apiKeyPrefix": "nex_8599fa5f",
+      "apiKeyHash": "89f2e57ff4d1bed6c05e434bc688a2e21fd831cb192c1406607dfa9110e41138",
+      "heartbeatTimeoutSeconds": 300,
+      "lastSeen": "2026-08-23T11:00:43.849Z"
+    }
+  ],
+  "telemetry": [
+    {
+      "deviceId": "dev_1787482798947",
+      "deviceName": "[Sanal] Unit-Test Virtual ESP32",
+      "metric": "temperature",
+      "value": 37.8,
+      "unit": "°C",
+      "status": "normal",
+      "rawPayload": "nex_c457b0b7_23c3b2a4a65a48f411288116, [Sanal] Unit-Test Virtual ESP32, temperature:37.8:°C | humidity:36.5:% | pressure:1012.8:hPa",
+      "sequence": 1,
+      "source": "simulator",
+      "environment": "sandbox",
+      "simulationRunId": "sim_run_mt5p3uqr",
+      "id": "tel_dev_1787482798947_seq_1_temperature",
+      "timestamp": "2026-08-23T10:59:58.947Z"
+    },
+    {
+      "deviceId": "dev_1787482798947",
+      "deviceName": "[Sanal] Unit-Test Virtual ESP32",
+      "metric": "humidity",
+      "value": 36.5,
+      "unit": "%",
+      "status": "normal",
+      "rawPayload": "nex_c457b0b7_23c3b2a4a65a48f411288116, [Sanal] Unit-Test Virtual ESP32, temperature:37.8:°C | humidity:36.5:% | pressure:1012.8:hPa",
+      "sequence": 1,
+      "source": "simulator",
+      "environment": "sandbox",
+      "simulationRunId": "sim_run_mt5p3uqr",
+      "id": "tel_dev_1787482798947_seq_1_humidity",
+      "timestamp": "2026-08-23T10:59:58.947Z"
+    },
+    {
+      "deviceId": "dev_1787482798947",
+      "deviceName": "[Sanal] Unit-Test Virtual ESP32",
+      "metric": "pressure",
+      "value": 1012.8,
+      "unit": "hPa",
+      "status": "normal",
+      "rawPayload": "nex_c457b0b7_23c3b2a4a65a48f411288116, [Sanal] Unit-Test Virtual ESP32, temperature:37.8:°C | humidity:36.5:% | pressure:1012.8:hPa",
+      "sequence": 1,
+      "source": "simulator",
+      "environment": "sandbox",
+      "simulationRunId": "sim_run_mt5p3uqr",
+      "id": "tel_dev_1787482798947_seq_1_pressure",
+      "timestamp": "2026-08-23T10:59:58.947Z"
+    }
+  ],
+  "dashboards": [],
+  "sessions": [],
+  "notifications": [],
+  "rules": [],
+  "auditLogs": [
+    {
+      "id": "log_1787482798947_dm0",
+      "timestamp": "2026-08-23T10:59:58.947Z",
+      "userName": "Sistem",
+      "action": "Yeni Cihaz Eklendi: [Sanal] Unit-Test Virtual ESP32 (IP: undefined)",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    },
+    {
+      "id": "log_1787482798947_qmp",
+      "timestamp": "2026-08-23T10:59:58.947Z",
+      "userName": "Sistem",
+      "action": "Yeni Cihaz Eklendi: Real Physical Hardware Sensor (IP: undefined)",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    },
+    {
+      "id": "log_1787482798947_v73",
+      "timestamp": "2026-08-23T10:59:58.947Z",
+      "userId": "system",
+      "userName": "API Manager",
+      "action": "Cihaz Silindi: [Sanal] Unit-Test Virtual ESP32",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    },
+    {
+      "id": "log_1787482798947_jlm",
+      "timestamp": "2026-08-23T10:59:58.947Z",
+      "userId": "system",
+      "userName": "API Manager",
+      "action": "Cihaz Silindi: Real Physical Hardware Sensor",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    },
+    {
+      "id": "log_1787482843849_cvy",
+      "timestamp": "2026-08-23T11:00:43.849Z",
+      "userName": "Sistem",
+      "action": "Yeni Cihaz Eklendi: [Sanal] Unit-Test Virtual ESP32 (IP: undefined)",
+      "ip": "127.0.0.1",
+      "severity": "medium"
+    }
+  ],
+  "retentionPolicies": {
+    "enabled": true,
+    "autoCleanupIntervalHours": 24,
+    "telemetryDays": 90,
+    "resolvedAlarmsDays": 30,
+    "readNotificationsDays": 30,
+    "auditLogsDays": 90,
+    "dispatchLogsDays": 30,
+    "deviceCommandsDays": 15
+  },
+  "activeAlarms": []
+}

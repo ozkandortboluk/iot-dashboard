@@ -60,6 +60,7 @@ services:
       - PORT=3000
       - DATABASE_URL=postgres://nexus_user:${customDbPassword}@postgres:5432/nexus_dashboard
       - GEMINI_API_KEY=${customApiKey}
+      - ENABLE_SIMULATOR="true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,7 +93,8 @@ volumes:
 NODE_ENV=production
 PORT=3000
 DATABASE_URL=postgres://nexus_user:${customDbPassword}@localhost:5432/nexus_dashboard
-GEMINI_API_KEY=${customApiKey}`;
+GEMINI_API_KEY=${customApiKey}
+ENABLE_SIMULATOR=true`;
 
   const nginxConfig = `# Nginx Proxy ve SSL Yapılandırması (/etc/nginx/sites-available/dashboard)
 server {

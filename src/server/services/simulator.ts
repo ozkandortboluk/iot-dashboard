@@ -3,11 +3,11 @@ import { broadcast } from './websocket.js';
 import { simulationTelemetryService } from './simulationTelemetry.service.js';
 import type { TelemetryReading, Device } from '../../types.js';
 
-const isSimulatorEnabledByDefault =
-  process.env.NODE_ENV !== 'production' &&
-  process.env.ENABLE_SIMULATOR === 'true';
+export function isSimulatorEnabledFromEnv(): boolean {
+  return process.env.ENABLE_SIMULATOR === 'true';
+}
 
-export let simulatorActive = isSimulatorEnabledByDefault;
+export let simulatorActive = isSimulatorEnabledFromEnv();
 export let simulatorIntervalMs = 2000;
 export let anomalyProbability = 0.05; // 5% chance of warning/critical anomaly
 export let activeScenario = 'normal'; // 'normal', 'overheat', 'spike_burst', 'sine_wave'
@@ -16,14 +16,19 @@ let stepCounter = 0;
 let simTimeout: NodeJS.Timeout | null = null;
 let currentSimulationRunId = `sim_run_${Date.now().toString(36)}`;
 
+export function getSimTimeout(): NodeJS.Timeout | null {
+  return simTimeout;
+}
+
 export function setSimulatorActive(active: boolean) {
+  if (simTimeout) {
+    clearTimeout(simTimeout);
+    simTimeout = null;
+  }
   simulatorActive = active;
   if (active) {
     currentSimulationRunId = `sim_run_${Date.now().toString(36)}`;
     scheduleSimulationStep();
-  } else if (simTimeout) {
-    clearTimeout(simTimeout);
-    simTimeout = null;
   }
 }
 
@@ -221,25 +226,32 @@ export function runSimulationStep() {
 }
 
 export function scheduleSimulationStep() {
-  if (simTimeout) clearTimeout(simTimeout);
+  if (simTimeout) {
+    clearTimeout(simTimeout);
+    simTimeout = null;
+  }
   if (!simulatorActive) return;
   simTimeout = setTimeout(() => {
+    simTimeout = null;
     runSimulationStep();
     scheduleSimulationStep();
   }, simulatorIntervalMs);
 }
 
-export function initSimulator() {
-  const simulatorEnabled =
-    process.env.NODE_ENV !== 'production' &&
-    process.env.ENABLE_SIMULATOR === 'true';
+export function initSimulator(): boolean {
+  if (simTimeout) {
+    clearTimeout(simTimeout);
+    simTimeout = null;
+  }
 
-  simulatorActive = simulatorEnabled;
+  simulatorActive = isSimulatorEnabledFromEnv();
 
-  if (simulatorEnabled) {
-    console.log('[Simulator] Sanal cihaz simülatörü aktif edildi.');
+  if (simulatorActive) {
+    console.log('[Simulator] Sanal cihaz simülatörü aktif edildi (ENABLE_SIMULATOR=true).');
     scheduleSimulationStep();
   } else {
-    console.log('[Simulator] Üretim/Varsayılan modda simülatör kapalı tutuluyor (ENABLE_SIMULATOR != true).');
+    console.log('[Simulator] Simülatör kapalı tutuluyor (ENABLE_SIMULATOR != true).');
   }
+
+  return simulatorActive;
 }
