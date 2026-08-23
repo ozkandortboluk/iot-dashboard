@@ -285,9 +285,16 @@ export const Header: React.FC<HeaderProps> = ({
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                                {n.title}
-                              </p>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                                  {n.title}
+                                </p>
+                                {(n.isSimulation || n.source === 'simulator') && (
+                                  <span className="shrink-0 text-[9px] font-extrabold uppercase text-purple-600 dark:text-purple-400 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 rounded">
+                                    TEST ALARMI
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 ml-1">
                                 {formatShortTime(n.timestamp)}
                               </span>

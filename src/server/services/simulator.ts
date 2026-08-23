@@ -1,23 +1,36 @@
 import { db } from '../db.js';
 import { broadcast } from './websocket.js';
+import { simulationTelemetryService } from './simulationTelemetry.service.js';
 import type { TelemetryReading, Device } from '../../types.js';
 
-export let simulatorActive = true;
+const isSimulatorEnabledByDefault =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.ENABLE_SIMULATOR === 'true';
+
+export let simulatorActive = isSimulatorEnabledByDefault;
 export let simulatorIntervalMs = 2000;
 export let anomalyProbability = 0.05; // 5% chance of warning/critical anomaly
 export let activeScenario = 'normal'; // 'normal', 'overheat', 'spike_burst', 'sine_wave'
 export let telemetryIngestedCount = 0;
 let stepCounter = 0;
 let simTimeout: NodeJS.Timeout | null = null;
+let currentSimulationRunId = `sim_run_${Date.now().toString(36)}`;
 
 export function setSimulatorActive(active: boolean) {
   simulatorActive = active;
+  if (active) {
+    currentSimulationRunId = `sim_run_${Date.now().toString(36)}`;
+    scheduleSimulationStep();
+  } else if (simTimeout) {
+    clearTimeout(simTimeout);
+    simTimeout = null;
+  }
 }
 
 export function setSimulatorConfig(config: { intervalMs?: number; anomalyRate?: number; scenario?: string; active?: boolean }) {
   if (config.intervalMs !== undefined && typeof config.intervalMs === 'number') {
     simulatorIntervalMs = Math.max(200, Math.min(60000, config.intervalMs));
-    scheduleSimulationStep();
+    if (simulatorActive) scheduleSimulationStep();
   }
   if (config.anomalyRate !== undefined && typeof config.anomalyRate === 'number') {
     anomalyProbability = Math.max(0, Math.min(1, config.anomalyRate));
@@ -26,7 +39,7 @@ export function setSimulatorConfig(config: { intervalMs?: number; anomalyRate?: 
     activeScenario = config.scenario;
   }
   if (config.active !== undefined && typeof config.active === 'boolean') {
-    simulatorActive = config.active;
+    setSimulatorActive(config.active);
   }
 }
 
@@ -179,35 +192,37 @@ export function runSimulationStep() {
     }
 
     const calculatedValues: Record<string, number> = {};
+    const parsedMetrics: { metric: string; value: number; unit: string }[] = [];
 
     for (const m of metricsToGenerate) {
       const { val, unit } = computeValueForMetric(m, isAnomaly, stepCounter, calculatedValues);
       calculatedValues[m.toLowerCase()] = val;
-
-      const rawPayload = `${dev.apiKey}, ${dev.name}, ${m}:${val}:${unit}`;
-
-      const reading = db.addTelemetryReading({
-        deviceId: dev.id,
-        deviceName: dev.name,
-        metric: m,
-        value: val,
-        unit,
-        status: 'normal',
-        rawPayload,
-      });
-
-      telemetryIngestedCount++;
-      stepReadings.push(reading);
+      parsedMetrics.push({ metric: m, value: val, unit });
     }
-  }
 
-  if (stepReadings.length > 0) {
-    broadcast('telemetry:batch', stepReadings);
+    const rawPayload = `${dev.apiKey}, ${dev.name}, ${parsedMetrics.map((p) => `${p.metric}:${p.value}:${p.unit}`).join(' | ')}`;
+
+    // Process via dedicated SimulationTelemetryService pipeline
+    simulationTelemetryService.ingestSimulationTelemetry(
+      dev,
+      parsedMetrics,
+      rawPayload,
+      false,
+      stepCounter,
+      currentSimulationRunId
+    ).then((res) => {
+      if (res.addedReadings) {
+        stepReadings.push(...res.addedReadings);
+      }
+    }).catch((err) => {
+      console.error(`[Simulator] Sanal telemetri işleme hatası (${dev.name}):`, err?.message);
+    });
   }
 }
 
 export function scheduleSimulationStep() {
   if (simTimeout) clearTimeout(simTimeout);
+  if (!simulatorActive) return;
   simTimeout = setTimeout(() => {
     runSimulationStep();
     scheduleSimulationStep();
@@ -215,5 +230,16 @@ export function scheduleSimulationStep() {
 }
 
 export function initSimulator() {
-  scheduleSimulationStep();
+  const simulatorEnabled =
+    process.env.NODE_ENV !== 'production' &&
+    process.env.ENABLE_SIMULATOR === 'true';
+
+  simulatorActive = simulatorEnabled;
+
+  if (simulatorEnabled) {
+    console.log('[Simulator] Sanal cihaz simülatörü aktif edildi.');
+    scheduleSimulationStep();
+  } else {
+    console.log('[Simulator] Üretim/Varsayılan modda simülatör kapalı tutuluyor (ENABLE_SIMULATOR != true).');
+  }
 }

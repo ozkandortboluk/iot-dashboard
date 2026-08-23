@@ -13,6 +13,8 @@ import {
   setSimulatorConfig,
   scheduleSimulationStep,
 } from '../services/simulator.js';
+import { simulationTelemetryController } from '../controllers/simulationTelemetry.controller.js';
+import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const startTime = Date.now();
@@ -315,6 +317,93 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
 // Simulator Router
 const simulatorRouter = Router();
 
+// Primary Simulation Ingestion API (POST /api/simulator/v1/telemetry and POST /api/simulator/telemetry)
+simulatorRouter.post('/v1/telemetry', (req, res) => simulationTelemetryController.ingest(req, res));
+simulatorRouter.post('/telemetry', (req, res) => simulationTelemetryController.ingest(req, res));
+simulatorRouter.post('/v1/telemetry/legacy', (req, res) => simulationTelemetryController.ingestLegacy(req, res));
+
+// Manual Test Telemetry Injection (Authenticated Admin Session ONLY - NO device API key required)
+const handleSimulatorInject = async (req: any, res: any) => {
+  const { deviceId, metric, value, unit, readings } = req.body;
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId parametresi zorunludur.' });
+  }
+
+  const dev = db.getDevices().find((d) => d.id === deviceId || d.apiKey === deviceId);
+  if (!dev) {
+    return res.status(404).json({ error: 'Belirtilen cihaz bulunamadı.' });
+  }
+
+  const metricsToProcess: { metric: string; value: number; unit?: string }[] = [];
+  if (Array.isArray(readings) && readings.length > 0) {
+    for (const r of readings) {
+      if (r.metric && r.value !== undefined && !isNaN(Number(r.value))) {
+        metricsToProcess.push({
+          metric: String(r.metric),
+          value: Number(r.value),
+          unit: r.unit || '',
+        });
+      }
+    }
+  } else if (metric && value !== undefined && !isNaN(Number(value))) {
+    metricsToProcess.push({
+      metric: String(metric),
+      value: Number(value),
+      unit: unit || (metric === 'temperature' ? '°C' : metric === 'humidity' ? '%' : 'birim'),
+    });
+  }
+
+  if (metricsToProcess.length === 0) {
+    return res.status(400).json({ error: 'Geçerli bir metrik adı ve sayısal değer belirtilmedi.' });
+  }
+
+  const generatedReadings = [];
+  for (const m of metricsToProcess) {
+    const rawPayload = `[SIM_INJECT] Device: ${dev.name} | ${m.metric}:${m.value} ${m.unit || ''}`;
+    const reading = db.addTelemetryReading({
+      deviceId: dev.id,
+      deviceName: dev.name,
+      metric: m.metric,
+      value: m.value,
+      unit: m.unit || '',
+      status: 'normal',
+      rawPayload,
+      source: 'manual_test',
+      environment: 'sandbox',
+      simulationRunId: `manual_${Date.now().toString(36)}`,
+    });
+    generatedReadings.push(reading);
+
+    if (!dev.metrics) dev.metrics = {};
+    dev.metrics[m.metric] = m.value;
+    dev.metrics[m.metric.toLowerCase()] = m.value;
+  }
+
+  db.updateDevice(dev.id, {
+    metrics: dev.metrics,
+    lastSeen: new Date().toISOString(),
+    status: 'online',
+  });
+
+  // Broadcast strictly to simulation channel
+  broadcast('telemetry:simulation:batch', generatedReadings);
+  if (generatedReadings.length === 1) {
+    broadcast('telemetry:simulation:new', generatedReadings[0]);
+  }
+
+  res.status(201).json({
+    success: true,
+    message: 'Test telemetrisi simülasyon motoruna başarıyla enjekte edildi.',
+    deviceId: dev.id,
+    deviceName: dev.name,
+    injectedCount: generatedReadings.length,
+    readings: generatedReadings,
+  });
+};
+
+simulatorRouter.post('/v1/inject', authenticateUser, requireAdmin, handleSimulatorInject);
+simulatorRouter.post('/inject', authenticateUser, requireAdmin, handleSimulatorInject);
+
 simulatorRouter.get('/status', (req, res) => {
   res.json({
     simulatorActive,
@@ -389,6 +478,8 @@ simulatorRouter.post('/batch', authenticateUser, (req, res) => {
       unit: u,
       status: 'normal',
       rawPayload,
+      source: 'manual_test',
+      environment: 'sandbox',
     });
     generatedReadings.push(reading);
   }

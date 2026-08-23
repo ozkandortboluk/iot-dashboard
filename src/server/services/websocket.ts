@@ -12,6 +12,7 @@ export interface AuthenticatedWebSocket extends WebSocket {
   isAlive?: boolean;
   messageCount?: number;
   lastRateReset?: number;
+  subscribedChannels?: Set<'physical' | 'simulation'>;
 }
 
 const MAX_WS_PAYLOAD = 1024 * 1024; // 1MB max payload per frame
@@ -96,16 +97,33 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'rules:updated', payload: db.getRules(user.id, user.id) }));
     }
 
+    // Default channels assignment if not already set
+    if (!ws.subscribedChannels) {
+      ws.subscribedChannels = user.role === 'admin'
+        ? new Set(['physical', 'simulation'])
+        : new Set(['physical']);
+    }
+
     const recentTelemetries = db.getTelemetry(undefined, undefined, 50, user.id, user.role === 'admin' ? undefined : user.id);
     if (recentTelemetries && recentTelemetries.length > 0) {
-      safeSend(ws, JSON.stringify({ event: 'telemetry:batch', payload: recentTelemetries }));
+      const physicalTelemetries = recentTelemetries.filter((r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox'));
+      const simTelemetries = recentTelemetries.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
+
+      if (physicalTelemetries.length > 0 && ws.subscribedChannels.has('physical')) {
+        safeSend(ws, JSON.stringify({ event: 'telemetry:physical:batch', payload: physicalTelemetries }));
+        safeSend(ws, JSON.stringify({ event: 'telemetry:batch', payload: physicalTelemetries }));
+      }
+
+      if (simTelemetries.length > 0 && user.role === 'admin' && ws.subscribedChannels.has('simulation')) {
+        safeSend(ws, JSON.stringify({ event: 'telemetry:simulation:batch', payload: simTelemetries }));
+      }
     }
   } catch (err) {
     console.error('[WebSocket] Bootstrap veri gönderim hatası:', err);
   }
 }
 
-// Broadcast helper function with customer/tenant isolation & authentication checks
+// Broadcast helper function with customer/tenant isolation, channel subscriptions & authentication checks
 export function broadcast(event: string, payload: unknown) {
   if (!wss) return;
 
@@ -124,32 +142,82 @@ export function broadcast(event: string, payload: unknown) {
 
     const clientUser = client.user;
     const isAdmin = clientUser.role === 'admin';
+    const subChannels = client.subscribedChannels || (isAdmin ? new Set(['physical', 'simulation']) : new Set(['physical']));
 
-    // 1. Telemetry broadcast (single or batch)
-    if (event === 'telemetry:new' || event === 'telemetry:batch') {
-      let readingsToBroadcast: TelemetryReading[] = [];
-      if (event === 'telemetry:batch' && Array.isArray(payload)) {
-        readingsToBroadcast = payload as TelemetryReading[];
+    // 1. Telemetry broadcasts (Strict Physical vs Simulation Channel Isolation)
+    if (
+      event === 'telemetry:new' ||
+      event === 'telemetry:batch' ||
+      event === 'telemetry:physical:new' ||
+      event === 'telemetry:physical:batch' ||
+      event === 'telemetry:simulation:new' ||
+      event === 'telemetry:simulation:batch' ||
+      event === 'simulator:batch' ||
+      event === 'simulator:telemetry'
+    ) {
+      let readings: TelemetryReading[] = [];
+      if (Array.isArray(payload)) {
+        readings = payload as TelemetryReading[];
       } else if (payload && (payload as TelemetryReading).deviceId) {
-        readingsToBroadcast = [payload as TelemetryReading];
+        readings = [payload as TelemetryReading];
       }
 
-      if (readingsToBroadcast.length === 0) return;
+      if (readings.length === 0) return;
 
-      if (!isAdmin) {
-        readingsToBroadcast = readingsToBroadcast.filter((r) => {
-          const dev = allDevices.find((d) => d.id === r.deviceId);
-          return dev && dev.userId === clientUser.id;
-        });
+      // Classify readings based on origin
+      const isSimEvent = event.startsWith('telemetry:simulation') || event.startsWith('simulator:');
+      const isPhysEvent = event.startsWith('telemetry:physical');
+
+      const physicalReadings = isSimEvent
+        ? []
+        : readings.filter(
+            (r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox')
+          );
+
+      const simulationReadings = isPhysEvent
+        ? []
+        : readings.filter(
+            (r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox'
+          );
+
+      // Deliver PHYSICAL channel readings
+      if (physicalReadings.length > 0 && subChannels.has('physical')) {
+        let allowedPhysical = physicalReadings;
+        if (!isAdmin) {
+          allowedPhysical = physicalReadings.filter((r) => {
+            const dev = allDevices.find((d) => d.id === r.deviceId);
+            return dev && dev.userId === clientUser.id;
+          });
+        }
+
+        if (allowedPhysical.length > 0) {
+          const timestamp = new Date().toISOString();
+          if (allowedPhysical.length === 1) {
+            safeSend(client, JSON.stringify({ event: 'telemetry:physical:new', payload: allowedPhysical[0], timestamp }));
+            safeSend(client, JSON.stringify({ event: 'telemetry:new', payload: allowedPhysical[0], timestamp }));
+          } else {
+            safeSend(client, JSON.stringify({ event: 'telemetry:physical:batch', payload: allowedPhysical, timestamp }));
+            safeSend(client, JSON.stringify({ event: 'telemetry:batch', payload: allowedPhysical, timestamp }));
+          }
+        }
       }
 
-      if (readingsToBroadcast.length === 0) return;
-
-      if (readingsToBroadcast.length === 1) {
-        safeSend(client, JSON.stringify({ event: 'telemetry:new', payload: readingsToBroadcast[0], timestamp: new Date().toISOString() }));
-      } else {
-        safeSend(client, JSON.stringify({ event: 'telemetry:batch', payload: readingsToBroadcast, timestamp: new Date().toISOString() }));
+      // Deliver SIMULATION channel readings
+      // 1. KURAL / STRICT TENANT ISOLATION: Non-admins NEVER receive simulation readings.
+      // Admins receive simulation readings ONLY if subscribed to 'simulation'.
+      if (simulationReadings.length > 0 && isAdmin && subChannels.has('simulation')) {
+        const timestamp = new Date().toISOString();
+        if (simulationReadings.length === 1) {
+          safeSend(client, JSON.stringify({ event: 'telemetry:simulation:new', payload: simulationReadings[0], timestamp }));
+          safeSend(client, JSON.stringify({ event: 'simulator:telemetry', payload: simulationReadings[0], timestamp }));
+          safeSend(client, JSON.stringify({ event: 'telemetry:new', payload: simulationReadings[0], timestamp }));
+        } else {
+          safeSend(client, JSON.stringify({ event: 'telemetry:simulation:batch', payload: simulationReadings, timestamp }));
+          safeSend(client, JSON.stringify({ event: 'simulator:batch', payload: simulationReadings, timestamp }));
+          safeSend(client, JSON.stringify({ event: 'telemetry:batch', payload: simulationReadings, timestamp }));
+        }
       }
+
       return;
     }
 
@@ -470,6 +538,74 @@ export function initWebSocketServer(server: http.Server) {
         // Client heartbeat
         if (parsed.event === 'heartbeat') {
           safeSend(ws, JSON.stringify({ event: 'heartbeat:ack', timestamp: Date.now() }));
+          return;
+        }
+
+        // Channel Subscription handler: { event: "subscribe", channels: ["physical"] | ["simulation"] | ["physical", "simulation"] }
+        if (parsed.event === 'subscribe' || parsed.type === 'subscribe') {
+          const requestedChannels: string[] = Array.isArray(parsed.channels)
+            ? parsed.channels
+            : typeof parsed.channel === 'string'
+            ? [parsed.channel]
+            : [];
+
+          if (!ws.subscribedChannels) {
+            ws.subscribedChannels = ws.user?.role === 'admin'
+              ? new Set(['physical', 'simulation'])
+              : new Set(['physical']);
+          }
+
+          const approvedChannels: string[] = [];
+          for (const ch of requestedChannels) {
+            if (ch === 'physical') {
+              ws.subscribedChannels.add('physical');
+              approvedChannels.push('physical');
+            } else if (ch === 'simulation') {
+              // 1. Kural: Simülasyon kanalı YALNIZCA yöneticilere açıktır.
+              if (ws.user?.role === 'admin') {
+                ws.subscribedChannels.add('simulation');
+                approvedChannels.push('simulation');
+              } else {
+                console.warn(`[WebSocket] Müşteri kullanıcısı (${ws.user?.name || ws.user?.id || 'Anonim'}) yetkisiz simülasyon kanalına abone olmaya çalıştı. Güvenlik nedeniyle reddedildi.`);
+              }
+            }
+          }
+
+          safeSend(
+            ws,
+            JSON.stringify({
+              event: 'subscribed',
+              channels: Array.from(ws.subscribedChannels),
+              timestamp: new Date().toISOString(),
+            })
+          );
+          return;
+        }
+
+        // Channel Unsubscription handler: { event: "unsubscribe", channels: ["simulation"] }
+        if (parsed.event === 'unsubscribe' || parsed.type === 'unsubscribe') {
+          const toUnsub: string[] = Array.isArray(parsed.channels)
+            ? parsed.channels
+            : typeof parsed.channel === 'string'
+            ? [parsed.channel]
+            : [];
+
+          if (ws.subscribedChannels) {
+            for (const ch of toUnsub) {
+              if (ch === 'physical' || ch === 'simulation') {
+                ws.subscribedChannels.delete(ch);
+              }
+            }
+          }
+
+          safeSend(
+            ws,
+            JSON.stringify({
+              event: 'unsubscribed',
+              channels: Array.from(ws.subscribedChannels || []),
+              timestamp: new Date().toISOString(),
+            })
+          );
           return;
         }
 

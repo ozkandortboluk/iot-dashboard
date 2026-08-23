@@ -181,23 +181,16 @@ export class DeviceAuthService {
       };
     }
 
-    // Automatically convert simulated device to real hardware upon receiving real physical telemetry
+    // 4.5. Reject Physical Telemetry For Simulated Devices (Strict Isolation)
     if (device.isSimulated) {
-      console.log(`[Device Auth] Fiziki donanımdan canlı veri alındı: ${device.name} (${device.id}). Simülatör modu kapatıldı.`);
-      device.isSimulated = false;
-      device.saveSimulatedDataToDb = false;
-      if (device.name.includes('[Sanal]')) {
-        device.name = device.name.replace(/\[Sanal\]\s*/gi, '').trim();
-      }
-      // Reset simulator dummy metrics so they do not pollute real sensor readings
-      device.metrics = {};
-      db.updateDevice(device.id, {
-        isSimulated: false,
-        saveSimulatedDataToDb: false,
-        name: device.name,
-        metrics: {},
-      });
-      broadcast('device:updated', device);
+      return {
+        success: false,
+        httpStatus: 403,
+        errorResponse: {
+          error: 'simulated_device_not_allowed',
+          message: 'Sanal cihaz gerçek telemetri API’sini kullanamaz.',
+        },
+      };
     }
 
     // 5. Check Device-Specific Rate Limit (rateLimitPerMin)

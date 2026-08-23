@@ -43,13 +43,18 @@ CREATE TABLE IF NOT EXISTS devices (
 
 -- 3. Telemetry Table (Hypertable Base)
 CREATE TABLE IF NOT EXISTS telemetry_readings (
-    id VARCHAR(64) NOT NULL,
+    id VARCHAR(128) NOT NULL,
+    packet_id VARCHAR(128),
     device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
     metric_value DOUBLE PRECISION NOT NULL,
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
+    sequence BIGINT,
+    source VARCHAR(32) DEFAULT 'physical',
+    environment VARCHAR(32) DEFAULT 'production',
+    simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );

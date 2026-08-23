@@ -302,8 +302,9 @@ class LocalDatabase {
       try {
         this.pgPool = new Pool({
           connectionString: url,
-          connectionTimeoutMillis: 5000,
+          connectionTimeoutMillis: 10000,
           idleTimeoutMillis: 30000,
+          max: 20,
           ssl: this.getPgSslOption(url),
         });
         this.pgPool.on('error', (err) => {
@@ -863,6 +864,7 @@ class LocalDatabase {
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
   public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }
+  public convertToPhysicalDevice(deviceId: string, adminUserId?: string, adminUserName?: string): Device { return this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
   public updateDevice(deviceId: string, updates: Partial<Device>): Device { return this.deviceRepository.updateDevice(deviceId, updates); }
   public deleteDevice(deviceId: string): void { return this.deviceRepository.deleteDevice(deviceId); }
   public recordUnregisteredDevice(discDev: DiscoveredNetworkDevice): DiscoveredNetworkDevice | null { return this.deviceRepository.recordUnregisteredDevice(discDev); }

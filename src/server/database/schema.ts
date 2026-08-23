@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS telemetry_packets (
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(device_id, sequence);
 
--- 3b. Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
+-- 3b. Physical Telemetry Table (TimescaleDB Hypertable Base with Composite Primary Key for Deduplication & Partitioning)
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
@@ -89,15 +89,21 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    source VARCHAR(32) DEFAULT 'physical',
+    environment VARCHAR(32) DEFAULT 'production',
+    simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
--- Ensure packet_id and sequence columns exist on telemetry_readings
+-- Ensure packet_id, sequence, source, environment and simulation_run_id columns exist on telemetry_readings
 DO $$
 BEGIN
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'telemetry_readings columns setup notice: %', SQLERRM;
@@ -125,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(devic
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_packet ON telemetry_readings(packet_id);
+CREATE INDEX IF NOT EXISTS idx_telemetry_source_env ON telemetry_readings(source, environment);
 
 -- Convert to Hypertable (TimescaleDB)
 DO $$
@@ -147,17 +154,75 @@ BEGIN
     END IF;
 END $$;
 
--- 4. Continuous Aggregates (Hourly & Daily Materialized Views / Standard Views Fallback)
+-- 3c. Simulation / Virtual Sandbox Telemetry Table (Completely Isolated Hypertable)
+CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
+    id VARCHAR(128) NOT NULL,
+    packet_id VARCHAR(128),
+    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    device_name VARCHAR(128) NOT NULL,
+    metric VARCHAR(64) NOT NULL,
+    metric_value DOUBLE PRECISION NOT NULL,
+    unit VARCHAR(16) NOT NULL,
+    status_level VARCHAR(32) DEFAULT 'normal',
+    sequence BIGINT,
+    source VARCHAR(32) DEFAULT 'simulator',
+    environment VARCHAR(32) DEFAULT 'sandbox',
+    simulation_run_id VARCHAR(128),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (id, created_at)
+);
+
+DO $$
+BEGIN
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'simulator';
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'sandbox';
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'simulation_telemetry_readings columns setup notice: %', SQLERRM;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_device_time ON simulation_telemetry_readings(device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_metric_time ON simulation_telemetry_readings(metric, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_time ON simulation_telemetry_readings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_run ON simulation_telemetry_readings(simulation_run_id);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_packet ON simulation_telemetry_readings(packet_id);
+
+-- Convert Simulation Table to Hypertable (TimescaleDB)
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
-        EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_hourly_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY bucket, device_id, metric WITH NO DATA;';
+        PERFORM create_hypertable('simulation_telemetry_readings', 'created_at', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
+    END IF;
+END $$;
 
-        EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_daily_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY bucket, device_id, metric WITH NO DATA;';
+-- Enable TimescaleDB Columnar Compression Policy for Simulation
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        ALTER TABLE simulation_telemetry_readings SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'device_id, metric',
+            timescaledb.compress_orderby = 'created_at DESC'
+        );
+        PERFORM add_compression_policy('simulation_telemetry_readings', INTERVAL '3 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('simulation_telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
+    END IF;
+END $$;
+
+-- 4. Continuous Aggregates (Hourly & Daily Materialized Views / Standard Views Fallback - Strictly Physical Telemetry)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_hourly_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY bucket, device_id, metric WITH NO DATA;';
+
+        EXECUTE 'CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_daily_summary WITH (timescaledb.continuous) AS SELECT time_bucket(''1 day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY bucket, device_id, metric WITH NO DATA;';
     ELSE
-        EXECUTE 'CREATE OR REPLACE VIEW telemetry_hourly_summary AS SELECT date_trunc(''hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY date_trunc(''hour'', created_at), device_id, metric;';
+        EXECUTE 'CREATE OR REPLACE VIEW telemetry_hourly_summary AS SELECT date_trunc(''hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY date_trunc(''hour'', created_at), device_id, metric;';
 
-        EXECUTE 'CREATE OR REPLACE VIEW telemetry_daily_summary AS SELECT date_trunc(''day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings GROUP BY date_trunc(''day'', created_at), device_id, metric;';
+        EXECUTE 'CREATE OR REPLACE VIEW telemetry_daily_summary AS SELECT date_trunc(''day'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY date_trunc(''day'', created_at), device_id, metric;';
     END IF;
 END $$;
 

@@ -59,7 +59,23 @@ export class PostgresRepository {
     try {
       return await this.pool.query(text, params);
     } catch (err: any) {
-      console.warn(`[PostgreSQL Query Error]: ${err?.message || err}`);
+      const errMsg = err?.message || String(err);
+      const isConnectionIssue =
+        errMsg.includes('timeout') ||
+        errMsg.includes('Connection terminated') ||
+        errMsg.includes('ECONNREFUSED') ||
+        errMsg.includes('ETIMEDOUT') ||
+        errMsg.includes('57P01') ||
+        errMsg.includes('08006') ||
+        errMsg.includes('Connection closed') ||
+        errMsg.includes('client has already been released');
+
+      if (isConnectionIssue) {
+        this.isConnected = false;
+        console.warn(`[PostgreSQL Bağlantı Kesintisi Tespit Edildi]: ${errMsg}. Bellek içi veritabanına sorunsuz geçiş yapılıyor.`);
+      } else {
+        console.warn(`[PostgreSQL Query Error]: ${errMsg}`);
+      }
       throw err;
     }
   }
@@ -197,16 +213,19 @@ export class PostgresRepository {
   }
 
   // ==========================================
-  // TELEMETRY READINGS
+  // TELEMETRY READINGS (Physical & Simulation Hypertable Isolation)
   // ==========================================
   public async saveTelemetry(reading: TelemetryReading): Promise<{ success: boolean; rowCount: number }> {
     if (!this.pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
     }
+    const isSimulation = reading.source === 'simulator' || reading.environment === 'sandbox';
+    const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
+
     const sql = `
-      INSERT INTO telemetry_readings (
-        id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      INSERT INTO ${targetTable} (
+        id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT DO NOTHING;
     `;
     const res = await this.query(sql, [
@@ -218,6 +237,9 @@ export class PostgresRepository {
       reading.unit || '',
       reading.status || 'normal',
       reading.sequence ?? null,
+      reading.source || (isSimulation ? 'simulator' : 'physical'),
+      reading.environment || (isSimulation ? 'sandbox' : 'production'),
+      reading.simulationRunId || null,
       reading.timestamp || new Date().toISOString(),
     ]);
     const rowCount = typeof res?.rowCount === 'number' ? res.rowCount : 1;
@@ -232,23 +254,44 @@ export class PostgresRepository {
     return res.rowCount;
   }
 
+  public async savePhysicalTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number; duplicateSkipped?: boolean }> {
+    const enforced = readings.map((r) => ({
+      ...r,
+      source: 'physical' as const,
+      environment: 'production' as const,
+    }));
+    return this.saveTelemetryBatchInTransaction(enforced);
+  }
+
+  public async saveSimulationTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number; duplicateSkipped?: boolean }> {
+    const enforced = readings.map((r) => ({
+      ...r,
+      source: 'simulator' as const,
+      environment: 'sandbox' as const,
+    }));
+    return this.saveTelemetryBatchInTransaction(enforced);
+  }
+
   public async saveTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number; duplicateSkipped?: boolean }> {
     if (!this.pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
     }
     if (!readings || readings.length === 0) return { success: true, rowCount: 0 };
 
+    const first = readings[0];
+    const isSimulation = first?.source === 'simulator' || first?.environment === 'sandbox';
+    const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
+
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
-      const first = readings[0];
       const deviceId = first.deviceId;
       const sequence = first.sequence;
       let packetId: string | null = first.packetId || null;
 
-      // Packet-Level Sequence Deduplication
-      if (deviceId && sequence !== undefined && sequence !== null) {
+      // Packet-Level Sequence Deduplication for Physical Telemetry Packets
+      if (!isSimulation && deviceId && sequence !== undefined && sequence !== null) {
         packetId = packetId || `pkt_${deviceId}_seq_${sequence}`;
         const packetSql = `
           INSERT INTO telemetry_packets (id, device_id, sequence, metric_count, received_at)
@@ -282,7 +325,7 @@ export class PostgresRepository {
         let paramIdx = 1;
 
         for (const r of chunk) {
-          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`);
+          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12})`);
           params.push(
             r.id,
             packetId,
@@ -293,14 +336,17 @@ export class PostgresRepository {
             r.unit || '',
             r.status || 'normal',
             r.sequence ?? null,
+            r.source || (isSimulation ? 'simulator' : 'physical'),
+            r.environment || (isSimulation ? 'sandbox' : 'production'),
+            r.simulationRunId || null,
             r.timestamp || new Date().toISOString()
           );
-          paramIdx += 10;
+          paramIdx += 13;
         }
 
         const sql = `
-          INSERT INTO telemetry_readings (
-            id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, created_at
+          INSERT INTO ${targetTable} (
+            id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at
           ) VALUES ${valueTuples.join(', ')}
           ON CONFLICT DO NOTHING;
         `;
@@ -313,7 +359,7 @@ export class PostgresRepository {
       return { success: true, rowCount: totalInserted };
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
-      console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed: ${err?.message || err}`);
+      console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed (${targetTable}): ${err?.message || err}`);
       throw err;
     } finally {
       client.release();
@@ -644,13 +690,17 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) return counts;
 
     try {
-      // 1. Telemetry readings
+      // 1. Telemetry readings (Both physical and simulation hypertables)
       if (options.telemetryDays && options.telemetryDays > 0) {
-        const res = await this.query(
+        const resPhysical = await this.query(
           `DELETE FROM telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
           [options.telemetryDays]
         );
-        counts.telemetry = res?.rowCount || 0;
+        const resSim = await this.query(
+          `DELETE FROM simulation_telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
+          [options.telemetryDays]
+        );
+        counts.telemetry = (resPhysical?.rowCount || 0) + (resSim?.rowCount || 0);
       }
 
       // 2. Resolved Alarms
@@ -730,13 +780,16 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) return counts;
 
     try {
-      // 1. Telemetry readings
-      const telRes = await this.query(`
+      // 1. Telemetry readings: Purge dedicated simulation hypertable + any legacy simulation rows
+      const simTelRes = await this.query(`DELETE FROM simulation_telemetry_readings;`);
+      const legacyTelRes = await this.query(`
         DELETE FROM telemetry_readings 
-        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
+        WHERE source = 'simulator' 
+           OR environment = 'sandbox'
+           OR device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
            OR device_id LIKE 'sim_%';
       `);
-      counts.telemetry = telRes?.rowCount || 0;
+      counts.telemetry = (simTelRes?.rowCount || 0) + (legacyTelRes?.rowCount || 0);
 
       // 2. Active/Resolved Alarms
       const alarmRes = await this.query(`
@@ -977,19 +1030,24 @@ export class PostgresRepository {
         });
       }
 
-      // 8. Latest Telemetry
-      const telRes = await this.query(`SELECT * FROM telemetry_readings ORDER BY created_at DESC LIMIT 500;`);
+      // 8. Latest Telemetry (Strictly Physical Production Data)
+      const telRes = await this.query(`SELECT * FROM telemetry_readings WHERE source = 'physical' OR source IS NULL ORDER BY created_at DESC LIMIT 500;`);
       const telemetry: TelemetryReading[] = [];
       if (telRes?.rows) {
         telRes.rows.forEach((r: any) => {
           telemetry.push({
             id: r.id,
+            packetId: r.packet_id || undefined,
             deviceId: r.device_id,
             deviceName: r.device_name,
             metric: r.metric,
             value: Number(r.metric_value),
             unit: r.unit || '',
             status: r.status_level || 'normal',
+            sequence: r.sequence !== null && r.sequence !== undefined ? Number(r.sequence) : undefined,
+            source: r.source || 'physical',
+            environment: r.environment || 'production',
+            simulationRunId: r.simulation_run_id || undefined,
             timestamp: new Date(r.created_at).toISOString(),
           });
         });

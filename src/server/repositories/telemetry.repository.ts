@@ -25,25 +25,33 @@ export interface TelemetryPacket {
 }
 
 export class TelemetryRepository {
-  private retryQueue: TelemetryPacket[] = [];
-  private isFlushingRetryQueue = false;
+  private physicalQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'physical-telemetry.ndjson');
+  private simulationQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'simulation-telemetry.ndjson');
+  private legacyQueueFilePath = path.join(process.cwd(), 'data', 'telemetry-retry.ndjson');
+
+  private physicalRetryQueue: TelemetryPacket[] = [];
+  private simulationRetryQueue: TelemetryPacket[] = [];
+  private isFlushingPhysicalQueue = false;
+  private isFlushingSimulationQueue = false;
   private retryWorkerTimer: NodeJS.Timeout | null = null;
-  private queueFilePath = path.join(process.cwd(), 'data', 'telemetry-retry.ndjson');
+  private readonly MAX_SIMULATION_QUEUE_SIZE = 1000;
 
   constructor(private db: any) {
     this.loadPersistentQueue();
     this.startRetryWorker();
   }
 
-  // Load uncommitted retry packets from durable NDJSON file on disk
+  // Load uncommitted retry packets from isolated durable NDJSON files on disk
   private loadPersistentQueue() {
     try {
-      const dataDir = path.dirname(this.queueFilePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+      const walDir = path.join(process.cwd(), 'data', 'wal');
+      if (!fs.existsSync(walDir)) {
+        fs.mkdirSync(walDir, { recursive: true });
       }
-      if (fs.existsSync(this.queueFilePath)) {
-        const content = fs.readFileSync(this.queueFilePath, 'utf8');
+
+      // 1. Load Physical WAL Queue (Strictly source === 'physical')
+      if (fs.existsSync(this.physicalQueueFilePath)) {
+        const content = fs.readFileSync(this.physicalQueueFilePath, 'utf8');
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
         let loadedPackets = 0;
         let loadedReadings = 0;
@@ -51,38 +59,117 @@ export class TelemetryRepository {
           try {
             const parsed = JSON.parse(line);
             if (parsed && Array.isArray(parsed.readings) && parsed.readings.length > 0) {
-              this.retryQueue.push(parsed as TelemetryPacket);
+              const sanitizedReadings = parsed.readings.map((r: TelemetryReading) => ({
+                ...r,
+                source: 'physical' as const,
+                environment: 'production' as const,
+              }));
+              this.physicalRetryQueue.push({
+                ...parsed,
+                readings: sanitizedReadings,
+              });
               loadedPackets++;
-              loadedReadings += parsed.readings.length;
-            } else if (parsed && parsed.deviceId && parsed.metric) {
-              // Backward compatibility for legacy single-reading lines
-              const legacyPacket: TelemetryPacket = {
-                packetId: `pkt_legacy_${parsed.id || Date.now()}`,
-                deviceId: parsed.deviceId,
-                timestamp: parsed.timestamp || new Date().toISOString(),
-                sequence: parsed.sequence,
-                readings: [parsed as TelemetryReading],
-                attempts: 0,
-                lastAttemptAt: new Date().toISOString(),
-              };
-              this.retryQueue.push(legacyPacket);
-              loadedPackets++;
-              loadedReadings++;
+              loadedReadings += sanitizedReadings.length;
             }
           } catch {
             // ignore malformed line
           }
         }
         if (loadedPackets > 0) {
-          console.log(`[Persistent Queue / WAL] Diskten ${loadedPackets} paket (${loadedReadings} metrik kaydı) başarıyla yüklendi (${this.queueFilePath}).`);
+          console.log(`[Physical WAL] Diskten ${loadedPackets} fiziksel paket (${loadedReadings} metrik kaydı) yüklendi (${this.physicalQueueFilePath}).`);
         }
       }
+
+      // 2. Load Simulation WAL Queue (Strictly source === 'simulator')
+      if (fs.existsSync(this.simulationQueueFilePath)) {
+        const content = fs.readFileSync(this.simulationQueueFilePath, 'utf8');
+        const lines = content.split('\n').filter((l) => l.trim().length > 0);
+        let loadedPackets = 0;
+        let loadedReadings = 0;
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed && Array.isArray(parsed.readings) && parsed.readings.length > 0) {
+              const sanitizedReadings = parsed.readings.map((r: TelemetryReading) => ({
+                ...r,
+                source: 'simulator' as const,
+                environment: 'sandbox' as const,
+              }));
+              this.simulationRetryQueue.push({
+                ...parsed,
+                readings: sanitizedReadings,
+              });
+              loadedPackets++;
+              loadedReadings += sanitizedReadings.length;
+            }
+          } catch {
+            // ignore malformed line
+          }
+        }
+        if (loadedPackets > 0) {
+          console.log(`[Simulation WAL] Diskten ${loadedPackets} simülasyon paketi (${loadedReadings} metrik kaydı) yüklendi (${this.simulationQueueFilePath}).`);
+        }
+      }
+
+      // 3. Migrate Legacy Single-Queue File (data/telemetry-retry.ndjson) if present
+      if (fs.existsSync(this.legacyQueueFilePath)) {
+        const legacyContent = fs.readFileSync(this.legacyQueueFilePath, 'utf8');
+        const legacyLines = legacyContent.split('\n').filter((l) => l.trim().length > 0);
+        let migratedPhysical = 0;
+        let migratedSimulation = 0;
+
+        for (const line of legacyLines) {
+          try {
+            const parsed = JSON.parse(line);
+            let readings: TelemetryReading[] = [];
+            if (Array.isArray(parsed.readings) && parsed.readings.length > 0) {
+              readings = parsed.readings;
+            } else if (parsed && parsed.deviceId && parsed.metric) {
+              readings = [parsed as TelemetryReading];
+            }
+
+            if (readings.length > 0) {
+              const first = readings[0];
+              const isSim = first.source === 'simulator' || first.environment === 'sandbox';
+              const packet: TelemetryPacket = {
+                packetId: parsed.packetId || `pkt_migrated_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                deviceId: first.deviceId,
+                timestamp: parsed.timestamp || first.timestamp || new Date().toISOString(),
+                sequence: parsed.sequence ?? first.sequence,
+                readings,
+                attempts: parsed.attempts || 0,
+                lastAttemptAt: parsed.lastAttemptAt || new Date().toISOString(),
+              };
+
+              if (isSim) {
+                this.simulationRetryQueue.push(packet);
+                migratedSimulation++;
+              } else {
+                this.physicalRetryQueue.push(packet);
+                migratedPhysical++;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (migratedPhysical > 0 || migratedSimulation > 0) {
+          console.log(`[WAL Migration] Eski kuyruktan ${migratedPhysical} fiziksel ve ${migratedSimulation} sanal paket başarıyla ayrıştırıldı.`);
+          this.savePhysicalDiskQueue();
+          this.saveSimulationDiskQueue();
+        }
+        // Clean legacy file after migration
+        try {
+          fs.writeFileSync(this.legacyQueueFilePath, '', 'utf8');
+        } catch {}
+      }
     } catch (err: any) {
-      console.warn(`[Persistent Queue Load Error]: ${err?.message || err}`);
+      console.warn(`[Persistent WAL Load Error]: ${err?.message || err}`);
     }
   }
 
-  // Durable Disk-backed Packet Enqueue (Write-Ahead Log style for All-or-Nothing guarantees)
+  // Durable Disk-backed Packet Enqueue with Strict Isolation
   private enqueuePacketToRetryQueue(readings: TelemetryReading[]) {
     if (!readings || readings.length === 0) return;
 
@@ -93,27 +180,80 @@ export class TelemetryRepository {
         ? `pkt_${first.deviceId}_seq_${sequence}`
         : `pkt_${first.deviceId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    const packet: TelemetryPacket = {
-      packetId,
-      deviceId: first.deviceId,
-      timestamp: first.timestamp || new Date().toISOString(),
-      sequence,
-      readings,
-      attempts: 0,
-      lastAttemptAt: new Date().toISOString(),
-    };
+    // Determine target queue based on source and device type
+    const dev = (this.db.data.devices || []).find((d: Device) => d.id === first.deviceId);
+    const isSimulated = dev?.isSimulated || first.source === 'simulator' || first.environment === 'sandbox';
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
-    this.retryQueue.push(packet);
-
-    try {
-      const dataDir = path.dirname(this.queueFilePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+    if (isSimulated) {
+      // If virtual device has saveSimulatedDataToDb disabled, it is ephemeral in RAM only
+      if (!saveSimulatedDataToDb) {
+        return;
       }
-      fs.appendFileSync(this.queueFilePath, JSON.stringify(packet) + '\n', 'utf8');
-      console.warn(`[Persistent WAL] All-or-Nothing Paket disk sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
-    } catch (err: any) {
-      console.warn(`[Persistent Queue Append Error]: ${err?.message || err}`);
+
+      // Enforce simulation metadata on all readings in packet
+      const sanitizedReadings = readings.map((r) => ({
+        ...r,
+        source: 'simulator' as const,
+        environment: 'sandbox' as const,
+      }));
+
+      const packet: TelemetryPacket = {
+        packetId,
+        deviceId: first.deviceId,
+        timestamp: first.timestamp || new Date().toISOString(),
+        sequence,
+        readings: sanitizedReadings,
+        attempts: 0,
+        lastAttemptAt: new Date().toISOString(),
+      };
+
+      // Ephemeral short-lived queue: limit size
+      if (this.simulationRetryQueue.length >= this.MAX_SIMULATION_QUEUE_SIZE) {
+        this.simulationRetryQueue.shift(); // Evict oldest
+      }
+      this.simulationRetryQueue.push(packet);
+
+      try {
+        const walDir = path.dirname(this.simulationQueueFilePath);
+        if (!fs.existsSync(walDir)) {
+          fs.mkdirSync(walDir, { recursive: true });
+        }
+        fs.appendFileSync(this.simulationQueueFilePath, JSON.stringify(packet) + '\n', 'utf8');
+        console.warn(`[Simulation WAL] Simülasyon paketi izole test WAL sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
+      } catch (err: any) {
+        console.warn(`[Simulation Queue Append Error]: ${err?.message || err}`);
+      }
+    } else {
+      // Physical production pipeline: strictly enforce source='physical' and environment='production'
+      const sanitizedReadings = readings.map((r) => ({
+        ...r,
+        source: 'physical' as const,
+        environment: 'production' as const,
+      }));
+
+      const packet: TelemetryPacket = {
+        packetId,
+        deviceId: first.deviceId,
+        timestamp: first.timestamp || new Date().toISOString(),
+        sequence,
+        readings: sanitizedReadings,
+        attempts: 0,
+        lastAttemptAt: new Date().toISOString(),
+      };
+
+      this.physicalRetryQueue.push(packet);
+
+      try {
+        const walDir = path.dirname(this.physicalQueueFilePath);
+        if (!fs.existsSync(walDir)) {
+          fs.mkdirSync(walDir, { recursive: true });
+        }
+        fs.appendFileSync(this.physicalQueueFilePath, JSON.stringify(packet) + '\n', 'utf8');
+        console.warn(`[Persistent Physical WAL] Fiziksel üretim paketi WAL sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
+      } catch (err: any) {
+        console.warn(`[Physical Queue Append Error]: ${err?.message || err}`);
+      }
     }
   }
 
@@ -122,25 +262,47 @@ export class TelemetryRepository {
     this.enqueuePacketToRetryQueue([reading]);
   }
 
-  // Synchronize remaining packets to disk atomically
-  private saveDiskQueue() {
+  // Synchronize remaining physical packets to disk atomically
+  private savePhysicalDiskQueue() {
     try {
-      const dataDir = path.dirname(this.queueFilePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+      const walDir = path.dirname(this.physicalQueueFilePath);
+      if (!fs.existsSync(walDir)) {
+        fs.mkdirSync(walDir, { recursive: true });
       }
-      if (this.retryQueue.length === 0) {
-        if (fs.existsSync(this.queueFilePath)) {
-          fs.writeFileSync(this.queueFilePath, '', 'utf8');
+      if (this.physicalRetryQueue.length === 0) {
+        if (fs.existsSync(this.physicalQueueFilePath)) {
+          fs.writeFileSync(this.physicalQueueFilePath, '', 'utf8');
         }
       } else {
-        const ndjson = this.retryQueue.map((item) => JSON.stringify(item)).join('\n') + '\n';
-        const tmpFile = `${this.queueFilePath}.tmp`;
+        const ndjson = this.physicalRetryQueue.map((item) => JSON.stringify(item)).join('\n') + '\n';
+        const tmpFile = `${this.physicalQueueFilePath}.tmp`;
         fs.writeFileSync(tmpFile, ndjson, 'utf8');
-        fs.renameSync(tmpFile, this.queueFilePath);
+        fs.renameSync(tmpFile, this.physicalQueueFilePath);
       }
     } catch (err: any) {
-      console.warn(`[Persistent Queue Sync Error]: ${err?.message || err}`);
+      console.warn(`[Physical Queue Sync Error]: ${err?.message || err}`);
+    }
+  }
+
+  // Synchronize remaining simulation packets to disk atomically
+  private saveSimulationDiskQueue() {
+    try {
+      const walDir = path.dirname(this.simulationQueueFilePath);
+      if (!fs.existsSync(walDir)) {
+        fs.mkdirSync(walDir, { recursive: true });
+      }
+      if (this.simulationRetryQueue.length === 0) {
+        if (fs.existsSync(this.simulationQueueFilePath)) {
+          fs.writeFileSync(this.simulationQueueFilePath, '', 'utf8');
+        }
+      } else {
+        const ndjson = this.simulationRetryQueue.map((item) => JSON.stringify(item)).join('\n') + '\n';
+        const tmpFile = `${this.simulationQueueFilePath}.tmp`;
+        fs.writeFileSync(tmpFile, ndjson, 'utf8');
+        fs.renameSync(tmpFile, this.simulationQueueFilePath);
+      }
+    } catch (err: any) {
+      console.warn(`[Simulation Queue Sync Error]: ${err?.message || err}`);
     }
   }
 
@@ -152,50 +314,34 @@ export class TelemetryRepository {
     }, 5000);
   }
 
-  public async flushRetryQueue(): Promise<{
+  public async flushPhysicalRetryQueue(): Promise<{
     flushedPacketCount: number;
     flushedReadingCount: number;
     remainingPacketCount: number;
     remainingReadingCount: number;
-    flushedCount: number; // backward compatibility
-    remainingCount: number; // backward compatibility
   }> {
-    const initialRemainingReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
-
-    if (this.isFlushingRetryQueue || this.retryQueue.length === 0) {
+    const initialRemainingReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    if (this.isFlushingPhysicalQueue || this.physicalRetryQueue.length === 0 || !this.db.postgresRepo?.isReady()) {
       return {
         flushedPacketCount: 0,
         flushedReadingCount: 0,
-        remainingPacketCount: this.retryQueue.length,
+        remainingPacketCount: this.physicalRetryQueue.length,
         remainingReadingCount: initialRemainingReadings,
-        flushedCount: 0,
-        remainingCount: initialRemainingReadings,
-      };
-    }
-    if (!this.db.postgresRepo?.isReady()) {
-      return {
-        flushedPacketCount: 0,
-        flushedReadingCount: 0,
-        remainingPacketCount: this.retryQueue.length,
-        remainingReadingCount: initialRemainingReadings,
-        flushedCount: 0,
-        remainingCount: initialRemainingReadings,
       };
     }
 
-    this.isFlushingRetryQueue = true;
+    this.isFlushingPhysicalQueue = true;
     let flushedPacketCount = 0;
     let flushedReadingCount = 0;
-    const packetsToFlush = [...this.retryQueue];
-    this.retryQueue = [];
-
+    const packetsToFlush = [...this.physicalRetryQueue];
+    this.physicalRetryQueue = [];
     const failedPackets: TelemetryPacket[] = [];
 
     try {
       for (const packet of packetsToFlush) {
         try {
-          // Attempt atomic transaction batch commit for the whole packet (All-or-Nothing)
-          const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(packet.readings);
+          // Strictly insert into physical hypertable (telemetry_readings)
+          const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
           if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
             flushedPacketCount++;
             flushedReadingCount += packet.readings.length;
@@ -205,7 +351,7 @@ export class TelemetryRepository {
             failedPackets.push(packet);
           }
         } catch (err: any) {
-          console.warn(`[Telemetry Packet Retry Warning] Paket (${packet.packetId}) veritabanına yazılamadı: ${err?.message || err}. Tekrar sıraya alındı.`);
+          console.warn(`[Physical Telemetry Retry Warning] Paket (${packet.packetId}) fiziksel veritabanına yazılamadı: ${err?.message || err}. Tekrar sıraya alındı.`);
           packet.attempts = (packet.attempts || 0) + 1;
           packet.lastAttemptAt = new Date().toISOString();
           failedPackets.push(packet);
@@ -213,55 +359,189 @@ export class TelemetryRepository {
       }
 
       if (failedPackets.length > 0) {
-        this.retryQueue.unshift(...failedPackets);
+        this.physicalRetryQueue.unshift(...failedPackets);
       }
 
       if (flushedPacketCount > 0) {
-        console.log(`[Telemetry Persistence] ${flushedPacketCount} adet paket (${flushedReadingCount} metrik kaydı) PostgreSQL / TimescaleDB'ye başarıyla aktarıldı.`);
+        console.log(`[Physical Telemetry Persistence] ${flushedPacketCount} adet fiziksel paket (${flushedReadingCount} metrik kaydı) telemetry_readings hypertable'ına aktarıldı.`);
       }
 
-      this.saveDiskQueue();
+      this.savePhysicalDiskQueue();
     } catch (err: any) {
-      console.warn(`[Telemetry Persistence Global Retry Error]: ${err?.message || err}`);
+      console.warn(`[Physical Telemetry Global Retry Error]: ${err?.message || err}`);
       if (packetsToFlush.length > 0) {
-        this.retryQueue.unshift(...packetsToFlush);
-        this.saveDiskQueue();
+        this.physicalRetryQueue.unshift(...packetsToFlush);
+        this.savePhysicalDiskQueue();
       }
     } finally {
-      this.isFlushingRetryQueue = false;
+      this.isFlushingPhysicalQueue = false;
     }
 
-    const currentRemainingReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    const currentRemainingReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    return {
+      flushedPacketCount,
+      flushedReadingCount,
+      remainingPacketCount: this.physicalRetryQueue.length,
+      remainingReadingCount: currentRemainingReadings,
+    };
+  }
+
+  public async flushSimulationRetryQueue(): Promise<{
+    flushedPacketCount: number;
+    flushedReadingCount: number;
+    remainingPacketCount: number;
+    remainingReadingCount: number;
+  }> {
+    const initialRemainingReadings = this.simulationRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    if (this.isFlushingSimulationQueue || this.simulationRetryQueue.length === 0 || !this.db.postgresRepo?.isReady()) {
+      return {
+        flushedPacketCount: 0,
+        flushedReadingCount: 0,
+        remainingPacketCount: this.simulationRetryQueue.length,
+        remainingReadingCount: initialRemainingReadings,
+      };
+    }
+
+    this.isFlushingSimulationQueue = true;
+    let flushedPacketCount = 0;
+    let flushedReadingCount = 0;
+    const packetsToFlush = [...this.simulationRetryQueue];
+    this.simulationRetryQueue = [];
+    const failedPackets: TelemetryPacket[] = [];
+
+    try {
+      for (const packet of packetsToFlush) {
+        try {
+          // Strictly insert into simulation hypertable (simulation_telemetry_readings)
+          const txRes = await this.db.postgresRepo.saveSimulationTelemetryBatchInTransaction(packet.readings);
+          if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
+            flushedPacketCount++;
+            flushedReadingCount += packet.readings.length;
+          } else {
+            packet.attempts = (packet.attempts || 0) + 1;
+            packet.lastAttemptAt = new Date().toISOString();
+            failedPackets.push(packet);
+          }
+        } catch (err: any) {
+          console.warn(`[Simulation Telemetry Retry Warning] Paket (${packet.packetId}) simülasyon tablosuna yazılamadı: ${err?.message || err}. Tekrar sıraya alındı.`);
+          packet.attempts = (packet.attempts || 0) + 1;
+          packet.lastAttemptAt = new Date().toISOString();
+          failedPackets.push(packet);
+        }
+      }
+
+      if (failedPackets.length > 0) {
+        this.simulationRetryQueue.unshift(...failedPackets);
+      }
+
+      if (flushedPacketCount > 0) {
+        console.log(`[Simulation Telemetry Persistence] ${flushedPacketCount} adet simülasyon paketi (${flushedReadingCount} metrik kaydı) simulation_telemetry_readings hypertable'ına aktarıldı.`);
+      }
+
+      this.saveSimulationDiskQueue();
+    } catch (err: any) {
+      console.warn(`[Simulation Telemetry Global Retry Error]: ${err?.message || err}`);
+      if (packetsToFlush.length > 0) {
+        this.simulationRetryQueue.unshift(...packetsToFlush);
+        this.saveSimulationDiskQueue();
+      }
+    } finally {
+      this.isFlushingSimulationQueue = false;
+    }
+
+    const currentRemainingReadings = this.simulationRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    return {
+      flushedPacketCount,
+      flushedReadingCount,
+      remainingPacketCount: this.simulationRetryQueue.length,
+      remainingReadingCount: currentRemainingReadings,
+    };
+  }
+
+  public async flushRetryQueue(): Promise<{
+    flushedPacketCount: number;
+    flushedReadingCount: number;
+    remainingPacketCount: number;
+    remainingReadingCount: number;
+    flushedCount: number;
+    remainingCount: number;
+    physical: {
+      flushedPacketCount: number;
+      flushedReadingCount: number;
+      remainingPacketCount: number;
+      remainingReadingCount: number;
+    };
+    simulation: {
+      flushedPacketCount: number;
+      flushedReadingCount: number;
+      remainingPacketCount: number;
+      remainingReadingCount: number;
+    };
+  }> {
+    const physRes = await this.flushPhysicalRetryQueue();
+    const simRes = await this.flushSimulationRetryQueue();
+
+    const flushedPacketCount = physRes.flushedPacketCount + simRes.flushedPacketCount;
+    const flushedReadingCount = physRes.flushedReadingCount + simRes.flushedReadingCount;
+    const remainingPacketCount = physRes.remainingPacketCount + simRes.remainingPacketCount;
+    const remainingReadingCount = physRes.remainingReadingCount + simRes.remainingReadingCount;
 
     return {
       flushedPacketCount,
       flushedReadingCount,
-      remainingPacketCount: this.retryQueue.length,
-      remainingReadingCount: currentRemainingReadings,
+      remainingPacketCount,
+      remainingReadingCount,
       flushedCount: flushedReadingCount,
-      remainingCount: currentRemainingReadings,
+      remainingCount: remainingReadingCount,
+      physical: physRes,
+      simulation: simRes,
     };
   }
 
   public getRetryQueueStats() {
-    let diskSizeBytes = 0;
+    let physicalDiskSizeBytes = 0;
+    let simulationDiskSizeBytes = 0;
     try {
-      if (fs.existsSync(this.queueFilePath)) {
-        diskSizeBytes = fs.statSync(this.queueFilePath).size;
+      if (fs.existsSync(this.physicalQueueFilePath)) {
+        physicalDiskSizeBytes = fs.statSync(this.physicalQueueFilePath).size;
+      }
+    } catch {}
+    try {
+      if (fs.existsSync(this.simulationQueueFilePath)) {
+        simulationDiskSizeBytes = fs.statSync(this.simulationQueueFilePath).size;
       }
     } catch {}
 
-    const totalReadings = this.retryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    const physicalReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    const simulationReadings = this.simulationRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
+    const totalReadings = physicalReadings + simulationReadings;
+    const totalPackets = this.physicalRetryQueue.length + this.simulationRetryQueue.length;
 
     return {
-      pendingPacketCount: this.retryQueue.length,
+      physical: {
+        pendingPacketCount: this.physicalRetryQueue.length,
+        pendingReadingCount: physicalReadings,
+        filePath: this.physicalQueueFilePath,
+        diskSizeBytes: physicalDiskSizeBytes,
+        durable: true,
+        acceptedSource: 'physical (Fiziksel Üretim Hypertable)',
+      },
+      simulation: {
+        pendingPacketCount: this.simulationRetryQueue.length,
+        pendingReadingCount: simulationReadings,
+        filePath: this.simulationQueueFilePath,
+        diskSizeBytes: simulationDiskSizeBytes,
+        durable: false,
+        acceptedSource: 'simulator (Sanal Test Hypertable - Kısa Ömürlü/Ephemeral)',
+      },
+      pendingPacketCount: totalPackets,
       pendingReadingCount: totalReadings,
       pendingRetryCount: totalReadings,
-      isFlushing: this.isFlushingRetryQueue,
-      persistentQueuePath: this.queueFilePath,
-      diskSizeBytes,
+      isFlushing: this.isFlushingPhysicalQueue || this.isFlushingSimulationQueue,
+      persistentQueuePath: this.physicalQueueFilePath,
+      diskSizeBytes: physicalDiskSizeBytes + simulationDiskSizeBytes,
       durable: true,
-      model: 'TelemetryPacket (All-or-Nothing Packet Level WAL)',
+      model: 'Isolated Two-Queue WAL (physical-telemetry.ndjson & simulation-telemetry.ndjson)',
     };
   }
 
@@ -345,6 +625,10 @@ export class TelemetryRepository {
     }
 
     const timestamp = new Date().toISOString();
+    const firstReadingInput = readings[0];
+    const devLookup = firstReadingInput ? (this.db.data.devices || []).find((d: Device) => d.id === firstReadingInput.deviceId) : null;
+    const isDevSim = devLookup?.isSimulated || false;
+
     const fullReadings: TelemetryReading[] = readings.map((r, i) => {
       const id =
         r.sequence !== undefined && r.sequence !== null
@@ -355,11 +639,14 @@ export class TelemetryRepository {
         ...r,
         id,
         timestamp,
+        source: r.source || (isDevSim ? 'simulator' : 'physical'),
+        environment: r.environment || (isDevSim ? 'sandbox' : 'production'),
+        simulationRunId: r.simulationRunId,
       };
     });
 
     const firstReading = fullReadings[0];
-    const device = (this.db.data.devices || []).find((d: Device) => d.id === firstReading.deviceId);
+    const device = devLookup || (this.db.data.devices || []).find((d: Device) => d.id === firstReading.deviceId);
 
     // Check virtual device setting: if device is simulated and saveSimulatedDataToDb is false, skip writing to DB
     const isSimulated = device?.isSimulated || false;
@@ -445,7 +732,11 @@ export class TelemetryRepository {
         }
 
         this.processHistory(r, device.isSimulated || false, device.saveSimulatedDataToDb || false);
-        this.evaluateRules(r, device);
+        if (r.source === 'physical') {
+          this.evaluateProductionRules(r, device);
+        } else {
+          this.evaluateSimulationRules(r, device);
+        }
       }
 
       device.updatedAt = timestamp;
@@ -465,10 +756,16 @@ export class TelemetryRepository {
   }
 
   public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
+    const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
+    const isDevSim = dev?.isSimulated || false;
+
     const fullReading: TelemetryReading = {
       ...reading,
       id: `tel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
+      source: reading.source || (isDevSim ? 'simulator' : 'physical'),
+      environment: reading.environment || (isDevSim ? 'sandbox' : 'production'),
+      simulationRunId: reading.simulationRunId,
     };
 
     if (!this.db.data.telemetry) this.db.data.telemetry = [];
@@ -505,8 +802,12 @@ export class TelemetryRepository {
       this.processHistory(fullReading, device.isSimulated || false, device.saveSimulatedDataToDb || false);
     }
 
-    // Check threshold rules for notification trigger!
-    this.evaluateRules(fullReading, device);
+    // Check threshold rules for notification trigger (strictly separated engines)
+    if (fullReading.source === 'physical') {
+      this.evaluateProductionRules(fullReading, device);
+    } else {
+      this.evaluateSimulationRules(fullReading, device);
+    }
 
     this.db.scheduleSave();
     return fullReading;
@@ -538,8 +839,8 @@ export class TelemetryRepository {
         hourlyRollup: '168 Saat (7 Gün Saatlik Ortalama)',
         dailyRollup: '365 Gün (1 Yıl Günlük Ortalama)',
         monthlyRollup: '60 Ay (5 Yıl Aylık Ortalama)',
-        postgresArchive: 'PostgreSQL / TimescaleDB (Sıkıştırılmış Hypertable)',
-        persistentQueue: 'Durable Disk-Backed Queue (/data/telemetry-retry.ndjson)',
+        postgresArchive: 'PostgreSQL / TimescaleDB (Sıkıştırılmış İki Ayrı Hypertable)',
+        persistentQueue: 'İzole WAL Kuyrukları (data/wal/physical-telemetry.ndjson & data/wal/simulation-telemetry.ndjson)',
       },
     };
   }
@@ -552,7 +853,10 @@ export class TelemetryRepository {
   }
 
   public async getHistoryAsync(deviceId: string, metric: string): Promise<MetricHistory | null> {
-    const pool = this.db.getPgPool?.();
+    if (!this.db.postgresRepo?.isReady()) {
+      return this.getHistory(deviceId, metric);
+    }
+    const pool = this.db.postgresRepo.getPool();
     if (pool) {
       try {
         // Query from Continuous Aggregate telemetry_hourly_summary (Fallback to raw time_bucket)
@@ -716,191 +1020,240 @@ export class TelemetryRepository {
     toStr?: string,
     resolutionParam?: string
   ): Promise<any[]> {
-    const pool = this.db.getPgPool?.();
-    if (pool) {
-      try {
-        const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);
-        const allowedDeviceIds = allowedDevices.map((d: Device) => d.id);
-        if (allowedDeviceIds.length > 0) {
-          const queryDev = deviceId && deviceId !== 'all' ? deviceId : null;
-          const queryMetric = metric && metric !== 'all' ? metric : null;
-          const numLimit = Math.min(5000, Math.max(1, limit || 1000));
+    if (this.db.postgresRepo?.isReady()) {
+      const pool = this.db.postgresRepo.getPool();
+      if (pool) {
+        try {
+          const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);
+          const allowedDeviceIds = allowedDevices.map((d: Device) => d.id);
+          if (allowedDeviceIds.length > 0) {
+            const queryDev = deviceId && deviceId !== 'all' ? deviceId : null;
+            const queryMetric = metric && metric !== 'all' ? metric : null;
+            const numLimit = Math.min(5000, Math.max(1, limit || 1000));
 
-          const fromDate = fromStr ? new Date(fromStr) : null;
-          const toDate = toStr ? new Date(toStr) : new Date();
-          const validFrom = fromDate && !isNaN(fromDate.getTime()) ? fromDate.toISOString() : null;
-          const validTo = toDate && !isNaN(toDate.getTime()) ? toDate.toISOString() : new Date().toISOString();
+            const fromDate = fromStr ? new Date(fromStr) : null;
+            const toDate = toStr ? new Date(toStr) : new Date();
+            const validFrom = fromDate && !isNaN(fromDate.getTime()) ? fromDate.toISOString() : null;
+            const validTo = toDate && !isNaN(toDate.getTime()) ? toDate.toISOString() : new Date().toISOString();
 
-          // Time range delta calculation
-          const deltaMs = fromDate && !isNaN(fromDate.getTime()) ? (toDate.getTime() - fromDate.getTime()) : 0;
-          const deltaHours = deltaMs > 0 ? deltaMs / (1000 * 60 * 60) : 0;
+            // Time range delta calculation
+            const deltaMs = fromDate && !isNaN(fromDate.getTime()) ? (toDate.getTime() - fromDate.getTime()) : 0;
+            const deltaHours = deltaMs > 0 ? deltaMs / (1000 * 60 * 60) : 0;
 
-          // Automated Resolution Selector:
-          // Range <= 2 Hours -> Raw Telemetry
-          // 2 Hours < Range <= 24 Hours -> 5m Bucket
-          // 24 Hours < Range <= 30 Days (720h) -> Hourly Continuous Aggregate (telemetry_hourly_summary)
-          // Range > 30 Days -> Daily Continuous Aggregate (telemetry_daily_summary)
-          let selectedResolution = (resolutionParam || 'auto').toLowerCase().trim();
-          if (selectedResolution === 'auto') {
-            if (!validFrom) {
-              selectedResolution = 'raw';
-            } else if (deltaHours <= 2) {
-              selectedResolution = 'raw';
-            } else if (deltaHours <= 24) {
-              selectedResolution = '5m';
-            } else if (deltaHours <= 720) {
-              selectedResolution = '1h';
+            const queryDevObj = queryDev ? (this.db.data.devices || []).find((d: Device) => d.id === queryDev) : null;
+            const isSimulatedQuery = queryDevObj ? queryDevObj.isSimulated : false;
+            const rawTable = isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings';
+
+            // Automated Resolution Selector:
+            // Range <= 2 Hours -> Raw Telemetry
+            // 2 Hours < Range <= 24 Hours -> 5m Bucket
+            // 24 Hours < Range <= 30 Days (720h) -> Hourly Continuous Aggregate (telemetry_hourly_summary)
+            // Range > 30 Days -> Daily Continuous Aggregate (telemetry_daily_summary)
+            let selectedResolution = (resolutionParam || 'auto').toLowerCase().trim();
+            if (selectedResolution === 'auto') {
+              if (!validFrom || isSimulatedQuery) {
+                selectedResolution = 'raw';
+              } else if (deltaHours <= 2) {
+                selectedResolution = 'raw';
+              } else if (deltaHours <= 24) {
+                selectedResolution = '5m';
+              } else if (deltaHours <= 720) {
+                selectedResolution = '1h';
+              } else {
+                selectedResolution = '1d';
+              }
+            }
+
+            let sql = '';
+            let tierSource = `${rawTable} (Raw)`;
+
+            if (!isSimulatedQuery && selectedResolution === '1d') {
+              tierSource = 'telemetry_daily_summary (Continuous Aggregate)';
+              sql = `
+                SELECT 
+                  bucket AS timestamp,
+                  device_id AS "deviceId",
+                  metric,
+                  ROUND(avg_val::numeric, 2)::float AS value,
+                  ROUND(min_val::numeric, 2)::float AS "minVal",
+                  ROUND(max_val::numeric, 2)::float AS "maxVal",
+                  reading_count::int AS count
+                FROM telemetry_daily_summary
+                WHERE device_id = ANY($1::text[])
+                  AND ($2::text IS NULL OR device_id = $2)
+                  AND ($3::text IS NULL OR metric = $3)
+                  AND ($4::timestamptz IS NULL OR bucket >= $4)
+                  AND ($5::timestamptz IS NULL OR bucket <= $5)
+                ORDER BY bucket ASC
+                LIMIT $6;
+              `;
+            } else if (!isSimulatedQuery && selectedResolution === '1h') {
+              tierSource = 'telemetry_hourly_summary (Continuous Aggregate)';
+              sql = `
+                SELECT 
+                  bucket AS timestamp,
+                  device_id AS "deviceId",
+                  metric,
+                  ROUND(avg_val::numeric, 2)::float AS value,
+                  ROUND(min_val::numeric, 2)::float AS "minVal",
+                  ROUND(max_val::numeric, 2)::float AS "maxVal",
+                  reading_count::int AS count
+                FROM telemetry_hourly_summary
+                WHERE device_id = ANY($1::text[])
+                  AND ($2::text IS NULL OR device_id = $2)
+                  AND ($3::text IS NULL OR metric = $3)
+                  AND ($4::timestamptz IS NULL OR bucket >= $4)
+                  AND ($5::timestamptz IS NULL OR bucket <= $5)
+                ORDER BY bucket ASC
+                LIMIT $6;
+              `;
+            } else if (selectedResolution === '5m' || selectedResolution === '15m') {
+              const bucketInterval = selectedResolution === '15m' ? '15 minutes' : '5 minutes';
+              tierSource = `${rawTable} (Bucket: ${bucketInterval})`;
+              sql = `
+                SELECT 
+                  time_bucket('${bucketInterval}', created_at) AS timestamp,
+                  device_id AS "deviceId",
+                  metric,
+                  ROUND(AVG(metric_value)::numeric, 2)::float AS value,
+                  ROUND(MIN(metric_value)::numeric, 2)::float AS "minVal",
+                  ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
+                  COUNT(*)::int AS count
+                FROM ${rawTable}
+                WHERE device_id = ANY($1::text[])
+                  AND ($2::text IS NULL OR device_id = $2)
+                  AND ($3::text IS NULL OR metric = $3)
+                  AND ($4::timestamptz IS NULL OR created_at >= $4)
+                  AND ($5::timestamptz IS NULL OR created_at <= $5)
+                GROUP BY timestamp, device_id, metric
+                ORDER BY timestamp ASC
+                LIMIT $6;
+              `;
             } else {
-              selectedResolution = '1d';
+              tierSource = `${rawTable} (Raw)`;
+              sql = `
+                SELECT 
+                  id,
+                  packet_id AS "packetId",
+                  device_id AS "deviceId",
+                  device_name AS "deviceName",
+                  metric,
+                  metric_value AS value,
+                  unit,
+                  status_level AS status,
+                  sequence,
+                  source,
+                  environment,
+                  simulation_run_id AS "simulationRunId",
+                  created_at AS timestamp
+                FROM ${rawTable}
+                WHERE device_id = ANY($1::text[])
+                  AND ($2::text IS NULL OR device_id = $2)
+                  AND ($3::text IS NULL OR metric = $3)
+                  AND ($4::timestamptz IS NULL OR created_at >= $4)
+                  AND ($5::timestamptz IS NULL OR created_at <= $5)
+                ORDER BY created_at ASC
+                LIMIT $6;
+              `;
+            }
+
+            let res;
+            try {
+              res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
+            } catch (tierErr: any) {
+              const errStr = tierErr?.message || String(tierErr);
+              const isConnError =
+                errStr.includes('timeout') ||
+                errStr.includes('Connection terminated') ||
+                errStr.includes('ECONNREFUSED') ||
+                errStr.includes('ETIMEDOUT') ||
+                errStr.includes('57P01') ||
+                errStr.includes('08006') ||
+                errStr.includes('Connection closed');
+
+              if (isConnError) {
+                this.db.postgresRepo?.setConnected(false);
+                return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);
+              }
+
+              console.warn(`[Telemetry Tier Query Fallback] '${tierSource}' sorgusu başarısız (${tierErr}). Ham veriye geçiliyor.`);
+              tierSource = `${rawTable} (Raw Fallback)`;
+              const fallbackSql = `
+                SELECT 
+                  id,
+                  packet_id AS "packetId",
+                  device_id AS "deviceId",
+                  device_name AS "deviceName",
+                  metric,
+                  metric_value AS value,
+                  unit,
+                  status_level AS status,
+                  sequence,
+                  source,
+                  environment,
+                  simulation_run_id AS "simulationRunId",
+                  created_at AS timestamp
+                FROM ${rawTable}
+                WHERE device_id = ANY($1::text[])
+                  AND ($2::text IS NULL OR device_id = $2)
+                  AND ($3::text IS NULL OR metric = $3)
+                  AND ($4::timestamptz IS NULL OR created_at >= $4)
+                  AND ($5::timestamptz IS NULL OR created_at <= $5)
+                ORDER BY created_at ASC
+                LIMIT $6;
+              `;
+              try {
+                res = await pool.query(fallbackSql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
+              } catch (fallbackErr: any) {
+                const fbErrStr = fallbackErr?.message || String(fallbackErr);
+                if (
+                  fbErrStr.includes('timeout') ||
+                  fbErrStr.includes('Connection terminated') ||
+                  fbErrStr.includes('ECONNREFUSED') ||
+                  fbErrStr.includes('ETIMEDOUT')
+                ) {
+                  this.db.postgresRepo?.setConnected(false);
+                }
+                return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);
+              }
+            }
+
+            if (res && res.rows) {
+              const mapped = res.rows.map((r: any) => ({
+                id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
+                packetId: r.packetId || undefined,
+                deviceId: r.deviceId,
+                deviceName: r.deviceName || r.deviceId,
+                metric: r.metric,
+                value: Number(r.value),
+                minVal: r.minVal !== undefined ? Number(r.minVal) : Number(r.value),
+                maxVal: r.maxVal !== undefined ? Number(r.maxVal) : Number(r.value),
+                count: r.count ? Number(r.count) : 1,
+                unit: r.unit || 'birim',
+                status: r.status || 'normal',
+                sequence: r.sequence !== null && r.sequence !== undefined ? Number(r.sequence) : undefined,
+                source: (r.source as any) || 'physical',
+                environment: (r.environment as any) || 'production',
+                simulationRunId: r.simulationRunId || undefined,
+                timestamp: new Date(r.timestamp).toISOString(),
+              }));
+
+              // Attach query metadata property
+              (mapped as any).meta = {
+                resolution: selectedResolution,
+                tierSource,
+                from: validFrom,
+                to: validTo,
+                limit: numLimit,
+                totalRecords: mapped.length,
+              };
+
+              return mapped;
             }
           }
-
-          let sql = '';
-          let tierSource = 'telemetry_readings (Raw)';
-
-          if (selectedResolution === '1d') {
-            tierSource = 'telemetry_daily_summary (Continuous Aggregate)';
-            sql = `
-              SELECT 
-                bucket AS timestamp,
-                device_id AS "deviceId",
-                metric,
-                ROUND(avg_val::numeric, 2)::float AS value,
-                ROUND(min_val::numeric, 2)::float AS "minVal",
-                ROUND(max_val::numeric, 2)::float AS "maxVal",
-                reading_count::int AS count
-              FROM telemetry_daily_summary
-              WHERE device_id = ANY($1::text[])
-                AND ($2::text IS NULL OR device_id = $2)
-                AND ($3::text IS NULL OR metric = $3)
-                AND ($4::timestamptz IS NULL OR bucket >= $4)
-                AND ($5::timestamptz IS NULL OR bucket <= $5)
-              ORDER BY bucket ASC
-              LIMIT $6;
-            `;
-          } else if (selectedResolution === '1h') {
-            tierSource = 'telemetry_hourly_summary (Continuous Aggregate)';
-            sql = `
-              SELECT 
-                bucket AS timestamp,
-                device_id AS "deviceId",
-                metric,
-                ROUND(avg_val::numeric, 2)::float AS value,
-                ROUND(min_val::numeric, 2)::float AS "minVal",
-                ROUND(max_val::numeric, 2)::float AS "maxVal",
-                reading_count::int AS count
-              FROM telemetry_hourly_summary
-              WHERE device_id = ANY($1::text[])
-                AND ($2::text IS NULL OR device_id = $2)
-                AND ($3::text IS NULL OR metric = $3)
-                AND ($4::timestamptz IS NULL OR bucket >= $4)
-                AND ($5::timestamptz IS NULL OR bucket <= $5)
-              ORDER BY bucket ASC
-              LIMIT $6;
-            `;
-          } else if (selectedResolution === '5m' || selectedResolution === '15m') {
-            const bucketInterval = selectedResolution === '15m' ? '15 minutes' : '5 minutes';
-            tierSource = `telemetry_readings (Bucket: ${bucketInterval})`;
-            sql = `
-              SELECT 
-                time_bucket('${bucketInterval}', created_at) AS timestamp,
-                device_id AS "deviceId",
-                metric,
-                ROUND(AVG(metric_value)::numeric, 2)::float AS value,
-                ROUND(MIN(metric_value)::numeric, 2)::float AS "minVal",
-                ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
-                COUNT(*)::int AS count
-              FROM telemetry_readings
-              WHERE device_id = ANY($1::text[])
-                AND ($2::text IS NULL OR device_id = $2)
-                AND ($3::text IS NULL OR metric = $3)
-                AND ($4::timestamptz IS NULL OR created_at >= $4)
-                AND ($5::timestamptz IS NULL OR created_at <= $5)
-              GROUP BY timestamp, device_id, metric
-              ORDER BY timestamp ASC
-              LIMIT $6;
-            `;
-          } else {
-            tierSource = 'telemetry_readings (Raw)';
-            sql = `
-              SELECT 
-                id,
-                device_id AS "deviceId",
-                device_name AS "deviceName",
-                metric,
-                metric_value AS value,
-                unit,
-                status_level AS status,
-                created_at AS timestamp
-              FROM telemetry_readings
-              WHERE device_id = ANY($1::text[])
-                AND ($2::text IS NULL OR device_id = $2)
-                AND ($3::text IS NULL OR metric = $3)
-                AND ($4::timestamptz IS NULL OR created_at >= $4)
-                AND ($5::timestamptz IS NULL OR created_at <= $5)
-              ORDER BY created_at ASC
-              LIMIT $6;
-            `;
-          }
-
-          let res;
-          try {
-            res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
-          } catch (tierErr) {
-            console.warn(`[Telemetry Tier Query Fallback] '${tierSource}' sorgusu başarısız (${tierErr}). Ham veriye geçiliyor.`);
-            tierSource = 'telemetry_readings (Raw Fallback)';
-            const fallbackSql = `
-              SELECT 
-                id,
-                device_id AS "deviceId",
-                device_name AS "deviceName",
-                metric,
-                metric_value AS value,
-                unit,
-                status_level AS status,
-                created_at AS timestamp
-              FROM telemetry_readings
-              WHERE device_id = ANY($1::text[])
-                AND ($2::text IS NULL OR device_id = $2)
-                AND ($3::text IS NULL OR metric = $3)
-                AND ($4::timestamptz IS NULL OR created_at >= $4)
-                AND ($5::timestamptz IS NULL OR created_at <= $5)
-              ORDER BY created_at ASC
-              LIMIT $6;
-            `;
-            res = await pool.query(fallbackSql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
-          }
-
-          if (res.rows) {
-            const mapped = res.rows.map((r: any) => ({
-              id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
-              deviceId: r.deviceId,
-              deviceName: r.deviceName || r.deviceId,
-              metric: r.metric,
-              value: Number(r.value),
-              minVal: r.minVal !== undefined ? Number(r.minVal) : Number(r.value),
-              maxVal: r.maxVal !== undefined ? Number(r.maxVal) : Number(r.value),
-              count: r.count ? Number(r.count) : 1,
-              unit: r.unit || 'birim',
-              status: r.status || 'normal',
-              timestamp: new Date(r.timestamp).toISOString(),
-            }));
-
-            // Attach query metadata property
-            (mapped as any).meta = {
-              resolution: selectedResolution,
-              tierSource,
-              from: validFrom,
-              to: validTo,
-              limit: numLimit,
-              totalRecords: mapped.length,
-            };
-
-            return mapped;
-          }
+        } catch (err: any) {
+          console.warn(`[getTelemetryAsync Error]: ${err?.message || err}`);
         }
-      } catch (err: any) {
-        console.warn(`[getTelemetryAsync Error]: ${err?.message || err}`);
       }
     }
     return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);
@@ -916,11 +1269,11 @@ export class TelemetryRepository {
       this.db.data.activeAlarms.push(alarm);
     }
 
+    const isSimulated = alarm.isSimulation || alarm.source === 'simulator';
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === alarm.deviceId);
-    const isSimulated = dev?.isSimulated || false;
     const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
-    // Sync to PostgreSQL Repository if real device OR if saveSimulatedDataToDb is true
+    // Sync to PostgreSQL Repository ONLY if real physical device OR if saveSimulatedDataToDb is true
     if (!isSimulated || saveSimulatedDataToDb) {
       this.db.postgresRepo?.saveAlarm(alarm).catch(() => {});
     }
@@ -948,11 +1301,16 @@ export class TelemetryRepository {
     title: string,
     customMsg?: string
   ) {
+    const isSimulated = alarm.isSimulation || alarm.source === 'simulator';
     const msg = customMsg || `${alarm.message} (Eşik: ${alarm.thresholdValue}, Ölçülen: ${alarm.currentValue})`;
+
+    const formattedTitle = isSimulated
+      ? (title.startsWith('🧪') ? title : `🧪 [TEST ALARMI] ${title}`)
+      : title;
 
     this.db.addNotification({
       userId: alarm.userId,
-      title,
+      title: formattedTitle,
       message: msg,
       severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
       deviceId: alarm.deviceId,
@@ -967,12 +1325,17 @@ export class TelemetryRepository {
       currentValue: alarm.currentValue,
       thresholdValue: alarm.thresholdValue,
       silencedUntil: alarm.silencedUntil,
+      source: alarm.source || (isSimulated ? 'simulator' : 'physical'),
+      isSimulation: isSimulated,
+      environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
     });
 
     if (alarm.userId !== 'usr_admin') {
       this.db.addNotification({
         userId: 'usr_admin',
-        title: `[${alarm.deviceName}] ${title}`,
+        title: isSimulated
+          ? (title.startsWith('🧪') ? title : `🧪 [TEST ALARMI] [${alarm.deviceName}] ${title}`)
+          : `[${alarm.deviceName}] ${title}`,
         message: msg,
         severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
         deviceId: alarm.deviceId,
@@ -987,11 +1350,19 @@ export class TelemetryRepository {
         currentValue: alarm.currentValue,
         thresholdValue: alarm.thresholdValue,
         silencedUntil: alarm.silencedUntil,
+        source: alarm.source || (isSimulated ? 'simulator' : 'physical'),
+        isSimulation: isSimulated,
+        environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
       });
     }
 
-    // Enqueue external channels (WhatsApp, Telegram, Email, SMS, Webhook)
-    this.enqueueExternalNotification(alarm, eventType, title, msg);
+    // STRICT ISOLATION RULE:
+    // If the alarm is generated from simulation / test reading, outbound notification channels
+    // (WhatsApp, Telegram, Email, SMS, Webhook) are COMPLETELY DISABLED!
+    // Only internal in-panel 'app' feed is generated.
+    if (!isSimulated) {
+      this.enqueueExternalNotification(alarm, eventType, title, msg);
+    }
   }
 
   private enqueueExternalNotification(
@@ -1003,6 +1374,12 @@ export class TelemetryRepository {
     if (!this.db.data.notificationQueue) this.db.data.notificationQueue = [];
     const rule = (this.db.data.rules || []).find((r: ThresholdRule) => r.id === alarm.ruleId);
     if (!rule || !rule.notificationChannels || rule.notificationChannels.length === 0) return;
+
+    // Safety check: Never enqueue simulation alarms to real external dispatch queue
+    if (alarm.isSimulation || alarm.source === 'simulator') {
+      console.log(`[Notification Engine] Simulation alarm (${alarm.id}) external dispatch blocked.`);
+      return;
+    }
 
     const user = (this.db.data.users || []).find((u: any) => u.id === alarm.userId);
 
@@ -1072,7 +1449,17 @@ export class TelemetryRepository {
     }, 50);
   }
 
-  private evaluateRules(reading: TelemetryReading, device?: Device) {
+  // Unified Rule Dispatcher
+  public evaluateRules(reading: TelemetryReading, device?: Device) {
+    if (reading.source === 'physical') {
+      this.evaluateProductionRules(reading, device);
+    } else {
+      this.evaluateSimulationRules(reading, device);
+    }
+  }
+
+  // 1. Production Rule Evaluation Engine (Fiziksel Saha Cihazları)
+  public evaluateProductionRules(reading: TelemetryReading, device?: Device) {
     if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
 
     const rules = (this.db.data.rules || []).filter(
@@ -1087,19 +1474,13 @@ export class TelemetryRepository {
     const nowMs = new Date(nowIso).getTime();
 
     for (const rule of rules) {
-      // 1. Strict Tenant Rule Evaluation Check:
-      // If the rule belongs to a customer, it ONLY applies to that customer's devices.
+      // Strict Tenant Rule Evaluation Check
       if (rule.userId && rule.userId !== 'usr_admin') {
-        if (deviceOwnerId !== rule.userId) {
-          continue;
-        }
+        if (deviceOwnerId !== rule.userId) continue;
       }
-      // If the rule belongs to admin with deviceId = 'all', it ONLY applies to admin's devices.
-      // (It must NOT trigger alarms on customer devices unless explicitly assigned to that device).
       if (rule.userId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
         continue;
       }
-      // If the rule has a specific deviceId, ensure it matches reading.deviceId
       if (rule.deviceId !== 'all' && rule.deviceId !== reading.deviceId) {
         continue;
       }
@@ -1129,13 +1510,9 @@ export class TelemetryRepository {
           const endMinutes = (endH || 0) * 60 + (endM || 0);
 
           if (startMinutes < endMinutes) {
-            if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
-              continue;
-            }
+            if (currentMinutes < startMinutes || currentMinutes > endMinutes) continue;
           } else if (startMinutes > endMinutes) {
-            if (currentMinutes < startMinutes && currentMinutes > endMinutes) {
-              continue;
-            }
+            if (currentMinutes < startMinutes && currentMinutes > endMinutes) continue;
           }
         }
       }
@@ -1202,6 +1579,9 @@ export class TelemetryRepository {
               message: formattedMsg,
               updatedAt: nowIso,
               version: 1,
+              source: 'physical',
+              isSimulation: false,
+              environment: 'production',
             };
             this.upsertActiveAlarm(existingAlarm);
           } else {
@@ -1225,6 +1605,9 @@ export class TelemetryRepository {
               message: formattedMsg,
               updatedAt: nowIso,
               version: 1,
+              source: 'physical',
+              isSimulation: false,
+              environment: 'production',
             };
             this.upsertActiveAlarm(existingAlarm);
             this.emitAlarmNotification(
@@ -1245,6 +1628,9 @@ export class TelemetryRepository {
             existingAlarm.message = formattedMsg;
             existingAlarm.updatedAt = nowIso;
             existingAlarm.version = (existingAlarm.version || 1) + 1;
+            existingAlarm.source = 'physical';
+            existingAlarm.isSimulation = false;
+            existingAlarm.environment = 'production';
             this.upsertActiveAlarm(existingAlarm);
 
             this.emitAlarmNotification(
@@ -1261,6 +1647,9 @@ export class TelemetryRepository {
           existingAlarm.currentValue = reading.value;
           existingAlarm.message = formattedMsg;
           existingAlarm.updatedAt = nowIso;
+          existingAlarm.source = 'physical';
+          existingAlarm.isSimulation = false;
+          existingAlarm.environment = 'production';
 
           const lastNotifiedMs = new Date(existingAlarm.lastNotifiedAt || nowIso).getTime();
           const timeSinceLastNotifiedSec = (nowMs - lastNotifiedMs) / 1000;
@@ -1292,6 +1681,9 @@ export class TelemetryRepository {
         existingAlarm.currentValue = reading.value;
         existingAlarm.updatedAt = nowIso;
         existingAlarm.version = (existingAlarm.version || 1) + 1;
+        existingAlarm.source = 'physical';
+        existingAlarm.isSimulation = false;
+        existingAlarm.environment = 'production';
         this.upsertActiveAlarm(existingAlarm);
 
         this.emitAlarmNotification(
@@ -1299,6 +1691,213 @@ export class TelemetryRepository {
           'RESOLVED',
           `✅ [ALARM NORMALE DÖNDÜ] ${reading.deviceName} - ${reading.metric.toUpperCase()}`,
           `Değer güvenli aralığa geri döndü: ${reading.value} ${reading.unit} (Eşik: ${rule.thresholdValue}, Histerezis: ${rule.hysteresis || 0})`
+        );
+      }
+    }
+  }
+
+  // 2. Simulation Rule Evaluation Engine (Sanal Cihazlar & Testler)
+  public evaluateSimulationRules(reading: TelemetryReading, device?: Device) {
+    if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
+
+    const rules = (this.db.data.rules || []).filter(
+      (r: ThresholdRule) =>
+        r.enabled &&
+        (r.deviceId === 'all' || r.deviceId === reading.deviceId) &&
+        r.metricKey === reading.metric
+    );
+
+    const deviceOwnerId = device ? device.userId : 'usr_admin';
+    const nowIso = reading.timestamp || new Date().toISOString();
+    const nowMs = new Date(nowIso).getTime();
+
+    for (const rule of rules) {
+      // Strict Tenant Rule Check
+      if (rule.userId && rule.userId !== 'usr_admin') {
+        if (deviceOwnerId !== rule.userId) continue;
+      }
+      if (rule.userId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
+        continue;
+      }
+      if (rule.deviceId !== 'all' && rule.deviceId !== reading.deviceId) {
+        continue;
+      }
+
+      // Distinct Key for Simulation Alarms (sim_alarm_...)
+      const alarmKey = `sim_alarm_${rule.id}_${reading.deviceId}_${reading.metric}`;
+
+      if (rule.silencedUntil && new Date(rule.silencedUntil).getTime() > nowMs) {
+        continue;
+      }
+
+      let existingAlarm = this.db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmKey);
+
+      let isBreached = false;
+      if (rule.operator === '>' && reading.value > rule.thresholdValue) isBreached = true;
+      if (rule.operator === '<' && reading.value < rule.thresholdValue) isBreached = true;
+      if (rule.operator === '==' && reading.value === rule.thresholdValue) isBreached = true;
+
+      const hysteresis = rule.hysteresis || 0;
+      let isRecovered = false;
+      if (rule.operator === '>' && reading.value <= rule.thresholdValue - hysteresis) isRecovered = true;
+      if (rule.operator === '<' && reading.value >= rule.thresholdValue + hysteresis) isRecovered = true;
+      if (rule.operator === '==' && reading.value !== rule.thresholdValue) isRecovered = true;
+
+      const minBreachSec = rule.minBreachDurationSeconds || 0;
+      const repeatIntervalSec = rule.repeatIntervalSeconds || 300;
+
+      const formattedMsg = `[TEST ALARMI] ${rule.messageTemplate
+        .replace('{deviceName}', reading.deviceName)
+        .replace('{value}', String(reading.value))}`;
+
+      if (isBreached) {
+        if (
+          existingAlarm &&
+          existingAlarm.silencedUntil &&
+          new Date(existingAlarm.silencedUntil).getTime() > nowMs
+        ) {
+          existingAlarm.currentValue = reading.value;
+          existingAlarm.repeatCount++;
+          existingAlarm.updatedAt = nowIso;
+          continue;
+        }
+
+        if (
+          !existingAlarm ||
+          existingAlarm.state === 'NORMAL' ||
+          existingAlarm.state === 'RESOLVED'
+        ) {
+          if (minBreachSec > 0) {
+            existingAlarm = {
+              id: alarmKey,
+              ruleId: rule.id,
+              deviceId: reading.deviceId,
+              deviceName: reading.deviceName,
+              userId: deviceOwnerId,
+              metricKey: reading.metric,
+              operator: rule.operator,
+              thresholdValue: rule.thresholdValue,
+              currentValue: reading.value,
+              severity: rule.severity,
+              state: 'BREACH_PENDING',
+              firstBreachAt: nowIso,
+              acknowledged: false,
+              repeatCount: 1,
+              message: formattedMsg,
+              updatedAt: nowIso,
+              version: 1,
+              source: 'simulator',
+              isSimulation: true,
+              environment: 'sandbox',
+            };
+            this.upsertActiveAlarm(existingAlarm);
+          } else {
+            existingAlarm = {
+              id: alarmKey,
+              ruleId: rule.id,
+              deviceId: reading.deviceId,
+              deviceName: reading.deviceName,
+              userId: deviceOwnerId,
+              metricKey: reading.metric,
+              operator: rule.operator,
+              thresholdValue: rule.thresholdValue,
+              currentValue: reading.value,
+              severity: rule.severity,
+              state: 'ACTIVE',
+              firstBreachAt: nowIso,
+              triggeredAt: nowIso,
+              lastNotifiedAt: nowIso,
+              acknowledged: false,
+              repeatCount: 1,
+              message: formattedMsg,
+              updatedAt: nowIso,
+              version: 1,
+              source: 'simulator',
+              isSimulation: true,
+              environment: 'sandbox',
+            };
+            this.upsertActiveAlarm(existingAlarm);
+            this.emitAlarmNotification(
+              existingAlarm,
+              'OPEN',
+              `🧪 [TEST ALARMI] ${reading.deviceName} - ${reading.metric.toUpperCase()}`
+            );
+          }
+        } else if (existingAlarm.state === 'BREACH_PENDING') {
+          const breachDurationMs =
+            nowMs - new Date(existingAlarm.firstBreachAt || nowIso).getTime();
+          if (breachDurationMs >= minBreachSec * 1000) {
+            existingAlarm.state = 'ACTIVE';
+            existingAlarm.triggeredAt = nowIso;
+            existingAlarm.lastNotifiedAt = nowIso;
+            existingAlarm.currentValue = reading.value;
+            existingAlarm.repeatCount = 1;
+            existingAlarm.message = formattedMsg;
+            existingAlarm.updatedAt = nowIso;
+            existingAlarm.version = (existingAlarm.version || 1) + 1;
+            existingAlarm.source = 'simulator';
+            existingAlarm.isSimulation = true;
+            existingAlarm.environment = 'sandbox';
+            this.upsertActiveAlarm(existingAlarm);
+
+            this.emitAlarmNotification(
+              existingAlarm,
+              'OPEN',
+              `🧪 [TEST ALARMI] ${reading.deviceName} - ${reading.metric.toUpperCase()}`
+            );
+          } else {
+            existingAlarm.currentValue = reading.value;
+            existingAlarm.updatedAt = nowIso;
+          }
+        } else if (existingAlarm.state === 'ACTIVE' || existingAlarm.state === 'SILENCED') {
+          existingAlarm.repeatCount++;
+          existingAlarm.currentValue = reading.value;
+          existingAlarm.message = formattedMsg;
+          existingAlarm.updatedAt = nowIso;
+          existingAlarm.source = 'simulator';
+          existingAlarm.isSimulation = true;
+          existingAlarm.environment = 'sandbox';
+
+          const lastNotifiedMs = new Date(existingAlarm.lastNotifiedAt || nowIso).getTime();
+          const timeSinceLastNotifiedSec = (nowMs - lastNotifiedMs) / 1000;
+
+          if (!existingAlarm.acknowledged && timeSinceLastNotifiedSec >= repeatIntervalSec) {
+            existingAlarm.lastNotifiedAt = nowIso;
+            existingAlarm.version = (existingAlarm.version || 1) + 1;
+            this.upsertActiveAlarm(existingAlarm);
+
+            this.emitAlarmNotification(
+              existingAlarm,
+              'REPEAT',
+              `🧪 [TEST ALARMI TEKRARI #${existingAlarm.repeatCount}] ${reading.deviceName} - ${reading.metric.toUpperCase()}`
+            );
+          } else {
+            this.updateActiveNotificationDeduplicated(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm);
+          }
+        }
+      } else if (
+        isRecovered &&
+        existingAlarm &&
+        (existingAlarm.state === 'ACTIVE' ||
+          existingAlarm.state === 'BREACH_PENDING' ||
+          existingAlarm.state === 'SILENCED')
+      ) {
+        existingAlarm.state = 'RESOLVED';
+        existingAlarm.resolvedAt = nowIso;
+        existingAlarm.currentValue = reading.value;
+        existingAlarm.updatedAt = nowIso;
+        existingAlarm.version = (existingAlarm.version || 1) + 1;
+        existingAlarm.source = 'simulator';
+        existingAlarm.isSimulation = true;
+        existingAlarm.environment = 'sandbox';
+        this.upsertActiveAlarm(existingAlarm);
+
+        this.emitAlarmNotification(
+          existingAlarm,
+          'RESOLVED',
+          `🧪 [TEST ALARMI NORMALE DÖNDÜ] ${reading.deviceName} - ${reading.metric.toUpperCase()}`,
+          `[Simülasyon Testi] Değer güvenli aralığa geri döndü: ${reading.value} ${reading.unit} (Eşik: ${rule.thresholdValue}, Histerezis: ${rule.hysteresis || 0})`
         );
       }
     }

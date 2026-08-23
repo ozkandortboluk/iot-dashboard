@@ -73,6 +73,9 @@ export function seedDemoDataForDatabase(
           value: Number(cpu.toFixed(1)),
           unit: '%',
           status: cpu > 85 ? 'critical' : cpu > 70 ? 'warning' : 'normal',
+          source: 'simulator',
+          environment: 'sandbox',
+          simulationRunId: 'sim_run_demo',
         });
         readings.push({
           id: `tel_${dev.id}_mem_${i}`,
@@ -83,6 +86,9 @@ export function seedDemoDataForDatabase(
           value: Number(memory.toFixed(1)),
           unit: '%',
           status: memory > 85 ? 'critical' : memory > 75 ? 'warning' : 'normal',
+          source: 'simulator',
+          environment: 'sandbox',
+          simulationRunId: 'sim_run_demo',
         });
       } else if (dev.type === 'sensor') {
         const temp = Number((22 + Math.sin(i / 8) * 4 + Math.random() * 1.5).toFixed(1));
@@ -96,6 +102,9 @@ export function seedDemoDataForDatabase(
           value: temp,
           unit: '°C',
           status: temp > 35 ? 'warning' : 'normal',
+          source: 'simulator',
+          environment: 'sandbox',
+          simulationRunId: 'sim_run_demo',
         });
         readings.push({
           id: `tel_${dev.id}_hum_${i}`,
@@ -106,6 +115,9 @@ export function seedDemoDataForDatabase(
           value: hum,
           unit: '%',
           status: 'normal',
+          source: 'simulator',
+          environment: 'sandbox',
+          simulationRunId: 'sim_run_demo',
         });
       } else if (dev.type === 'meter') {
         const pwr = Number((80 + Math.sin(i / 4) * 35 + Math.random() * 8).toFixed(1));
@@ -118,6 +130,9 @@ export function seedDemoDataForDatabase(
           value: pwr,
           unit: 'kW',
           status: pwr > 110 ? 'warning' : 'normal',
+          source: 'simulator',
+          environment: 'sandbox',
+          simulationRunId: 'sim_run_demo',
         });
       }
     });

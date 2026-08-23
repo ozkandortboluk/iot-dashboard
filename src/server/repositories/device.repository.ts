@@ -210,6 +210,35 @@ export class DeviceRepository {
     return dev.apiKey;
   }
 
+  public convertToPhysicalDevice(deviceId: string, adminUserId = 'system', adminUserName = 'Yönetici'): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+    if (!dev.isSimulated) throw new Error('Bu cihaz zaten fiziksel bir donanımdır.');
+
+    dev.isSimulated = false;
+    dev.saveSimulatedDataToDb = false;
+    dev.simulatedMetrics = [];
+
+    if (dev.name.includes('[Sanal]')) {
+      dev.name = dev.name.replace(/\[Sanal\]\s*/gi, '').trim();
+    } else if (dev.name.includes('(Sanal)')) {
+      dev.name = dev.name.replace(/\(Sanal\)\s*/gi, '').trim();
+    }
+
+    dev.metrics = {};
+
+    const keyDetails = generateDeviceKeyDetails();
+    dev.apiKey = keyDetails.rawKey;
+    dev.apiKeyPrefix = keyDetails.prefix;
+    dev.apiKeyHash = keyDetails.hash;
+
+    this.db.addAuditLog(adminUserId, adminUserName, `Sanal Cihaz Fiziksel Donanıma Dönüştürüldü (Yeni API Anahtarı Atandı): ${dev.name}`, 'high');
+    this.db.saveData(this.db.data);
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    return dev;
+  }
+
   public updateDevice(deviceId: string, updates: Partial<Device>): Device {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
@@ -248,9 +277,30 @@ export class DeviceRepository {
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
     if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
     if (updates.expectedIntervalSeconds !== undefined) dev.expectedIntervalSeconds = updates.expectedIntervalSeconds;
+    const wasSimulated = dev.isSimulated;
     if (updates.isSimulated !== undefined) dev.isSimulated = updates.isSimulated;
     if (updates.saveSimulatedDataToDb !== undefined) dev.saveSimulatedDataToDb = updates.saveSimulatedDataToDb;
     if (updates.simulatedMetrics !== undefined) dev.simulatedMetrics = updates.simulatedMetrics;
+    
+    // If device was simulated and is explicitly converted to physical, clean up tags and regenerate physical key
+    if (wasSimulated && updates.isSimulated === false) {
+      dev.saveSimulatedDataToDb = false;
+      dev.simulatedMetrics = [];
+      if (dev.name.includes('[Sanal]')) {
+        dev.name = dev.name.replace(/\[Sanal\]\s*/gi, '').trim();
+      } else if (dev.name.includes('(Sanal)')) {
+        dev.name = dev.name.replace(/\(Sanal\)\s*/gi, '').trim();
+      }
+      dev.metrics = {};
+      if (!updates.apiKey || !updates.apiKey.trim()) {
+        const keyDetails = generateDeviceKeyDetails();
+        dev.apiKey = keyDetails.rawKey;
+        dev.apiKeyPrefix = keyDetails.prefix;
+        dev.apiKeyHash = keyDetails.hash;
+      }
+      this.db.addAuditLog('system', 'Yönetici', `Sanal Cihaz Fiziksel Donanıma Dönüştürüldü (Yeni API Anahtarı Atandı): ${dev.name}`, 'high');
+    }
+
     if (updates.metrics !== undefined) {
       dev.metrics = {
         ...(dev.metrics || {}),

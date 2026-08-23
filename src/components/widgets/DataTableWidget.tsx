@@ -55,9 +55,9 @@ export const DataTableWidget: React.FC<DataTableWidgetProps> = ({ config, onEdit
   });
 
   const exportCSV = () => {
-    const headers = 'Tarih/Saat,Cihaz,Metrik,Deger,Birim,Durum\n';
+    const headers = 'Tarih/Saat,Cihaz,Metrik,Deger,Birim,Durum,Kaynak,Ortam\n';
     const rows = filtered
-      .map((t) => `${t.timestamp},${t.deviceName},${t.metric},${t.value},${t.unit},${t.status}`)
+      .map((t) => `${t.timestamp},${t.deviceName},${t.metric},${t.value},${t.unit},${t.status},${t.source || 'physical'},${t.environment || 'production'}`)
       .join('\n');
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);

@@ -43,6 +43,7 @@ interface RealtimeContextType {
   updateDevice: (id: string, updates: Partial<Device>) => Promise<Device>;
   deleteDevice: (id: string) => Promise<void>;
   regenerateApiKey: (id: string) => Promise<string>;
+  convertToPhysicalDevice: (id: string) => Promise<{ device: Device; apiKey: string }>;
   sendControlCommand: (
     deviceId: string,
     command: string,
@@ -312,6 +313,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(authPayload));
+
+            // Subscribe to channels based on role (Customer -> physical only; Admin -> physical + simulation)
+            const initialChannels = user?.role === 'admin' ? ['physical', 'simulation'] : ['physical'];
+            ws.send(
+              JSON.stringify({
+                event: 'subscribe',
+                channels: initialChannels,
+              })
+            );
           }
 
           // Periodic ping for latency calculation & connection keepalive
@@ -348,7 +358,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'auth:success') {
               setIsConnected(true);
               setConnectionStatus('connected');
-            } else if (data.event === 'telemetry:new' || data.event === 'telemetry:batch') {
+            } else if (
+              data.event === 'telemetry:new' ||
+              data.event === 'telemetry:batch' ||
+              data.event === 'telemetry:physical:new' ||
+              data.event === 'telemetry:physical:batch' ||
+              data.event === 'telemetry:simulation:new' ||
+              data.event === 'telemetry:simulation:batch' ||
+              data.event === 'simulator:telemetry' ||
+              data.event === 'simulator:batch'
+            ) {
               const rawPayload = data.payload;
               const readings: TelemetryReading[] = Array.isArray(rawPayload)
                 ? rawPayload
@@ -696,16 +715,20 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!dev) return;
 
     try {
-      await fetch('/api/v1/telemetry', {
+      await fetch('/api/simulator/v1/inject', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': dev.apiKey,
         },
-        body: JSON.stringify({ metric, value, unit }),
+        body: JSON.stringify({
+          deviceId: dev.id,
+          metric,
+          value,
+          unit,
+        }),
       });
     } catch (e) {
-      console.error(e);
+      console.error('triggerTestTelemetry hatası:', e);
     }
   }, [devices]);
 
@@ -807,6 +830,28 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [devices, user]);
 
+  const convertToPhysicalDevice = useCallback(async (id: string): Promise<{ device: Device; apiKey: string }> => {
+    const dev = devices.find((d) => d.id === id);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+    if (user?.role !== 'admin') {
+      throw new Error('Sanal cihazı gerçek donanıma dönüştürme yetkisi yalnızca yöneticilere (Admin) aittir.');
+    }
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}/convert-to-physical`, { method: 'POST' });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Dönüştürme işlemi başarısız oldu');
+      }
+      const data = await res.json();
+      const updatedDev: Device = data.device;
+      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updatedDev } : d)));
+      return { device: updatedDev, apiKey: data.apiKey };
+    } catch (e: any) {
+      console.error('convertToPhysicalDevice error:', e);
+      throw new Error(e.message || 'Cihaz dönüştürülemedi', { cause: e });
+    }
+  }, [devices, user]);
+
   const sendControlCommand = useCallback(
     async (deviceId: string, command: string, value?: any, outputPin?: string, unit?: string) => {
       try {
@@ -878,6 +923,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updateDevice,
       deleteDevice,
       regenerateApiKey,
+      convertToPhysicalDevice,
       sendControlCommand,
     }),
     [
@@ -910,6 +956,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updateDevice,
       deleteDevice,
       regenerateApiKey,
+      convertToPhysicalDevice,
       sendControlCommand,
     ]
   );

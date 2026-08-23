@@ -34,8 +34,9 @@ router.post('/', authenticateUser, (req, res) => {
     return res.status(400).json({ error: 'Cihaz adı ve türü zorunludur.' });
   }
 
-  // Non-admins can only create devices for themselves
+  // Non-admins can only create devices for themselves and CANNOT create simulated devices
   const targetOwnerId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
+  const allowSimulated = currentUser.role === 'admin';
 
   const device = db.createDevice({
     id: id && id.trim() ? id.trim() : undefined,
@@ -51,8 +52,8 @@ router.post('/', authenticateUser, (req, res) => {
     apiKey: apiKey && apiKey.trim() ? apiKey.trim() : undefined,
     heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 300,
     expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : undefined,
-    isSimulated: isSimulated !== undefined ? Boolean(isSimulated) : false,
-    saveSimulatedDataToDb: saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
+    isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
+    saveSimulatedDataToDb: allowSimulated && saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
     metrics: {},
   });
 
@@ -85,6 +86,9 @@ router.put('/:id', authenticateUser, (req, res) => {
       return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınızı düzenleyebilirsiniz.' });
     }
     delete req.body.userId;
+    delete req.body.isSimulated;
+    delete req.body.saveSimulatedDataToDb;
+    delete req.body.simulatedMetrics;
   }
 
   try {
@@ -98,6 +102,28 @@ router.put('/:id', authenticateUser, (req, res) => {
     res.json(updated);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Cihaz güncellenemedi.';
+    res.status(400).json({ error: msg });
+  }
+});
+
+router.post('/:id/convert-to-physical', authenticateUser, requireAdmin, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  try {
+    const updated = db.convertToPhysicalDevice(deviceId, currentUser.id, currentUser.name);
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+    res.json({
+      success: true,
+      device: updated,
+      apiKey: updated.apiKey,
+      message: `"${updated.name}" cihazı başarıyla fiziksel donanıma dönüştürüldü ve yeni fiziksel API Anahtarı üretildi.`,
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Cihaz dönüştürülemedi.';
     res.status(400).json({ error: msg });
   }
 });
@@ -169,6 +195,8 @@ router.post('/:id/control', authenticateUser, (req, res) => {
       unit: unit || (typeof value === 'number' ? '%' : 'STATE'),
       status: 'normal',
       rawPayload: `[CONTROL_OUT] Pin:${pinOrMetric} | Cmd:${command || 'SET'} | Val:${displayValue}`,
+      source: device.isSimulated ? 'simulator' : 'manual_test',
+      environment: device.isSimulated ? 'sandbox' : 'production',
     });
 
     broadcast('telemetry:new', reading);

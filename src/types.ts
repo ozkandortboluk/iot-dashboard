@@ -136,6 +136,8 @@ export interface MetricHistory {
   monthly: HistoryBucket[];
 }
 
+export type TelemetrySource = 'physical' | 'simulator' | 'manual_test';
+
 export interface TelemetryReading {
   id: string;
   packetId?: string;
@@ -148,6 +150,9 @@ export interface TelemetryReading {
   status: 'normal' | 'warning' | 'critical';
   rawPayload?: string;
   sequence?: number;
+  source: TelemetrySource;
+  environment: 'production' | 'sandbox';
+  simulationRunId?: string;
 }
 
 export interface DeviceCommand {
@@ -264,6 +269,10 @@ export interface ActiveAlarm {
   currentValue: number;
   severity: NotificationSeverity;
   state: AlarmState;
+
+  source?: 'physical' | 'simulator';
+  isSimulation?: boolean;
+  environment?: 'production' | 'sandbox';
   
   firstBreachAt?: string;
   triggeredAt?: string;
@@ -294,6 +303,10 @@ export interface NotificationItem {
   updatedAt?: string;
   version?: number;
   
+  source?: 'physical' | 'simulator';
+  isSimulation?: boolean;
+  environment?: 'production' | 'sandbox';
+
   alarmId?: string;
   ruleId?: string;
   alarmState?: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED';

@@ -122,13 +122,13 @@ export const DataGeneratorView: React.FC = () => {
     const u = overrideUnit || customUnit || getMetricUnit(m);
 
     try {
-      const res = await fetch('/api/v1/telemetry', {
+      const res = await fetch('/api/simulator/v1/inject', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': dev.apiKey,
         },
         body: JSON.stringify({
+          deviceId: dev.id,
           metric: m,
           value: v,
           unit: u,
@@ -137,7 +137,7 @@ export const DataGeneratorView: React.FC = () => {
 
       const data = await res.json();
       if (res.ok) {
-        setSuccessMessage(`Paket Gönderildi: [${dev.name}] -> ${m}: ${v} ${u}`);
+        setSuccessMessage(`Test Verisi Enjekte Edildi: [${dev.name}] -> ${m}: ${v} ${u}`);
         setTimeout(() => setSuccessMessage(null), 3500);
       } else {
         alert(data.error || 'Veri gönderilemedi');

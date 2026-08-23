@@ -684,9 +684,16 @@ export const NotificationsView: React.FC = () => {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-md">
-                          {alarm.state}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded-md">
+                            {alarm.state}
+                          </span>
+                          {(alarm.isSimulation || alarm.source === 'simulator') && (
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              🧪 TEST ALARMI
+                            </span>
+                          )}
+                        </div>
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white mt-1">
                           {alarm.deviceName} ({alarm.metricKey.toUpperCase()})
                         </h4>

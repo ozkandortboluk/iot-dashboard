@@ -645,6 +645,85 @@ setInterval(sendTelemetry, 5000);
 sendTelemetry();
 `,
     },
+    {
+      id: 'code_isolated_apis_architecture',
+      title: 'İki Ayrı Giriş API & Veritabanı Hypertable İzolasyonu (Fiziksel vs Sanal)',
+      category: 'curl',
+      categoryLabel: 'Mimari & API İzolasyonu',
+      badge: 'Güvenlik & Mimari',
+      description: 'Fiziksel telemetri (POST /api/v1/telemetry -> telemetry_readings) ve Sanal simülasyon telemetrisi (POST /api/simulator/v1/telemetry -> simulation_telemetry_readings) arasındaki iki ayrı hypertable mimarisi ve cURL örnekleri.',
+      tags: ['mimari', 'api', 'fiziksel', 'simülatör', 'izolasyon', '403', 'hypertable', 'timescaledb'],
+      endpoint: 'POST /api/v1/telemetry (Fiziksel) vs POST /api/simulator/v1/telemetry (Sanal)',
+      code: `#!/bin/bash
+# =========================================================================
+# NEXUSNODE IoT - İKİ AYRI TELEMETRİ GİRİŞ API, HYPERTABLE & WAL İZOLASYON MİMARİSİ
+# =========================================================================
+# 1. VERİTABANI & WAL KUYRUK İZOLASYONU:
+#    - Fiziksel Telemetri: telemetry_readings (TimescaleDB Hypertable)
+#      -> WAL Kuyruğu: data/wal/physical-telemetry.ndjson
+#      -> Yalnızca gerçek donanım verilerini depolar ve kuyruklar (source='physical').
+#      -> telemetry_hourly_summary ve telemetry_daily_summary continuous aggregate'larını besler.
+#    - Sanal Simülasyon Telemetrisi: simulation_telemetry_readings (TimescaleDB Hypertable)
+#      -> WAL Kuyruğu: data/wal/simulation-telemetry.ndjson
+#      -> Tamamen ayrı bir hypertable ve kısa ömürlü (ephemeral/RAM) kuyrukta tutulur.
+#      -> Sanal veriler kesinlikle gerçek üretim kuyruğuna, WAL dosyasına veya Timescale aggregate'larına karışamaz.
+#
+# 2. GERÇEK FİZİKSEL CİHAZ TELEMETRİ GİRİŞİ (Production Telemetry Pipeline)
+# Uç Nokta: POST /api/v1/telemetry
+# Kural: Yalnızca isSimulated === false olan gerçek donanım API anahtarları kabul edilir.
+# Sanal cihaz API anahtarı ile istek gelirse 403 Forbidden (simulated_device_not_allowed) döner.
+curl -X POST "${originUrl}/api/v1/telemetry" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_PHYSICAL_DEVICE_API_KEY" \\
+  -d '{
+    "deviceId": "dev_esp32_saha_01",
+    "sequence": 1042,
+    "metrics": {
+      "temperature": { "value": 24.8, "unit": "°C" },
+      "humidity": { "value": 55.2, "unit": "%" },
+      "voltage": { "value": 228.4, "unit": "V" }
+    }
+  }'
+
+# 3. SANAL SİMÜLATÖR TELEMETRİ GİRİŞİ (Sandbox / Test Telemetry Pipeline)
+# Uç Nokta: POST /api/simulator/v1/telemetry
+# Kural: Yalnızca isSimulated === true olan sanal cihaz API anahtarları kabul edilir.
+# Fiziksel cihaz API anahtarı ile istek gelirse 403 Forbidden (physical_device_not_allowed_in_simulator) döner.
+curl -X POST "${originUrl}/api/simulator/v1/telemetry" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_SIMULATED_DEVICE_API_KEY" \\
+  -d '{
+    "deviceId": "sim_dev_server_01",
+    "sequence": 1,
+    "metrics": {
+      "cpu": { "value": 42.5, "unit": "%" },
+      "memory": { "value": 68.0, "unit": "%" },
+      "bandwidth": { "value": 450.0, "unit": "Mbps" }
+    }
+  }'
+
+# 4. MANUEL TEST TELEMETRİ ENJEKSİYONU (Yönetici Oturumu & Cihaz API Anahtarsız)
+# Uç Nokta: POST /api/simulator/v1/inject
+# Kural: Cihaz API anahtarı KULLANILMAZ. Yönetici oturum token'ı (Authorization: Bearer <TOKEN>) ile doğrulanır.
+curl -X POST "${originUrl}/api/simulator/v1/inject" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_ADMIN_SESSION_TOKEN" \\
+  -d '{
+    "deviceId": "dev_esp32_saha_01",
+    "metric": "temperature",
+    "value": 38.5,
+    "unit": "°C"
+  }'
+
+# 5. WEBSOCKET KANAL VE ABONELİK İZOLASYONU
+# Kanallar:
+#   - telemetry:physical:batch (ve telemetry:physical:new) -> Gerçek donanım verileri
+#   - telemetry:simulation:batch (ve telemetry:simulation:new) -> Sanal simülasyon/test verileri
+# İstemci Abonelik Mesajı:
+#   { "event": "subscribe", "channels": ["physical"] }           # Müşteri kullanıcıları
+#   { "event": "subscribe", "channels": ["physical", "simulation"] } # Yönetici paneli
+`,
+    },
   ];
 
   const filteredCodeExamples = useMemo(() => {
@@ -754,10 +833,24 @@ Body:
       answer: 'Sistemimizdeki tüm cihazlar canlı olarak takip edilir. Son sinyal zamanından itibaren 18 saniyeyi geçen cihazlar "Gecikme/Uyarı", 40 saniye boyunca hiç veri göndermeyen cihazlar ise otomatik olarak "ÇEVRİMDİŞİ" (offline) durumuna alınır.',
       tags: ['çevrimdışı', 'gecikme', 'sinyal', 'uyarı', 'offline', 'otomatik takip'],
     },
+    {
+      id: 'faq_8',
+      category: 'Müşteri & Güvenlik',
+      question: 'Sanal Simülatör cihazı ile Gerçek Donanım ayrımı ve izolasyonu nasıl çalışır?',
+      answer: 'Sistem sanal ve fiziksel donanımları kesin sınırlarla izole eder. Gerçek telemetri API’sine (/api/v1/telemetry, /api/telemetry, /api/telemetry/ping) sanal cihaz anahtarıyla gelen istekler otomatik olarak 403 Forbidden (simulated_device_not_allowed) hatası ile reddedilir. Sanal bir cihaz ancak yönetici (Admin) tarafından "Gerçek Donanıma Dönüştür" işlemi ile fiziksel cihaza çevrilebilir ve bu işlem sonucunda yeni bir fiziksel API anahtarı atanır.',
+      tags: ['sanal cihaz', 'simülatör', 'izolasyon', '403', 'simulated_device_not_allowed', 'dönüştürme', 'fiziksel donanım', 'güvenlik'],
+    },
   ];
 
   // Technical Dictionary
   const dictionary: DictionaryTerm[] = [
+    {
+      term: 'Sanal ve Gerçek Cihaz İzolasyonu',
+      shortDef: 'Sanal simülatör cihazlarının fiziksel telemetri kanallarına sızmasını önleyen kesin güvenlik sınırıdır.',
+      category: 'Sistem & Güvenlik',
+      fullExplanation: 'Sanal cihazlar sadece sistem simülatörü içinde çalışır. Gerçek donanım API uçlarına istek gönderdiklerinde sunucu HTTP 403 Forbidden ("Sanal cihaz gerçek telemetri API\'sini kullanamaz") döner. Sanal cihazdan gerçek cihaza geçiş sadece Admin kontrolünde kontrollü dönüştürme ve yeni API key üretimiyle mümkündür.',
+      example: 'HTTP 403 Response: { "error": "simulated_device_not_allowed", "message": "Sanal cihaz gerçek telemetri API’sini kullanamaz." }',
+    },
     {
       term: 'Telemetri (Telemetry)',
       shortDef: 'Uzaktaki cihaz ve sensörlerden kablosuz veya kablolu ağlar üzerinden toplanan canlı ölçüm verileridir.',

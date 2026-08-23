@@ -52,8 +52,15 @@ export const NotificationsWidget: React.FC<NotificationsWidgetProps> = ({ config
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-slate-900 dark:text-white truncate">{n.title}</p>
-                  <span className="text-[10px] text-slate-400 shrink-0">{formatShortTime(n.timestamp)}</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="font-semibold text-slate-900 dark:text-white truncate">{n.title}</p>
+                    {(n.isSimulation || n.source === 'simulator') && (
+                      <span className="shrink-0 text-[9px] font-extrabold uppercase text-purple-600 dark:text-purple-400 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 rounded">
+                        TEST ALARMI
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 shrink-0 ml-1">{formatShortTime(n.timestamp)}</span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1">
                   {n.message}
