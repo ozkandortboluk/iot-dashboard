@@ -114,6 +114,12 @@ describe('IoT Device Simulator Engine Test Suite', () => {
         isSimulated: true,
         dataFlowActive: true,
         simulatedMetrics: ['temperature', 'humidity', 'pressure'],
+        userId: 'usr_admin',
+        status: 'online',
+        ipAddress: '192.168.1.100',
+        rateLimitPerMin: 60,
+        encryptionMethod: 'none',
+        metrics: {},
       });
 
       // Create a test physical hardware device
@@ -124,6 +130,12 @@ describe('IoT Device Simulator Engine Test Suite', () => {
         location: 'Factory Floor',
         isSimulated: false,
         dataFlowActive: true,
+        userId: 'usr_admin',
+        status: 'online',
+        ipAddress: '192.168.1.101',
+        rateLimitPerMin: 60,
+        encryptionMethod: 'none',
+        metrics: {},
       });
 
       expect(simDev.isSimulated).toBe(true);

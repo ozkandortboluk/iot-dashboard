@@ -97,9 +97,9 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'rules:updated', payload: db.getRules(user.id, user.id) }));
     }
 
-    // Default channels assignment: ALL connections (admin & customer) default to ONLY physical channel
+    // Default channels assignment: Connections default to both physical and simulation channels
     if (!ws.subscribedChannels) {
-      ws.subscribedChannels = new Set(['physical']);
+      ws.subscribedChannels = new Set(['physical', 'simulation']);
     }
 
     const recentTelemetries = db.getTelemetry(undefined, undefined, 50, user.id, user.role === 'admin' ? undefined : user.id);
@@ -111,7 +111,7 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
         safeSend(ws, JSON.stringify({ event: 'telemetry:bootstrap', payload: physicalTelemetries }));
       }
 
-      if (simTelemetries.length > 0 && user.role === 'admin' && ws.subscribedChannels.has('simulation')) {
+      if (simTelemetries.length > 0 && ws.subscribedChannels.has('simulation')) {
         safeSend(ws, JSON.stringify({ event: 'telemetry:simulation:bootstrap', payload: simTelemetries }));
       }
     }
@@ -196,14 +196,22 @@ export function broadcast(event: string, payload: unknown) {
       }
 
       // Deliver SIMULATION channel readings
-      // 1. KURAL / STRICT TENANT ISOLATION: Non-admins NEVER receive simulation readings.
-      // Admins receive simulation readings ONLY if explicitly subscribed to 'simulation'.
-      if (simulationReadings.length > 0 && isAdmin && subChannels.has('simulation')) {
-        const timestamp = new Date().toISOString();
-        if (simulationReadings.length === 1) {
-          safeSend(client, JSON.stringify({ event: 'telemetry:simulation:new', payload: simulationReadings[0], timestamp }));
-        } else {
-          safeSend(client, JSON.stringify({ event: 'telemetry:simulation:batch', payload: simulationReadings, timestamp }));
+      if (simulationReadings.length > 0 && subChannels.has('simulation')) {
+        let allowedSim = simulationReadings;
+        if (!isAdmin) {
+          allowedSim = simulationReadings.filter((r) => {
+            const dev = allDevices.find((d) => d.id === r.deviceId);
+            return dev && dev.userId === clientUser.id;
+          });
+        }
+
+        if (allowedSim.length > 0) {
+          const timestamp = new Date().toISOString();
+          if (allowedSim.length === 1) {
+            safeSend(client, JSON.stringify({ event: 'telemetry:simulation:new', payload: allowedSim[0], timestamp }));
+          } else {
+            safeSend(client, JSON.stringify({ event: 'telemetry:simulation:batch', payload: allowedSim, timestamp }));
+          }
         }
       }
 
@@ -531,24 +539,14 @@ export function initWebSocketServer(server: http.Server) {
             : [];
 
           if (!ws.subscribedChannels) {
-            ws.subscribedChannels = ws.user?.role === 'admin'
-              ? new Set(['physical', 'simulation'])
-              : new Set(['physical']);
+            ws.subscribedChannels = new Set(['physical', 'simulation']);
           }
 
           const approvedChannels: string[] = [];
           for (const ch of requestedChannels) {
-            if (ch === 'physical') {
-              ws.subscribedChannels.add('physical');
-              approvedChannels.push('physical');
-            } else if (ch === 'simulation') {
-              // 1. Kural: Simülasyon kanalı YALNIZCA yöneticilere açıktır.
-              if (ws.user?.role === 'admin') {
-                ws.subscribedChannels.add('simulation');
-                approvedChannels.push('simulation');
-              } else {
-                console.warn(`[WebSocket] Müşteri kullanıcısı (${ws.user?.name || ws.user?.id || 'Anonim'}) yetkisiz simülasyon kanalına abone olmaya çalıştı. Güvenlik nedeniyle reddedildi.`);
-              }
+            if (ch === 'physical' || ch === 'simulation') {
+              ws.subscribedChannels.add(ch);
+              approvedChannels.push(ch);
             }
           }
 

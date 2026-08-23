@@ -203,7 +203,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const devicesRef = useRef(devices);
   const notificationsRef = useRef(notifications);
   const isConnectedRef = useRef(isConnected);
-  const activeSubscriptionsRef = useRef<Set<'physical' | 'simulation'>>(new Set(['physical']));
+  const activeSubscriptionsRef = useRef<Set<'physical' | 'simulation'>>(new Set(['physical', 'simulation']));
 
   useEffect(() => {
     isConnectedRef.current = isConnected;

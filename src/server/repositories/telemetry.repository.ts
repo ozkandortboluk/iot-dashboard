@@ -1042,7 +1042,9 @@ export class TelemetryRepository {
 
             const queryDevObj = queryDev ? (this.db.data.devices || []).find((d: Device) => d.id === queryDev) : null;
             const isSimulatedQuery = queryDevObj ? queryDevObj.isSimulated : false;
-            const rawTable = isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings';
+            const rawTable = queryDev
+              ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
+              : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
 
             // Automated Resolution Selector:
             // Range <= 2 Hours -> Raw Telemetry
@@ -1238,17 +1240,32 @@ export class TelemetryRepository {
                 timestamp: new Date(r.timestamp).toISOString(),
               }));
 
+              // Seamlessly merge in-memory RAM readings (e.g. sandbox/simulated readings not persisted to DB)
+              const ramReadings = this.getTelemetry(deviceId, metric, numLimit, requestingUserId, targetCustomerId);
+              const mergedMap = new Map<string, any>();
+              for (const dbItem of mapped) {
+                if (dbItem && dbItem.id) mergedMap.set(dbItem.id, dbItem);
+              }
+              for (const ramItem of ramReadings) {
+                if (ramItem && ramItem.id && !mergedMap.has(ramItem.id)) {
+                  mergedMap.set(ramItem.id, ramItem);
+                }
+              }
+              const finalCombined = Array.from(mergedMap.values());
+              finalCombined.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+              const slicedResult = finalCombined.slice(-numLimit);
+
               // Attach query metadata property
-              (mapped as any).meta = {
+              (slicedResult as any).meta = {
                 resolution: selectedResolution,
                 tierSource,
                 from: validFrom,
                 to: validTo,
                 limit: numLimit,
-                totalRecords: mapped.length,
+                totalRecords: slicedResult.length,
               };
 
-              return mapped;
+              return slicedResult;
             }
           }
         } catch (err: any) {
