@@ -268,9 +268,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 )
                 .slice(0, 500);
             });
+          }
 
-            setLatestTelemetry((prev) => {
-              const merged = [...prev, ...physicalHistory];
+          if (simHistory.length > 0) {
+            setSimulationTelemetry((prev) => {
+              const merged = [...prev, ...simHistory];
               const unique = Array.from(
                 new Map(merged.map((item) => [item.id, item])).values()
               );
@@ -283,9 +285,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             });
           }
 
-          if (user?.role === 'admin' && simHistory.length > 0) {
-            setSimulationTelemetry((prev) => {
-              const merged = [...prev, ...simHistory];
+          if (uniqueHistory.length > 0) {
+            setLatestTelemetry((prev) => {
+              const merged = [...prev, ...uniqueHistory];
               const unique = Array.from(
                 new Map(merged.map((item) => [item.id, item])).values()
               );
@@ -501,9 +503,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               data.event === 'telemetry:simulation:new' ||
               data.event === 'telemetry:simulation:batch'
             ) {
-              // 2. SIMULATION TELEMETRY STREAM (Strictly isolated for admin simulator)
-              if (user?.role !== 'admin') return;
-
+              // 2. SIMULATION TELEMETRY STREAM
               const rawPayload = data.payload;
               const readings: TelemetryReading[] = Array.isArray(rawPayload)
                 ? rawPayload
@@ -512,56 +512,73 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 : [];
 
               if (readings.length > 0) {
-                // Update simulated devices metrics only (NEVER touch physical devices)
-                const simUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
-                for (const reading of readings) {
-                  if (!reading.metric || typeof reading.value !== 'number' || isNaN(reading.value)) {
-                    continue;
-                  }
-                  const targetDev = devicesRef.current.find(
-                    (d) => (d.id === reading.deviceId || d.apiKey === reading.deviceId) && d.isSimulated === true
+                const allowedReadings = readings.filter((reading) => {
+                  if (!reading || !reading.deviceId) return false;
+                  if (user?.role === 'admin' && selectedCustomerForAdmin === 'all') return true;
+                  return devicesRef.current.some(
+                    (d) => d.id === reading.deviceId || d.apiKey === reading.deviceId
                   );
-                  if (!targetDev) continue;
+                });
 
-                  const existing = simUpdatesMap.get(targetDev.id) || {
-                    lastSeen: reading.timestamp || new Date().toISOString(),
-                    metrics: {},
-                  };
-                  existing.lastSeen = reading.timestamp || new Date().toISOString();
-                  existing.metrics[reading.metric] = reading.value;
-                  existing.metrics[reading.metric.toLowerCase()] = reading.value;
-                  simUpdatesMap.set(targetDev.id, existing);
-                }
+                if (allowedReadings.length > 0) {
+                  // Update simulated devices metrics only (NEVER touch physical devices)
+                  const simUpdatesMap = new Map<string, { lastSeen: string; metrics: Record<string, number> }>();
+                  for (const reading of allowedReadings) {
+                    if (!reading.metric || typeof reading.value !== 'number' || isNaN(reading.value)) {
+                      continue;
+                    }
+                    const targetDev = devicesRef.current.find(
+                      (d) => (d.id === reading.deviceId || d.apiKey === reading.deviceId)
+                    );
+                    const devId = targetDev ? targetDev.id : reading.deviceId;
 
-                if (simUpdatesMap.size > 0) {
-                  setDevices((prevDevs) => {
-                    const updated = prevDevs.map((dev) => {
-                      if (!dev.isSimulated) return dev; // Never touch physical hardware
-                      const update = simUpdatesMap.get(dev.id);
-                      if (update) {
-                        return {
-                          ...dev,
-                          lastSeen: dev.dataFlowActive !== false ? update.lastSeen : dev.lastSeen,
-                          status: dev.dataFlowActive !== false ? 'online' : dev.status,
-                          metrics: {
-                            ...(dev.metrics || {}),
-                            ...update.metrics,
-                          },
-                        };
-                      }
-                      return dev;
+                    const existing = simUpdatesMap.get(devId) || {
+                      lastSeen: reading.timestamp || new Date().toISOString(),
+                      metrics: {},
+                    };
+                    existing.lastSeen = reading.timestamp || new Date().toISOString();
+                    existing.metrics[reading.metric] = reading.value;
+                    existing.metrics[reading.metric.toLowerCase()] = reading.value;
+                    simUpdatesMap.set(devId, existing);
+                  }
+
+                  if (simUpdatesMap.size > 0) {
+                    setDevices((prevDevs) => {
+                      const updated = prevDevs.map((dev) => {
+                        if (!dev.isSimulated) return dev; // Never touch physical hardware
+                        const update = simUpdatesMap.get(dev.id) || (dev.apiKey ? simUpdatesMap.get(dev.apiKey) : undefined);
+                        if (update) {
+                          return {
+                            ...dev,
+                            lastSeen: dev.dataFlowActive !== false ? update.lastSeen : dev.lastSeen,
+                            status: dev.dataFlowActive !== false ? 'online' : dev.status,
+                            metrics: {
+                              ...(dev.metrics || {}),
+                              ...update.metrics,
+                            },
+                          };
+                        }
+                        return dev;
+                      });
+                      devicesRef.current = updated;
+                      return updated;
                     });
-                    devicesRef.current = updated;
-                    return updated;
+                  }
+
+                  // Update simulation telemetry state
+                  setSimulationTelemetry((prev) => {
+                    const newIds = new Set(allowedReadings.map((r) => r.id));
+                    const filteredPrev = prev.filter((item) => !newIds.has(item.id));
+                    return [...allowedReadings, ...filteredPrev].slice(0, 500);
+                  });
+
+                  // Update latestTelemetry state so all dashboard widgets (charts, gauges, metrics, analyzers) update live
+                  setLatestTelemetry((prev) => {
+                    const newIds = new Set(allowedReadings.map((r) => r.id));
+                    const filteredPrev = prev.filter((item) => !newIds.has(item.id));
+                    return [...allowedReadings, ...filteredPrev].slice(0, 500);
                   });
                 }
-
-                // Update simulation-only telemetry state
-                setSimulationTelemetry((prev) => {
-                  const newIds = new Set(readings.map((r) => r.id));
-                  const filteredPrev = prev.filter((item) => !newIds.has(item.id));
-                  return [...readings, ...filteredPrev].slice(0, 500);
-                });
               }
             } else if (data.event === 'telemetry:bootstrap') {
               // Initial bootstrap hydration for physical telemetry without triggering false real-time alert/stream spikes
@@ -584,18 +601,23 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 });
               }
             } else if (data.event === 'telemetry:simulation:bootstrap') {
-              if (user?.role === 'admin') {
-                const rawPayload = data.payload;
-                const readings: TelemetryReading[] = Array.isArray(rawPayload) ? rawPayload : [];
-                if (readings.length > 0) {
-                  setSimulationTelemetry((prev) => {
-                    const existingIds = new Set(prev.map((p) => p.id));
-                    const newItems = readings.filter((r) => !existingIds.has(r.id));
-                    const merged = [...prev, ...newItems];
-                    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-                    return merged.slice(0, 500);
-                  });
-                }
+              const rawPayload = data.payload;
+              const readings: TelemetryReading[] = Array.isArray(rawPayload) ? rawPayload : [];
+              if (readings.length > 0) {
+                setSimulationTelemetry((prev) => {
+                  const existingIds = new Set(prev.map((p) => p.id));
+                  const newItems = readings.filter((r) => !existingIds.has(r.id));
+                  const merged = [...prev, ...newItems];
+                  merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                  return merged.slice(0, 500);
+                });
+                setLatestTelemetry((prev) => {
+                  const existingIds = new Set(prev.map((p) => p.id));
+                  const newItems = readings.filter((r) => !existingIds.has(r.id));
+                  const merged = [...prev, ...newItems];
+                  merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                  return merged.slice(0, 500);
+                });
               }
             } else if (data.event === 'system:connected') {
               setIsConnected(true);

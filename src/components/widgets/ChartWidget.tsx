@@ -29,7 +29,7 @@ interface ChartWidgetProps {
 type TimeRange = 'live' | '1h' | '24h' | '7d' | '30d';
 
 export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
-  const { latestTelemetry } = useRealtime();
+  const { latestTelemetry, devices } = useRealtime();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [chartType, setChartType] = useState<WidgetConfig['type']>(config.type || 'area_chart');
@@ -39,6 +39,10 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
 
   const metricKey = config.metricKey || 'cpu';
   const unit = config.unit || getMetricUnit(metricKey);
+
+  const targetDev = config.deviceId
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
 
   useEffect(() => {
     if (timeRange === 'live') return;
@@ -84,9 +88,14 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
 
   if (timeRange === 'live') {
     // Filter telemetry for this widget (latestTelemetry is ordered newest-first)
-    const matchingTelemetry = latestTelemetry.filter(
-      (t) => (!config.deviceId || t.deviceId === config.deviceId) && t.metric === metricKey
-    );
+    const matchingTelemetry = latestTelemetry.filter((t) => {
+      if (config.deviceId && targetDev) {
+        if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
+      } else if (config.deviceId && t.deviceId !== config.deviceId) {
+        return false;
+      }
+      return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
+    });
 
     filtered = matchingTelemetry
       .slice(0, 30)

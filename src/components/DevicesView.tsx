@@ -138,6 +138,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       ageText?: string;
       deviceNames: Set<string>;
       isFresh: boolean;
+      isFromTelemetryStream: boolean;
     }>();
 
     const now = Date.now();
@@ -154,7 +155,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const isPhysical = !activeDevice.isSimulated;
       const telemetrySource = isPhysical ? physicalTelemetry : simulationTelemetry;
 
-      // Seed from activeDevice.metrics (ensures all 8 reported metrics are immediately available without flapping)
+      // 1. Seed from activeDevice.metrics (ensures all reported metrics are immediately available as initial state)
       if (activeDevice.metrics && typeof activeDevice.metrics === 'object') {
         for (const [mKey, mVal] of Object.entries(activeDevice.metrics)) {
           if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
@@ -172,11 +173,12 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             ageText,
             deviceNames: new Set([targetName || targetDevId]),
             isFresh: ageSec < 180,
+            isFromTelemetryStream: false,
           });
         }
       }
 
-      // Overlay from telemetrySource stream for precise per-metric timestamps and units
+      // 2. Overlay from telemetrySource stream for authoritative per-metric readings, timestamps, and units
       for (const t of telemetrySource) {
         if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
 
@@ -195,7 +197,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
 
         const existing = metricMap.get(lowerKey);
-        if (!existing) {
+        if (!existing || !existing.isFromTelemetryStream) {
           metricMap.set(lowerKey, {
             name: t.metric,
             latestValue: t.value,
@@ -204,6 +206,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             ageText,
             deviceNames: new Set([targetName || targetDevId]),
             isFresh: ageSec < 180,
+            isFromTelemetryStream: true,
           });
         } else {
           const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
@@ -226,7 +229,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
 
       const telemetryPool: TelemetryReading[] = [
         ...physicalTelemetry,
-        ...(user?.role === 'admin' ? simulationTelemetry : []),
+        ...simulationTelemetry,
       ];
 
       for (const t of telemetryPool) {
@@ -256,6 +259,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             ageText,
             deviceNames: new Set([t.deviceName || t.deviceId]),
             isFresh: ageSec < 120,
+            isFromTelemetryStream: true,
           });
         } else {
           existing.deviceNames.add(t.deviceName || t.deviceId);
@@ -276,7 +280,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       const tB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0;
       return tB - tA;
     });
-  }, [metricsScope, activeDevice, physicalTelemetry, simulationTelemetry, devices, user?.role]);
+  }, [metricsScope, activeDevice, physicalTelemetry, simulationTelemetry, devices]);
 
   const getFilteredTerminalLogs = () => {
     let list: TelemetryReading[] = [];
