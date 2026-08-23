@@ -43,6 +43,8 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const {
     devices,
     latestTelemetry,
+    physicalTelemetry,
+    simulationTelemetry,
     createNewDevice,
     updateDevice,
     deleteDevice,
@@ -134,76 +136,146 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     devices[0] ||
     selectedDevice;
 
+  // Active System Metrics: Strictly reflects metrics actively received within the last 10 minutes from online devices
   const activeSystemMetrics = React.useMemo(() => {
-    const set = new Set<string>();
+    const metricMap = new Map<string, {
+      name: string;
+      latestValue?: number | string;
+      unit?: string;
+      lastTimestamp?: string;
+      ageText?: string;
+      deviceNames: Set<string>;
+      isFresh: boolean;
+    }>();
 
-    // Filter only OPEN / ONLINE devices (status === 'online' AND dataFlowActive !== false)
-    const onlineActiveDevices = devices.filter(
-      (d) => d.status === 'online' && d.dataFlowActive !== false
-    );
+    const now = Date.now();
+    const RECENCY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes window
 
-    const onlineDevMap = new Map<string, Device>();
-    onlineActiveDevices.forEach((d) => {
-      onlineDevMap.set(d.id, d);
-      if (d.apiKey) onlineDevMap.set(d.apiKey, d);
-      if (d.name) onlineDevMap.set(d.name, d);
-    });
+    // Identify active & online devices
+    const onlineDevices = devices.filter((d) => d.status === 'online' && d.dataFlowActive !== false);
+    const onlineDevIds = new Set(onlineDevices.map((d) => d.id));
+    const onlineDevTokens = new Set(onlineDevices.map((d) => d.apiKey).filter(Boolean));
+    const onlineDevNames = new Set(onlineDevices.map((d) => d.name).filter(Boolean));
 
-    // Telemetry from open/online devices only
-    latestTelemetry.forEach((t) => {
-      if (!t.metric || isInternalOrControlMetric(t.metric)) return;
+    // Gather telemetry pool based on role
+    const telemetryPool: TelemetryReading[] = [
+      ...physicalTelemetry,
+      ...(user?.role === 'admin' ? simulationTelemetry : []),
+    ];
 
-      const dev = onlineDevMap.get(t.deviceId) || onlineDevMap.get(t.deviceName);
-      if (!dev) return; // Ignore telemetry from closed / offline devices
+    // 1. Scan recent telemetry items within recency window
+    for (const t of telemetryPool) {
+      if (!t || !t.metric || isInternalOrControlMetric(t.metric)) continue;
 
-      // If simulated device, check if metric is configured in simulatedMetrics
-      if (dev.isSimulated && Array.isArray(dev.simulatedMetrics)) {
-        const allowedLower = dev.simulatedMetrics.map((m) => m.toLowerCase());
-        if (!allowedLower.includes(t.metric.toLowerCase())) {
-          return;
+      const isFromOnlineDev =
+        onlineDevIds.has(t.deviceId) ||
+        onlineDevTokens.has(t.deviceId) ||
+        onlineDevNames.has(t.deviceName);
+
+      if (!isFromOnlineDev) continue;
+
+      const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
+      // Stale metric older than 10 minutes is filtered out
+      if (!ts || now - ts > RECENCY_WINDOW_MS) continue;
+
+      const lowerKey = t.metric.toLowerCase();
+      const ageSec = Math.max(0, Math.floor((now - ts) / 1000));
+      const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+
+      const existing = metricMap.get(lowerKey);
+      if (!existing) {
+        metricMap.set(lowerKey, {
+          name: t.metric,
+          latestValue: t.value,
+          unit: t.unit || '',
+          lastTimestamp: t.timestamp,
+          ageText,
+          deviceNames: new Set([t.deviceName || t.deviceId]),
+          isFresh: ageSec < 120,
+        });
+      } else {
+        existing.deviceNames.add(t.deviceName || t.deviceId);
+        const existingTs = existing.lastTimestamp ? new Date(existing.lastTimestamp).getTime() : 0;
+        if (ts > existingTs) {
+          existing.latestValue = t.value;
+          if (t.unit) existing.unit = t.unit;
+          existing.lastTimestamp = t.timestamp;
+          existing.ageText = ageText;
+          existing.isFresh = ageSec < 120;
         }
       }
+    }
 
-      set.add(t.metric);
-    });
+    // 2. Scan online devices with recently updated metrics (lastSeen <= 10m)
+    for (const dev of onlineDevices) {
+      const devLastSeenTs = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
+      const isRecentlySeen = devLastSeenTs > 0 && now - devLastSeenTs <= RECENCY_WINDOW_MS;
 
-    // Also include active metrics defined on open/online devices
-    onlineActiveDevices.forEach((d) => {
-      if (d.isSimulated && Array.isArray(d.simulatedMetrics)) {
-        d.simulatedMetrics.forEach((m) => {
-          if (m && !isInternalOrControlMetric(m)) set.add(m);
-        });
-      } else if (d.metrics) {
-        Object.keys(d.metrics).forEach((k) => {
-          if (k && !isInternalOrControlMetric(k)) set.add(k);
-        });
+      if (isRecentlySeen && dev.metrics) {
+        const ageSec = Math.max(0, Math.floor((now - devLastSeenTs) / 1000));
+        const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
+
+        for (const [mKey, mVal] of Object.entries(dev.metrics as Record<string, number>)) {
+          if (!mKey || isInternalOrControlMetric(mKey) || typeof mVal !== 'number' || isNaN(mVal)) continue;
+          const lowerKey = mKey.toLowerCase();
+          if (!metricMap.has(lowerKey)) {
+            metricMap.set(lowerKey, {
+              name: mKey,
+              latestValue: mVal,
+              unit: '',
+              lastTimestamp: dev.lastSeen,
+              ageText,
+              deviceNames: new Set([dev.name]),
+              isFresh: ageSec < 120,
+            });
+          }
+        }
       }
-    });
+    }
 
-    return Array.from(set);
-  }, [latestTelemetry, devices]);
+    return Array.from(metricMap.values()).sort((a, b) => {
+      const tA = a.lastTimestamp ? new Date(a.lastTimestamp).getTime() : 0;
+      const tB = b.lastTimestamp ? new Date(b.lastTimestamp).getTime() : 0;
+      return tB - tA;
+    });
+  }, [physicalTelemetry, simulationTelemetry, devices, user?.role]);
 
   const getFilteredTerminalLogs = () => {
-    return latestTelemetry.filter((t) => {
-      if (clearedLogsAt > 0) {
+    let list: TelemetryReading[] = [];
+
+    if (terminalFilterMode === 'selected' && activeDevice) {
+      if (activeDevice.isSimulated) {
+        list = simulationTelemetry.filter(
+          (t) =>
+            t.deviceId === activeDevice.id ||
+            t.deviceId === activeDevice.apiKey ||
+            t.deviceName === activeDevice.name
+        );
+      } else {
+        list = physicalTelemetry.filter(
+          (t) =>
+            t.deviceId === activeDevice.id ||
+            t.deviceId === activeDevice.apiKey ||
+            t.deviceName === activeDevice.name ||
+            (activeDevice.apiKey && t.rawPayload?.includes(activeDevice.apiKey)) ||
+            (activeDevice.name && t.rawPayload?.includes(activeDevice.name))
+        );
+      }
+    } else {
+      // 'all' mode: combine physical and simulation (if admin)
+      list = user?.role === 'admin'
+        ? [...physicalTelemetry, ...simulationTelemetry]
+        : [...physicalTelemetry];
+    }
+
+    if (clearedLogsAt > 0) {
+      list = list.filter((t) => {
         const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
-        if (!isNaN(ts) && ts < clearedLogsAt) return false;
-      }
+        return ts >= clearedLogsAt;
+      });
+    }
 
-      if (terminalFilterMode === 'selected' && activeDevice) {
-        const matchesId = t.deviceId === activeDevice.id;
-        const matchesApiKey = t.deviceId === activeDevice.apiKey;
-        const matchesName = t.deviceName === activeDevice.name;
-        const matchesPayload =
-          (activeDevice.apiKey && t.rawPayload?.includes(activeDevice.apiKey)) ||
-          (activeDevice.name && t.rawPayload?.includes(activeDevice.name));
-        if (!matchesId && !matchesApiKey && !matchesName && !matchesPayload) {
-          return false;
-        }
-      }
-
-      return true;
-    });
+    return list;
   };
 
   const groupLogsByPacket = (logs: TelemetryReading[]) => {
@@ -213,6 +285,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       deviceName: string;
       timestamp: string;
       rawPayload?: string;
+      sequence?: number;
       source?: string;
       environment?: string;
       simulationRunId?: string;
@@ -228,17 +301,27 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     const map = new Map<string, (typeof result)[0]>();
 
     for (const log of logs) {
-      const raw = (log.rawPayload || '').trim();
-      const key = raw ? `${log.deviceId}_${raw}` : `${log.deviceId}_${log.timestamp}`;
+      if (!log || !log.metric) continue;
+
+      // Grouping key:
+      // When sequence is provided: deviceId + sequence
+      // Otherwise: deviceId + second-resolution timestamp + rawPayload
+      const timeStr = log.timestamp ? new Date(log.timestamp).toISOString() : 'no_time';
+      const timeSec = timeStr.substring(0, 19); // YYYY-MM-DDTHH:mm:ss
+      const key =
+        log.sequence !== undefined && log.sequence !== null
+          ? `${log.deviceId}_seq_${log.sequence}`
+          : `${log.deviceId}_${timeSec}_${log.rawPayload || ''}`;
 
       let pkt = map.get(key);
       if (!pkt) {
         pkt = {
-          id: log.id,
+          id: log.id || `${log.deviceId}_${timeStr}`,
           deviceId: log.deviceId,
-          deviceName: log.deviceName,
-          timestamp: log.timestamp,
+          deviceName: log.deviceName || log.deviceId,
+          timestamp: log.timestamp || new Date().toISOString(),
           rawPayload: log.rawPayload,
+          sequence: log.sequence,
           source: log.source,
           environment: log.environment,
           simulationRunId: log.simulationRunId,
@@ -253,16 +336,24 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         pkt.metrics.push({
           metric: log.metric,
           value: log.value,
-          unit: log.unit,
-          status: log.status,
+          unit: log.unit || '',
+          status: log.status || 'normal',
         });
       }
 
       if (log.status === 'critical') pkt.overallStatus = 'critical';
-      else if (log.status === 'warning' && pkt.overallStatus !== 'critical') pkt.overallStatus = 'warning';
+      else if (log.status === 'warning' && pkt.overallStatus !== 'critical') {
+        pkt.overallStatus = 'warning';
+      }
     }
 
-    return result;
+    // Sort newest packets first deterministically
+    return result.sort((a, b) => {
+      const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      if (tB !== tA) return tB - tA;
+      return (b.sequence || 0) - (a.sequence || 0);
+    });
   };
 
   const handleTogglePause = () => {
@@ -907,45 +998,36 @@ void sendHeartbeat() {
 
             {activeSystemMetrics.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-1">
-                {activeSystemMetrics.map((m) => {
-                  const lastReading = latestTelemetry.find(
-                    (t) => t.metric?.toLowerCase() === m.toLowerCase()
-                  );
-                  let displayVal: number | string | undefined = lastReading?.value;
-                  if (displayVal === undefined) {
-                    for (const dev of devices) {
-                      if (dev.metrics) {
-                        const matchKey = Object.keys(dev.metrics).find(
-                          (k) => k.toLowerCase() === m.toLowerCase()
-                        );
-                        if (
-                          matchKey &&
-                          (dev.metrics as Record<string, number>)[matchKey] !== undefined
-                        ) {
-                          displayVal = (dev.metrics as Record<string, number>)[matchKey];
-                          break;
-                        }
-                      }
-                    }
-                  }
-                  return (
-                    <div
-                      key={m}
-                      className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-2 text-xs font-mono text-slate-800 dark:text-slate-200 shadow-xs"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
-                      <span className="font-bold text-indigo-600 dark:text-indigo-400">{m}</span>
-                      {displayVal !== undefined && (
-                        <span className="text-[10px] text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2">
-                          {displayVal}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+                {activeSystemMetrics.map((m) => (
+                  <div
+                    key={m.name}
+                    className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono shadow-xs transition-colors ${
+                      m.isFresh
+                        ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30 text-slate-800 dark:text-slate-100'
+                        : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        m.isFresh ? 'bg-emerald-500 animate-pulse' : 'bg-cyan-500'
+                      }`}
+                    />
+                    <span className="font-bold text-indigo-600 dark:text-indigo-400">{m.name}</span>
+                    {m.latestValue !== undefined && (
+                      <span className="text-[11px] font-semibold text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 pl-2">
+                        {m.latestValue} {m.unit}
+                      </span>
+                    )}
+                    {m.ageText && (
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 pl-1">
+                        ({m.ageText})
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             ) : (
-              <p className="text-xs text-slate-400 italic">Henüz aktif metrik verisi algılanmadı.</p>
+              <p className="text-xs text-slate-400 italic">Son 10 dakika içinde aktif metrik verisi algılanmadı.</p>
             )}
           </div>
         </div>
@@ -1274,6 +1356,11 @@ void sendHeartbeat() {
                             <span className="text-emerald-400 font-bold flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                               [POST /api/v1/telemetry] 201 OK • {pkt.deviceName}
+                              {pkt.sequence !== undefined && pkt.sequence !== null && (
+                                <span className="text-[9px] px-1 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-mono border border-emerald-500/30">
+                                  #{pkt.sequence}
+                                </span>
+                              )}
                             </span>
                             <div className="flex items-center gap-1.5">
                               {pkt.source === 'simulator' ? (

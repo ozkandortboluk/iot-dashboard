@@ -516,6 +516,40 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   return [...readings, ...filteredPrev].slice(0, 500);
                 });
               }
+            } else if (data.event === 'telemetry:bootstrap') {
+              // Initial bootstrap hydration for physical telemetry without triggering false real-time alert/stream spikes
+              const rawPayload = data.payload;
+              const readings: TelemetryReading[] = Array.isArray(rawPayload) ? rawPayload : [];
+              if (readings.length > 0) {
+                setPhysicalTelemetry((prev) => {
+                  const existingIds = new Set(prev.map((p) => p.id));
+                  const newItems = readings.filter((r) => !existingIds.has(r.id));
+                  const merged = [...prev, ...newItems];
+                  merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                  return merged.slice(0, 500);
+                });
+                setLatestTelemetry((prev) => {
+                  const existingIds = new Set(prev.map((p) => p.id));
+                  const newItems = readings.filter((r) => !existingIds.has(r.id));
+                  const merged = [...prev, ...newItems];
+                  merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                  return merged.slice(0, 500);
+                });
+              }
+            } else if (data.event === 'telemetry:simulation:bootstrap') {
+              if (user?.role === 'admin') {
+                const rawPayload = data.payload;
+                const readings: TelemetryReading[] = Array.isArray(rawPayload) ? rawPayload : [];
+                if (readings.length > 0) {
+                  setSimulationTelemetry((prev) => {
+                    const existingIds = new Set(prev.map((p) => p.id));
+                    const newItems = readings.filter((r) => !existingIds.has(r.id));
+                    const merged = [...prev, ...newItems];
+                    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                    return merged.slice(0, 500);
+                  });
+                }
+              }
             } else if (data.event === 'system:connected') {
               setIsConnected(true);
               setConnectionStatus('connected');

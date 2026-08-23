@@ -108,11 +108,11 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       const simTelemetries = recentTelemetries.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
 
       if (physicalTelemetries.length > 0 && ws.subscribedChannels.has('physical')) {
-        safeSend(ws, JSON.stringify({ event: 'telemetry:physical:batch', payload: physicalTelemetries }));
+        safeSend(ws, JSON.stringify({ event: 'telemetry:bootstrap', payload: physicalTelemetries }));
       }
 
       if (simTelemetries.length > 0 && user.role === 'admin' && ws.subscribedChannels.has('simulation')) {
-        safeSend(ws, JSON.stringify({ event: 'telemetry:simulation:batch', payload: simTelemetries }));
+        safeSend(ws, JSON.stringify({ event: 'telemetry:simulation:bootstrap', payload: simTelemetries }));
       }
     }
   } catch (err) {
