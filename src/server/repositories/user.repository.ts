@@ -75,7 +75,7 @@ export class UserRepository {
     return null;
   }
 
-  public registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): User {
+  public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> {
     const existing = this.db.data.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
     if (existing) throw new Error('Bu e-posta adresi zaten kayıtlı.');
 
@@ -84,10 +84,36 @@ export class UserRepository {
       name,
       email,
       role,
+      companyName: companyName || undefined,
       created_at: new Date().toISOString(),
     };
     
-    // Multi-tenant setup: If companyName is provided, create a Tenant and a Membership
+    const dashboard = {
+      id: `dash_${newUser.id}`,
+      userId: newUser.id,
+      title: `${companyName || name} Özel Dashboard`,
+      widgets: [...defaultWidgets],
+      updatedAt: new Date().toISOString(),
+    };
+
+    const auditLog: import('../../types.js').AuditLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      userId: newUser.id,
+      userName: name,
+      action: `Yeni Kullanıcı Kaydı Yapıldı: ${email} (${role})`,
+      ip: '127.0.0.1',
+      severity: 'low',
+    };
+
+    const hashedPassword = hashPassword(pass);
+
+    // 1. Yazma önceliği: PostgreSQL
+    await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+    await this.db.postgresRepo.saveDashboard(dashboard);
+    await this.db.postgresRepo.saveAuditLog(auditLog);
+
+    // 2. Local cache güncellemesi (Postgres başarılı olduktan sonra)
     if (companyName) {
       if (!this.db.data.tenants) this.db.data.tenants = [];
       if (!this.db.data.tenantMemberships) this.db.data.tenantMemberships = [];
@@ -119,26 +145,16 @@ export class UserRepository {
     }
 
     this.db.data.users.push(newUser);
-    this.db.data.passwords[newUser.id] = hashPassword(pass);
-    this.db.data.dashboards.push({
-      id: `dash_${newUser.id}`,
-      userId: newUser.id,
-      title: `${companyName || name} Özel Dashboard`,
-      widgets: [...defaultWidgets],
-      updatedAt: new Date().toISOString(),
-    });
-    this.db.addAuditLog(newUser.id, name, `Yeni Kullanıcı Kaydı Yapıldı: ${email} (${role})`, 'low');
-    this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveUser(newUser, hashPassword(pass)).catch(() => {});
+    this.db.data.passwords[newUser.id] = hashedPassword;
+    this.db.data.dashboards.push(dashboard);
+    this.db.data.auditLogs.push(auditLog);
     
-    if (this.db.data.dashboards.length > 0) {
-      const userDash = this.db.data.dashboards[this.db.data.dashboards.length - 1];
-      this.db.postgresRepo.saveDashboard(userDash).catch(() => {});
-    }
+    this.db.saveData(this.db.data);
+    
     return newUser;
   }
 
-  public changePassword(userId: string, oldPass: string, newPass: string): void {
+  public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> {
     const user = this.db.data.users.find((u: any) => u.id === userId);
     if (!user) throw new Error('Kullanıcı bulunamadı.');
 
@@ -153,20 +169,25 @@ export class UserRepository {
     }
 
     const newHash = hashPassword(newPass.trim());
+    
+    // Postgres'e yazılmasını bekle
+    await this.db.postgresRepo.saveUser(user, newHash);
+    
     this.db.data.passwords[userId] = newHash;
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveUser(user, newHash).catch(() => {});
     this.addAuditLog(userId, user.name, 'Kullanıcı Şifresini Başarıyla Güncelledi', 'low');
   }
 
-  public updateUserRole(userId: string, newRole: User['role']): User {
+  public async updateUserRole(userId: string, newRole: User['role']): Promise<User> {
     const user = this.db.data.users.find((u: any) => u.id === userId);
     if (!user) throw new Error('Kullanıcı bulunamadı.');
     const oldRole = user.role;
     user.role = newRole;
+
+    await this.db.postgresRepo.saveUser(user);
+
     this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveUser(user).catch(() => {});
     return user;
   }
 
@@ -179,6 +200,12 @@ export class UserRepository {
       this.db.saveData(this.db.data);
       this.db.postgresRepo.deleteUser(userId).catch(() => {});
     }
+  }
+
+  public async terminateUserSessions(userId: string) {
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
+    this.db.saveData(this.db.data);
+    await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});
   }
 
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {

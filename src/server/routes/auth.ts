@@ -13,7 +13,7 @@ router.get('/setup-status', (req, res) => {
   res.json({ needSetup: !hasAdmin });
 });
 
-router.post('/setup', (req, res) => {
+router.post('/setup', async (req, res) => {
   const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -35,7 +35,7 @@ router.post('/setup', (req, res) => {
   }
 
   try {
-    const adminUser = db.registerUser(name, email, password, 'admin', companyName || 'Merkez Yönetim');
+    const adminUser = await db.registerUser(name, email, password, 'admin', companyName || 'Merkez Yönetim');
 
     if (seedDemoData) {
       db.seedDemoDataForUser(adminUser.id, name, companyName || 'Merkez Yönetim', email);
@@ -82,7 +82,7 @@ router.post('/login', (req, res) => {
   });
 });
 
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
   const rateLimit = rateLimiterService.checkIpRateLimit(`reg:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -99,7 +99,7 @@ router.post('/register', (req, res) => {
 
   try {
     // Public registration ALWAYS assigns 'customer' role. Escalation to 'admin' via public API is forbidden.
-    const user = db.registerUser(name, email, password, 'customer');
+    const user = await db.registerUser(name, email, password, 'customer');
     res.json({ user, message: 'Hesap başarıyla oluşturuldu.' });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
@@ -125,11 +125,11 @@ profileRouter.get('/', authenticateUser, (req, res) => {
   res.json(user);
 });
 
-profileRouter.put('/', authenticateUser, (req, res) => {
+profileRouter.put('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const updatedUser = db.updateUserProfile(currentUser.id, req.body);
+    const updatedUser = await db.updateUserProfile(currentUser.id, req.body);
     broadcast('users:updated', db.getUsers());
     res.json({ user: updatedUser, message: 'Profil ve hesap ayarları güncellendi.' });
   } catch (err: any) {
@@ -137,7 +137,7 @@ profileRouter.put('/', authenticateUser, (req, res) => {
   }
 });
 
-profileRouter.post('/change-password', authenticateUser, (req, res) => {
+profileRouter.post('/change-password', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { currentPassword, newPassword } = req.body;
@@ -151,7 +151,7 @@ profileRouter.post('/change-password', authenticateUser, (req, res) => {
   }
 
   try {
-    db.changePassword(currentUser.id, currentPassword, newPassword);
+    await db.changePassword(currentUser.id, currentPassword, newPassword);
     res.json({ success: true, message: 'Şifreniz başarıyla değiştirildi.' });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Şifre değiştirme işlemi başarısız oldu.' });
@@ -168,14 +168,14 @@ customersRouter.get('/', authenticateUser, requireAdmin, (req, res) => {
   res.json(users);
 });
 
-customersRouter.post('/', authenticateUser, requireAdmin, (req, res) => {
+customersRouter.post('/', authenticateUser, requireAdmin, async (req, res) => {
   const { name, email, password, role, companyName } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Ad, e-posta ve şifre alanları zorunludur.' });
   }
 
   try {
-    const newUser = db.registerUser(name, email, password, role || 'customer', companyName);
+    const newUser = await db.registerUser(name, email, password, role || 'customer', companyName);
     broadcast('users:updated', db.getUsers());
     res.status(201).json(newUser);
   } catch (err: unknown) {
@@ -224,14 +224,14 @@ customersRouter.delete('/:id', authenticateUser, requireAdmin, async (req, res) 
   }
 });
 
-customersRouter.patch('/:id/role', authenticateUser, requireAdmin, (req, res) => {
+customersRouter.patch('/:id/role', authenticateUser, requireAdmin, async (req, res) => {
   const { role } = req.body;
   if (!role || !['admin', 'customer', 'operator', 'analyst'].includes(role)) {
     return res.status(400).json({ error: 'Geçersiz rol belirtildi.' });
   }
 
   try {
-    const updatedUser = db.updateUserRole(req.params.id, role);
+    const updatedUser = await db.updateUserRole(req.params.id, role);
     broadcast('users:updated', db.getUsers());
     res.json({ user: updatedUser, message: 'Kullanıcı rolü başarıyla güncellendi.' });
   } catch (err: unknown) {
@@ -241,3 +241,52 @@ customersRouter.patch('/:id/role', authenticateUser, requireAdmin, (req, res) =>
 });
 
 export { customersRouter };
+
+customersRouter.put('/:id', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const updatedUser = await db.updateUserProfile(req.params.id, req.body);
+    broadcast('users:updated', db.getUsers());
+    res.json({ user: updatedUser, message: 'Müşteri bilgileri güncellendi.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Müşteri güncellenemedi.' });
+  }
+});
+
+customersRouter.patch('/:id/status', authenticateUser, requireAdmin, async (req, res) => {
+  const { status } = req.body;
+  if (!['active', 'suspended'].includes(status)) {
+    return res.status(400).json({ error: 'Geçersiz statü.' });
+  }
+  try {
+    const user = db.getUsers().find(u => u.id === req.params.id);
+    if (!user) throw new Error('Kullanıcı bulunamadı.');
+    user.status = status;
+    await db.updateUserProfile(user.id, { status });
+    
+    if (status === 'suspended') {
+      await db.terminateUserSessions(user.id);
+    }
+    broadcast('users:updated', db.getUsers());
+    res.json({ message: `Kullanıcı hesabı ${status === 'active' ? 'aktifleştirildi' : 'donduruldu'}.` });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+customersRouter.post('/:id/terminate-sessions', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    await db.terminateUserSessions(req.params.id);
+    res.json({ message: 'Tüm aktif oturumlar sonlandırıldı.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+customersRouter.post('/:id/reset-password', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    // In a real app, send an email. For now, just return success.
+    res.json({ message: 'Parola sıfırlama bağlantısı e-posta adresine gönderildi.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});

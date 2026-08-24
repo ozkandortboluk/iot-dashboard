@@ -890,11 +890,12 @@ class LocalDatabase {
   public createSession(user: User): string { return this.userRepository.createSession(user); }
   public verifySession(token: string): { user: User; session?: UserSession } | null { return this.userRepository.verifySession(token); }
   public authenticate(email: string, pass: string): { user: User; token: string } | null { return this.userRepository.authenticate(email, pass); }
-  public registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): User { return this.userRepository.registerUser(name, email, pass, role, companyName); }
-  public changePassword(userId: string, oldPass: string, newPass: string): void { return this.userRepository.changePassword(userId, oldPass, newPass); }
-  public updateUserRole(userId: string, newRole: User['role']): User { return this.userRepository.updateUserRole(userId, newRole); }
+  public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
+  public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }
+  public async updateUserRole(userId: string, newRole: User['role']): Promise<User> { return this.userRepository.updateUserRole(userId, newRole); }
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
+  public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
     public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
   public getDevices(tenantId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(tenantId, customerId); }
   public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
@@ -1284,7 +1285,7 @@ class LocalDatabase {
     return this.data.dispatchLogs;
   }
 
-  public updateUserProfile(userId: string, data: Partial<User>): User {
+  public async updateUserProfile(userId: string, data: Partial<User>): Promise<User> {
     const user = this.data.users.find((u) => u.id === userId);
     if (!user) {
       throw new Error('Kullanıcı bulunamadı.');
@@ -1308,7 +1309,7 @@ class LocalDatabase {
     this.saveData(this.data);
 
     // Sync to PostgreSQL Repository
-    this.postgresRepo.saveUser(user).catch(() => {});
+    await this.postgresRepo.saveUser(user);
 
     this.safeFirestoreWrite(
       () => updateDoc(doc(firestore, 'users', user.id), cleanFirestoreData(user)),

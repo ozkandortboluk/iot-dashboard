@@ -200,7 +200,7 @@ export class PostgresRepository {
         notification_email = EXCLUDED.notification_email,
         whatsapp_number = EXCLUDED.whatsapp_number,
         telegram_chat_id = EXCLUDED.telegram_chat_id,
-        password_hash = COALESCE(EXCLUDED.password_hash, users.password_hash),
+        password_hash = CASE WHEN EXCLUDED.password_hash = '__pending__' THEN users.password_hash ELSE EXCLUDED.password_hash END,
         role = EXCLUDED.role,
         company_name = EXCLUDED.company_name,
         notification_preferences = EXCLUDED.notification_preferences,
@@ -214,7 +214,7 @@ export class PostgresRepository {
       user.notificationEmail || null,
       user.whatsappNumber || null,
       user.telegramChatId || null,
-      passwordHash || null,
+      passwordHash || '__pending__',
       user.role || 'customer',
       user.companyName || null,
       JSON.stringify(user.notificationPreferences || {}),
@@ -764,6 +764,11 @@ export class PostgresRepository {
   // ==========================================
   // USER SESSIONS
   // ==========================================
+  public async deleteUserSessions(userId: string): Promise<void> {
+    if (!this.pool) return;
+    await this.query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);
+  }
+
   public async saveSession(session: UserSession): Promise<void> {
     if (!this.pool) return;
     const sql = `

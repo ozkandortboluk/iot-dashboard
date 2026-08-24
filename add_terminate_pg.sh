@@ -1,0 +1,1 @@
+sed -i '/public async saveSession(/i \  public async deleteUserSessions(userId: string): Promise<void> {\n    if (!this.pool) return;\n    await this.query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);\n  }\n' src/server/database/postgres.ts

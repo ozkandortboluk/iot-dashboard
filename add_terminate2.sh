@@ -1,0 +1,1 @@
+sed -i '/public async softDeleteUser(userId: string/i \  public async terminateUserSessions(userId: string) {\n    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);\n    this.db.saveData(this.db.data);\n    await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});\n  }\n' src/server/repositories/user.repository.ts
