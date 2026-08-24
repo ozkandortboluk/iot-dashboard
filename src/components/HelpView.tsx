@@ -238,13 +238,14 @@ void loop() {
       title: 'ESP32 / ESP8266 - Ed25519 İmzalı Güvenli OTA & Post-Boot Onaylı İstemci',
       category: 'esp32',
       categoryLabel: 'ESP32 / ESP8266 OTA',
-      badge: 'Ed25519 & Boot Onaylı',
-      description: 'Cihaz depodaki Ed25519 public key ile imzayı ve SHA-256 doğrulamasını yapar. Flashing sonrası boot doğrulamasını /api/ota/confirm-boot ile tamamlar. Başarısızlık durumunda otomatik rollback gerçekleşir.',
-      tags: ['esp32', 'esp8266', 'ota', 'ed25519', 'confirm-boot', 'rollback', 'httpupdate'],
+      badge: 'Root of Trust & Ed25519',
+      description: 'Donanıma derleme anında sabitlenen (pinned) Root of Trust anahtar tablosu ve Ed25519 ile imza doğrulaması yapar. Ağdan gelen sahte anahtarlara karşı tam korumalıdır. Key Rotation ve tek kullanımlık token destekler.',
+      tags: ['esp32', 'esp8266', 'ota', 'root-of-trust', 'ed25519', 'key-rotation', 'confirm-boot'],
       endpoint: 'POST /api/ota/check, /api/ota/status & /api/ota/confirm-boot',
       code: `// =========================================================================
-// NEXUSNODE IoT - ESP32 ED25519 İMZALI & POST-BOOT ONAYLI OTA İSTEMCİSİ
-// Bu kod derlenip doğrudan ESP32 kartınıza yüklenebilir.
+// NEXUSNODE IoT - ESP32 ROOT OF TRUST (PINNED KEY) & ED25519 GÜVENLİ OTA
+// Güvenlik Kuralı: Sunucudan gelen X-Public-Key'e ASLA güvenilmez.
+// İmzalar cihazın ROM/Flash hafızasında derleme anında sabitlenen bu anahtarlarla doğrulanır.
 // =========================================================================
 #include <WiFi.h> // ESP8266 için: #include <ESP8266WiFi.h>
 #include <HTTPClient.h>
@@ -256,18 +257,50 @@ const char* WIFI_PASS       = "WIFI_SIFRENIZ";
 const char* SERVER_URL      = "${originUrl}";
 const char* API_KEY         = "nkn_live_YOUR_DEVICE_API_KEY";
 
-// CİHAZ BEYANI VE SÜRÜM
+// CİHAZ BEYANI VE SÜRÜM BİLGİSİ
 const char* DEVICE_TYPE        = "pump_controller";
 const char* DEVICE_ROLE_KEY    = "PUMP_CTRL";
 const char* HARDWARE_MODEL     = "ESP32_WROOM_32";
 const char* HARDWARE_REVISION  = "v1.0";
 const char* FIRMWARE_VERSION   = "1.0.0";
 
-// EMBEDDED ED25519 PUBLIC KEY (Güven zinciri için cihaz firmware'ine gömülüdür)
-const char* EMBEDDED_PUBLIC_KEY = 
-  "-----BEGIN PUBLIC KEY-----\\n"
-  "MCowKO...// PRODUCTION ED25519 PUBLIC KEY IN PEM FORMAT\\n"
-  "-----END PUBLIC KEY-----\\n";
+// =========================================================================
+// ROOT OF TRUST (Donanım İçinde Sabitlenmiş Güvenilir Ed25519 Anahtar Tablosu)
+// Key Rotation için geçiş döneminde hem aktif hem eski/yeni anahtarlar listelenir.
+// =========================================================================
+struct TrustedRootKey {
+  const char* keyId;
+  const char* publicKeyPem;
+  const char* desc;
+};
+
+const TrustedRootKey TRUSTED_ROOT_KEYS[] = {
+  {
+    "root_ed25519_v1",
+    "-----BEGIN PUBLIC KEY-----\\n"
+    "MCowBQYDK2VwAyEAjP/fHdse0+0S7ZwrjlZaxd0QYhIyLMwD6VmD78CokU0=\\n"
+    "-----END PUBLIC KEY-----\\n",
+    "Birincil Aktif İmza Anahtarı"
+  },
+  {
+    "root_ed25519_v2",
+    "-----BEGIN PUBLIC KEY-----\\n"
+    "MCowBQYDK2VwAyEAtCcoQVIFQi6D7r29nPmnGOBVIqjzrwaVS3BPj9778W0=\\n"
+    "-----END PUBLIC KEY-----\\n",
+    "İkincil / Rotasyon Geçiş Anahtarı"
+  }
+};
+const size_t TRUSTED_KEYS_COUNT = sizeof(TRUSTED_ROOT_KEYS) / sizeof(TRUSTED_ROOT_KEYS[0]);
+
+const char* findPinnedPublicKey(const char* keyId) {
+  if (!keyId || strlen(keyId) == 0) return nullptr;
+  for (size_t i = 0; i < TRUSTED_KEYS_COUNT; i++) {
+    if (strcmp(TRUSTED_ROOT_KEYS[i].keyId, keyId) == 0) {
+      return TRUSTED_ROOT_KEYS[i].publicKeyPem;
+    }
+  }
+  return nullptr;
+}
 
 void reportStatus(const char* jobId, const char* firmwareId, const char* downloadToken, const char* status, int progress, const char* errorMsg = "") {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -285,41 +318,6 @@ void reportStatus(const char* jobId, const char* firmwareId, const char* downloa
 
   http.POST(json);
   http.end();
-}
-
-void confirmBoot(const char* jobId, const char* bootNonce) {
-  if (WiFi.status() != WL_CONNECTED || !jobId || !bootNonce) return;
-  Serial.println("[OTA] Post-Boot Doğrulaması Gönderiliyor...");
-  
-  HTTPClient http;
-  http.begin(String(SERVER_URL) + "/api/ota/confirm-boot");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-API-Key", API_KEY);
-
-  String body = "{\\"jobId\\":\\"" + String(jobId) + 
-                "\\",\\"firmwareVersion\\":\\"" + String(FIRMWARE_VERSION) + 
-                "\\",\\"bootNonce\\":\\"" + String(bootNonce) + "\\"}";
-
-  int httpCode = http.POST(body);
-  if (httpCode == 200) {
-    Serial.println("[OK] OTA Boot Doğrulaması Sunucu Tarafından Onaylandı! Rollback Iptal Edildi.");
-  } else {
-    Serial.printf("[UYARI] Boot Onayı Başarısız (%d). Otomatik Rollback Tetiklenebilir!\\n", httpCode);
-  }
-  http.end();
-}
-
-void setup() {
-  Serial.begin(115200);
-  Serial.println("\\n>>> ESP32 Güvenli OTA İstemcisi Başlatılıyor...");
-  Serial.printf("Model: %s | Sürüm: %s | Görev: %s\\n", HARDWARE_MODEL, FIRMWARE_VERSION, DEVICE_ROLE_KEY);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(400);
-    Serial.print(".");
-  }
-  Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
 }
 
 void checkOTA() {
@@ -346,12 +344,25 @@ void checkOTA() {
     if (doc["updateAvailable"] | false) {
       String jobId          = doc["jobId"] | "";
       String firmwareId     = doc["firmwareId"] | "";
+      String keyId          = doc["keyId"] | "";
       String downloadUrl    = doc["downloadUrl"] | "";
       String sha256Expected = doc["sha256"] | "";
       String downloadToken  = doc["downloadToken"] | "";
       String bootNonce      = doc["bootNonce"] | "";
 
-      Serial.println("[OTA] Yeni Firmware Bulundu! JobID: " + jobId);
+      Serial.println("[OTA] Yeni Firmware Bulundu! JobID: " + jobId + " | KeyID: " + keyId);
+
+      // ROOT OF TRUST DOĞRULAMASI:
+      // keyId cihazın hafızasındaki sabitlenmiş Root of Trust tablosunda aranır
+      const char* pinnedPublicKey = findPinnedPublicKey(keyId.c_str());
+      if (pinnedPublicKey == nullptr) {
+        Serial.printf("[GÜVENLİK ALARMI] keyId '%s' cihazdaki Root of Trust tablosunda bulunamadı! Güncelleme reddedildi.\\n", keyId.c_str());
+        reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "FAILED", 0, "Bilinmeyen keyId / İmzalama anahtarı donanımda kayıtlı değil.");
+        http.end();
+        return;
+      }
+
+      Serial.printf("[GÜVENLİK] keyId '%s' doğrulandı. Sabitlenmiş anahtar kullanılıyor.\\n", keyId.c_str());
       reportStatus(jobId.c_str(), firmwareId.c_str(), downloadToken.c_str(), "DOWNLOADING", 10);
 
       String fullUrl = downloadUrl.startsWith("http") ? downloadUrl : String(SERVER_URL) + downloadUrl;
@@ -705,12 +716,14 @@ sendTelemetry();
 # 2. GERÇEK FİZİKSEL CİHAZ TELEMETRİ GİRİŞİ (Production Telemetry Pipeline)
 # Uç Nokta: POST /api/v1/telemetry
 # Kural: Yalnızca isSimulated === false olan gerçek donanım API anahtarları kabul edilir.
-# Sanal cihaz API anahtarı ile istek gelirse 403 Forbidden (simulated_device_not_allowed) döner.
+# İdempotency: deviceId + bootId + sequence anahtarı ile çift paketler otomatik deduplicate edilir.
 curl -X POST "${originUrl}/api/v1/telemetry" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_PHYSICAL_DEVICE_API_KEY" \\
+  -H "X-Boot-Id: boot_counter_042" \\
   -d '{
     "deviceId": "dev_esp32_saha_01",
+    "bootId": "boot_counter_042",
     "sequence": 1042,
     "metrics": {
       "temperature": { "value": 24.8, "unit": "°C" },
@@ -728,6 +741,7 @@ curl -X POST "${originUrl}/api/simulator/v1/telemetry" \\
   -H "X-API-Key: YOUR_SIMULATED_DEVICE_API_KEY" \\
   -d '{
     "deviceId": "sim_dev_server_01",
+    "bootId": "sim_boot_01",
     "sequence": 1,
     "metrics": {
       "cpu": { "value": 42.5, "unit": "%" },
@@ -758,6 +772,58 @@ curl -X POST "${originUrl}/api/simulator/v1/inject" \\
 #   - Bağlantı açıldığında varsayılan: { "event": "subscribe", "channels": ["physical"] }
 #   - Sanal Veri Üreteci sayfasına girildiğinde: { "event": "subscribe", "channels": ["simulation"] }
 #   - Sayfadan çıkıldığında: { "event": "unsubscribe", "channels": ["simulation"] }
+`,
+    },
+    {
+      id: 'code_production_idempotency_health',
+      title: 'Production - İdempotency (Deduplication) & Canlılık/Hazırlık Sağlık Kontrolleri',
+      category: 'curl',
+      categoryLabel: 'Production Politikası & Sağlık',
+      badge: 'Zero-Data-Loss & SLA',
+      description: 'Her telemetri paketi için deviceId + bootId + sequence idempotency anahtarı, dayanıklı disk retry WAL kuyruğu ve Kubernetes / Container uyumlu /health/live ve /health/ready sağlık uç noktaları.',
+      tags: ['production', 'idempotency', 'deduplication', 'health', 'liveness', 'readiness', 'wal', 'retry-queue'],
+      endpoint: 'GET /health/live, GET /health/ready & POST /api/v1/telemetry',
+      code: `#!/bin/bash
+# =========================================================================
+# PRODUCTION TELEMETRİ POLİTİKASI & SAĞLIK DENETİMİ (HEALTH CHECKS)
+# =========================================================================
+#
+# 1. HER PAKET İÇİN İDEMPOTENCY ANAHTARI (DEDUPLICATION)
+# Formül: deviceId + ":" + bootId + ":" + sequence
+# Örnek: "dev_esp32_01:boot_007:1042"
+# Cihaz yeniden bağlandığında veya ağ gecikmesiyle aynı paketi tekrar yolladığında
+# PostgreSQL 'telemetry_packets' tablosundaki benzersiz anahtar sayesinde çift kayıt engellenir.
+# Sunucu "COMMITTED_TO_TIMESCALEDB (Duplicate Skipped)" yanıtı döner ve çift alarm tetiklenmez.
+
+# İdempotent Telemetri Gönderimi (Header veya Body ile bootId ve sequence iletimi):
+curl -X POST "${originUrl}/api/v1/telemetry" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_PHYSICAL_DEVICE_API_KEY" \\
+  -H "X-Boot-Id: boot_seq_001" \\
+  -d '{
+    "deviceId": "dev_esp32_saha_01",
+    "bootId": "boot_seq_001",
+    "sequence": 5001,
+    "metrics": {
+      "temperature": { "value": 24.3, "unit": "°C" },
+      "humidity": { "value": 52.0, "unit": "%" }
+    }
+  }'
+
+# 2. CANLILIK KONTROLÜ (LIVENESS PROBE)
+# Uç Nokta: GET /health/live veya /api/health/live
+# Amaç: Node.js işlemcinin çalıştığını doğrular. (Her zaman HTTP 200 döner)
+curl -i "${originUrl}/health/live"
+
+# 3. HAZIRLIK KONTROLÜ (READINESS PROBE)
+# Uç Nokta: GET /health/ready veya /api/health/ready
+# Kural: PostgreSQL / TimescaleDB ana veritabanı hazır DEĞİLSE HTTP 503 Service Unavailable döner.
+#        Veritabanı bağlı ve hazır ise HTTP 200 OK döner.
+curl -i "${originUrl}/health/ready"
+
+# 4. DETAYLI SİSTEM & KUYRUK SAĞLIĞI
+# Uç Nokta: GET /health veya /api/health
+curl -i "${originUrl}/health"
 `,
     },
   ];

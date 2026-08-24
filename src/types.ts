@@ -101,6 +101,7 @@ export interface Firmware {
   binarySize: number; // Bytes
   sha256: string; // Hash
   signature?: string; // Ed25519 signature
+  keyId?: string; // Ed25519 Signing Key Identifier (e.g. "root_ed25519_v1")
   filePath?: string; // Disk path (uploads/firmware/:id.bin)
   minHardwareRevision?: string;
   isActive: boolean;
@@ -120,6 +121,7 @@ export interface OtaDeploymentJob {
   roleKey: string;
   targetScope: 'single' | 'selected' | 'role_key' | 'device_type' | 'auto';
   status: OtaStatus;
+  keyId?: string;
   progressPercent?: number;
   errorMessage?: string;
   initiatedBy: string;
@@ -158,6 +160,9 @@ export type TelemetrySource = 'physical' | 'simulator' | 'manual_test';
 export interface TelemetryReading {
   id: string;
   packetId?: string;
+  tenantId?: string;
+  customerId?: string;
+  userId?: string;
   deviceId: string;
   deviceName: string;
   timestamp: string;
@@ -167,6 +172,8 @@ export interface TelemetryReading {
   status: 'normal' | 'warning' | 'critical';
   rawPayload?: string;
   sequence?: number;
+  bootId?: string;
+  idempotencyKey?: string;
   source: TelemetrySource;
   environment: 'production' | 'sandbox';
   simulationRunId?: string;

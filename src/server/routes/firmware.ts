@@ -15,6 +15,8 @@ import {
   saveFirmwareFileToDisk,
   readFirmwareFileFromDisk,
   getEd25519KeyPair,
+  getTrustedPublicKeys,
+  getPublicKeyByKeyId,
   compareTokensSafe,
   hashDownloadToken,
 } from '../utils/ota-crypto.js';
@@ -57,13 +59,27 @@ firmwareRouter.get('/', authenticateUser, (req: Request, res: Response) => {
   res.json(firmwares.map(sanitizeFirmware));
 });
 
-// GET /api/firmwares/public-key - Get server's Ed25519 public key for firmware verification
+// GET /api/firmwares/public-key - Get server's Ed25519 public key (Informational / Audit Only)
 firmwareRouter.get('/public-key', (_req: Request, res: Response) => {
-  const keys = getEd25519KeyPair();
-  res.json({
-    publicKeyPem: keys.publicKeyPem,
-    publicKeyHex: keys.publicKeyHex,
-  });
+  try {
+    const keys = getEd25519KeyPair();
+    const trustedKeys = getTrustedPublicKeys();
+    res.json({
+      keyId: keys.keyId,
+      publicKeyPem: keys.publicKeyPem,
+      publicKeyHex: keys.publicKeyHex,
+      trustedKeys,
+      securityNotice: 'Root of Trust Ed25519 public key(s) must be compiled directly into the hardware firmware at build-time. Network-provided keys are for administrative auditing and informational inspection only.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/firmwares/keys/trusted - Get active and transitional trusted public keys for key rotation auditing
+firmwareRouter.get('/keys/trusted', authenticateUser, (_req: Request, res: Response) => {
+  const trustedKeys = getTrustedPublicKeys();
+  res.json(trustedKeys);
 });
 
 // GET /api/firmwares/:id - Get firmware details
@@ -133,7 +149,7 @@ firmwareRouter.post('/', authenticateUser, requireAdmin, (req: Request, res: Res
   }
 
   // Generate SHA-256 and Ed25519 Signature
-  const { sha256, signatureHex } = signBinaryBuffer(binaryBuffer);
+  const { sha256, signatureHex, keyId } = signBinaryBuffer(binaryBuffer);
   const binarySize = binaryBuffer.length;
   const id = `fw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
 
@@ -152,6 +168,7 @@ firmwareRouter.post('/', authenticateUser, requireAdmin, (req: Request, res: Res
     binarySize,
     sha256,
     signature: signatureHex,
+    keyId: keyId || 'root_ed25519_v1',
     minHardwareRevision: minHardwareRevision ? minHardwareRevision.trim() : undefined,
     isActive: true,
     uploadedBy: user.name || user.email,
@@ -355,7 +372,7 @@ firmwareRouter.post('/upload', authenticateUser, requireAdmin, (req: Request, re
       return res.status(400).json({ error: validation.error });
     }
 
-    const { sha256, signatureHex } = signBinaryBuffer(binaryBuffer);
+    const { sha256, signatureHex, keyId } = signBinaryBuffer(binaryBuffer);
     const id = `fw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
     const permPath = path.join(process.cwd(), 'uploads', 'firmware', `${id}.bin`);
 
@@ -378,6 +395,7 @@ firmwareRouter.post('/upload', authenticateUser, requireAdmin, (req: Request, re
       binarySize: binaryBuffer.length,
       sha256,
       signature: signatureHex,
+      keyId: keyId || 'root_ed25519_v1',
       minHardwareRevision: minHardwareRevision ? String(minHardwareRevision).trim() : undefined,
       isActive: true,
       uploadedBy: user.name || user.email,
@@ -532,12 +550,16 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
   }
 
   const keys = getEd25519KeyPair();
+  const effectiveKeyId = fw.keyId || keys.keyId;
 
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Length', binaryBuffer.length);
   res.setHeader('Content-Disposition', `attachment; filename="${fw.roleKey}_${fw.version}.bin"`);
+  res.setHeader('X-Key-ID', effectiveKeyId);
   res.setHeader('X-SHA256', fw.sha256);
   res.setHeader('X-Signature', fw.signature || '');
+  // Note: Hardware clients must verify against hardcoded compiled-in Root of Trust matching X-Key-ID.
+  res.setHeader('X-Public-Key-Info-Only', keys.publicKeyPem.replace(/\n/g, '\\n'));
   res.setHeader('X-Public-Key', keys.publicKeyPem.replace(/\n/g, '\\n'));
   res.setHeader('X-Version', fw.version);
   res.setHeader('X-Role-Key', fw.roleKey);

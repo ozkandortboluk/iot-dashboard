@@ -50,6 +50,105 @@ export class PostgresRepository {
     return !!this.pool && this.isConnected;
   }
 
+  private isSchemaEnsured = false;
+
+  public async ensureTelemetrySchema(): Promise<void> {
+    if (!this.pool || this.isSchemaEnsured) return;
+    try {
+      const statements = [
+        `CREATE TABLE IF NOT EXISTS telemetry_packets (
+          id VARCHAR(192) PRIMARY KEY,
+          device_id VARCHAR(64) NOT NULL,
+          boot_id VARCHAR(64) DEFAULT 'default' NOT NULL,
+          sequence BIGINT NOT NULL,
+          idempotency_key VARCHAR(192),
+          metric_count INTEGER DEFAULT 1,
+          received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );`,
+        `CREATE TABLE IF NOT EXISTS telemetry_readings (
+          id VARCHAR(128) NOT NULL,
+          packet_id VARCHAR(128),
+          tenant_id VARCHAR(64) DEFAULT 'usr_admin',
+          customer_id VARCHAR(64) DEFAULT 'usr_admin',
+          user_id VARCHAR(64) DEFAULT 'usr_admin',
+          device_id VARCHAR(64),
+          device_name VARCHAR(128) NOT NULL,
+          metric VARCHAR(64) NOT NULL,
+          metric_value DOUBLE PRECISION NOT NULL,
+          unit VARCHAR(16) NOT NULL,
+          status_level VARCHAR(32) DEFAULT 'normal',
+          sequence BIGINT,
+          boot_id VARCHAR(64) DEFAULT 'default',
+          idempotency_key VARCHAR(192),
+          source VARCHAR(32) DEFAULT 'physical',
+          environment VARCHAR(32) DEFAULT 'production',
+          simulation_run_id VARCHAR(128),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          PRIMARY KEY (id, created_at)
+        );`,
+        `CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
+          id VARCHAR(128) NOT NULL,
+          packet_id VARCHAR(128),
+          tenant_id VARCHAR(64) DEFAULT 'usr_admin',
+          customer_id VARCHAR(64) DEFAULT 'usr_admin',
+          user_id VARCHAR(64) DEFAULT 'usr_admin',
+          device_id VARCHAR(64),
+          device_name VARCHAR(128) NOT NULL,
+          metric VARCHAR(64) NOT NULL,
+          metric_value DOUBLE PRECISION NOT NULL,
+          unit VARCHAR(16) NOT NULL,
+          status_level VARCHAR(32) DEFAULT 'normal',
+          sequence BIGINT,
+          boot_id VARCHAR(64) DEFAULT 'default',
+          idempotency_key VARCHAR(192),
+          source VARCHAR(32) DEFAULT 'simulator',
+          environment VARCHAR(32) DEFAULT 'sandbox',
+          simulation_run_id VARCHAR(128),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+          PRIMARY KEY (id, created_at)
+        );`,
+        `ALTER TABLE telemetry_packets ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';`,
+        `ALTER TABLE telemetry_packets ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_packets_idempotency ON telemetry_packets(device_id, boot_id, sequence);`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';`,
+        `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'simulator';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'sandbox';`,
+        `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);`,
+        `CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);`,
+        `CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);`,
+        `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);`,
+        `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);`,
+      ];
+
+      for (const stmt of statements) {
+        try {
+          await this.pool.query(stmt);
+        } catch {
+          // ignore individual DDL notices
+        }
+      }
+      this.isSchemaEnsured = true;
+    } catch (err: any) {
+      console.warn('[PostgreSQL ensureTelemetrySchema Warning]:', err?.message || err);
+    }
+  }
+
   /**
    * Runs parameterized query against PostgreSQL pool.
    * Throws an error on execution failure or when connection is not ready,
@@ -224,15 +323,28 @@ export class PostgresRepository {
     }
     const isSimulation = reading.source === 'simulator' || reading.environment === 'sandbox';
     const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
+    const tenantId = reading.tenantId || reading.customerId || reading.userId || 'usr_admin';
+    const customerId = reading.customerId || reading.tenantId || reading.userId || 'usr_admin';
+    const userId = reading.userId || customerId || tenantId || 'usr_admin';
+    const bootId = reading.bootId || 'default';
+    const idempotencyKey = reading.idempotencyKey || (
+      reading.sequence !== undefined && reading.sequence !== null && reading.deviceId
+        ? `${reading.deviceId}:${bootId}:${reading.sequence}`
+        : null
+    );
 
     const sql = `
       INSERT INTO ${targetTable} (
-        id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT DO NOTHING;
     `;
     const res = await this.query(sql, [
       reading.id,
+      reading.packetId || null,
+      tenantId,
+      customerId,
+      userId,
       reading.deviceId,
       reading.deviceName || reading.deviceId,
       reading.metric,
@@ -240,6 +352,8 @@ export class PostgresRepository {
       reading.unit || '',
       reading.status || 'normal',
       reading.sequence ?? null,
+      bootId,
+      idempotencyKey,
       reading.source || (isSimulation ? 'simulator' : 'physical'),
       reading.environment || (isSimulation ? 'sandbox' : 'production'),
       reading.simulationRunId || null,
@@ -291,29 +405,37 @@ export class PostgresRepository {
 
       const deviceId = first.deviceId;
       const sequence = first.sequence;
+      const bootId = first.bootId || 'default';
+      const idempotencyKey = first.idempotencyKey || (
+        deviceId && sequence !== undefined && sequence !== null
+          ? `${deviceId}:${bootId}:${sequence}`
+          : null
+      );
       let packetId: string | null = first.packetId || null;
 
-      // Packet-Level Sequence Deduplication for Physical Telemetry Packets
+      // Packet-Level Idempotency Deduplication for Physical Telemetry Packets (deviceId + bootId + sequence)
       if (!isSimulation && deviceId && sequence !== undefined && sequence !== null) {
-        packetId = packetId || `pkt_${deviceId}_seq_${sequence}`;
+        packetId = packetId || `pkt_${deviceId}_boot_${bootId}_seq_${sequence}`;
         const packetSql = `
-          INSERT INTO telemetry_packets (id, device_id, sequence, metric_count, received_at)
-          VALUES ($1, $2, $3, $4, $5)
-          ON CONFLICT (device_id, sequence) DO NOTHING
+          INSERT INTO telemetry_packets (id, device_id, boot_id, sequence, idempotency_key, metric_count, received_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (device_id, boot_id, sequence) DO NOTHING
           RETURNING id;
         `;
         const pktRes = await client.query(packetSql, [
           packetId,
           deviceId,
+          bootId,
           sequence,
+          idempotencyKey,
           readings.length,
           first.timestamp || new Date().toISOString(),
         ]);
 
         if (!pktRes.rows || pktRes.rows.length === 0) {
-          // Conflict occurred: Packet sequence was already processed!
+          // Conflict occurred: Packet with (deviceId, bootId, sequence) was already processed!
           await client.query('COMMIT');
-          console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, Sequence=${sequence} daha önce işlenmiş.`);
+          console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, BootId=${bootId}, Sequence=${sequence} daha önce işlenmiş.`);
           return { success: true, rowCount: 0, duplicateSkipped: true };
         }
       }
@@ -328,10 +450,23 @@ export class PostgresRepository {
         let paramIdx = 1;
 
         for (const r of chunk) {
-          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12})`);
+          const tenantId = r.tenantId || r.customerId || r.userId || 'usr_admin';
+          const customerId = r.customerId || r.tenantId || r.userId || 'usr_admin';
+          const userId = r.userId || customerId || tenantId || 'usr_admin';
+          const rBootId = r.bootId || bootId;
+          const rIdempotencyKey = r.idempotencyKey || (
+            r.deviceId && r.sequence !== undefined && r.sequence !== null
+              ? `${r.deviceId}:${rBootId}:${r.sequence}`
+              : null
+          );
+
+          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
           params.push(
             r.id,
             packetId,
+            tenantId,
+            customerId,
+            userId,
             r.deviceId,
             r.deviceName || r.deviceId,
             r.metric,
@@ -339,17 +474,19 @@ export class PostgresRepository {
             r.unit || '',
             r.status || 'normal',
             r.sequence ?? null,
+            rBootId,
+            rIdempotencyKey,
             r.source || (isSimulation ? 'simulator' : 'physical'),
             r.environment || (isSimulation ? 'sandbox' : 'production'),
             r.simulationRunId || null,
             r.timestamp || new Date().toISOString()
           );
-          paramIdx += 13;
+          paramIdx += 18;
         }
 
         const sql = `
           INSERT INTO ${targetTable} (
-            id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at
+            id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
           ) VALUES ${valueTuples.join(', ')}
           ON CONFLICT DO NOTHING;
         `;
@@ -1044,6 +1181,9 @@ export class PostgresRepository {
           telemetry.push({
             id: r.id,
             packetId: r.packet_id || undefined,
+            tenantId: r.tenant_id || r.customer_id || r.user_id || 'usr_admin',
+            customerId: r.customer_id || r.tenant_id || r.user_id || 'usr_admin',
+            userId: r.user_id || r.customer_id || r.tenant_id || 'usr_admin',
             deviceId: r.device_id,
             deviceName: r.device_name,
             metric: r.metric,

@@ -25,7 +25,9 @@ export class PhysicalTelemetryService {
     metricsToProcess: ParsedMetric[],
     finalFormattedPacket: string,
     devInfoUpdated = false,
-    sequence?: number
+    sequence?: number,
+    bootId?: string,
+    idempotencyKey?: string
   ): Promise<PhysicalTelemetryResult> {
     // 1. Strict Physical Validation: Never process simulated devices via physical telemetry service!
     if (device.isSimulated) {
@@ -41,7 +43,14 @@ export class PhysicalTelemetryService {
       }
     }
 
-    // 2. Prepare Production Telemetry Readings with strict source/environment metadata
+    const effectiveBootId = bootId || 'default';
+    const computedIdempotencyKey = idempotencyKey || (
+      device.id && sequence !== undefined && sequence !== null
+        ? `${device.id}:${effectiveBootId}:${sequence}`
+        : undefined
+    );
+
+    // 2. Prepare Production Telemetry Readings with strict source/environment metadata and idempotency key
     const readingsToInsert = metricsToProcess.map((m) => ({
       deviceId: device.id,
       deviceName: device.name,
@@ -51,6 +60,8 @@ export class PhysicalTelemetryService {
       status: 'normal' as const,
       rawPayload: finalFormattedPacket,
       sequence: sequence,
+      bootId: effectiveBootId,
+      idempotencyKey: computedIdempotencyKey,
       source: 'physical' as const,
       environment: 'production' as const,
     }));

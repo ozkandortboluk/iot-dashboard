@@ -229,7 +229,9 @@ export class PhysicalTelemetryController {
       parsedPayload.metricsToProcess,
       parsedPayload.finalFormattedPacket,
       authResult.devInfoUpdated,
-      parsedPayload.sequence
+      parsedPayload.sequence,
+      parsedPayload.bootId,
+      parsedPayload.idempotencyKey
     );
 
     // 7. Retrieve & Deliver Pending Commands for Physical Device
@@ -238,6 +240,8 @@ export class PhysicalTelemetryController {
     // 8. Build Standardized Packet ACK
     const packetAck = buildPacketAck({
       sequence: parsedPayload.sequence,
+      bootId: parsedPayload.bootId,
+      idempotencyKey: parsedPayload.idempotencyKey,
       receivedCount: parsedPayload.metricsToProcess.length,
       addedReadingsCount: addedReadings.length,
       writeAck,

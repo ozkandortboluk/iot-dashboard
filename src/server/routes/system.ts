@@ -22,6 +22,79 @@ const startTime = Date.now();
 // System Router
 const systemRouter = Router();
 
+// Health Check Endpoints: Liveness (/health/live) & Readiness (/health/ready)
+systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
+  res.status(200).json({
+    status: 'alive',
+    live: true,
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
+  const isDbReady = !!db.postgresRepo?.isReady();
+  const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
+
+  if (isDbReady) {
+    return res.status(200).json({
+      status: 'ready',
+      ready: true,
+      database: {
+        status: 'connected',
+        engine: 'PostgreSQL / TimescaleDB',
+        ready: true,
+      },
+      retryQueue: {
+        pendingPacketCount: retryStats?.pendingPacketCount || 0,
+        pendingReadingCount: retryStats?.pendingReadingCount || 0,
+      },
+      uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  return res.status(503).json({
+    status: 'not_ready',
+    ready: false,
+    database: {
+      status: 'disconnected',
+      engine: 'PostgreSQL',
+      ready: false,
+      error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya bağlantı hazır değil.',
+    },
+    retryQueue: {
+      pendingPacketCount: retryStats?.pendingPacketCount || 0,
+      pendingReadingCount: retryStats?.pendingReadingCount || 0,
+      durable: true,
+    },
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+systemRouter.get('/health', (req, res) => {
+  const isDbReady = !!db.postgresRepo?.isReady();
+  const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
+
+  const statusCode = isDbReady ? 200 : 503;
+  return res.status(statusCode).json({
+    status: isDbReady ? 'healthy' : 'degraded',
+    live: true,
+    ready: isDbReady,
+    database: {
+      ready: isDbReady,
+      engine: isDbReady ? 'PostgreSQL / TimescaleDB' : 'PostgreSQL (Connecting/Retry WAL)',
+    },
+    retryQueue: {
+      pendingPacketCount: retryStats?.pendingPacketCount || 0,
+      pendingReadingCount: retryStats?.pendingReadingCount || 0,
+    },
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // OpenAPI & API Documentation (Public)
 systemRouter.get('/openapi.json', (req, res) => {
   const openApiPath = path.join(process.cwd(), 'openapi.json');

@@ -9,16 +9,21 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - OTA_SIGNING_KEY_ID=root_ed25519_v1
+      - OTA_SIGNING_PRIVATE_KEY_PATH=/run/secrets/ota_signing_key
+    secrets:
+      - ota_signing_key
     volumes:
       - firmware_data:/app/uploads/firmware
-      - keys_data:/app/uploads/keys
       - app_data:/app/data
     restart: always
 
+secrets:
+  ota_signing_key:
+    file: ./secrets/ota_signing_key.pem
+
 volumes:
   firmware_data:
-    driver: local
-  keys_data:
     driver: local
   app_data:
     driver: local

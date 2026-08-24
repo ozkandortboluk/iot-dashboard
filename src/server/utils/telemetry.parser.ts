@@ -12,6 +12,8 @@ export interface ParsedTelemetryPayload {
   deviceIdFromPayload?: string;
   deviceNameFromPayload: string;
   sequence?: number;
+  bootId?: string;
+  idempotencyKey?: string;
   rawBodyText: string;
   metricsToProcess: ParsedMetric[];
   clientIp: string;
@@ -22,6 +24,9 @@ export interface ParsedTelemetryPayload {
 export interface PacketAck {
   status: 'accepted' | 'duplicate_skipped' | 'queued' | 'failed';
   packetId: string;
+  idempotencyKey?: string;
+  sequence?: number;
+  bootId?: string;
   received: number;
   persisted: number;
   queued: number;
@@ -32,6 +37,8 @@ export interface PacketAck {
 
 export function buildPacketAck(params: {
   sequence?: number;
+  bootId?: string;
+  idempotencyKey?: string;
   receivedCount: number;
   addedReadingsCount: number;
   writeAck: {
@@ -44,12 +51,19 @@ export function buildPacketAck(params: {
   deviceId?: string;
   error?: string;
 }): PacketAck {
-  const { sequence, receivedCount, addedReadingsCount, writeAck, deviceId, error } = params;
+  const { sequence, bootId, idempotencyKey, receivedCount, addedReadingsCount, writeAck, deviceId, error } = params;
+
+  const effectiveBootId = bootId || 'default';
+  const computedIdempotencyKey = idempotencyKey || (
+    sequence !== undefined && sequence !== null && deviceId
+      ? `${deviceId}:${effectiveBootId}:${sequence}`
+      : undefined
+  );
 
   const devPrefix = deviceId ? `${deviceId}:` : '';
   const packetId =
     sequence !== undefined && sequence !== null
-      ? `${devPrefix}${sequence}`
+      ? `${devPrefix}${effectiveBootId}:${sequence}`
       : `${devPrefix}pkt_${Date.now()}`;
 
   let status: 'accepted' | 'duplicate_skipped' | 'queued' | 'failed' = 'accepted';
@@ -67,6 +81,9 @@ export function buildPacketAck(params: {
   return {
     status,
     packetId,
+    idempotencyKey: computedIdempotencyKey,
+    sequence,
+    bootId: effectiveBootId,
     received: receivedCount,
     persisted: writeAck.persisted ? writeAck.persistedCount : 0,
     queued: writeAck.queuedForRetryCount || 0,
@@ -167,7 +184,7 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     ''
   ).toString().trim();
 
-  // Extract Sequence Number
+  // Extract Sequence Number & Boot ID
   let sequence: number | undefined = undefined;
   const rawSeq =
     bodyObj.sequence ??
@@ -183,6 +200,29 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
       sequence = parsedSeq;
     }
   }
+
+  // Extract Boot ID / Reset Counter (Default: 'default')
+  const rawBootId =
+    bodyObj.bootId ??
+    bodyObj.boot_id ??
+    bodyObj.bootCount ??
+    bodyObj.resetCount ??
+    bodyObj.boot_count ??
+    bodyObj.reset_count ??
+    reqHeaders['x-boot-id'] ??
+    reqHeaders['x-boot-count'] ??
+    reqHeaders['x-reset-count'] ??
+    req?.query?.bootId ??
+    req?.query?.boot_id;
+
+  const bootId = rawBootId !== undefined && rawBootId !== null && String(rawBootId).trim() !== ''
+    ? String(rawBootId).trim()
+    : 'default';
+
+  const idempotencyKey =
+    sequence !== undefined && sequence !== null
+      ? `${deviceIdFromPayload || 'device'}:${bootId}:${sequence}`
+      : undefined;
 
   const metricsToProcess: ParsedMetric[] = [];
 
@@ -277,7 +317,8 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
   if (metricsToProcess.length === 0 && typeof bodyObj === 'object' && Object.keys(bodyObj).length > 0) {
     const ignoredKeys = new Set([
       'deviceid', 'device_id', 'devicename', 'device_name', 'id', 'name',
-      'sequence', 'seq', 'packetid', 'packet_id',
+      'sequence', 'seq', 'packetid', 'packet_id', 'bootid', 'boot_id', 'bootcount', 'resetcount', 'boot_count', 'reset_count',
+      'idempotencykey', 'idempotency_key',
       'apikey', 'api_key', 'token', 'mac', 'macaddress', 'mac_address',
       'ip', 'ipaddress', 'ip_address', 'timestamp', 'time', 'date'
     ]);
@@ -361,6 +402,8 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     deviceIdFromPayload,
     deviceNameFromPayload,
     sequence,
+    bootId,
+    idempotencyKey,
     rawBodyText: rawBodyText || (typeof reqBody === 'string' ? reqBody : JSON.stringify(bodyObj)),
     metricsToProcess,
     clientIp,
@@ -432,6 +475,29 @@ export function parseLegacyTelemetryPayload(req: any): ParsedTelemetryPayload {
       sequence = parsedSeq;
     }
   }
+
+  // Extract Boot ID / Reset Counter (Default: 'default')
+  const rawBootId =
+    bodyObj.bootId ??
+    bodyObj.boot_id ??
+    bodyObj.bootCount ??
+    bodyObj.resetCount ??
+    firstArrayItem.bootId ??
+    firstArrayItem.boot_id ??
+    reqHeaders['x-boot-id'] ??
+    reqHeaders['x-boot-count'] ??
+    reqHeaders['x-reset-count'] ??
+    req?.query?.bootId ??
+    req?.query?.boot_id;
+
+  const bootId = rawBootId !== undefined && rawBootId !== null && String(rawBootId).trim() !== ''
+    ? String(rawBootId).trim()
+    : 'default';
+
+  const idempotencyKey =
+    sequence !== undefined && sequence !== null
+      ? `${bodyObj.deviceId || bodyObj.device_id || firstArrayItem.deviceId || firstArrayItem.id || 'device'}:${bootId}:${sequence}`
+      : undefined;
 
   const metricsToProcess: ParsedMetric[] = [];
 
@@ -521,6 +587,8 @@ export function parseLegacyTelemetryPayload(req: any): ParsedTelemetryPayload {
     token,
     deviceNameFromPayload,
     sequence,
+    bootId,
+    idempotencyKey,
     rawBodyText,
     metricsToProcess,
     clientIp,

@@ -48,19 +48,29 @@ export const devices = pgTable('devices', {
 export const telemetryReadings = pgTable(
   'telemetry_readings',
   {
-    id: varchar('id', { length: 64 }).notNull(),
-    deviceId: varchar('device_id', { length: 64 })
-      .references(() => devices.id, { onDelete: 'cascade' })
-      .notNull(),
+    id: varchar('id', { length: 128 }).notNull(),
+    packetId: varchar('packet_id', { length: 128 }),
+    tenantId: varchar('tenant_id', { length: 64 }).default('usr_admin'),
+    customerId: varchar('customer_id', { length: 64 }).default('usr_admin'),
+    userId: varchar('user_id', { length: 64 }).default('usr_admin'),
+    deviceId: varchar('device_id', { length: 64 }).notNull(),
     deviceName: varchar('device_name', { length: 128 }).notNull(),
     metric: varchar('metric', { length: 64 }).notNull(),
     metricValue: doublePrecision('metric_value').notNull(),
     unit: varchar('unit', { length: 16 }).notNull(),
     statusLevel: varchar('status_level', { length: 32 }).default('normal'),
+    sequence: integer('sequence'),
+    source: varchar('source', { length: 32 }).default('physical'),
+    environment: varchar('environment', { length: 32 }).default('production'),
+    simulationRunId: varchar('simulation_run_id', { length: 128 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.id, table.createdAt] }),
+    tenantDeviceTimeIdx: index('idx_telemetry_tenant_device_time').on(table.tenantId, table.deviceId, table.createdAt),
+    customerDeviceTimeIdx: index('idx_telemetry_customer_device_time').on(table.customerId, table.deviceId, table.createdAt),
+    tenantTimeIdx: index('idx_telemetry_tenant_time').on(table.tenantId, table.createdAt),
+    customerTimeIdx: index('idx_telemetry_customer_time').on(table.customerId, table.createdAt),
     deviceTimeIdx: index('idx_telemetry_device_time').on(table.deviceId, table.createdAt),
     metricTimeIdx: index('idx_telemetry_metric_time').on(table.metric, table.createdAt),
     createdTimeIdx: index('idx_telemetry_created_at').on(table.createdAt),

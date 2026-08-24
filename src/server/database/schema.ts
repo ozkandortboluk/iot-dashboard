@@ -82,7 +82,10 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(de
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
+    customer_id VARCHAR(64) DEFAULT 'usr_admin',
+    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
     metric_value DOUBLE PRECISION NOT NULL,
@@ -96,9 +99,12 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     PRIMARY KEY (id, created_at)
 );
 
--- Ensure packet_id, sequence, source, environment and simulation_run_id columns exist on telemetry_readings
+-- Ensure tenant_id, customer_id, user_id, packet_id, sequence, source, environment and simulation_run_id columns exist on telemetry_readings
 DO $$
 BEGIN
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';
@@ -127,6 +133,25 @@ EXCEPTION
         RAISE NOTICE 'telemetry_readings primary key setup notice: %', SQLERRM;
 END $$;
 
+-- Backfill tenant_id and customer_id from devices table if available
+DO $$
+BEGIN
+    UPDATE telemetry_readings t
+    SET tenant_id = COALESCE(d.user_id, 'usr_admin'),
+        customer_id = COALESCE(d.user_id, 'usr_admin'),
+        user_id = COALESCE(d.user_id, 'usr_admin')
+    FROM devices d
+    WHERE t.device_id = d.id AND (t.tenant_id IS NULL OR t.tenant_id = '');
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings backfill notice: %', SQLERRM;
+END $$;
+
+-- Tenant and Device Composite Indexes for High Performance Time-Series Lookups
+CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_time ON telemetry_readings(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_customer_time ON telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
@@ -154,11 +179,41 @@ BEGIN
     END IF;
 END $$;
 
+-- PostgreSQL Row Level Security (RLS) for telemetry_readings
+ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    DROP POLICY IF EXISTS rls_telemetry_readings_tenant ON telemetry_readings;
+    CREATE POLICY rls_telemetry_readings_tenant ON telemetry_readings
+        FOR ALL
+        USING (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        )
+        WITH CHECK (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        );
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings RLS policy notice: %', SQLERRM;
+END $$;
+
 -- 3c. Simulation / Virtual Sandbox Telemetry Table (Completely Isolated Hypertable)
 CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
+    customer_id VARCHAR(64) DEFAULT 'usr_admin',
+    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
     metric_value DOUBLE PRECISION NOT NULL,
@@ -174,6 +229,9 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
 
 DO $$
 BEGIN
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'simulator';
@@ -184,6 +242,24 @@ EXCEPTION
         RAISE NOTICE 'simulation_telemetry_readings columns setup notice: %', SQLERRM;
 END $$;
 
+-- Backfill simulation tenant_id
+DO $$
+BEGIN
+    UPDATE simulation_telemetry_readings s
+    SET tenant_id = COALESCE(d.user_id, 'usr_admin'),
+        customer_id = COALESCE(d.user_id, 'usr_admin'),
+        user_id = COALESCE(d.user_id, 'usr_admin')
+    FROM devices d
+    WHERE s.device_id = d.id AND (s.tenant_id IS NULL OR s.tenant_id = '');
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'simulation_telemetry_readings backfill notice: %', SQLERRM;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_time ON simulation_telemetry_readings(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_time ON simulation_telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_device_time ON simulation_telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_metric_time ON simulation_telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_time ON simulation_telemetry_readings(created_at DESC);
@@ -210,6 +286,33 @@ BEGIN
         PERFORM add_compression_policy('simulation_telemetry_readings', INTERVAL '3 days', if_not_exists => TRUE);
         PERFORM add_retention_policy('simulation_telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
     END IF;
+END $$;
+
+-- PostgreSQL Row Level Security (RLS) for simulation_telemetry_readings
+ALTER TABLE simulation_telemetry_readings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    DROP POLICY IF EXISTS rls_simulation_telemetry_tenant ON simulation_telemetry_readings;
+    CREATE POLICY rls_simulation_telemetry_tenant ON simulation_telemetry_readings
+        FOR ALL
+        USING (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        )
+        WITH CHECK (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        );
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'simulation_telemetry_readings RLS policy notice: %', SQLERRM;
 END $$;
 
 -- 4. Continuous Aggregates (Hourly & Daily Materialized Views / Standard Views Fallback - Strictly Physical Telemetry)

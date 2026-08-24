@@ -3,6 +3,7 @@
   "passwords": {},
   "devices": [
     {
+      "id": "sim_test_dev_01",
       "name": "[Sanal] Unit-Test Virtual ESP32",
       "type": "sensor",
       "location": "Lab Room A",
@@ -13,13 +14,18 @@
         "humidity",
         "pressure"
       ],
+      "userId": "usr_admin",
+      "status": "online",
+      "ipAddress": "192.168.1.100",
+      "rateLimitPerMin": 60,
+      "encryptionMethod": "none",
+      "metrics": {},
       "saveSimulatedDataToDb": false,
-      "id": "dev_1787482798947",
-      "apiKey": "nex_c457b0b7_23c3b2a4a65a48f411288116",
-      "apiKeyPrefix": "nex_c457b0b7",
-      "apiKeyHash": "70d2c0be194abfdecb9f2e9de661250b20ef040bbc2ca5393d0aab314988ba8c",
+      "apiKey": "nex_4edfeb97_e86cf905f2cb76b001470726",
+      "apiKeyPrefix": "nex_4edfeb97",
+      "apiKeyHash": "3f43c186b3453b630492360e0a7fbf38a36b4954b4ab45dd8d64157c0a92bbe8",
       "heartbeatTimeoutSeconds": 300,
-      "lastSeen": "2026-08-23T10:59:58.947Z"
+      "lastSeen": "2026-08-24T17:23:33.898Z"
     }
   ],
   "telemetry": [],
@@ -29,10 +35,11 @@
   "rules": [],
   "auditLogs": [
     {
-      "id": "log_1787482798947_dm0",
-      "timestamp": "2026-08-23T10:59:58.947Z",
+      "id": "log_1787592213898_ue0",
+      "timestamp": "2026-08-24T17:23:33.898Z",
+      "userId": "usr_admin",
       "userName": "Sistem",
-      "action": "Yeni Cihaz Eklendi: [Sanal] Unit-Test Virtual ESP32 (IP: undefined)",
+      "action": "Yeni Cihaz Eklendi: [Sanal] Unit-Test Virtual ESP32 (IP: 192.168.1.100)",
       "ip": "127.0.0.1",
       "severity": "medium"
     }

@@ -17,6 +17,8 @@ export interface MetricHistory {
 export interface TelemetryPacket {
   packetId: string;
   deviceId: string;
+  bootId?: string;
+  idempotencyKey?: string;
   timestamp: string;
   sequence?: number;
   readings: TelemetryReading[];
@@ -34,7 +36,10 @@ export class TelemetryRepository {
   private isFlushingPhysicalQueue = false;
   private isFlushingSimulationQueue = false;
   private retryWorkerTimer: NodeJS.Timeout | null = null;
+  private readonly MAX_PHYSICAL_QUEUE_SIZE = 50000;
+  private readonly PHYSICAL_QUEUE_WARN_THRESHOLD = 5000;
   private readonly MAX_SIMULATION_QUEUE_SIZE = 1000;
+  private lastQueueAlarmAt = 0;
 
   constructor(private db: any) {
     this.loadPersistentQueue();
@@ -169,15 +174,58 @@ export class TelemetryRepository {
     }
   }
 
+  // Trigger alarms when queue reaches warning or critical overflow levels
+  private triggerQueueCapacityAlarm(level: 'WARN' | 'CRITICAL', currentSize: number, deviceId?: string) {
+    const now = Date.now();
+    // Throttle alarms to at most once per 60 seconds
+    if (now - this.lastQueueAlarmAt < 60000) {
+      return;
+    }
+    this.lastQueueAlarmAt = now;
+
+    const isCritical = level === 'CRITICAL';
+    const title = isCritical
+      ? '🚨 [KRİTİK ALARM] Telemetri Retry Kuyruğu Kapasite Aşımı'
+      : '⚠️ [UYARI] Telemetri Retry Kuyruğu Doluluk Uyarısı';
+    const message = isCritical
+      ? `Fiziksel telemetri kuyruğu maksimum limitine (${this.MAX_PHYSICAL_QUEUE_SIZE} paket) ulaştı! Eski paketler veri kaybını ve bellek taşmasını önlemek amacıyla arşivleniyor. Lütfen PostgreSQL/TimescaleDB bağlantısını acilen kontrol ediniz.`
+      : `Fiziksel telemetri kuyruğu uyarı eşiğini (${this.PHYSICAL_QUEUE_WARN_THRESHOLD} paket, mevcut: ${currentSize}) aştı. Veritabanı bağlantısı gecikiyor olabilir.`;
+
+    try {
+      if (typeof this.db.addNotification === 'function') {
+        this.db.addNotification({
+          userId: 'usr_admin',
+          title,
+          message,
+          severity: isCritical ? 'critical' : 'warning',
+          deviceId: deviceId || 'system_queue',
+          deviceName: 'Sistem Telemetri Kuyruk Yöneticisi',
+          alarmState: 'TRIGGERED',
+          source: 'physical',
+          isSimulation: false,
+          environment: 'production',
+        });
+      }
+    } catch (err: any) {
+      console.warn(`[Queue Alarm Dispatch Error]: ${err?.message || err}`);
+    }
+  }
+
   // Durable Disk-backed Packet Enqueue with Strict Isolation
   private enqueuePacketToRetryQueue(readings: TelemetryReading[]) {
     if (!readings || readings.length === 0) return;
 
     const first = readings[0];
     const sequence = first.sequence;
+    const bootId = first.bootId || 'default';
+    const idempotencyKey = first.idempotencyKey || (
+      first.deviceId && sequence !== undefined && sequence !== null
+        ? `${first.deviceId}:${bootId}:${sequence}`
+        : undefined
+    );
     const packetId =
       sequence !== undefined && sequence !== null
-        ? `pkt_${first.deviceId}_seq_${sequence}`
+        ? `pkt_${first.deviceId}_boot_${bootId}_seq_${sequence}`
         : `pkt_${first.deviceId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
     // Determine target queue based on source and device type
@@ -194,6 +242,8 @@ export class TelemetryRepository {
       // Enforce simulation metadata on all readings in packet
       const sanitizedReadings = readings.map((r) => ({
         ...r,
+        bootId: r.bootId || bootId,
+        idempotencyKey: r.idempotencyKey || idempotencyKey,
         source: 'simulator' as const,
         environment: 'sandbox' as const,
       }));
@@ -201,6 +251,8 @@ export class TelemetryRepository {
       const packet: TelemetryPacket = {
         packetId,
         deviceId: first.deviceId,
+        bootId,
+        idempotencyKey,
         timestamp: first.timestamp || new Date().toISOString(),
         sequence,
         readings: sanitizedReadings,
@@ -228,6 +280,8 @@ export class TelemetryRepository {
       // Physical production pipeline: strictly enforce source='physical' and environment='production'
       const sanitizedReadings = readings.map((r) => ({
         ...r,
+        bootId: r.bootId || bootId,
+        idempotencyKey: r.idempotencyKey || idempotencyKey,
         source: 'physical' as const,
         environment: 'production' as const,
       }));
@@ -235,12 +289,22 @@ export class TelemetryRepository {
       const packet: TelemetryPacket = {
         packetId,
         deviceId: first.deviceId,
+        bootId,
+        idempotencyKey,
         timestamp: first.timestamp || new Date().toISOString(),
         sequence,
         readings: sanitizedReadings,
         attempts: 0,
         lastAttemptAt: new Date().toISOString(),
       };
+
+      // Check physical queue capacity limit & alarms
+      if (this.physicalRetryQueue.length >= this.MAX_PHYSICAL_QUEUE_SIZE) {
+        const evicted = this.physicalRetryQueue.shift(); // Protect memory from OOM
+        this.triggerQueueCapacityAlarm('CRITICAL', this.physicalRetryQueue.length, evicted?.deviceId);
+      } else if (this.physicalRetryQueue.length >= this.PHYSICAL_QUEUE_WARN_THRESHOLD) {
+        this.triggerQueueCapacityAlarm('WARN', this.physicalRetryQueue.length, first.deviceId);
+      }
 
       this.physicalRetryQueue.push(packet);
 
@@ -630,14 +694,30 @@ export class TelemetryRepository {
     const isDevSim = devLookup?.isSimulated || false;
 
     const fullReadings: TelemetryReading[] = readings.map((r, i) => {
+      const dev = devLookup || (this.db.data.devices || []).find((d: Device) => d.id === r.deviceId);
+      const tenantId = r.tenantId || r.customerId || r.userId || dev?.userId || 'usr_admin';
+      const customerId = r.customerId || r.tenantId || r.userId || dev?.userId || 'usr_admin';
+      const userId = r.userId || customerId || tenantId || dev?.userId || 'usr_admin';
+      const bootId = r.bootId || 'default';
+      const idempotencyKey = r.idempotencyKey || (
+        r.deviceId && r.sequence !== undefined && r.sequence !== null
+          ? `${r.deviceId}:${bootId}:${r.sequence}`
+          : undefined
+      );
+
       const id =
         r.sequence !== undefined && r.sequence !== null
-          ? `tel_${r.deviceId}_seq_${r.sequence}_${r.metric}`
+          ? `tel_${r.deviceId}_boot_${bootId}_seq_${r.sequence}_${r.metric}`
           : `tel_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
 
       return {
         ...r,
         id,
+        tenantId,
+        customerId,
+        userId,
+        bootId,
+        idempotencyKey,
         timestamp,
         source: r.source || (isDevSim ? 'simulator' : 'physical'),
         environment: r.environment || (isDevSim ? 'sandbox' : 'production'),
@@ -675,21 +755,22 @@ export class TelemetryRepository {
         errorMsg = err?.message || 'PostgreSQL Transaction Batch INSERT hatası';
         console.warn(`[Telemetry Transaction Failure] ${errorMsg}. ${fullReadings.length} metrik paketi birlikte tekrar sırasına eklendi.`);
         this.enqueuePacketToRetryQueue(fullReadings);
-        engine = 'PostgreSQL (Paket Sırada / Otomatik Tekrar Denenecek)';
+        engine = 'PostgreSQL WAL Retry Queue (Paket Sırada / Otomatik Tekrar Denenecek)';
         persisted = false;
         queuedForRetry = true;
       }
     } else if (isSimulated && !saveSimulatedDataToDb) {
       persisted = true;
       engine = 'RAM / Sanal Filtre (Veritabanına Yazılmıyor)';
-    } else if (activeEngine === 'postgres' || activeEngine === 'timescaledb') {
+    } else if (!isSimulated || activeEngine === 'postgres' || activeEngine === 'timescaledb') {
+      // Production physical telemetry is strictly queued to durable WAL when DB is not ready
       this.enqueuePacketToRetryQueue(fullReadings);
-      engine = 'RAM Buffer (PostgreSQL Bağlantısı Bekleniyor)';
+      engine = 'PostgreSQL WAL Retry Queue (PostgreSQL Bağlantısı Bekleniyor)';
       persisted = false;
       queuedForRetry = true;
-      errorMsg = 'PostgreSQL sunucusuna ulaşılamadı, paketteki tüm veriler sıraya alındı';
+      errorMsg = 'PostgreSQL veritabanı hazır değil, fiziksel telemetri diske dayanıklı WAL sırasına alındı';
     } else {
-      // Standalone RAM mode
+      // Standalone RAM mode for ephemeral simulator items
       persisted = true;
       engine = 'RAM / Local Buffer';
     }
@@ -758,10 +839,16 @@ export class TelemetryRepository {
   public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isDevSim = dev?.isSimulated || false;
+    const tenantId = reading.tenantId || reading.customerId || reading.userId || dev?.userId || 'usr_admin';
+    const customerId = reading.customerId || reading.tenantId || reading.userId || dev?.userId || 'usr_admin';
+    const userId = reading.userId || customerId || tenantId || dev?.userId || 'usr_admin';
 
     const fullReading: TelemetryReading = {
       ...reading,
       id: `tel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      tenantId,
+      customerId,
+      userId,
       timestamp: new Date().toISOString(),
       source: reading.source || (isDevSim ? 'simulator' : 'physical'),
       environment: reading.environment || (isDevSim ? 'sandbox' : 'production'),
@@ -1040,11 +1127,15 @@ export class TelemetryRepository {
             const deltaMs = fromDate && !isNaN(fromDate.getTime()) ? (toDate.getTime() - fromDate.getTime()) : 0;
             const deltaHours = deltaMs > 0 ? deltaMs / (1000 * 60 * 60) : 0;
 
+            const effectiveUser = requestingUserId || 'usr_admin';
+            const isAdmin = effectiveUser === 'usr_admin';
+            const effectiveTenant = targetCustomerId || (!isAdmin ? effectiveUser : null);
+
             const queryDevObj = queryDev ? (this.db.data.devices || []).find((d: Device) => d.id === queryDev) : null;
             const isSimulatedQuery = queryDevObj ? queryDevObj.isSimulated : false;
             const rawTable = queryDev
               ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
-              : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
+              : `(SELECT id, packet_id, COALESCE(tenant_id, 'usr_admin') AS tenant_id, COALESCE(customer_id, 'usr_admin') AS customer_id, COALESCE(user_id, 'usr_admin') AS user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, COALESCE(tenant_id, 'usr_admin') AS tenant_id, COALESCE(customer_id, 'usr_admin') AS customer_id, COALESCE(user_id, 'usr_admin') AS user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
 
             // Automated Resolution Selector:
             // Range <= 2 Hours -> Raw Telemetry
@@ -1081,7 +1172,7 @@ export class TelemetryRepository {
                   ROUND(max_val::numeric, 2)::float AS "maxVal",
                   reading_count::int AS count
                 FROM telemetry_daily_summary
-                WHERE device_id = ANY($1::text[])
+                WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
                   AND ($2::text IS NULL OR device_id = $2)
                   AND ($3::text IS NULL OR metric = $3)
                   AND ($4::timestamptz IS NULL OR bucket >= $4)
@@ -1101,7 +1192,7 @@ export class TelemetryRepository {
                   ROUND(max_val::numeric, 2)::float AS "maxVal",
                   reading_count::int AS count
                 FROM telemetry_hourly_summary
-                WHERE device_id = ANY($1::text[])
+                WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
                   AND ($2::text IS NULL OR device_id = $2)
                   AND ($3::text IS NULL OR metric = $3)
                   AND ($4::timestamptz IS NULL OR bucket >= $4)
@@ -1122,7 +1213,10 @@ export class TelemetryRepository {
                   ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
                   COUNT(*)::int AS count
                 FROM ${rawTable}
-                WHERE device_id = ANY($1::text[])
+                WHERE (
+                  device_id = ANY($1::text[]) 
+                  OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                )
                   AND ($2::text IS NULL OR device_id = $2)
                   AND ($3::text IS NULL OR metric = $3)
                   AND ($4::timestamptz IS NULL OR created_at >= $4)
@@ -1137,6 +1231,9 @@ export class TelemetryRepository {
                 SELECT 
                   id,
                   packet_id AS "packetId",
+                  tenant_id AS "tenantId",
+                  customer_id AS "customerId",
+                  user_id AS "userId",
                   device_id AS "deviceId",
                   device_name AS "deviceName",
                   metric,
@@ -1149,7 +1246,10 @@ export class TelemetryRepository {
                   simulation_run_id AS "simulationRunId",
                   created_at AS timestamp
                 FROM ${rawTable}
-                WHERE device_id = ANY($1::text[])
+                WHERE (
+                  device_id = ANY($1::text[]) 
+                  OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                )
                   AND ($2::text IS NULL OR device_id = $2)
                   AND ($3::text IS NULL OR metric = $3)
                   AND ($4::timestamptz IS NULL OR created_at >= $4)
@@ -1161,7 +1261,7 @@ export class TelemetryRepository {
 
             let res;
             try {
-              res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);
+              res = await pool.query(sql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit, effectiveTenant]);
             } catch (tierErr: any) {
               const errStr = tierErr?.message || String(tierErr);
               const isConnError =
@@ -1178,8 +1278,16 @@ export class TelemetryRepository {
                 return this.getTelemetry(deviceId, metric, limit, requestingUserId, targetCustomerId);
               }
 
-              console.warn(`[Telemetry Tier Query Fallback] '${tierSource}' sorgusu başarısız (${tierErr}). Ham veriye geçiliyor.`);
-              tierSource = `${rawTable} (Raw Fallback)`;
+              // Trigger background migration if column missing
+              if (errStr.includes('column') || errStr.includes('does not exist')) {
+                this.db.postgresRepo?.ensureTelemetrySchema().catch(() => {});
+              }
+
+              // Resilient fallback query
+              const safeRawTable = queryDev
+                ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
+                : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS legacy_combined_telemetry`;
+
               const fallbackSql = `
                 SELECT 
                   id,
@@ -1195,7 +1303,7 @@ export class TelemetryRepository {
                   environment,
                   simulation_run_id AS "simulationRunId",
                   created_at AS timestamp
-                FROM ${rawTable}
+                FROM ${safeRawTable}
                 WHERE device_id = ANY($1::text[])
                   AND ($2::text IS NULL OR device_id = $2)
                   AND ($3::text IS NULL OR metric = $3)
@@ -1224,6 +1332,9 @@ export class TelemetryRepository {
               const mapped = res.rows.map((r: any) => ({
                 id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
                 packetId: r.packetId || undefined,
+                tenantId: r.tenantId || r.customerId || r.userId || 'usr_admin',
+                customerId: r.customerId || r.tenantId || r.userId || 'usr_admin',
+                userId: r.userId || r.customerId || r.tenantId || 'usr_admin',
                 deviceId: r.deviceId,
                 deviceName: r.deviceName || r.deviceId,
                 metric: r.metric,

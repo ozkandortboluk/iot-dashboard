@@ -491,6 +491,7 @@ otaRouter.all('/check', (req: Request, res: Response) => {
 
     const downloadUrl = `/api/firmwares/${targetFw.id}/download?token=${token}`;
     const keys = getEd25519KeyPair();
+    const effectiveKeyId = targetFw.keyId || keys.keyId;
 
     return res.json({
       updateAvailable: true,
@@ -498,12 +499,13 @@ otaRouter.all('/check', (req: Request, res: Response) => {
       firmwareId: targetFw.id,
       firmwareName: targetFw.name,
       version: targetFw.version,
+      keyId: effectiveKeyId,
       deviceType: targetFw.deviceType,
       roleKey: targetFw.roleKey,
       hardwareModel: targetFw.hardwareModel,
       sha256: targetFw.sha256,
       signature: targetFw.signature || '',
-      publicKeyPem: keys.publicKeyPem, // Informational only
+      publicKeyPem: keys.publicKeyPem, // Informational only: Root of Trust must be pinned on device
       binarySize: targetFw.binarySize,
       downloadUrl,
       downloadToken: token,

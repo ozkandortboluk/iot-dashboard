@@ -55,6 +55,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Global Health Check Endpoints (/health/live, /health/ready, /health)
+app.use(systemRouter);
+
 // Mount Modular API Routes
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);

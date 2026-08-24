@@ -45,7 +45,10 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
+    customer_id VARCHAR(64) DEFAULT 'usr_admin',
+    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
     metric_value DOUBLE PRECISION NOT NULL,
@@ -58,6 +61,17 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
+
+-- Ensure tenant_id, customer_id, user_id exist on telemetry_readings
+DO $$
+BEGIN
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings tenant columns setup notice: %', SQLERRM;
+END $$;
 
 -- Ensure Composite Primary Key (id, created_at) on existing telemetry_readings tables for ON CONFLICT support
 DO $$
@@ -74,10 +88,41 @@ EXCEPTION
         RAISE NOTICE 'telemetry_readings primary key setup notice: %', SQLERRM;
 END $$;
 
--- Primary composite index for time-series range lookups
+-- Primary composite indexes for multi-tenant and time-series range lookups
+CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_time ON telemetry_readings(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_customer_time ON telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
+
+-- PostgreSQL Row Level Security (RLS)
+ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    DROP POLICY IF EXISTS rls_telemetry_readings_tenant ON telemetry_readings;
+    CREATE POLICY rls_telemetry_readings_tenant ON telemetry_readings
+        FOR ALL
+        USING (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        )
+        WITH CHECK (
+            current_setting('app.is_admin', true) = 'true'
+            OR current_setting('app.current_tenant_id', true) IS NULL
+            OR current_setting('app.current_tenant_id', true) = ''
+            OR tenant_id = current_setting('app.current_tenant_id', true)
+            OR customer_id = current_setting('app.current_tenant_id', true)
+        );
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings RLS notice: %', SQLERRM;
+END $$;
 
 -- 4. Convert telemetry_readings into a TimescaleDB Hypertable
 -- Partitioned into 7-day chunks by default for optimal memory caching and IO performance

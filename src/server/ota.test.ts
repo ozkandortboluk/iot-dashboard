@@ -13,6 +13,9 @@ import {
   validateEspBinary,
   signBinaryBuffer,
   getEd25519KeyPair,
+  getTrustedPublicKeys,
+  verifyBinarySignature,
+  getPublicKeyByKeyId,
 } from './utils/ota-crypto.js';
 
 describe('OTA SemVer Version Utility Tests', () => {
@@ -49,7 +52,7 @@ describe('OTA SemVer Version Utility Tests', () => {
   });
 });
 
-describe('OTA Crypto & Token Safety Tests', () => {
+describe('OTA Crypto & Root of Trust Safety Tests', () => {
   it('should perform timing-safe token comparison (Requirement 1 & 3)', () => {
     const token = 'otatkn_1234567890abcdef';
     const tokenHash = hashDownloadToken(token);
@@ -59,7 +62,7 @@ describe('OTA Crypto & Token Safety Tests', () => {
     expect(compareTokensSafe('wrong_token', tokenHash)).toBe(false);
   });
 
-  it('should generate Ed25519 signature and verify binary (Requirement 11)', () => {
+  it('should generate Ed25519 signature and bind keyId (Root of Trust Requirement)', () => {
     const mockBinary = Buffer.concat([
       Buffer.from([0xe9, 0x02, 0x00, 0x00]), // Magic ESP header 0xE9
       crypto.randomBytes(1024),
@@ -68,18 +71,33 @@ describe('OTA Crypto & Token Safety Tests', () => {
     const validation = validateEspBinary(mockBinary);
     expect(validation.valid).toBe(true);
 
-    const { sha256, signatureHex } = signBinaryBuffer(mockBinary);
+    const { sha256, signatureHex, keyId } = signBinaryBuffer(mockBinary);
     expect(sha256).toHaveLength(64); // SHA-256 hex
     expect(signatureHex.length).toBeGreaterThan(0);
+    expect(keyId).toBeDefined();
+    const activeKeyExpected = getEd25519KeyPair().keyId;
+    expect(keyId).toBe(activeKeyExpected);
 
-    const keyPair = getEd25519KeyPair();
-    const isSignatureValid = crypto.verify(
-      null,
-      mockBinary,
-      keyPair.publicKeyPem,
-      Buffer.from(signatureHex, 'hex')
-    );
-    expect(isSignatureValid).toBe(true);
+    // Verify signature using verifyBinarySignature and keyId
+    const isVerified = verifyBinarySignature(mockBinary, signatureHex, keyId);
+    expect(isVerified).toBe(true);
+  });
+
+  it('should maintain trusted public key ring for key rotation transition periods', () => {
+    const activeKeyExpected = getEd25519KeyPair().keyId;
+    const trustedKeys = getTrustedPublicKeys();
+    expect(Array.isArray(trustedKeys)).toBe(true);
+    expect(trustedKeys.length).toBeGreaterThanOrEqual(1);
+
+    const activeKey = trustedKeys.find((k) => k.isCurrent);
+    expect(activeKey).toBeDefined();
+    expect(activeKey?.keyId).toBe(activeKeyExpected);
+    expect(activeKey?.publicKeyPem).toContain('BEGIN PUBLIC KEY');
+
+    // Lookup key by ID
+    const keyInfo = getPublicKeyByKeyId(activeKeyExpected);
+    expect(keyInfo).not.toBeNull();
+    expect(keyInfo?.keyId).toBe(activeKeyExpected);
   });
 
   it('should reject non-ESP binary headers', () => {

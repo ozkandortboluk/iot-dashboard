@@ -367,6 +367,13 @@ class LocalDatabase {
         console.warn('[PostgreSQL Schema Warning]:', schemaErr?.message || schemaErr);
       }
 
+      // 1b. Explicitly ensure telemetry schema columns & tables
+      try {
+        await this.postgresRepo.ensureTelemetrySchema();
+      } catch (tErr: any) {
+        console.warn('[PostgreSQL Telemetry Schema Setup Warning]:', tErr?.message || tErr);
+      }
+
       // 2. Hydrate from PostgreSQL into in-memory store
       try {
         const hydrated = await this.postgresRepo.hydrateFromPostgres();
@@ -894,6 +901,7 @@ class LocalDatabase {
   public async addTelemetryBatchAsync(readings: Omit<TelemetryReading, 'id' | 'timestamp'>[]): Promise<any> { return this.telemetryRepository.addTelemetryBatchAsync(readings); }
   public async flushTelemetryRetryQueue(): Promise<any> { return this.telemetryRepository.flushRetryQueue(); }
   public getTelemetryRetryQueueStats(): any { return this.telemetryRepository.getRetryQueueStats(); }
+  public getRetryQueueStats(): any { return this.telemetryRepository.getRetryQueueStats(); }
   public getTelemetryStats(): any { return this.telemetryRepository.getTelemetryStats(); }
   public getHistory(deviceId: string, metric: string): any { return this.telemetryRepository.getHistory(deviceId, metric); }
   public async getHistoryAsync(deviceId: string, metric: string): Promise<any> { return this.telemetryRepository.getHistoryAsync(deviceId, metric); }

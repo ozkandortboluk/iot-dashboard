@@ -468,6 +468,12 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
                           </span>
                         </div>
                         <div className="flex justify-between items-center pt-1 border-t border-slate-200 dark:border-slate-700">
+                          <span className="text-slate-500 dark:text-slate-400">Anahtar (Key ID):</span>
+                          <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">
+                            {fw.keyId || 'root_ed25519_v1'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
                           <span className="text-slate-500 dark:text-slate-400">SHA-256 Hash:</span>
                           <button
                             onClick={() => copyToClipboard(fw.sha256)}
