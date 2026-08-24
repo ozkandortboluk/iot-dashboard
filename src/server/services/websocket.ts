@@ -181,7 +181,7 @@ export function broadcast(event: string, payload: unknown) {
         if (!isAdmin) {
           allowedPhysical = physicalReadings.filter((r) => {
             const dev = allDevices.find((d) => d.id === r.deviceId);
-            return dev && dev.userId === clientUser.id;
+            return dev && dev.tenantId === clientUser.id;
           });
         }
 
@@ -201,7 +201,7 @@ export function broadcast(event: string, payload: unknown) {
         if (!isAdmin) {
           allowedSim = simulationReadings.filter((r) => {
             const dev = allDevices.find((d) => d.id === r.deviceId);
-            return dev && dev.userId === clientUser.id;
+            return dev && dev.tenantId === clientUser.id;
           });
         }
 
@@ -233,7 +233,7 @@ export function broadcast(event: string, payload: unknown) {
     if (event === 'device:created' || event === 'device:updated') {
       if (!isAdmin) {
         const dev = payload as Device;
-        if (!dev || dev.userId !== clientUser.id) {
+        if (!dev || dev.tenantId !== clientUser.id) {
           return;
         }
       }
@@ -245,7 +245,7 @@ export function broadcast(event: string, payload: unknown) {
       if (!isAdmin) {
         const devId = (payload as any)?.deviceId;
         const dev = allDevices.find((d) => d.id === devId);
-        if (!dev || dev.userId !== clientUser.id) {
+        if (!dev || dev.tenantId !== clientUser.id) {
           return;
         }
       }
@@ -257,7 +257,7 @@ export function broadcast(event: string, payload: unknown) {
       if (!isAdmin) {
         const deletedId = (payload as any)?.id;
         const dev = allDevices.find((d) => d.id === deletedId);
-        if (dev && dev.userId !== clientUser.id) {
+        if (dev && dev.tenantId !== clientUser.id) {
           return;
         }
       }
@@ -279,7 +279,7 @@ export function broadcast(event: string, payload: unknown) {
     if (event === 'notification:new') {
       const notif = payload as any;
       if (notif) {
-        if (isAdmin || notif.userId === clientUser.id) {
+        if (isAdmin || notif.tenantId === clientUser.id) {
           safeSend(client, JSON.stringify({ event: 'notification:new', payload: notif, timestamp: new Date().toISOString() }));
         }
       }
@@ -292,7 +292,7 @@ export function broadcast(event: string, payload: unknown) {
         const cmdList = Array.isArray(payload) ? payload : [];
         if (cmdList.length > 0) {
           const dev = allDevices.find((d) => d.id === cmdList[0].deviceId);
-          if (!dev || dev.userId !== clientUser.id) {
+          if (!dev || dev.tenantId !== clientUser.id) {
             return;
           }
         }
@@ -315,7 +315,7 @@ export function broadcast(event: string, payload: unknown) {
       const unreg = payload as any;
       if (isAdmin) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
-      } else if (unreg && unreg.userId === clientUser.id) {
+      } else if (unreg && unreg.tenantId === clientUser.id) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       }
       return;
@@ -324,8 +324,8 @@ export function broadcast(event: string, payload: unknown) {
     // 7. Dashboard Layout broadcast
     if (event === 'dashboard:layout' || event === 'dashboard:updated') {
       const dash = payload as DashboardLayout;
-      if (dash && dash.userId) {
-        if (isAdmin || dash.userId === clientUser.id) {
+      if (dash && dash.tenantId) {
+        if (isAdmin || dash.tenantId === clientUser.id) {
           safeSend(client, JSON.stringify({ event: 'dashboard:layout', payload: dash, timestamp: new Date().toISOString() }));
         }
       } else {

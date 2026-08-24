@@ -695,9 +695,9 @@ export class TelemetryRepository {
 
     const fullReadings: TelemetryReading[] = readings.map((r, i) => {
       const dev = devLookup || (this.db.data.devices || []).find((d: Device) => d.id === r.deviceId);
-      const tenantId = r.tenantId || r.customerId || r.userId || dev?.userId || 'usr_admin';
-      const customerId = r.customerId || r.tenantId || r.userId || dev?.userId || 'usr_admin';
-      const userId = r.userId || customerId || tenantId || dev?.userId || 'usr_admin';
+      const tenantId = r.tenantId || r.customerId || r.tenantId || dev?.tenantId || 'usr_admin';
+      const customerId = r.customerId || r.tenantId || r.tenantId || dev?.tenantId || 'usr_admin';
+      const userId = r.tenantId || customerId || tenantId || dev?.tenantId || 'usr_admin';
       const bootId = r.bootId || 'default';
       const idempotencyKey = r.idempotencyKey || (
         r.deviceId && r.sequence !== undefined && r.sequence !== null
@@ -839,9 +839,9 @@ export class TelemetryRepository {
   public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isDevSim = dev?.isSimulated || false;
-    const tenantId = reading.tenantId || reading.customerId || reading.userId || dev?.userId || 'usr_admin';
-    const customerId = reading.customerId || reading.tenantId || reading.userId || dev?.userId || 'usr_admin';
-    const userId = reading.userId || customerId || tenantId || dev?.userId || 'usr_admin';
+    const tenantId = reading.tenantId || reading.customerId || reading.tenantId || dev?.tenantId || 'usr_admin';
+    const customerId = reading.customerId || reading.tenantId || reading.tenantId || dev?.tenantId || 'usr_admin';
+    const userId = reading.tenantId || customerId || tenantId || dev?.tenantId || 'usr_admin';
 
     const fullReading: TelemetryReading = {
       ...reading,
@@ -1332,9 +1332,7 @@ export class TelemetryRepository {
               const mapped = res.rows.map((r: any) => ({
                 id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
                 packetId: r.packetId || undefined,
-                tenantId: r.tenantId || r.customerId || r.userId || 'usr_admin',
-                customerId: r.customerId || r.tenantId || r.userId || 'usr_admin',
-                userId: r.userId || r.customerId || r.tenantId || 'usr_admin',
+                tenantId: r.tenantId || "usr_admin",
                 deviceId: r.deviceId,
                 deviceName: r.deviceName || r.deviceId,
                 metric: r.metric,
@@ -1437,7 +1435,7 @@ export class TelemetryRepository {
       : title;
 
     this.db.addNotification({
-      userId: alarm.userId,
+      userId: alarm.tenantId,
       title: formattedTitle,
       message: msg,
       severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
@@ -1458,7 +1456,7 @@ export class TelemetryRepository {
       environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
     });
 
-    if (alarm.userId !== 'usr_admin') {
+    if (alarm.tenantId !== 'usr_admin') {
       this.db.addNotification({
         userId: 'usr_admin',
         title: isSimulated
@@ -1509,7 +1507,7 @@ export class TelemetryRepository {
       return;
     }
 
-    const user = (this.db.data.users || []).find((u: any) => u.id === alarm.userId);
+    const user = (this.db.data.users || []).find((u: any) => u.id === alarm.tenantId);
 
     for (const channel of rule.notificationChannels) {
       if (channel === 'app') continue; // In-panel feed handles app notifications
@@ -1553,8 +1551,8 @@ export class TelemetryRepository {
         const queueItem: NotificationQueueItem = {
           id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           ruleId: rule.id,
-          userId: alarm.userId,
-          userName: user?.name || alarm.userId,
+          userId: alarm.tenantId,
+          userName: user?.name || alarm.tenantId,
           channel,
           recipient,
           title,
@@ -1597,16 +1595,16 @@ export class TelemetryRepository {
         r.metricKey === reading.metric
     );
 
-    const deviceOwnerId = device ? device.userId : 'usr_admin';
+    const deviceOwnerId = device ? device.tenantId : 'usr_admin';
     const nowIso = reading.timestamp || new Date().toISOString();
     const nowMs = new Date(nowIso).getTime();
 
     for (const rule of rules) {
       // Strict Tenant Rule Evaluation Check
-      if (rule.userId && rule.userId !== 'usr_admin') {
-        if (deviceOwnerId !== rule.userId) continue;
+      if (rule.tenantId && rule.tenantId !== 'usr_admin') {
+        if (deviceOwnerId !== rule.tenantId) continue;
       }
-      if (rule.userId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
+      if (rule.tenantId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
         continue;
       }
       if (rule.deviceId !== 'all' && rule.deviceId !== reading.deviceId) {
@@ -1835,16 +1833,16 @@ export class TelemetryRepository {
         r.metricKey === reading.metric
     );
 
-    const deviceOwnerId = device ? device.userId : 'usr_admin';
+    const deviceOwnerId = device ? device.tenantId : 'usr_admin';
     const nowIso = reading.timestamp || new Date().toISOString();
     const nowMs = new Date(nowIso).getTime();
 
     for (const rule of rules) {
       // Strict Tenant Rule Check
-      if (rule.userId && rule.userId !== 'usr_admin') {
-        if (deviceOwnerId !== rule.userId) continue;
+      if (rule.tenantId && rule.tenantId !== 'usr_admin') {
+        if (deviceOwnerId !== rule.tenantId) continue;
       }
-      if (rule.userId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
+      if (rule.tenantId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') {
         continue;
       }
       if (rule.deviceId !== 'all' && rule.deviceId !== reading.deviceId) {

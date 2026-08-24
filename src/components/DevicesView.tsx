@@ -449,7 +449,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditType(dev.type);
     setEditLocation(dev.location);
     setEditIpAddress(dev.ipAddress);
-    setEditOwnerId(dev.userId);
+    setEditOwnerId(dev.tenantId);
     setEditRateLimit(dev.rateLimitPerMin || 120);
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
     setEditStatus(dev.status);
@@ -942,7 +942,7 @@ void sendHeartbeat() {
                           )}
                           <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
                             <Building2 className="w-2.5 h-2.5" />
-                            <span>{getOwnerName(dev.userId)}</span>
+                            <span>{getOwnerName(dev.tenantId)}</span>
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">

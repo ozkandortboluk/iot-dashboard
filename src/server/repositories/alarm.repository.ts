@@ -11,11 +11,11 @@ export class AlarmRepository {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     if (reqUser && reqUser.role === 'customer') {
       // Customer can ONLY see alarms that belong strictly to their account
-      return list.filter((a) => a.userId === requestingUserId);
+      return list.filter((a) => a.tenantId === requestingUserId);
     }
 
     if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return list.filter((a) => a.userId === targetCustomerId);
+      return list.filter((a) => a.tenantId === targetCustomerId);
     }
 
     return list;
@@ -27,7 +27,7 @@ export class AlarmRepository {
     if (!alarm) return;
 
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
-    if (reqUser && reqUser.role === 'customer' && alarm.userId !== userId) {
+    if (reqUser && reqUser.role === 'customer' && alarm.tenantId !== userId) {
       // Forbidden: Customer cannot manipulate other users' alarms
       return;
     }
@@ -55,7 +55,7 @@ export class AlarmRepository {
     if (!alarm) return;
 
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
-    if (reqUser && reqUser.role === 'customer' && alarm.userId !== userId) {
+    if (reqUser && reqUser.role === 'customer' && alarm.tenantId !== userId) {
       // Forbidden: Customer cannot manipulate other users' alarms
       return;
     }
@@ -77,7 +77,7 @@ export class AlarmRepository {
     if (!alarm) return;
 
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
-    if (reqUser && reqUser.role === 'customer' && alarm.userId !== userId) {
+    if (reqUser && reqUser.role === 'customer' && alarm.tenantId !== userId) {
       // Forbidden: Customer cannot manipulate other users' alarms
       return;
     }
@@ -105,11 +105,11 @@ export class AlarmRepository {
     
     if (reqUser && reqUser.role === 'customer') {
       // Customer sees ONLY their own created rules (never other customers, never admin rules)
-      return this.db.data.rules.filter((r: ThresholdRule) => r.userId === requestingUserId);
+      return this.db.data.rules.filter((r: ThresholdRule) => r.tenantId === requestingUserId);
     }
 
     if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.db.data.rules.filter((r: ThresholdRule) => r.userId === targetCustomerId);
+      return this.db.data.rules.filter((r: ThresholdRule) => r.tenantId === targetCustomerId);
     }
 
     return this.db.data.rules;
@@ -117,7 +117,7 @@ export class AlarmRepository {
 
   public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: { id: string; name: string; role: string }): ThresholdRule {
     if (!this.db.data.rules) this.db.data.rules = [];
-    let ownerId = ruleData.userId || 'usr_admin';
+    let ownerId = ruleData.tenantId || 'usr_admin';
     let ownerName = ruleData.userName || 'Sistem Yöneticisi';
 
     if (requestingUser) {
@@ -127,14 +127,14 @@ export class AlarmRepository {
         ownerName = requestingUser.name;
         // Verify customer owns the target device if deviceId is specific
         if (ruleData.deviceId && ruleData.deviceId !== 'all') {
-          const userDevices = (this.db.data.devices || []).filter((d: any) => d.userId === requestingUser.id);
+          const userDevices = (this.db.data.devices || []).filter((d: any) => d.tenantId === requestingUser.id);
           const ownsDev = userDevices.some((d: any) => d.id === ruleData.deviceId);
           if (!ownsDev) {
             ruleData.deviceId = 'all';
           }
         }
-      } else if (requestingUser.role === 'admin' && ruleData.userId) {
-        const foundUser = (this.db.data.users || []).find((u: any) => u.id === ruleData.userId);
+      } else if (requestingUser.role === 'admin' && ruleData.tenantId) {
+        const foundUser = (this.db.data.users || []).find((u: any) => u.id === ruleData.tenantId);
         if (foundUser) ownerName = foundUser.name;
       }
     }
@@ -163,13 +163,13 @@ export class AlarmRepository {
     const r = this.db.data.rules.find((item: ThresholdRule) => item.id === id);
     if (!r) return null;
 
-    if (requestingUser && requestingUser.role !== 'admin' && r.userId !== requestingUser.id) {
+    if (requestingUser && requestingUser.role !== 'admin' && r.tenantId !== requestingUser.id) {
       return null; // Forbidden: Müşteri başkasının kuralını değiştiremez
     }
 
     // If customer, do not allow changing ownership
     if (requestingUser && requestingUser.role === 'customer') {
-      delete (updates as any).userId;
+      delete (updates as any).tenantId;
       delete (updates as any).userName;
     }
 
@@ -187,7 +187,7 @@ export class AlarmRepository {
     if (idx < 0) return false;
 
     const r = this.db.data.rules[idx];
-    if (requestingUser && requestingUser.role !== 'admin' && r.userId !== requestingUser.id) {
+    if (requestingUser && requestingUser.role !== 'admin' && r.tenantId !== requestingUser.id) {
       return false; // Forbidden: Müşteri başkasının kuralını silemez
     }
 
@@ -202,7 +202,7 @@ export class AlarmRepository {
     const r = this.db.data.rules.find((item: ThresholdRule) => item.id === id);
     if (!r) return false;
 
-    if (requestingUser && requestingUser.role !== 'admin' && r.userId !== requestingUser.id) {
+    if (requestingUser && requestingUser.role !== 'admin' && r.tenantId !== requestingUser.id) {
       return false; // Forbidden: Müşteri başkasının kuralını değiştiremez
     }
 

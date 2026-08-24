@@ -403,7 +403,7 @@ export const NotificationsView: React.FC = () => {
 
   const openEditRuleModal = (rule: ThresholdRule) => {
     setEditingRule(rule);
-    setRuleUserId(rule.userId || 'usr_admin');
+    setRuleUserId(rule.tenantId || 'usr_admin');
     setRuleDeviceId(rule.deviceId);
     setRuleMetric(rule.metricKey);
     setRuleOp(rule.operator);

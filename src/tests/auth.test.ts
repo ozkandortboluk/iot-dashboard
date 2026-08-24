@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { hasPermission, canAccessTab } from '../lib/permissions';
 
 export type UserRole = 'admin' | 'operator' | 'viewer';
 
@@ -79,6 +80,76 @@ describe('Role-Based Access Control & Authorization Test Suite', () => {
       expect(canAcknowledgeAlarms(adminUser)).toBe(true);
       expect(canAcknowledgeAlarms(operatorUser)).toBe(true);
       expect(canAcknowledgeAlarms(viewerUser)).toBe(false);
+    });
+  });
+
+  describe('Centralized Permissions Matrix (src/lib/permissions.ts)', () => {
+    it('Customer creation and deletion is strictly Admin only', () => {
+      expect(hasPermission('admin', 'manage_customers')).toBe(true);
+      expect(hasPermission('operator', 'manage_customers')).toBe(false);
+      expect(hasPermission('analyst', 'manage_customers')).toBe(false);
+      expect(hasPermission('customer', 'manage_customers')).toBe(false);
+    });
+
+    it('Database management is strictly Admin only', () => {
+      expect(hasPermission('admin', 'manage_database')).toBe(true);
+      expect(hasPermission('operator', 'manage_database')).toBe(false);
+      expect(hasPermission('analyst', 'manage_database')).toBe(false);
+      expect(hasPermission('customer', 'manage_database')).toBe(false);
+    });
+
+    it('Device Assignment is Admin and limited Operator', () => {
+      expect(hasPermission('admin', 'assign_devices')).toBe(true);
+      expect(hasPermission('operator', 'assign_devices')).toBe(true);
+      expect(hasPermission('analyst', 'assign_devices')).toBe(false);
+      expect(hasPermission('customer', 'assign_devices')).toBe(false);
+    });
+
+    it('Device Control permissions check', () => {
+      expect(hasPermission('admin', 'control_devices')).toBe(true);
+      expect(hasPermission('operator', 'control_devices')).toBe(true);
+      expect(hasPermission('analyst', 'control_devices')).toBe(false);
+      expect(hasPermission('customer', 'control_devices', { isDeviceAllowed: false })).toBe(false);
+      expect(hasPermission('customer', 'control_devices', { isDeviceAllowed: true })).toBe(true);
+    });
+
+    it('Report Viewing permissions check', () => {
+      expect(hasPermission('admin', 'view_reports')).toBe(true);
+      expect(hasPermission('operator', 'view_reports')).toBe(true);
+      expect(hasPermission('analyst', 'view_reports')).toBe(true);
+      expect(hasPermission('customer', 'view_reports', { isOwner: false })).toBe(false);
+      expect(hasPermission('customer', 'view_reports', { isOwner: true })).toBe(true);
+    });
+
+    it('OTA Management permissions check', () => {
+      expect(hasPermission('admin', 'manage_ota')).toBe(true);
+      expect(hasPermission('operator', 'manage_ota')).toBe(true);
+      expect(hasPermission('analyst', 'manage_ota')).toBe(false);
+      expect(hasPermission('customer', 'manage_ota')).toBe(false);
+    });
+
+    it('Tab navigation access check for Operator, Analyst, Customer, and Admin', () => {
+      // Operator should NOT access customer management or database tabs
+      expect(canAccessTab('operator', 'customers')).toBe(false);
+      expect(canAccessTab('operator', 'database_data')).toBe(false);
+      expect(canAccessTab('operator', 'security')).toBe(false);
+      expect(canAccessTab('operator', 'deployment')).toBe(false);
+      expect(canAccessTab('operator', 'generator')).toBe(false);
+      expect(canAccessTab('operator', 'devices')).toBe(true);
+      expect(canAccessTab('operator', 'analytics')).toBe(true);
+
+      // Analyst should NOT access customer management, OTA or database tabs
+      expect(canAccessTab('analyst', 'customers')).toBe(false);
+      expect(canAccessTab('analyst', 'firmware_ota')).toBe(false);
+      expect(canAccessTab('analyst', 'database_data')).toBe(false);
+      expect(canAccessTab('analyst', 'analytics')).toBe(true);
+
+      // Admin has universal tab access
+      expect(canAccessTab('admin', 'customers')).toBe(true);
+      expect(canAccessTab('admin', 'database_data')).toBe(true);
+      expect(canAccessTab('admin', 'security')).toBe(true);
+      expect(canAccessTab('admin', 'deployment')).toBe(true);
+      expect(canAccessTab('admin', 'generator')).toBe(true);
     });
   });
 });

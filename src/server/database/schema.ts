@@ -82,9 +82,9 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(de
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) DEFAULT 'usr_admin',
-    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    tenant_id VARCHAR(64) NOT NULL,
+    customer_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -102,9 +102,9 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
 -- Ensure tenant_id, customer_id, user_id, packet_id, sequence, source, environment and simulation_run_id columns exist on telemetry_readings
 DO $$
 BEGIN
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) NOT NULL;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) NOT NULL;
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';
@@ -137,9 +137,9 @@ END $$;
 DO $$
 BEGIN
     UPDATE telemetry_readings t
-    SET tenant_id = COALESCE(d.user_id, 'usr_admin'),
-        customer_id = COALESCE(d.user_id, 'usr_admin'),
-        user_id = COALESCE(d.user_id, 'usr_admin')
+    SET tenant_id = COALESCE(d.user_id, ''),
+        customer_id = COALESCE(d.user_id, ''),
+        user_id = COALESCE(d.user_id, '')
     FROM devices d
     WHERE t.device_id = d.id AND (t.tenant_id IS NULL OR t.tenant_id = '');
 EXCEPTION
@@ -189,17 +189,17 @@ BEGIN
         FOR ALL
         USING (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         )
         WITH CHECK (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         );
 EXCEPTION
     WHEN OTHERS THEN
@@ -210,9 +210,9 @@ END $$;
 CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) DEFAULT 'usr_admin',
-    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    tenant_id VARCHAR(64) NOT NULL,
+    customer_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -229,9 +229,9 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
 
 DO $$
 BEGIN
-    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) NOT NULL;
+    ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) NOT NULL;
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
     ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'simulator';
@@ -246,9 +246,9 @@ END $$;
 DO $$
 BEGIN
     UPDATE simulation_telemetry_readings s
-    SET tenant_id = COALESCE(d.user_id, 'usr_admin'),
-        customer_id = COALESCE(d.user_id, 'usr_admin'),
-        user_id = COALESCE(d.user_id, 'usr_admin')
+    SET tenant_id = COALESCE(d.user_id, ''),
+        customer_id = COALESCE(d.user_id, ''),
+        user_id = COALESCE(d.user_id, '')
     FROM devices d
     WHERE s.device_id = d.id AND (s.tenant_id IS NULL OR s.tenant_id = '');
 EXCEPTION
@@ -298,17 +298,17 @@ BEGIN
         FOR ALL
         USING (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         )
         WITH CHECK (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         );
 EXCEPTION
     WHEN OTHERS THEN

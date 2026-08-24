@@ -34,6 +34,7 @@ import {
   Tag,
 } from 'lucide-react';
 import type { Device, DiscoveredNetworkDevice } from '../types';
+import { canAccessTab } from '../lib/permissions';
 
 export const NetworkDiscoveryView: React.FC<{
   onNavigateToDevices?: () => void;
@@ -41,6 +42,20 @@ export const NetworkDiscoveryView: React.FC<{
 }> = ({ onNavigateToDevices, onNavigateToHelp }) => {
   const { devices, latestTelemetry, createNewDevice, updateDevice, refreshDevices, customersList } = useRealtime();
   const { user } = useAuth();
+
+  if (!canAccessTab(user?.role || 'customer', 'discovery')) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+          Ağ keşfi ve yerel IP taraması yalnızca <strong>Sistem Yöneticisi (Admin)</strong> ve <strong>Operatör</strong> rollerine açıktır.
+        </p>
+      </div>
+    );
+  }
 
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [subnet, setSubnet] = useState('192.168.1.0/24');

@@ -236,6 +236,22 @@ export class PostgresRepository {
     await this.query(`DELETE FROM users WHERE id = $1;`, [userId]);
   }
 
+  public async softDeleteUser(userId: string): Promise<void> {
+    if (!this.pool) return;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE users SET status = 'suspended', deleted_at = NOW() WHERE id = $1;`, [userId]);
+      // Silme veya askıya alma durumlarında ek temizlik (örneğin oturumların temizlenmesi) eklenebilir.
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
   // ==========================================
   // DEVICES
   // ==========================================
@@ -279,7 +295,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       dev.id,
-      dev.userId || null,
+      dev.tenantId || null,
       dev.name,
       dev.deviceType || dev.type || 'sensor',
       dev.apiKey || null,
@@ -323,9 +339,9 @@ export class PostgresRepository {
     }
     const isSimulation = reading.source === 'simulator' || reading.environment === 'sandbox';
     const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
-    const tenantId = reading.tenantId || reading.customerId || reading.userId || 'usr_admin';
-    const customerId = reading.customerId || reading.tenantId || reading.userId || 'usr_admin';
-    const userId = reading.userId || customerId || tenantId || 'usr_admin';
+    const tenantId = reading.tenantId || reading.customerId || reading.tenantId || 'usr_admin';
+    const customerId = reading.customerId || reading.tenantId || reading.tenantId || 'usr_admin';
+    const userId = reading.tenantId || customerId || tenantId || 'usr_admin';
     const bootId = reading.bootId || 'default';
     const idempotencyKey = reading.idempotencyKey || (
       reading.sequence !== undefined && reading.sequence !== null && reading.deviceId
@@ -450,9 +466,9 @@ export class PostgresRepository {
         let paramIdx = 1;
 
         for (const r of chunk) {
-          const tenantId = r.tenantId || r.customerId || r.userId || 'usr_admin';
-          const customerId = r.customerId || r.tenantId || r.userId || 'usr_admin';
-          const userId = r.userId || customerId || tenantId || 'usr_admin';
+          const tenantId = r.tenantId || r.customerId || r.tenantId || 'usr_admin';
+          const customerId = r.customerId || r.tenantId || r.tenantId || 'usr_admin';
+          const userId = r.tenantId || customerId || tenantId || 'usr_admin';
           const rBootId = r.bootId || bootId;
           const rIdempotencyKey = r.idempotencyKey || (
             r.deviceId && r.sequence !== undefined && r.sequence !== null
@@ -539,7 +555,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       rule.id,
-      rule.userId || null,
+      rule.tenantId || null,
       rule.userName || null,
       rule.deviceId || 'all',
       rule.metricKey,
@@ -595,7 +611,7 @@ export class PostgresRepository {
       alarm.ruleId,
       alarm.deviceId,
       alarm.deviceName,
-      alarm.userId,
+      alarm.tenantId,
       alarm.metricKey,
       alarm.operator,
       alarm.thresholdValue,
@@ -636,7 +652,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       n.id,
-      n.userId,
+      n.tenantId,
       n.title,
       n.message,
       n.severity || 'info',
@@ -686,7 +702,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       dash.id,
-      dash.userId,
+      dash.tenantId,
       dash.title || 'Özel Dashboard',
       JSON.stringify(dash.widgets || []),
       dash.updatedAt || new Date().toISOString(),
@@ -705,7 +721,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       log.id,
-      log.userId || null,
+      log.tenantId || null,
       log.userName || null,
       log.action,
       log.ip || null,
@@ -784,7 +800,7 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       log.id,
-      log.userId || null,
+      log.tenantId || null,
       log.userName || null,
       log.channel,
       log.recipient,
@@ -1181,9 +1197,7 @@ export class PostgresRepository {
           telemetry.push({
             id: r.id,
             packetId: r.packet_id || undefined,
-            tenantId: r.tenant_id || r.customer_id || r.user_id || 'usr_admin',
-            customerId: r.customer_id || r.tenant_id || r.user_id || 'usr_admin',
-            userId: r.user_id || r.customer_id || r.tenant_id || 'usr_admin',
+            userId: r.tenant_id || r.customer_id || r.user_id || 'usr_admin',
             deviceId: r.device_id,
             deviceName: r.device_name,
             metric: r.metric,
@@ -1551,5 +1565,29 @@ export class PostgresRepository {
     }
 
     return { success: true, counts };
+  }
+
+  /**
+   * PostgreSQL RLS (Row Level Security) uyumlu, tenant bağlamında izole sorgu çalıştırır.
+   * "Fail-closed" izolasyonu sebebiyle, tenant belirtilmezse RLS politikaları hiçbir veriyi döndürmez.
+   */
+  public async queryWithTenant(tenantId: string, isAdmin: boolean, text: string, params: any[] = []): Promise<any> {
+    if (!this.pool || !this.isConnected) {
+      throw new Error('PostgreSQL veritabanı bağlantısı hazır veya aktif değil');
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SET LOCAL app.current_tenant_id = $1`, [tenantId]);
+      await client.query(`SET LOCAL app.is_admin = $1`, [isAdmin ? 'true' : 'false']);
+      const result = await client.query(text, params);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

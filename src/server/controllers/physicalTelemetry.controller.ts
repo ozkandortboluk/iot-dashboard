@@ -281,7 +281,7 @@ export class PhysicalTelemetryController {
       if (!dev) {
         return res.status(404).json({ error: 'Cihaz bulunamadı.' });
       }
-      if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+      if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
         return res
           .status(403)
           .json({ error: 'Yetkisiz erişim! Başka bir kullanıcının cihaz verisini görüntüleyemezsiniz.' });
@@ -321,7 +321,7 @@ export class PhysicalTelemetryController {
     if (!dev) {
       return res.status(404).json({ error: 'Cihaz bulunamadı.' });
     }
-    if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+    if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
       return res
         .status(403)
         .json({ error: 'Yetkisiz erişim! Başka bir kullanıcının cihaz verisini görüntüleyemezsiniz.' });

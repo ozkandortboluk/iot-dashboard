@@ -1,4 +1,38 @@
 export type Role = 'admin' | 'customer' | 'analyst' | 'operator';
+export type TenantRole = 'admin' | 'maintenance' | 'operator' | 'viewer';
+
+export interface Subscription {
+  id: string;
+  plan: 'basic' | 'professional' | 'enterprise';
+  maxDevices: number;
+  maxUsers: number;
+  status: 'active' | 'suspended' | 'cancelled';
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  contactEmail: string;
+  subscription: Subscription;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TenantMembership {
+  id: string;
+  userId: string;
+  tenantId: string;
+  role: TenantRole;
+  createdAt: string;
+}
+
+export interface Site {
+  id: string;
+  tenantId: string;
+  name: string;
+  address?: string;
+  createdAt: string;
+}
 
 export interface User {
   id: string;
@@ -10,6 +44,8 @@ export interface User {
   telegramChatId?: string;
   role: Role;
   companyName?: string;
+  status?: "active" | "suspended";
+  deletedAt?: string; // System level role
   avatarUrl?: string;
   notificationPreferences?: {
     app?: boolean;
@@ -39,7 +75,8 @@ export type OtaStatus = 'IDLE' | 'PENDING' | 'DOWNLOADING' | 'FLASHING' | 'VERIF
 
 export interface Device {
   id: string;
-  userId: string;
+  tenantId: string; // Tenant (Company) ID
+  siteId?: string; // Facility/Location ID
   name: string;
   type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway' | string;
   roleKey?: string; // Görev Kimliği (Örn: "PUMP_CTRL", "VALVE_CTRL", "METER_MAIN")
@@ -270,7 +307,7 @@ export interface WidgetConfig {
 
 export interface DashboardLayout {
   id: string;
-  userId: string;
+  tenantId: string;
   title: string;
   widgets: WidgetConfig[];
   updatedAt: string;
@@ -286,7 +323,7 @@ export interface ActiveAlarm {
   ruleId: string;
   deviceId: string;
   deviceName: string;
-  userId: string;
+  tenantId: string;
   metricKey: string;
   operator: '>' | '<' | '==';
   thresholdValue: number;
@@ -316,7 +353,7 @@ export interface ActiveAlarm {
 
 export interface NotificationItem {
   id: string;
-  userId: string;
+  tenantId: string;
   title: string;
   message: string;
   severity: NotificationSeverity;
@@ -351,7 +388,7 @@ export interface NotificationQueueItem {
   id: string;
   notificationId?: string;
   ruleId?: string;
-  userId: string;
+  tenantId: string;
   userName?: string;
   channel: NotificationChannel;
   recipient: string; // email, whatsapp number, phone, telegram chatId, webhook url
@@ -372,7 +409,7 @@ export interface DispatchLogItem {
   id: string;
   queueItemId?: string;
   notificationId?: string;
-  userId: string;
+  tenantId: string;
   userName?: string;
   channel: NotificationChannel;
   recipient: string;
@@ -447,7 +484,7 @@ export interface ThresholdRule {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  userId: string;
+  tenantId: string;
   userName: string;
   action: string;
   ip: string;

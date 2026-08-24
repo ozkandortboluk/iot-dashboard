@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import type { AuditLog } from '../types';
 import { formatDateTime } from '../lib/utils';
-import { ShieldCheck, Lock, Key, Eye, UserCheck, Activity, Terminal } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Lock, Key, Eye, UserCheck, Activity, Terminal } from 'lucide-react';
 import { apiFetch as fetch } from '../lib/apiFetch';
+import { useAuth } from '../context/AuthContext';
 
 export const SecurityView: React.FC = () => {
+  const { user } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
+    if (user?.role !== 'admin') return;
     fetch('/api/audit-logs')
       .then((res) => {
         const ct = res.headers.get('content-type');
@@ -18,7 +21,21 @@ export const SecurityView: React.FC = () => {
       })
       .then((data) => setLogs(data))
       .catch(() => {});
-  }, []);
+  }, [user?.role]);
+
+  if (user?.role !== 'admin') {
+    return (
+      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+          Güvenlik parametreleri ve sistem audit logları yalnızca <strong>Sistem Yöneticisi (Admin)</strong> rolüne açıktır.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

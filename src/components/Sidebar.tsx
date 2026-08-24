@@ -6,21 +6,18 @@ import {
   Bell,
   ShieldCheck,
   Server,
-  Activity,
-  Layers,
   Radio,
   Users,
   Wifi,
-  Map,
   HelpCircle,
   Database,
   GitBranch,
   ExternalLink,
   UserCog,
-  UploadCloud,
   HardDrive,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { getRoleBadgeInfo } from '../lib/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -30,12 +27,18 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const { user } = useAuth();
 
-  const isCustomer = user?.role === 'customer';
+  const role = user?.role || 'customer';
+  const isAdmin = role === 'admin';
+  const isOperator = role === 'operator';
+  const isAnalyst = role === 'analyst';
+  const isCustomer = role === 'customer';
+
+  const roleInfo = getRoleBadgeInfo(role);
 
   const customerMenuItems = [
     {
       id: 'dashboard',
-      label: 'Özel Dashboard\'um',
+      label: "Özel Dashboard'um",
       icon: LayoutDashboard,
       badge: 'Canlı',
     },
@@ -67,7 +70,112 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     },
   ];
 
-  const adminMenuItems = [
+  const operatorMenuGroups = [
+    {
+      section: 'SAHA & OPERASYON',
+      items: [
+        {
+          id: 'dashboard',
+          label: 'Operasyon Dashboard',
+          icon: LayoutDashboard,
+          badge: 'Canlı',
+        },
+        {
+          id: 'devices',
+          label: 'Saha Cihazları & Kontrol',
+          icon: Cpu,
+        },
+        {
+          id: 'firmware_ota',
+          label: 'Firmware & OTA Durumu',
+          icon: HardDrive,
+          badge: 'OTA',
+        },
+        {
+          id: 'network_discovery',
+          label: 'Ağdaki Cihazlar & Tarayıcı',
+          icon: Wifi,
+        },
+      ],
+    },
+    {
+      section: 'ANALİZ & DESTEK',
+      items: [
+        {
+          id: 'analytics',
+          label: 'Veri Analizi & Raporlar',
+          icon: BarChart3,
+        },
+        {
+          id: 'notifications',
+          label: 'Bildirimler & Alarmlar',
+          icon: Bell,
+        },
+        {
+          id: 'account_settings',
+          label: 'Hesap Ayarları',
+          icon: UserCog,
+        },
+        {
+          id: 'help',
+          label: 'Yardım & Bilgi Merkezi',
+          icon: HelpCircle,
+        },
+      ],
+    },
+  ];
+
+  const analystMenuGroups = [
+    {
+      section: 'VERİ & ANALİZ',
+      items: [
+        {
+          id: 'dashboard',
+          label: 'Analiz Dashboard',
+          icon: LayoutDashboard,
+          badge: 'Canlı',
+        },
+        {
+          id: 'analytics',
+          label: 'Veri Analizi & Export',
+          icon: BarChart3,
+          badge: 'Rapor',
+        },
+        {
+          id: 'devices',
+          label: 'Sensör Verileri & İzleme',
+          icon: Cpu,
+        },
+        {
+          id: 'network_discovery',
+          label: 'Ağ Keşif İzleme',
+          icon: Wifi,
+        },
+      ],
+    },
+    {
+      section: 'SİSTEM & DESTEK',
+      items: [
+        {
+          id: 'notifications',
+          label: 'Bildirimler & Alarmlar',
+          icon: Bell,
+        },
+        {
+          id: 'account_settings',
+          label: 'Hesap Ayarları',
+          icon: UserCog,
+        },
+        {
+          id: 'help',
+          label: 'Yardım & Bilgi Merkezi',
+          icon: HelpCircle,
+        },
+      ],
+    },
+  ];
+
+  const adminMenuGroups = [
     {
       section: 'MÜŞTERİ & SAHA YÖNETİMİ',
       items: [
@@ -152,24 +260,72 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     },
   ];
 
+  const getBrandAvatar = () => {
+    if (isCustomer) return { text: 'M', bg: 'bg-emerald-500 shadow-emerald-500/20' };
+    if (isOperator) return { text: 'OP', bg: 'bg-amber-500 shadow-amber-500/20' };
+    if (isAnalyst) return { text: 'AN', bg: 'bg-sky-500 shadow-sky-500/20' };
+    return { text: 'NX', bg: 'bg-indigo-600 shadow-indigo-600/20' };
+  };
+
+  const getBrandTitle = () => {
+    if (isCustomer) return user?.companyName || user?.name || 'Müşteri Portalı';
+    if (isOperator) return 'NexusNode Saha';
+    if (isAnalyst) return 'NexusNode Analytics';
+    return 'NexusNode IoT';
+  };
+
+  const avatarInfo = getBrandAvatar();
+  const brandTitle = getBrandTitle();
+
+  const renderNavGroup = (groups: typeof adminMenuGroups, activeThemeClass: string, iconActiveColor: string) => {
+    return groups.map((group, idx) => (
+      <div key={idx} className="space-y-1">
+        <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5">
+          {group.section}
+        </p>
+        {group.items.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl transition-all text-xs font-medium cursor-pointer ${
+                isActive
+                  ? activeThemeClass
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Icon className={`w-4 h-4 ${isActive ? iconActiveColor : 'text-slate-400'}`} />
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded border border-slate-500/20">
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    ));
+  };
+
   return (
     <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 min-h-screen border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors">
       {/* Brand & Logo Header */}
       <div>
         <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg text-sm ${
-            isCustomer ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-indigo-600 shadow-indigo-600/20'
-          }`}>
-            {isCustomer ? 'M' : 'NX'}
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg text-xs ${avatarInfo.bg}`}>
+            {avatarInfo.text}
           </div>
           <div className="min-w-0">
             <h1 className="font-bold text-sm text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
-              {isCustomer ? (user?.companyName || user?.name) : 'NexusNode IoT'}
+              {brandTitle}
             </h1>
-            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider mt-0.5 ${
-              isCustomer ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20'
-            }`}>
-              {isCustomer ? 'Müşteri Portalı' : 'Sistem Yönetimi'}
+            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider mt-0.5 ${roleInfo.badgeClass}`}>
+              {roleInfo.label}
             </span>
           </div>
         </div>
@@ -207,39 +363,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                 );
               })}
             </div>
+          ) : isOperator ? (
+            renderNavGroup(
+              operatorMenuGroups,
+              'bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20 font-bold shadow-sm',
+              'text-amber-600 dark:text-amber-400'
+            )
+          ) : isAnalyst ? (
+            renderNavGroup(
+              analystMenuGroups,
+              'bg-sky-50 dark:bg-sky-500/10 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-500/20 font-bold shadow-sm',
+              'text-sky-600 dark:text-sky-400'
+            )
           ) : (
-            adminMenuItems.map((group, idx) => (
-              <div key={idx} className="space-y-1">
-                <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5">
-                  {group.section}
-                </p>
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl transition-all text-xs font-medium cursor-pointer ${
-                        isActive
-                          ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 font-bold shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
-                        <span>{item.label}</span>
-                      </div>
-                      {item.badge && (
-                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded border border-indigo-500/20">
-                          {item.badge}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))
+            renderNavGroup(
+              adminMenuGroups,
+              'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/20 font-bold shadow-sm',
+              'text-indigo-600 dark:text-indigo-400'
+            )
           )}
         </nav>
       </div>

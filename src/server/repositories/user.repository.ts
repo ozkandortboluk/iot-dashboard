@@ -84,9 +84,40 @@ export class UserRepository {
       name,
       email,
       role,
-      companyName: companyName || name,
       created_at: new Date().toISOString(),
     };
+    
+    // Multi-tenant setup: If companyName is provided, create a Tenant and a Membership
+    if (companyName) {
+      if (!this.db.data.tenants) this.db.data.tenants = [];
+      if (!this.db.data.tenantMemberships) this.db.data.tenantMemberships = [];
+      
+      const tenant = {
+        id: `tnt_${Date.now()}`,
+        name: companyName,
+        contactEmail: email,
+        subscription: {
+          id: `sub_${Date.now()}`,
+          plan: 'basic' as const,
+          maxDevices: 50,
+          maxUsers: 5,
+          status: 'active' as const
+        },
+        createdAt: new Date().toISOString()
+      };
+      
+      const membership = {
+        id: `mem_${Date.now()}`,
+        userId: newUser.id,
+        tenantId: tenant.id,
+        role: 'admin' as import('../../types.js').TenantRole,
+        createdAt: new Date().toISOString()
+      };
+      
+      this.db.data.tenants.push(tenant);
+      this.db.data.tenantMemberships.push(membership);
+    }
+
     this.db.data.users.push(newUser);
     this.db.data.passwords[newUser.id] = hashPassword(pass);
     this.db.data.dashboards.push({
@@ -144,10 +175,28 @@ export class UserRepository {
     if (index !== -1) {
       const removed = this.db.data.users.splice(index, 1)[0];
       delete this.db.data.passwords[userId];
-      this.db.addAuditLog('system', 'Admin', `Müşteri Hesabı Silindi: ${removed.name} (${removed.email})`, 'high');
+      this.db.addAuditLog('system', 'Admin', `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
       this.db.saveData(this.db.data);
       this.db.postgresRepo.deleteUser(userId).catch(() => {});
     }
+  }
+
+  public async softDeleteUser(userId: string, adminId: string, adminName: string) {
+    const user = this.db.data.users.find((u: any) => u.id === userId);
+    if (!user) throw new Error("Kullanıcı bulunamadı");
+    
+    // Postgres Transaction
+    await this.db.postgresRepo.softDeleteUser(userId);
+    
+    // In-memory update
+    user.status = 'suspended';
+    user.deletedAt = new Date().toISOString();
+    
+    // Remove active sessions
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
+    
+    this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Askıya Alındı (Soft Delete): ${user.name} (${user.email})`, 'high');
+    this.db.saveData(this.db.data);
   }
 
 

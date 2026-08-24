@@ -64,6 +64,10 @@ interface DatabaseSchema {
   users: User[];
   passwords: Record<string, string>; // userId -> hash
   sessions?: UserSession[];
+  tenants?: import('../types.js').Tenant[];
+  tenantMemberships?: import('../types.js').TenantMembership[];
+  sites?: import('../types.js').Site[];
+  subscriptions?: import('../types.js').Subscription[];
   devices: Device[];
   unregisteredDevices?: DiscoveredNetworkDevice[];
   commands?: DeviceCommand[];
@@ -603,6 +607,10 @@ class LocalDatabase {
       notifications: [],
       rules: [],
       auditLogs: [],
+      tenants: [],
+      tenantMemberships: [],
+      sites: [],
+      subscriptions: [],
     };
 
     let parsed = emptyData;
@@ -621,6 +629,10 @@ class LocalDatabase {
         if (!parsed.rules) parsed.rules = [];
         if (!parsed.dashboards) parsed.dashboards = [];
         if (!parsed.auditLogs) parsed.auditLogs = [];
+        if (!parsed.tenants) parsed.tenants = [];
+        if (!parsed.tenantMemberships) parsed.tenantMemberships = [];
+        if (!parsed.sites) parsed.sites = [];
+        if (!parsed.subscriptions) parsed.subscriptions = [];
         if (!parsed.retentionPolicies) {
           parsed.retentionPolicies = {
             enabled: true,
@@ -882,10 +894,11 @@ class LocalDatabase {
   public changePassword(userId: string, oldPass: string, newPass: string): void { return this.userRepository.changePassword(userId, oldPass, newPass); }
   public updateUserRole(userId: string, newRole: User['role']): User { return this.userRepository.updateUserRole(userId, newRole); }
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
+  public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
     public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
-  public getDevices(userId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(userId, customerId); }
+  public getDevices(tenantId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(tenantId, customerId); }
   public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
-  public assignDeviceOwner(deviceId: string, targetUserId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetUserId); }
+  public assignDeviceOwner(deviceId: string, targetTenantId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
   public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }

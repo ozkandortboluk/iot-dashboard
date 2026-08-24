@@ -43,7 +43,7 @@ firmwareRouter.get('/', authenticateUser, (req: Request, res: Response) => {
 
   // Tenant Isolation: Non-admin customers only see active firmwares relevant to their devices
   if (user.role !== 'admin') {
-    const userDevices = db.getDevices().filter((d) => d.userId === user.id);
+    const userDevices = db.getDevices().filter((d) => d.tenantId === user.id);
     const userRoleKeys = new Set(userDevices.map((d) => (d.roleKey || '').toUpperCase()).filter(Boolean));
     const userDeviceTypes = new Set(userDevices.map((d) => (d.deviceType || d.type || '').toLowerCase()).filter(Boolean));
 
@@ -529,7 +529,7 @@ firmwareRouter.get('/:id/download', (req: Request, res: Response) => {
   } else if (userReq) {
     if (userReq.role !== 'admin') {
       const userOwnsTargetDevice = db.getDevices().some(
-        (d) => d.userId === userReq!.id && (d.otaTargetFirmwareId === fw.id || (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase())
+        (d) => d.tenantId === userReq!.id && (d.otaTargetFirmwareId === fw.id || (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase())
       );
       if (!userOwnsTargetDevice) {
         return res.status(403).send('Bu firmware dosyasına erişim yetkiniz bulunmamaktadır.');

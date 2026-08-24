@@ -185,6 +185,21 @@ export const DataGeneratorView: React.FC = () => {
     }
   };
 
+  // Admin Role Guard
+  if (!isAdmin) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+          Sanal cihaz yönetimi, telemetri üretimi ve veri işleme testleri yalnızca <strong>Sistem Yöneticisi (Admin)</strong> yetkisine aittir.
+        </p>
+      </div>
+    );
+  }
+
   // If no simulated devices available
   if (simulatedDevices.length === 0) {
     return (

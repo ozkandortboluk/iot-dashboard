@@ -184,10 +184,44 @@ customersRouter.post('/', authenticateUser, requireAdmin, (req, res) => {
   }
 });
 
-customersRouter.delete('/:id', authenticateUser, requireAdmin, (req, res) => {
-  db.deleteUser(req.params.id);
-  broadcast('users:updated', db.getUsers());
-  res.json({ message: 'Müşteri hesabı silindi.' });
+customersRouter.delete('/:id', authenticateUser, requireAdmin, async (req, res) => {
+  const targetUserId = req.params.id;
+  const currentUser = (req as any).user;
+
+  if (targetUserId === currentUser.id) {
+    return res.status(400).json({ error: 'Kendi hesabınızı silemezsiniz.' });
+  }
+
+  const users = db.getUsers();
+  const adminCount = users.filter((u) => u.role === 'admin' && u.status !== 'suspended').length;
+  const targetUser = users.find((u) => u.id === targetUserId);
+
+  if (!targetUser) {
+    return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  }
+
+  if (targetUser.role === 'admin' && adminCount <= 1) {
+    return res.status(400).json({ error: 'Sistemdeki son yönetici hesabını silemezsiniz.' });
+  }
+
+  // Handle dependency check query parameter
+  if (req.query.check_dependencies === 'true') {
+    const userDevices = db.getDevices().filter((d) => d.tenantId === targetUserId);
+    return res.json({
+      dependencies: {
+        devices: userDevices.length,
+      }
+    });
+  }
+
+  try {
+    await db.softDeleteUser(targetUserId, currentUser.id, currentUser.name);
+    broadcast('users:updated', db.getUsers());
+    res.json({ message: 'Müşteri hesabı başarıyla askıya alındı (Soft Delete).' });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Silme işlemi sırasında bir hata oluştu.';
+    res.status(500).json({ error: msg });
+  }
 });
 
 customersRouter.patch('/:id/role', authenticateUser, requireAdmin, (req, res) => {

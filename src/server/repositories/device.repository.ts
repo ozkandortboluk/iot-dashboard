@@ -72,14 +72,14 @@ export class DeviceRepository {
               : `${Math.round(timeoutSec / 60)} dakikadır`;
 
             this.db.addAuditLog(
-              dev.userId || 'system',
+              dev.tenantId || 'system',
               'Sistem Sinyal Takibi',
               `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) ${timeFormatted} sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
               'high'
             );
 
             this.db.addNotification({
-              userId: dev.userId || 'usr_admin',
+              userId: dev.tenantId || 'usr_admin',
               title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
               message: `${dev.name} cihazından ${timeFormatted} sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
               severity: 'critical',
@@ -107,6 +107,12 @@ export class DeviceRepository {
     return hasChanges;
   }
 
+  public getUserTenants(userId: string): string[] {
+    return (this.db.data.tenantMemberships || [])
+      .filter((m: any) => m.tenantId === userId)
+      .map((m: any) => m.tenantId);
+  }
+
   public getDevices(requestingUserId?: string, targetCustomerId?: string): Device[] {
     this.checkDeviceStatuses();
     let list: Device[] = this.db.data.devices || [];
@@ -114,19 +120,20 @@ export class DeviceRepository {
 
     if (reqUser && reqUser.role === 'admin') {
       if (targetCustomerId && targetCustomerId !== 'all') {
-        list = list.filter((d) => d.userId === targetCustomerId);
+        list = list.filter((d) => d.tenantId === targetCustomerId);
       }
     } else if (requestingUserId) {
-      list = list.filter((d) => d.userId === requestingUserId);
+      const allowedTenants = this.getUserTenants(requestingUserId);
+      list = list.filter((d) => allowedTenants.includes(d.tenantId));
     }
 
     return list;
   }
 
-  public assignDeviceOwner(deviceId: string, targetUserId: string): Device | undefined {
+  public assignDeviceOwner(deviceId: string, targetTenantId: string): Device | undefined {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (dev) {
-      dev.userId = targetUserId;
+      dev.tenantId = targetTenantId;
       this.db.saveData(this.db.data);
       this.db.postgresRepo?.saveDevice(dev).catch(() => {});
     }
@@ -179,7 +186,7 @@ export class DeviceRepository {
     if (newDevice.name) this.removeUnregisteredDevice(newDevice.name);
 
     this.db.addAuditLog(
-      deviceData.userId,
+      deviceData.tenantId,
       'Sistem',
       `Yeni Cihaz Eklendi: ${newDevice.name} (IP: ${newDevice.ipAddress})`,
       'medium'
@@ -247,7 +254,7 @@ export class DeviceRepository {
       'name',
       'type',
       'location',
-      'userId',
+      'tenantId',
       'rateLimitPerMin',
       'encryptionMethod',
       'heartbeatTimeoutSeconds',
@@ -272,7 +279,7 @@ export class DeviceRepository {
     if (updates.location !== undefined) dev.location = updates.location;
     if (updates.ipAddress !== undefined) dev.ipAddress = updates.ipAddress;
     if (updates.macAddress !== undefined) dev.macAddress = updates.macAddress;
-    if (updates.userId !== undefined) dev.userId = updates.userId;
+    if (updates.tenantId !== undefined) dev.tenantId = updates.tenantId;
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
     if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
@@ -440,10 +447,11 @@ export class DeviceRepository {
     // Filter devices based on tenant permission
     let allowedDevices = allDevices;
     if (!isAdmin) {
-      // Non-admin customers ONLY see their own devices
-      allowedDevices = allDevices.filter((d: Device) => d.userId === requestingUserId);
+      // Non-admin users ONLY see devices from their assigned tenants
+      const allowedTenants = requestingUserId ? this.getUserTenants(requestingUserId) : [];
+      allowedDevices = allDevices.filter((d: Device) => allowedTenants.includes(d.tenantId));
     } else if (targetCustomerId && targetCustomerId !== 'all') {
-      allowedDevices = allDevices.filter((d: Device) => d.userId === targetCustomerId);
+      allowedDevices = allDevices.filter((d: Device) => d.tenantId === targetCustomerId);
     }
 
     const registeredDiscovered: DiscoveredNetworkDevice[] = allowedDevices.map((d: Device) => {
@@ -460,7 +468,7 @@ export class DeviceRepository {
         lastPacket: metricsText,
         registeredDeviceId: d.id,
         lastSeen: d.lastSeen,
-        userId: d.userId,
+        userId: d.tenantId,
       };
     });
 
@@ -489,8 +497,9 @@ export class DeviceRepository {
         if (macClean && registeredMacs.has(macClean)) return false;
 
         if (!isAdmin) {
-          // If non-admin, only show unregistered devices explicitly tagged with userId or on same subnet
-          if (d.userId && d.userId === requestingUserId) return true;
+          // If non-admin, only show unregistered devices explicitly tagged with tenantId or on same subnet
+          const allowedTenants = requestingUserId ? this.getUserTenants(requestingUserId) : [];
+          if (d.tenantId && allowedTenants.includes(d.tenantId)) return true;
           const userSubnets = Array.from(registeredIps).map((ip) => ip.split('.').slice(0, 3).join('.')).filter(Boolean);
           if (ipClean && userSubnets.some((sub) => ipClean.startsWith(sub))) return true;
           return false;

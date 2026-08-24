@@ -45,9 +45,9 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
-    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) DEFAULT 'usr_admin',
-    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    tenant_id VARCHAR(64) NOT NULL,
+    customer_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -65,9 +65,9 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
 -- Ensure tenant_id, customer_id, user_id exist on telemetry_readings
 DO $$
 BEGIN
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) NOT NULL;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) NOT NULL;
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'telemetry_readings tenant columns setup notice: %', SQLERRM;
@@ -107,17 +107,17 @@ BEGIN
         FOR ALL
         USING (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         )
         WITH CHECK (
             current_setting('app.is_admin', true) = 'true'
-            OR current_setting('app.current_tenant_id', true) IS NULL
-            OR current_setting('app.current_tenant_id', true) = ''
+            
+            
             OR tenant_id = current_setting('app.current_tenant_id', true)
-            OR customer_id = current_setting('app.current_tenant_id', true)
+            
         );
 EXCEPTION
     WHEN OTHERS THEN

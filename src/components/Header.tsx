@@ -28,6 +28,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
 import { formatShortTime } from '../lib/utils';
+import { getRoleBadgeInfo } from '../lib/permissions';
 
 interface HeaderProps {
   activeTab: string;
@@ -331,7 +332,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <div className="text-right hidden 2xl:block">
                 <p className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 leading-tight">{user?.name}</p>
-                <p className="text-[10px] text-slate-500 leading-tight">{user?.role === 'admin' ? 'Yönetici' : user?.role}</p>
+                <p className="text-[10px] text-slate-500 leading-tight">{getRoleBadgeInfo(user?.role || 'customer').label}</p>
               </div>
               <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 border border-indigo-400/30 flex items-center justify-center font-bold text-white shadow-md text-xs shrink-0">
                 {user?.name.split(' ').map(n=>n[0]).join('') || 'DC'}
@@ -343,8 +344,8 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800">
                   <p className="font-semibold text-slate-900 dark:text-slate-200">{user?.name}</p>
                   <p className="text-slate-500 dark:text-slate-400 text-[11px] truncate">{user?.email}</p>
-                  <span className="mt-1 inline-block px-2 py-0.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded text-[10px] font-semibold uppercase border border-indigo-200 dark:border-indigo-500/20">
-                    {user?.role}
+                  <span className={`mt-1 inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${getRoleBadgeInfo(user?.role || 'customer').badgeClass}`}>
+                    {getRoleBadgeInfo(user?.role || 'customer').label}
                   </span>
                 </div>
 

@@ -14,7 +14,7 @@ router.all('/ping', (req, res) => telemetryController.ping(req, res));
 router.get('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const userId = req.query.userId as string | undefined;
+  const userId = req.query.tenantId as string | undefined;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
   if (currentUser.role === 'admin') {
@@ -83,10 +83,10 @@ router.put('/:id', authenticateUser, (req, res) => {
   }
 
   if (currentUser.role !== 'admin') {
-    if (existingDev.userId !== currentUser.id) {
+    if (existingDev.tenantId !== currentUser.id) {
       return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınızı düzenleyebilirsiniz.' });
     }
-    delete req.body.userId;
+    delete req.body.tenantId;
     delete req.body.isSimulated;
     delete req.body.saveSimulatedDataToDb;
     delete req.body.simulatedMetrics;
@@ -148,7 +148,7 @@ router.post('/:id/regen-key', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızın API anahtarını yenileyebilirsiniz.' });
   }
 
@@ -172,7 +172,7 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim!' });
   }
 
@@ -197,7 +197,7 @@ router.post('/:id/control', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && device.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && device.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınıza kontrol komutu gönderebilirsiniz.' });
   }
 
@@ -264,7 +264,7 @@ router.delete('/:id', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızı silebilirsiniz.' });
   }
 
@@ -303,7 +303,7 @@ deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, 
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihaza komut gönderme yetkiniz yok.' });
   }
 
@@ -331,7 +331,7 @@ deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, (req, 
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && dev.userId !== currentUser.id) {
+  if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
     return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihazın komutlarını görüntüleyemezsiniz.' });
   }
 

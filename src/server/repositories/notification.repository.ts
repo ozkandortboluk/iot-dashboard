@@ -9,10 +9,10 @@ export class NotificationRepository {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     if (reqUser && reqUser.role === 'customer') {
       // Customer ONLY sees notifications addressed specifically to their account
-      return this.db.data.notifications.filter((n: any) => n.userId === requestingUserId);
+      return this.db.data.notifications.filter((n: any) => n.tenantId === requestingUserId);
     }
     if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.db.data.notifications.filter((n: any) => n.userId === targetCustomerId);
+      return this.db.data.notifications.filter((n: any) => n.tenantId === targetCustomerId);
     }
     return this.db.data.notifications;
   }
@@ -47,7 +47,7 @@ export class NotificationRepository {
     const notif = this.db.data.notifications.find((n: any) => n.id === id);
     if (notif) {
       const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
-      if (reqUser && reqUser.role === 'customer' && notif.userId !== userId) {
+      if (reqUser && reqUser.role === 'customer' && notif.tenantId !== userId) {
         return; // Forbidden: Customer cannot mark another user's notification
       }
 
@@ -62,7 +62,7 @@ export class NotificationRepository {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     let updated = false;
     this.db.data.notifications.forEach((n: any) => {
-      if (!n.read && (userId === 'usr_admin' || n.userId === userId)) {
+      if (!n.read && (userId === 'usr_admin' || n.tenantId === userId)) {
         n.read = true;
         updated = true;
       }
@@ -76,7 +76,7 @@ export class NotificationRepository {
 
   public getDashboard(userId: string): DashboardLayout {
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    const userDash = this.db.data.dashboards.find((d: any) => d.userId === userId);
+    const userDash = this.db.data.dashboards.find((d: any) => d.tenantId === userId);
     if (userDash) return userDash;
 
     const user = (this.db.data.users || []).find((u: any) => u.id === userId);
@@ -97,7 +97,7 @@ export class NotificationRepository {
 
   public saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): DashboardLayout {
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    let userDash = this.db.data.dashboards.find((d: any) => d.userId === userId);
+    let userDash = this.db.data.dashboards.find((d: any) => d.tenantId === userId);
     if (!userDash) {
       userDash = this.getDashboard(userId);
     }

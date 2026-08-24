@@ -13,6 +13,8 @@ export const users = pgTable('users', {
   passwordHash: varchar('password_hash', { length: 256 }).notNull(),
   role: varchar('role', { length: 32 }).default('operator').notNull(),
   companyName: varchar('company_name', { length: 128 }),
+  status: varchar('status', { length: 32 }).default('active').notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   notificationPreferences: jsonb('notification_preferences').default({
     app: true,
     email: true,
@@ -28,7 +30,7 @@ export const users = pgTable('users', {
 // 2. Devices Table
 export const devices = pgTable('devices', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: varchar('tenant_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 128 }).notNull(),
   deviceType: varchar('device_type', { length: 32 }).notNull(),
   apiKey: varchar('api_key', { length: 128 }).notNull().unique(),
@@ -50,9 +52,7 @@ export const telemetryReadings = pgTable(
   {
     id: varchar('id', { length: 128 }).notNull(),
     packetId: varchar('packet_id', { length: 128 }),
-    tenantId: varchar('tenant_id', { length: 64 }).default('usr_admin'),
-    customerId: varchar('customer_id', { length: 64 }).default('usr_admin'),
-    userId: varchar('user_id', { length: 64 }).default('usr_admin'),
+    tenantId: varchar('tenant_id', { length: 64 }).notNull(),
     deviceId: varchar('device_id', { length: 64 }).notNull(),
     deviceName: varchar('device_name', { length: 128 }).notNull(),
     metric: varchar('metric', { length: 64 }).notNull(),
@@ -68,9 +68,7 @@ export const telemetryReadings = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.id, table.createdAt] }),
     tenantDeviceTimeIdx: index('idx_telemetry_tenant_device_time').on(table.tenantId, table.deviceId, table.createdAt),
-    customerDeviceTimeIdx: index('idx_telemetry_customer_device_time').on(table.customerId, table.deviceId, table.createdAt),
     tenantTimeIdx: index('idx_telemetry_tenant_time').on(table.tenantId, table.createdAt),
-    customerTimeIdx: index('idx_telemetry_customer_time').on(table.customerId, table.createdAt),
     deviceTimeIdx: index('idx_telemetry_device_time').on(table.deviceId, table.createdAt),
     metricTimeIdx: index('idx_telemetry_metric_time').on(table.metric, table.createdAt),
     createdTimeIdx: index('idx_telemetry_created_at').on(table.createdAt),
@@ -80,7 +78,7 @@ export const telemetryReadings = pgTable(
 // 4. Threshold Rules Table
 export const thresholdRules = pgTable('threshold_rules', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: varchar('tenant_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
   userName: varchar('user_name', { length: 128 }),
   deviceId: varchar('device_id', { length: 64 }).default('all'),
   metricKey: varchar('metric_key', { length: 64 }).notNull(),
@@ -106,7 +104,7 @@ export const activeAlarms = pgTable('active_alarms', {
   ruleId: varchar('rule_id', { length: 64 }).notNull(),
   deviceId: varchar('device_id', { length: 64 }).notNull(),
   deviceName: varchar('device_name', { length: 128 }).notNull(),
-  userId: varchar('user_id', { length: 64 }).notNull(),
+  tenantId: varchar('tenant_id', { length: 64 }).notNull(),
   metricKey: varchar('metric_key', { length: 64 }).notNull(),
   operator: varchar('operator', { length: 8 }).notNull(),
   thresholdValue: doublePrecision('threshold_value').notNull(),
@@ -129,7 +127,7 @@ export const activeAlarms = pgTable('active_alarms', {
 // 6. Notifications Table
 export const notifications = pgTable('notifications', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: varchar('tenant_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
   title: varchar('title', { length: 256 }).notNull(),
   message: text('message').notNull(),
   severity: varchar('severity', { length: 32 }).default('info'),
@@ -151,7 +149,7 @@ export const notifications = pgTable('notifications', {
 // 7. Dashboard Layouts Table
 export const dashboardLayouts = pgTable('dashboard_layouts', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: varchar('tenant_id', { length: 64 }).references(() => users.id, { onDelete: 'cascade' }),
   title: varchar('title', { length: 128 }).notNull(),
   widgetsJson: jsonb('widgets_json').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -160,7 +158,7 @@ export const dashboardLayouts = pgTable('dashboard_layouts', {
 // 8. Audit Logs Table
 export const auditLogs = pgTable('audit_logs', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }),
+  tenantId: varchar('tenant_id', { length: 64 }),
   userName: varchar('user_name', { length: 128 }),
   action: varchar('action', { length: 256 }).notNull(),
   ipAddress: varchar('ip_address', { length: 45 }),
@@ -171,7 +169,7 @@ export const auditLogs = pgTable('audit_logs', {
 // 9. Dispatch Logs Table
 export const dispatchLogs = pgTable('dispatch_logs', {
   id: varchar('id', { length: 64 }).primaryKey(),
-  userId: varchar('user_id', { length: 64 }),
+  tenantId: varchar('tenant_id', { length: 64 }),
   userName: varchar('user_name', { length: 128 }),
   channel: varchar('channel', { length: 32 }).notNull(),
   recipient: varchar('recipient', { length: 128 }).notNull(),
@@ -194,7 +192,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 
 export const devicesRelations = relations(devices, ({ one, many }) => ({
   owner: one(users, {
-    fields: [devices.userId],
+    fields: [devices.tenantId],
     references: [users.id],
   }),
   telemetry: many(telemetryReadings),

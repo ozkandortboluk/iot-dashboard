@@ -10,7 +10,7 @@ const router = Router();
 router.get('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const requestedUserId = (req.query.userId as string) || currentUser.id;
+  const requestedUserId = (req.query.tenantId as string) || currentUser.id;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
   const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
@@ -95,7 +95,7 @@ const notificationsRouter = Router();
 notificationsRouter.get('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const requestedUserId = (req.query.userId as string) || currentUser.id;
+  const requestedUserId = (req.query.tenantId as string) || currentUser.id;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
   const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
@@ -215,7 +215,7 @@ const dashboardRouter = Router();
 dashboardRouter.get('/widgets', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const requestedUserId = (req.query.userId as string) || currentUser.id;
+  const requestedUserId = (req.query.tenantId as string) || currentUser.id;
   const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
 
   const dash = db.getDashboard(targetUserId);

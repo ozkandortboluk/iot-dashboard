@@ -681,7 +681,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   if (prev.some((d) => d.id === dev.id)) {
                     return prev.map((d) => (d.id === dev.id ? { ...d, ...dev } : d));
                   }
-                  if (user?.role === 'admin' || dev.userId === user?.id) {
+                  if (user?.role === 'admin' || dev.tenantId === user?.id) {
                     return [dev, ...prev];
                   }
                   return prev;
@@ -700,8 +700,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               if (Array.isArray(data.payload)) {
                 const incomingDevs = data.payload as Device[];
                 const filtered = user?.role === 'admin'
-                  ? (selectedCustomerForAdmin === 'all' ? incomingDevs : incomingDevs.filter((d: Device) => d.userId === selectedCustomerForAdmin))
-                  : incomingDevs.filter((d: Device) => d.userId === user?.id);
+                  ? (selectedCustomerForAdmin === 'all' ? incomingDevs : incomingDevs.filter((d: Device) => d.tenantId === selectedCustomerForAdmin))
+                  : incomingDevs.filter((d: Device) => d.tenantId === user?.id);
                 setDevices(filtered);
                 devicesRef.current = filtered;
               } else {
@@ -728,9 +728,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                     ? selectedCustomerForAdmin
                     : user?.id || 'usr_admin';
                 if (
-                  !data.payload.userId ||
-                  data.payload.userId === currentTarget ||
-                  (user?.role === 'admin' && currentTarget === 'usr_admin' && (data.payload.userId === 'usr_admin' || !data.payload.userId))
+                  !data.payload.tenantId ||
+                  data.payload.tenantId === currentTarget ||
+                  (user?.role === 'admin' && currentTarget === 'usr_admin' && (data.payload.tenantId === 'usr_admin' || !data.payload.tenantId))
                 ) {
                   setWidgets(data.payload.widgets);
                   if (data.payload.title) setDashboardTitle(data.payload.title);
@@ -968,7 +968,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const createNewDevice = useCallback(async (data: Partial<Device>): Promise<Device> => {
     const targetOwner =
       user?.role === 'admin'
-        ? (data.userId || (selectedCustomerForAdmin !== 'all' ? selectedCustomerForAdmin : user?.id || 'usr_admin'))
+        ? (data.tenantId || (selectedCustomerForAdmin !== 'all' ? selectedCustomerForAdmin : user?.id || 'usr_admin'))
         : user?.id || 'usr_admin';
 
     const payload = {
@@ -1015,7 +1015,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateDevice = useCallback(async (id: string, updates: Partial<Device>): Promise<Device> => {
     const dev = devices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
-    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+    if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       throw new Error('Bu cihazı değiştirme yetkiniz yoktur');
     }
     try {
@@ -1040,7 +1040,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteDevice = useCallback(async (id: string) => {
     const dev = devices.find((d) => d.id === id);
     if (!dev) return;
-    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+    if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       console.error('Yetkisiz silme işlemi yapıldı');
       return;
     }
@@ -1055,7 +1055,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const regenerateApiKey = useCallback(async (id: string): Promise<string> => {
     const dev = devices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
-    if (user?.role !== 'admin' && dev.userId !== user?.id) {
+    if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       throw new Error('Yetkisiz işlem');
     }
     try {

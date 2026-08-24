@@ -19,6 +19,7 @@ import { LoginView } from './components/LoginView';
 import { HelpView } from './components/HelpView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
+import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import {
   LayoutDashboard,
   Cpu,
@@ -55,16 +56,17 @@ function DashboardContent() {
     return <LoginView />;
   }
 
+  const isAdmin = user.role === 'admin';
+  const isOperator = user.role === 'operator';
+  const isAnalyst = user.role === 'analyst';
   const isCustomer = user.role === 'customer';
 
-  // Guard: If customer attempts to access admin tabs, reset to dashboard
-  const safeActiveTab = isCustomer && ['customers', 'analytics', 'security', 'deployment', 'generator', 'database_data'].includes(activeTab)
-    ? 'dashboard'
-    : activeTab;
+  // Guard: If role cannot access current tab, safely fallback to dashboard
+  const safeActiveTab = canAccessTab(user.role, activeTab) ? activeTab : 'dashboard';
 
   const tabTitles: Record<string, string> = {
     dashboard: isCustomer ? 'Özel Dashboard\'um' : 'Canlı İzleme Dashboard',
-    devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Tüm Saha Cihazları',
+    devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
     firmware_ota: 'Firmware & OTA Yönetimi',
     network_discovery: 'Ağdaki Cihazlar & Tarayıcı',
     customers: 'Müşteri Yönetimi & Hesaplar',
@@ -82,12 +84,20 @@ function DashboardContent() {
     if (isCustomer) {
       return `${user.companyName || user.name} (Müşteri Hesabı)`;
     }
+    if (isOperator) {
+      return 'Saha Operasyonu';
+    }
+    if (isAnalyst) {
+      return 'Veri & Analiz Masası';
+    }
     if (selectedCustomerForAdmin !== 'all') {
       const activeCust = customersList.find((c) => c.id === selectedCustomerForAdmin);
       return `Yönetim > ${activeCust?.companyName || activeCust?.name || 'Seçili Müşteri'}`;
     }
     return 'Merkez Yönetim';
   };
+
+  const roleInfo = getRoleBadgeInfo(user.role);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 dark:bg-[#020617] dark:text-slate-200 font-sans transition-colors duration-200 flex flex-col md:flex-row">
@@ -99,7 +109,9 @@ function DashboardContent() {
         <Header
           activeTab={safeActiveTab}
           setActiveTab={setActiveTab}
-          onOpenDeploymentModal={() => setActiveTab('deployment')}
+          onOpenDeploymentModal={() => {
+            if (isAdmin) setActiveTab('deployment');
+          }}
           onOpenAddWidgetModal={() => setIsAddWidgetOpen(true)}
           editMode={editMode}
           onToggleEditMode={() => setEditMode((prev) => !prev)}
@@ -109,7 +121,9 @@ function DashboardContent() {
         <div className="px-3 sm:px-6 md:px-8 py-2 bg-white dark:bg-[#0a0f1d] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs min-w-0 shadow-sm dark:shadow-none">
           <div className="flex items-center gap-1.5 sm:gap-2 text-slate-500 dark:text-slate-400 font-medium overflow-x-auto whitespace-nowrap min-w-0 pr-2 scrollbar-none">
             <Home className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-            <span className="hidden xs:inline shrink-0">{isCustomer ? 'Müşteri Portalı' : 'Sistem Yönetimi'}</span>
+            <span className="hidden xs:inline shrink-0">
+              {isAdmin ? 'Sistem Yönetimi' : isOperator ? 'Operatör Masası' : isAnalyst ? 'Analist Masası' : 'Müşteri Portalı'}
+            </span>
             <ChevronRight className="w-3 h-3 text-slate-400 dark:text-slate-600 shrink-0" />
             <span className="text-slate-700 dark:text-slate-300 font-semibold truncate shrink">{getBreadcrumbContext()}</span>
             <ChevronRight className="w-3 h-3 text-slate-400 dark:text-slate-600 shrink-0" />
@@ -120,14 +134,8 @@ function DashboardContent() {
 
           <div className="hidden sm:flex items-center gap-2 text-[11px] shrink-0">
             <span className="text-slate-500">Aktif Rol:</span>
-            <span
-              className={`px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] ${
-                isCustomer
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-              }`}
-            >
-              {isCustomer ? 'Müşteri' : 'Admin'}
+            <span className={`px-2 py-0.5 rounded font-bold uppercase tracking-wider text-[10px] ${roleInfo.badgeClass}`}>
+              {roleInfo.label}
             </span>
           </div>
         </div>
@@ -143,7 +151,7 @@ function DashboardContent() {
           {safeActiveTab === 'devices' && (
             <DevicesView onNavigateToHelp={() => setActiveTab('help')} />
           )}
-          {safeActiveTab === 'firmware_ota' && (
+          {(isAdmin || isOperator) && safeActiveTab === 'firmware_ota' && (
             <FirmwareView
               currentUser={user}
               devices={devices}
@@ -156,18 +164,18 @@ function DashboardContent() {
               onNavigateToHelp={() => setActiveTab('help')}
             />
           )}
-          {!isCustomer && safeActiveTab === 'customers' && (
+          {isAdmin && safeActiveTab === 'customers' && (
             <CustomerManagement
               onSelectCustomerForDashboard={() => setActiveTab('dashboard')}
               onNavigateToDevices={() => setActiveTab('devices')}
             />
           )}
-          {!isCustomer && safeActiveTab === 'generator' && <DataGeneratorView />}
-          {!isCustomer && safeActiveTab === 'analytics' && <AnalyticsView />}
+          {isAdmin && safeActiveTab === 'generator' && <DataGeneratorView />}
+          {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'analytics' && <AnalyticsView />}
           {safeActiveTab === 'notifications' && <NotificationsView />}
-          {!isCustomer && safeActiveTab === 'database_data' && <DatabaseDataView />}
-          {!isCustomer && safeActiveTab === 'security' && <SecurityView />}
-          {!isCustomer && safeActiveTab === 'deployment' && <DeploymentView />}
+          {isAdmin && safeActiveTab === 'database_data' && <DatabaseDataView />}
+          {isAdmin && safeActiveTab === 'security' && <SecurityView />}
+          {isAdmin && safeActiveTab === 'deployment' && <DeploymentView />}
           {safeActiveTab === 'account_settings' && <AccountSettingsView />}
           {safeActiveTab === 'help' && <HelpView onNavigateToTab={(tab) => setActiveTab(tab)} />}
         </main>
@@ -193,7 +201,7 @@ function DashboardContent() {
           <Cpu className="w-4 h-4" />
           <span>Cihazlar</span>
         </button>
-        {!isCustomer && (
+        {isAdmin && (
           <button
             onClick={() => setActiveTab('customers')}
             className={`flex flex-col items-center gap-1 ${
@@ -204,7 +212,7 @@ function DashboardContent() {
             <span>Müşteriler</span>
           </button>
         )}
-        {!isCustomer && (
+        {(isAdmin || isOperator || isAnalyst) && (
           <button
             onClick={() => setActiveTab('analytics')}
             className={`flex flex-col items-center gap-1 ${

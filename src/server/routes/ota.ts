@@ -77,7 +77,7 @@ otaRouter.get('/jobs', authenticateUser, (req: Request, res: Response) => {
   let jobs = db.getOtaJobs();
 
   if (user.role !== 'admin') {
-    const userDeviceIds = new Set(db.getDevices().filter((d) => d.userId === user.id).map((d) => d.id));
+    const userDeviceIds = new Set(db.getDevices().filter((d) => d.tenantId === user.id).map((d) => d.id));
     jobs = jobs.filter((j) => userDeviceIds.has(j.deviceId));
   }
 

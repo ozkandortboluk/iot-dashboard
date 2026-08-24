@@ -6,6 +6,7 @@ import {
   Check,
   Download,
   ShieldCheck,
+  ShieldAlert,
   Terminal,
   HardDrive,
   Cpu,
@@ -26,8 +27,10 @@ import {
   FileText,
   Radio,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export const DeploymentView: React.FC = () => {
+  const { user } = useAuth();
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [activeStepTab, setActiveStepTab] = useState<'local' | 'steps' | 'migration' | 'configurator' | 'nodemcu_esp' | 'device_code' | 'roadmap' | 'troubleshoot'>('local');
   const [selectedLanguage, setSelectedLanguage] = useState<'curl' | 'python' | 'esp32'>('esp32');
@@ -44,6 +47,20 @@ export const DeploymentView: React.FC = () => {
     setCopiedSection(sectionKey);
     setTimeout(() => setCopiedSection(null), 2000);
   };
+
+  if (user?.role !== 'admin') {
+    return (
+      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+          Sunucu, Docker ve veritabanı kurulum rehberi yalnızca <strong>Sistem Yöneticisi (Admin)</strong> rolüne açıktır.
+        </p>
+      </div>
+    );
+  }
 
   // Dynamic Docker Compose Yaml based on user configuration
   const dockerComposeYaml = `version: '3.8'
