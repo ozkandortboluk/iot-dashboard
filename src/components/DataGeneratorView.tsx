@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
-import { apiFetch as fetch } from '../lib/apiFetch';
+import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import {
   Cpu,
   Activity,
@@ -79,8 +79,9 @@ export const DataGeneratorView: React.FC = () => {
   // Fetch initial simulator status
   useEffect(() => {
     fetch('/api/simulator/status')
-      .then((res) => res.json())
+      .then((res) => safeJson<any>(res, null))
       .then((data) => {
+        if (!data) return;
         if (data.simulatorIntervalMs) setIntervalMs(data.simulatorIntervalMs);
         if (data.anomalyProbability !== undefined) setAnomalyRate(data.anomalyProbability);
         if (data.activeScenario) setActiveScenario(data.activeScenario);

@@ -184,9 +184,9 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-fadeIn">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-800/20">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800/60 bg-slate-50/70 dark:bg-slate-800/20">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 font-bold text-xl">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xl">
               {formData.companyName ? formData.companyName[0].toUpperCase() : formData.name ? formData.name[0].toUpperCase() : 'M'}
             </div>
             <div>
@@ -195,7 +195,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                   {formData.companyName || formData.name || 'Müşteri Detayı'}
                 </h2>
                 {customer.status === 'suspended' && (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20 uppercase tracking-wider">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 uppercase tracking-wider">
                     Askıda
                   </span>
                 )}
@@ -203,7 +203,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                   <RefreshCw className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
                 )}
               </div>
-              <p className="text-sm text-slate-500 font-mono">{customer.email}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400 font-mono">{customer.email}</p>
             </div>
           </div>
           <button
@@ -215,7 +215,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="flex px-6 space-x-6 border-b border-slate-100 dark:border-slate-800/60 overflow-x-auto shrink-0">
+        <div className="flex px-6 space-x-6 border-b border-slate-200 dark:border-slate-800/60 overflow-x-auto shrink-0 bg-white dark:bg-slate-900">
           {[
             { id: 'info', label: 'Profil & İletişim', icon: User },
             { id: 'devices', label: `Cihazlar (${assignedDevices.length})`, icon: Cpu },
@@ -230,8 +230,8 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               }}
               className={`flex items-center gap-2 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === t.id
-                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
+                  ? 'border-indigo-600 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600'
               }`}
             >
               <t.icon className="w-4 h-4" />
@@ -241,7 +241,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 dark:bg-[#0b1120]">
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/60 dark:bg-[#0b1120]">
           {successMsg && (
             <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-sm flex items-center gap-3 animate-fadeIn">
               <CheckCircle2 className="w-5 h-5 shrink-0" />
@@ -268,7 +268,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
@@ -282,7 +282,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     value={formData.companyName}
                     onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                     placeholder="Örn: Atlas Lojistik"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
@@ -295,13 +295,13 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     type="email"
                     value={formData.email}
                     disabled
-                    className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-500 cursor-not-allowed font-mono"
+                    className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-600 dark:text-slate-400 cursor-not-allowed font-mono"
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-indigo-400" />
+                    <Mail className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
                     Alarm Bildirim E-postası
                   </label>
                   <input
@@ -309,7 +309,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     value={formData.notificationEmail}
                     onChange={(e) => setFormData({ ...formData, notificationEmail: e.target.value })}
                     placeholder={formData.email || 'alarm@sirket.com'}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white font-mono"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
                   />
                 </div>
 
@@ -323,7 +323,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="+90 532 000 0000"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
@@ -337,7 +337,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     value={formData.whatsappNumber}
                     onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
                     placeholder="905320000000"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
 
@@ -351,7 +351,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     value={formData.telegramChatId}
                     onChange={(e) => setFormData({ ...formData, telegramChatId: e.target.value })}
                     placeholder="@kullanici veya 12345678"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                   />
                 </div>
               </div>
@@ -360,7 +360,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-sm"
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/20"
                 >
                   {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                   <span>{isSubmitting ? 'Kaydediliyor...' : 'Değişiklikleri Veritabanına Kaydet'}</span>
@@ -374,11 +374,11 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">Atanmış Cihazlar</h3>
-                  <p className="text-xs text-slate-500">Müşteriye zimmetlenmiş donanım ve sensörler.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Müşteriye zimmetlenmiş donanım ve sensörler.</p>
                 </div>
                 <button
                   onClick={() => onNavigateToDevices(customer.id)}
-                  className="px-4 py-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-semibold hover:bg-indigo-500/20 transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20 rounded-xl text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors cursor-pointer"
                 >
                   Cihaz Yönetimine Git
                 </button>
@@ -387,25 +387,25 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
               {assignedDevices.length === 0 ? (
                 <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
                   <Cpu className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-                  <p className="text-xs text-slate-500">Bu müşteriye henüz atanmış cihaz bulunmuyor.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Bu müşteriye henüz atanmış cihaz bulunmuyor.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {assignedDevices.map((dev) => (
-                    <div key={dev.id} className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center justify-between">
+                    <div key={dev.id} className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-xs">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
                           <Cpu className="w-5 h-5 text-slate-600 dark:text-slate-400" />
                         </div>
                         <div>
                           <p className="font-semibold text-xs text-slate-900 dark:text-white">{dev.name}</p>
-                          <p className="text-[11px] text-slate-500 font-mono">{dev.id}</p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{dev.id}</p>
                         </div>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                        dev.status === 'online' ? 'bg-emerald-500/10 text-emerald-500' :
-                        dev.status === 'offline' ? 'bg-slate-100 dark:bg-slate-800 text-slate-500' :
-                        'bg-amber-500/10 text-amber-500'
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        dev.status === 'online' ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20' :
+                        dev.status === 'offline' ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700' :
+                        'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20'
                       }`}>
                         {dev.status}
                       </span>
@@ -418,15 +418,15 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
           {activeTab === 'security' && (
             <div className="space-y-5 max-w-2xl text-xs">
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
+              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-3.5">
-                    <div className="p-2.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl shrink-0">
+                    <div className="p-2.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl border border-indigo-100 dark:border-indigo-500/20 shrink-0">
                       <KeyRound className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-bold text-slate-900 dark:text-white">Parola Sıfırlama</h4>
-                      <p className="text-slate-500 mt-0.5">Müşteriye e-posta üzerinden güvenli parola sıfırlama bağlantısı gönderir.</p>
+                      <p className="text-slate-600 dark:text-slate-400 mt-0.5">Müşteriye e-posta üzerinden güvenli parola sıfırlama bağlantısı gönderir.</p>
                     </div>
                   </div>
                   <button
@@ -438,15 +438,15 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
+              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-3.5">
-                    <div className="p-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
+                    <div className="p-2.5 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl border border-amber-100 dark:border-amber-500/20 shrink-0">
                       <Ban className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-bold text-slate-900 dark:text-white">Oturumları Sonlandır</h4>
-                      <p className="text-slate-500 mt-0.5">Müşterinin tüm cihazlardaki açık oturumlarını sonlandırır ve çıkış yapmasını sağlar.</p>
+                      <p className="text-slate-600 dark:text-slate-400 mt-0.5">Müşterinin tüm cihazlardaki açık oturumlarını sonlandırır ve çıkış yapmasını sağlar.</p>
                     </div>
                   </div>
                   <button
@@ -458,17 +458,17 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-5 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/30 rounded-2xl">
+              <div className="p-5 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/30 rounded-2xl shadow-xs">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-3.5">
-                    <div className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-xl shrink-0">
+                    <div className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-xl border border-rose-100 dark:border-rose-500/20 shrink-0">
                       <ShieldCheck className="w-5 h-5" />
                     </div>
                     <div>
                       <h4 className="font-bold text-slate-900 dark:text-white">
                         Hesap Durumu: {customer.status === 'suspended' ? 'Askıda' : 'Aktif'}
                       </h4>
-                      <p className="text-slate-500 mt-0.5">
+                      <p className="text-slate-600 dark:text-slate-400 mt-0.5">
                         Hesabı dondurursanız müşteri sisteme giriş yapamaz, ancak verileri silinmez.
                       </p>
                     </div>
@@ -477,8 +477,8 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                     onClick={() => handleStatusChange(customer.status === 'suspended' ? 'active' : 'suspended')}
                     className={`px-3.5 py-2 font-semibold rounded-xl transition-colors shrink-0 cursor-pointer ${
                       customer.status === 'suspended'
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
-                        : 'bg-rose-500 hover:bg-rose-600 text-white shadow-lg shadow-rose-500/20'
+                        ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/30'
+                        : 'bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20'
                     }`}
                   >
                     {customer.status === 'suspended' ? 'Hesabı Aktifleştir' : 'Hesabı Dondur'}

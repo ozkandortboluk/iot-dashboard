@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Users, UserPlus, Building2, Cpu, Trash2, KeyRound, ShieldCheck, 
-  Search, ExternalLink, CheckCircle2, AlertCircle, Eye, Download, Settings, Edit3
+  Search, ExternalLink, CheckCircle2, AlertCircle, Eye, Download, Settings, Edit3, X
 } from 'lucide-react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
@@ -181,52 +181,68 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
 
       {/* Customer List Section */}
       <div className="bg-white dark:bg-[#0f172a] rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-sm dark:shadow-none">
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/80">
-          <div className="shrink-0">
-            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span>Müşteri Listesi & Firma Hesapları</span>
-              <span className="text-xs font-normal text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full ml-1">
+        <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3.5 pb-3.5 border-b border-slate-100 dark:border-slate-800/80">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                  Müşteri Listesi & Firma Hesapları
+                </h3>
+              </div>
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-full shrink-0">
                 {filteredCustomers.length} Müşteri
               </span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Müşterilerinizi yönetin, hesap ayrıntılarını ve atanan saha cihazlarını inceleyin.
             </p>
           </div>
 
-          {/* Action Tools: Search, CSV, Add Customer */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5">
-            {/* Search Input */}
-            <div className="relative min-w-[200px] sm:w-60 md:w-64">
+          {/* Action Tools: Adaptive Search, CSV, Add Customer */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 w-full xl:w-auto xl:max-w-2xl">
+            {/* Search Input - Fully Adaptive & Responsive */}
+            <div className="relative flex-1 min-w-[200px] w-full sm:w-64 md:w-72 xl:w-80 transition-all duration-200">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Müşteri ara..."
+                placeholder="Müşteri, yetkili veya e-posta ara..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                  title="Aramayı Temizle"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            {/* CSV Button */}
-            <button
-              onClick={handleExportCSV}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold rounded-xl text-xs shadow-xs transition-colors cursor-pointer shrink-0"
-              title="Müşteri listesini CSV formatında dışa aktar"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              <span>CSV İndir</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* CSV Button */}
+              <button
+                onClick={handleExportCSV}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold rounded-xl text-xs shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                title="Müşteri listesini CSV formatında dışa aktar"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                <span>CSV İndir</span>
+              </button>
 
-            {/* New Customer Button */}
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs shadow-md shadow-indigo-600/25 transition-all cursor-pointer active:scale-95 shrink-0"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Yeni Müşteri Ekle</span>
-            </button>
+              {/* New Customer Button */}
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs shadow-md shadow-indigo-600/25 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Yeni Müşteri Ekle</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -257,28 +273,28 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   return (
                     <tr
                       key={cust.id}
-                      className={`hover:bg-slate-800/40 transition-colors ${
-                        isSelected ? 'bg-indigo-500/10 border-l-2 border-indigo-500' : ''
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                        isSelected ? 'bg-indigo-50/70 dark:bg-indigo-500/10 border-l-2 border-indigo-500' : ''
                       }`}
                     >
-                      <td className="py-4 px-4 font-medium text-slate-200">
+                      <td className="py-4 px-4 font-medium text-slate-800 dark:text-slate-200">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-sm">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm">
                             {cust.companyName ? cust.companyName[0] : cust.name[0]}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-100 flex items-center gap-2">
+                            <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                               {cust.companyName || cust.name}
                               {cust.status === 'suspended' && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 uppercase tracking-wider">Askıda</span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 uppercase tracking-wider">Askıda</span>
                               )}
                             </p>
-                            <p className="text-[11px] text-slate-400">{cust.name}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">{cust.name}</p>
                           </div>
                         </div>
                       </td>
 
-                      <td className="py-4 px-4 text-slate-300 font-mono text-[11px]">
+                      <td className="py-4 px-4 text-slate-700 dark:text-slate-300 font-mono text-[11px]">
                         {cust.email}
                       </td>
 
@@ -286,10 +302,10 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                         <span
                           className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                             cust.role === 'admin'
-                              ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                              ? 'bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/20'
                               : cust.role === 'customer'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                           }`}
                         >
                           {cust.role === 'admin' ? 'Sistem Yöneticisi' : 'Müşteri'}
@@ -297,8 +313,8 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                       </td>
 
                       <td className="py-4 px-4 text-center">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-200 rounded-lg text-xs font-semibold">
-                          <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/60 rounded-lg text-xs font-semibold">
+                          <Cpu className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                           <span>{devCount} Cihaz</span>
                         </span>
                       </td>
@@ -312,8 +328,8 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                             }}
                             className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                               isSelected
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30'
+                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                             }`}
                             title="Bu müşterinin paneline ve cihaz verilerine geçiş yap"
                           >
@@ -323,7 +339,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
 
                           <button
                             onClick={() => setDetailsModalCustomer(cust)}
-                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
                           >
                             <Settings className="w-3.5 h-3.5" />
                             <span>Yönet</span>
@@ -383,7 +399,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   value={newCust.companyName}
                   onChange={(e) => setNewCust({ ...newCust, companyName: e.target.value })}
                   placeholder="Örn: Acme A.Ş."
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 
@@ -395,7 +411,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   value={newCust.name}
                   onChange={(e) => setNewCust({ ...newCust, name: e.target.value })}
                   placeholder="Örn: Ahmet Yılmaz"
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 
@@ -407,7 +423,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   value={newCust.email}
                   onChange={(e) => setNewCust({ ...newCust, email: e.target.value })}
                   placeholder="ornek@firma.com"
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 
@@ -419,7 +435,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   value={newCust.password}
                   onChange={(e) => setNewCust({ ...newCust, password: e.target.value })}
                   placeholder="En az 6 karakter"
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 

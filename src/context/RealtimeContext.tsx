@@ -844,14 +844,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // 1. Initial REST fetch to trigger backend seeding if first time
     fetch(`/api/dashboard/widgets?userId=${encodeURIComponent(targetUserId)}`)
-      .then((res) => res.json())
-      .then((data: DashboardLayout) => {
+      .then((res) => safeJson<DashboardLayout | null>(res, null))
+      .then((data: DashboardLayout | null) => {
         if (data && Array.isArray(data.widgets) && data.widgets.length > 0) {
           setWidgets(data.widgets);
           if (data.title) setDashboardTitle(data.title);
         }
       })
-      .catch((err) => console.error('Error fetching dashboard widgets:', err));
+      .catch((err) => {
+        console.warn('Dashboard widgets fetch deferred:', err);
+      });
   }, [user, selectedCustomerForAdmin]);
 
   // Action methods

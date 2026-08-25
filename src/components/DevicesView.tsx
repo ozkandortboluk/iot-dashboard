@@ -104,11 +104,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
   const [editCustomSimMetricInput, setEditCustomSimMetricInput] = useState('');
 
-  // Quick inline token editor state for active device security card
-  const [isEditingTokenInline, setIsEditingTokenInline] = useState(false);
-  const [inlineTokenInput, setInlineTokenInput] = useState('');
-  const [tokenSaveSuccess, setTokenSaveSuccess] = useState(false);
-
   // Delete confirmation modal state
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
 
@@ -490,27 +485,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     }
   };
 
-  const handleStartInlineEditToken = () => {
-    if (!activeDevice) return;
-    setInlineTokenInput(activeDevice.apiKey);
-    setIsEditingTokenInline(true);
-  };
-
-  const handleSaveInlineToken = async () => {
-    if (!activeDevice || !inlineTokenInput.trim()) return;
-    try {
-      const updated = await updateDevice(activeDevice.id, {
-        apiKey: inlineTokenInput.trim(),
-      });
-      setSelectedDeviceId(updated.id);
-      setIsEditingTokenInline(false);
-      setTokenSaveSuccess(true);
-      setTimeout(() => setTokenSaveSuccess(false), 3000);
-    } catch (err) {
-      alert('Manuel token güncellenemedi.');
-    }
-  };
-
   const handleConfirmConvertToPhysical = async () => {
     if (!convertingDevice) return;
     setIsConverting(true);
@@ -867,37 +841,22 @@ void sendHeartbeat() {
 
   return (
     <div className="space-y-6">
-      {/* View Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#0f172a] p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-indigo-400" />
-            <span>Cihaz Yönetimi & Uzaktan Ingestion API</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Farklı cihazlardan (IoT sensörler, sunucular, sayaçlar) güvenli veri toplama ve API anahtarı yönetimi
-          </p>
-        </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Yeni Cihaz Kaydet</span>
-        </button>
-      </div>
-
-
-      <div className="grid grid-cols-12 gap-6">
-        {/* Device List Table & System Metrics */}
-        <div className="col-span-12 lg:col-span-7 space-y-6">
-          <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                Kayıtlı Saha Cihazları ({devices.length})
-              </h3>
-              <span className="text-[11px] text-slate-500">Seçmek için satıra tıklayın</span>
+      {/* 1. Device List Table */}
+      <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Cpu className="w-4 h-4 text-indigo-500 shrink-0" />
+                <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider truncate">
+                  Kayıtlı Saha Cihazları ({devices.length})
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Yeni Cihaz Ekle</span>
+              </button>
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800/80 overflow-x-auto">
@@ -1007,24 +966,12 @@ void sendHeartbeat() {
                         );
                       })()}
 
-                      {user?.role === 'admin' && dev.isSimulated && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConvertingDevice(dev);
-                          }}
-                          className="p-1.5 rounded-xl text-cyan-500 hover:text-emerald-400 hover:bg-cyan-500/10 transition"
-                          title="Sanal Cihazı Gerçek Donanıma Dönüştür (Yeni Fiziksel API Key Üretir)"
-                        >
-                          <Cpu className="w-3.5 h-3.5" />
-                        </button>
-                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleOpenEdit(dev);
                         }}
-                        className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10"
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
                         title="Cihaz Ayarlarını Düzenle"
                       >
                         <Settings className="w-3.5 h-3.5" />
@@ -1032,19 +979,9 @@ void sendHeartbeat() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          regenerateApiKey(dev.id);
-                        }}
-                        className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                        title="API Key Yenile"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
                           setDeletingDevice(dev);
                         }}
-                        className="p-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10"
+                        className="p-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 cursor-pointer"
                         title="Cihazı Sil"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1172,202 +1109,12 @@ void sendHeartbeat() {
               </p>
             )}
           </div>
-        </div>
 
-        {/* Selected Device Details & Live Test Panel */}
-        {activeDevice && (
-          <div className="col-span-12 lg:col-span-5 space-y-6">
-            {/* Device Security Card */}
-            <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-                    API Güvenlik Kimliği
-                  </h3>
-                </div>
-                <span className="text-[10px] px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 font-bold rounded-full border border-emerald-500/20">
-                  {activeDevice.encryptionMethod}
-                </span>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    X-API-Key Başlığı (Token)
-                  </label>
-                  {tokenSaveSuccess && (
-                    <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 animate-pulse">
-                      <Check className="w-3 h-3" /> Token Güncellendi
-                    </span>
-                  )}
-                </div>
-
-                {isEditingTokenInline ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={inlineTokenInput}
-                        onChange={(e) => setInlineTokenInput(e.target.value)}
-                        placeholder="Manuel Token Girin"
-                        className="flex-1 px-3 py-2 rounded-2xl bg-slate-900 border border-emerald-500/50 font-mono text-xs text-amber-400 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                      <button
-                        onClick={handleSaveInlineToken}
-                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-emerald-600/20 flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Kaydet</span>
-                      </button>
-                      <button
-                        onClick={() => setIsEditingTokenInline(false)}
-                        className="p-2 text-slate-400 hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-2xl text-xs"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between text-[10px]">
-                      <span className="text-slate-400">
-                        Cihaz üzerindeki token ile aynı değeri girin.
-                      </span>
-                      <button
-                        onClick={() => setInlineTokenInput(`dev_key_${Math.random().toString(36).substring(2, 10)}`)}
-                        className="text-indigo-400 font-semibold hover:underline flex items-center gap-1"
-                      >
-                        <RefreshCw className="w-3 h-3" /> Rastgele
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={activeDevice.apiKey}
-                        className="flex-1 px-3 py-2 rounded-2xl bg-slate-100 dark:bg-[#020617] border border-slate-200 dark:border-slate-800 font-mono text-xs text-slate-800 dark:text-slate-200 font-semibold"
-                      />
-                      <button
-                        onClick={() => handleCopy(activeDevice.apiKey)}
-                        className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-indigo-600/20"
-                        title="Kopyala"
-                      >
-                        {copiedKey === activeDevice.apiKey ? (
-                          <Check className="w-4 h-4" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={handleStartInlineEditToken}
-                        className="px-3 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 rounded-2xl text-xs font-bold flex items-center gap-1 transition"
-                        title="Manuel Token Tanımla"
-                      >
-                        <Key className="w-3.5 h-3.5" />
-                        <span>Manuel Token</span>
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-400">
-                      Cihaza uzaktan erişilemiyorsa "Manuel Token" butonuna basarak cihaza çakılmış token'ı tanımlayabilirsiniz.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-slate-500 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <div>
-                  <span>Rate Limit:</span>{' '}
-                  <strong className="text-slate-800 dark:text-slate-200">
-                    {activeDevice.rateLimitPerMin} req/dk
-                  </strong>
-                </div>
-                <div>
-                  <span>Son Ping:</span>{' '}
-                  <strong className="text-slate-800 dark:text-slate-200">
-                    {formatDateTime(activeDevice.lastSeen)}
-                  </strong>
-                </div>
-                <div>
-                  <span>Heartbeat Toleransı:</span>{' '}
-                  <strong className="text-indigo-600 dark:text-indigo-400">
-                    {(activeDevice.heartbeatTimeoutSeconds || 300) >= 3600
-                      ? `${((activeDevice.heartbeatTimeoutSeconds || 300) / 3600).toFixed(1).replace('.0', '')} Saat`
-                      : `${Math.round((activeDevice.heartbeatTimeoutSeconds || 300) / 60)} Dk`}
-                  </strong>
-                </div>
-              </div>
-
-              {/* Heartbeat Status Notice */}
-              <div className="p-2.5 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 text-[10px] text-slate-600 dark:text-slate-300 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Radio className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                  <span className="truncate">
-                    Cihaz zaman aşımına uğrarsa çevrimdışı olur; yeni veri veya ping ile <strong>otomatik çevrimiçi</strong> açılır.
-                  </span>
-                </div>
-                <button
-                  onClick={() => setShowCodeGuide(!showCodeGuide)}
-                  className="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold rounded-lg shrink-0 cursor-pointer flex items-center gap-1"
-                >
-                  <Code className="w-3 h-3" />
-                  <span>{showCodeGuide ? 'Kodu Gizle' : 'ESP32 / API Kodu'}</span>
-                </button>
-              </div>
-
-              {activeDevice.isSimulated && (
-                <div className="bg-cyan-500/10 rounded-2xl p-3 border border-cyan-500/30 text-xs space-y-1.5 mt-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5 text-[11px]">
-                      <Bot className="w-3.5 h-3.5 text-cyan-500" /> Sanal Simülatör Metrikleri
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {user?.role === 'admin' && (
-                        <button
-                          onClick={() => setConvertingDevice(activeDevice)}
-                          className="px-2 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] flex items-center gap-1 font-bold cursor-pointer transition"
-                          title="Sanal Cihazı Gerçek Fiziksel Donanıma Dönüştür"
-                        >
-                          <Cpu className="w-3 h-3 text-emerald-500" />
-                          <span>Fiziksel Donanıma Dönüştür</span>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleOpenEdit(activeDevice)}
-                        className="text-[10px] text-cyan-700 dark:text-cyan-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
-                      >
-                        <Settings className="w-3 h-3" /> Metrikleri Düzenle
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {activeDevice.simulatedMetrics && activeDevice.simulatedMetrics.length > 0 ? (
-                      activeDevice.simulatedMetrics.map((m) => (
-                        <span key={m} className="px-2 py-0.5 bg-cyan-500/20 text-cyan-900 dark:text-cyan-200 font-mono text-[10px] font-bold rounded-md border border-cyan-500/30">
-                          {m}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 italic">
-                        Varsayılan {activeDevice.type} metrikleri üretiliyor
-                      </span>
-                    )}
-                  </div>
-                  <div className="pt-1.5 border-t border-cyan-500/20 flex items-center justify-between text-[10px]">
-                    <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
-                      <Database className={`w-3 h-3 ${activeDevice.saveSimulatedDataToDb ? 'text-amber-500' : 'text-slate-400'}`} />
-                      Veritabanı Yazma:
-                    </span>
-                    <span className={`font-bold px-2 py-0.5 rounded-full ${activeDevice.saveSimulatedDataToDb ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30' : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
-                      {activeDevice.saveSimulatedDataToDb ? 'Aktif (DB\'ye Yazılıyor)' : 'Pasif (Sadece RAM)'}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Live Terminal & Telemetry Ingestion Console */}
-            <div className="bg-[#020617] text-slate-200 rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-4">
+          {/* 3. Selected Device Live Terminal & Telemetry Ingestion Console */}
+          {activeDevice && (
+            <div className="space-y-6">
+              {/* Live Terminal & Telemetry Ingestion Console */}
+              <div className="bg-[#020617] text-slate-200 rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-4">
               <div className="flex items-center justify-between pb-1">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => setIsTerminalOpen(!isTerminalOpen)}>
                   <span className="relative flex h-2.5 w-2.5">
@@ -1387,6 +1134,14 @@ void sendHeartbeat() {
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => setShowCodeGuide(!showCodeGuide)}
+                    className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30 text-[10px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    title="ESP32 & API Entegrasyon Kılavuzu"
+                  >
+                    <Code className="w-3.5 h-3.5" />
+                    <span>{showCodeGuide ? 'Kodu Gizle' : 'ESP32 / API Kodu'}</span>
+                  </button>
                   {isTerminalOpen && (
                     <>
                       {/* Filter Mode Selector */}
@@ -1718,9 +1473,8 @@ void sendHeartbeat() {
                 </div>
               </div>
             )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
 
       {/* Add New Device Modal */}
       {showAddModal && (
