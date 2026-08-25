@@ -7,25 +7,24 @@ export const adminTenantsRouter = Router();
 
 // Validation Schemas
 const CreateTenantSchema = z.object({
-  name: z.string().trim().min(2, 'Ad en az 2 karakter olmalıdır.').max(100),
-  email: z.string().trim().toLowerCase().email('Geçersiz e-posta formatı.').max(100),
-  password: z.string().min(8, 'Parola en az 8 karakter olmalıdır.')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).*$/, 'Parola en az bir büyük harf, bir küçük harf, bir sayı ve bir özel karakter içermelidir.'),
-  companyName: z.string().trim().min(2).max(100).optional(),
+  name: z.string().trim().min(2, 'Yetkili adı en az 2 karakter olmalıdır.').max(100),
+  email: z.string().trim().toLowerCase().email('Geçerli bir e-posta adresi giriniz.').max(100),
+  password: z.string().min(6, 'Parola en az 6 karakter olmalıdır.').max(100),
+  companyName: z.string().trim().max(100).optional().or(z.literal('')),
   role: z.enum(['customer', 'admin', 'operator', 'analyst']).default('customer'),
-  phone: z.string().trim().max(30).optional(),
-  whatsappNumber: z.string().trim().max(30).optional(),
-  notificationEmail: z.string().trim().email().optional(),
-  telegramChatId: z.string().trim().max(50).optional(),
+  phone: z.string().trim().max(30).optional().or(z.literal('')),
+  whatsappNumber: z.string().trim().max(30).optional().or(z.literal('')),
+  notificationEmail: z.string().trim().email('Geçersiz bildirim e-postası formatı.').optional().or(z.literal('')),
+  telegramChatId: z.string().trim().max(50).optional().or(z.literal('')),
 });
 
 const UpdateTenantSchema = z.object({
-  name: z.string().trim().min(2).max(100).optional(),
-  companyName: z.string().trim().max(100).optional(),
-  phone: z.string().trim().max(30).optional(),
-  whatsappNumber: z.string().trim().max(30).optional(),
-  notificationEmail: z.string().trim().email().optional().or(z.literal('')),
-  telegramChatId: z.string().trim().max(50).optional(),
+  name: z.string().trim().min(2, 'Ad en az 2 karakter olmalıdır.').max(100).optional(),
+  companyName: z.string().trim().max(100).optional().or(z.literal('')),
+  phone: z.string().trim().max(30).optional().or(z.literal('')),
+  whatsappNumber: z.string().trim().max(30).optional().or(z.literal('')),
+  notificationEmail: z.string().trim().email('Geçersiz bildirim e-postası formatı.').optional().or(z.literal('')),
+  telegramChatId: z.string().trim().max(50).optional().or(z.literal('')),
   role: z.enum(['customer', 'admin', 'operator', 'analyst']).optional(),
   status: z.enum(['active', 'suspended']).optional(),
 });

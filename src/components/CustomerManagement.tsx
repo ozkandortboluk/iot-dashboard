@@ -75,21 +75,31 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    if (!newCust.name || !newCust.email || !newCust.password) {
+    const name = newCust.name.trim();
+    const email = newCust.email.trim().toLowerCase();
+    const password = newCust.password;
+    const companyName = newCust.companyName.trim();
+
+    if (!name || !email || !password) {
       setErrorMsg('Lütfen ad, e-posta ve şifre alanlarını doldurun.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMsg('Şifre en az 6 karakter olmalıdır.');
       return;
     }
 
     setIsSubmitting(true);
     try {
       await createNewCustomer({
-        name: newCust.name,
-        email: newCust.email,
-        password: newCust.password,
-        companyName: newCust.companyName || newCust.name,
+        name,
+        email,
+        password,
+        companyName: companyName || name,
         role: newCust.role,
       });
-      setSuccessMsg(`"${newCust.companyName || newCust.name}" müşteri hesabı başarıyla oluşturuldu.`);
+      setSuccessMsg(`"${companyName || name}" müşteri hesabı başarıyla oluşturuldu.`);
       setNewCust({ name: '', companyName: '', email: '', password: '', role: 'customer' });
       setShowAddModal(false);
     } catch (err: unknown) {

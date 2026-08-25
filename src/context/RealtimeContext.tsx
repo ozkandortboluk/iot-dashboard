@@ -154,8 +154,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (contentType && contentType.includes("application/json")) {
       const errRes = await res.json();
-      if (errRes.details) {
-        throw new Error(errRes.details.map((d: any) => d.message).join(", "));
+      if (errRes.details && Array.isArray(errRes.details)) {
+        const detailMsgs = errRes.details.map((d: any) => d.message || (d.path ? `${d.path.join('.')}: geçersiz` : null)).filter(Boolean);
+        throw new Error(detailMsgs.length > 0 ? detailMsgs.join(' ') : (errRes.error || "Doğrulama hatası."));
       }
       throw new Error(errRes.error || "Müşteri hesabı oluşturulamadı.");
     }

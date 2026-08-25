@@ -565,8 +565,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   };
 
   const getOwnerName = (userId: string) => {
+    if (!userId || userId === 'usr_admin' || userId === 'admin') {
+      return 'Merkez Yönetim';
+    }
     const owner = customersList.find((c) => c.id === userId);
-    return owner ? owner.companyName || owner.name : 'Genel Yönetim';
+    return owner ? (owner.companyName || owner.name) : 'Merkez Yönetim';
   };
 
   // Auto-sync rawPayloadInput default when activeDevice changes
@@ -1939,7 +1942,7 @@ void sendHeartbeat() {
                     onChange={(e) => setTargetOwnerId(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
                   >
-                    <option value="usr_admin">🏛️ Merkez Yönetim (Genel Admin)</option>
+                    <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
                     {customersList
                       .filter((c) => c.role === 'customer' || c.companyName)
                       .map((cust) => (
@@ -2253,7 +2256,7 @@ void sendHeartbeat() {
                     onChange={(e) => setEditOwnerId(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
                   >
-                    <option value="usr_admin">🏛️ Merkez Yönetim (Genel Admin)</option>
+                    <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
                     {customersList
                       .filter((c) => c.role === 'customer' || c.companyName)
                       .map((cust) => (
