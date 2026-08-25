@@ -20,6 +20,7 @@ import { HelpView } from './components/HelpView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
+import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
 import {
   LayoutDashboard,
   Cpu,
@@ -50,7 +51,10 @@ function DashboardContent() {
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const { user, logout } = useAuth();
-  const { selectedCustomerForAdmin, customersList, devices, refreshData } = useRealtime();
+  const { selectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
+
+  // Dynamic animated tab pulse favicon synchronized with real-time state
+  useAnimatedFavicon(isConnected, true);
 
   if (!user) {
     return <LoginView />;

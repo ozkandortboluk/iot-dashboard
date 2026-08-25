@@ -29,6 +29,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 interface HelpViewProps {
   onNavigateToTab?: (tab: string) => void;
@@ -1053,9 +1054,12 @@ Body:
       <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white border border-indigo-500/20 shadow-2xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl -z-0 pointer-events-none" />
         <div className="relative z-10 max-w-3xl space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
-            <LifeBuoy className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Yardım, Bilgi Merkezi & Terimler Sözlüğü</span>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <NexusNodeLogo variant="full" size="md" showDomain={true} animated={true} theme="dark" />
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
+              <LifeBuoy className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Yardım, Bilgi Merkezi & Terimler Sözlüğü</span>
+            </div>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">

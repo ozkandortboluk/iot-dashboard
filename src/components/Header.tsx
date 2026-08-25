@@ -29,6 +29,7 @@ import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
 import { formatShortTime } from '../lib/utils';
 import { getRoleBadgeInfo } from '../lib/permissions';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 interface HeaderProps {
   activeTab: string;
@@ -93,7 +94,12 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-30 min-h-[3.5rem] sm:min-h-[4rem] py-1.5 sm:py-2 bg-white/90 dark:bg-[#020617]/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex flex-col justify-center shadow-sm dark:shadow-none">
       <div className="px-2.5 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
         {/* Left Section: Optional Customer Title, Connection Badge & Admin Customer Switcher */}
-        <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+          {/* Mobile/Compact Brand Logo */}
+          <div className="md:hidden shrink-0">
+            <NexusNodeLogo variant="compact" size="xs" showDomain={false} animated={true} />
+          </div>
+
           {/* Customer Title (if applicable, without 'Canlı İzleme') */}
           {user?.role === 'customer' && (user.companyName || user.name) ? (
             <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 tracking-tight truncate max-w-[90px] xs:max-w-[120px] sm:max-w-[180px] shrink-0">

@@ -78,17 +78,42 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('reconnecting');
   const [wsLatency, setWsLatency] = useState(12);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [rawDevices, setRawDevices] = useState<Device[]>([]);
+  const [rawNotifications, setRawNotifications] = useState<NotificationItem[]>([]);
   const [latestTelemetry, setLatestTelemetry] = useState<TelemetryReading[]>([]);
   const [physicalTelemetry, setPhysicalTelemetry] = useState<TelemetryReading[]>([]);
   const [simulationTelemetry, setSimulationTelemetry] = useState<TelemetryReading[]>([]);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
   const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [simulatorActive, setSimulatorActive] = useState(true);
   const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>('all');
   const [customersList, setCustomersList] = useState<User[]>([]);
+
+  const selectedCustomerForAdminRef = useRef(selectedCustomerForAdmin);
+  useEffect(() => {
+    selectedCustomerForAdminRef.current = selectedCustomerForAdmin;
+  }, [selectedCustomerForAdmin]);
+
+  // Synchronous, flicker-free derived devices list based on active customer filter
+  const devices = useMemo(() => {
+    if (!user) return [];
+    if (user.role === 'admin') {
+      if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') return rawDevices;
+      return rawDevices.filter((d) => d.tenantId === selectedCustomerForAdmin);
+    }
+    return rawDevices.filter((d) => d.tenantId === user.id);
+  }, [rawDevices, user, selectedCustomerForAdmin]);
+
+  // Synchronous, flicker-free derived notifications list based on active customer filter
+  const notifications = useMemo(() => {
+    if (!user) return [];
+    if (user.role === 'admin') {
+      if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') return rawNotifications;
+      return rawNotifications.filter((n) => !n.tenantId || n.tenantId === selectedCustomerForAdmin);
+    }
+    return rawNotifications.filter((n) => !n.tenantId || n.tenantId === user.id);
+  }, [rawNotifications, user, selectedCustomerForAdmin]);
 
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -164,35 +189,31 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const fetchDevices = useCallback(async () => {
     if (!user) return;
     try {
-      const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
-      let url = `/api/devices?userId=${encodeURIComponent(user.id)}`;
-      if (targetCust) url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+      const url = `/api/devices?userId=${encodeURIComponent(user.id)}`;
       const res = await fetch(url);
       const data = await safeJson<Device[]>(res, []);
       if (Array.isArray(data)) {
-        setDevices(data);
+        setRawDevices(data);
       }
     } catch {
       // ignore
     }
-  }, [user, selectedCustomerForAdmin]);
+  }, [user]);
 
   const fetchNotifications = useCallback(async () => {
     if (!user) return;
     try {
-      const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
-      let url = `/api/notifications?userId=${encodeURIComponent(user.id)}`;
-      if (targetCust) url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+      const url = `/api/notifications?userId=${encodeURIComponent(user.id)}`;
       const res = await fetch(url);
       const data = await safeJson<NotificationItem[]>(res, []);
       if (Array.isArray(data)) {
         data.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setNotifications(data);
+        setRawNotifications(data);
       }
     } catch {
       // ignore
     }
-  }, [user, selectedCustomerForAdmin]);
+  }, [user]);
 
   const refreshDevices = useCallback(async () => {
     await fetchDevices();
@@ -205,7 +226,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshCustomers(); 
     fetchDevices();
     fetchNotifications();
-  }, [user, selectedCustomerForAdmin, refreshCustomers, fetchDevices, fetchNotifications]);
+  }, [user?.id, user?.role, refreshCustomers, fetchDevices, fetchNotifications]);
 
   const devicesRef = useRef(devices);
   const notificationsRef = useRef(notifications);
@@ -487,7 +508,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   }
 
                   // Batch update devices state once (immutable merge)
-                  setDevices((prevDevs) => {
+                  setRawDevices((prevDevs) => {
                     const updated = prevDevs.map((dev) => {
                       const update =
                         deviceUpdatesMap.get(dev.id) ||
@@ -566,7 +587,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   }
 
                   if (simUpdatesMap.size > 0) {
-                    setDevices((prevDevs) => {
+                    setRawDevices((prevDevs) => {
                       const updated = prevDevs.map((dev) => {
                         if (!dev.isSimulated) return dev; // Never touch physical hardware
                         const update = simUpdatesMap.get(dev.id) || (dev.apiKey ? simUpdatesMap.get(dev.apiKey) : undefined);
@@ -657,7 +678,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             } else if (data.event === 'device:updated') {
               if (data.payload && data.payload.id) {
-                setDevices((prev) =>
+                setRawDevices((prev) =>
                   prev.map((d) => (d.id === data.payload.id ? { ...d, ...data.payload } : d))
                 );
               } else {
@@ -666,7 +687,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'device:control') {
               if (data.payload && data.payload.deviceId) {
                 const { deviceId, pinOrMetric, value } = data.payload;
-                setDevices((prev) =>
+                setRawDevices((prev) =>
                   prev.map((d) => {
                     if (d.id === deviceId) {
                       return {
@@ -684,14 +705,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'device:created') {
               if (data.payload && data.payload.id) {
                 const dev = data.payload as Device;
-                setDevices((prev) => {
+                setRawDevices((prev) => {
                   if (prev.some((d) => d.id === dev.id)) {
                     return prev.map((d) => (d.id === dev.id ? { ...d, ...dev } : d));
                   }
-                  if (user?.role === 'admin' || dev.tenantId === user?.id) {
-                    return [dev, ...prev];
-                  }
-                  return prev;
+                  return [dev, ...prev];
                 });
               } else {
                 fetchDevices();
@@ -699,25 +717,20 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'device:deleted') {
               const delId = data.payload?.id || data.payload;
               if (delId) {
-                setDevices((prev) => prev.filter((d) => d.id !== delId));
+                setRawDevices((prev) => prev.filter((d) => d.id !== delId));
               } else {
                 fetchDevices();
               }
             } else if (data.event === 'devices:updated') {
               if (Array.isArray(data.payload)) {
-                const incomingDevs = data.payload as Device[];
-                const filtered = user?.role === 'admin'
-                  ? (selectedCustomerForAdmin === 'all' ? incomingDevs : incomingDevs.filter((d: Device) => d.tenantId === selectedCustomerForAdmin))
-                  : incomingDevs.filter((d: Device) => d.tenantId === user?.id);
-                setDevices(filtered);
-                devicesRef.current = filtered;
+                setRawDevices(data.payload as Device[]);
               } else {
                 fetchDevices();
               }
             } else if (data.event === 'notifications:updated' || data.event === 'notification:new') {
               if (data.event === 'notification:new' && data.payload && typeof data.payload === 'object' && (data.payload as any).id) {
                 const item = data.payload as NotificationItem;
-                setNotifications((prev) => {
+                setRawNotifications((prev) => {
                   const idx = prev.findIndex((n) => n.id === item.id);
                   if (idx >= 0) {
                     const updated = [...prev];
@@ -817,7 +830,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
     };
-  }, [user?.id, user?.role, selectedCustomerForAdmin]);
+  }, [user?.id, user?.role]);
 
   // Firestore listener & fetcher for Dashboard Widgets & Settings
   useEffect(() => {
@@ -842,7 +855,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Action methods
   const markNotificationRead = useCallback(async (id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    setRawNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     try {
       await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });
     } catch (e) {
@@ -851,7 +864,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const clearAllNotifications = useCallback(async () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setRawNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     try {
       await fetch('/api/notifications/clear', { method: 'POST' });
     } catch (e) {
@@ -1007,7 +1020,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       const created: Device = await res.json();
-      setDevices((prev) => {
+      setRawDevices((prev) => {
         const exists = prev.some((d) => d.id === created.id);
         return exists ? prev.map((d) => (d.id === created.id ? created : d)) : [...prev, created];
       });
@@ -1020,7 +1033,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [user, selectedCustomerForAdmin, fetchDevices]);
 
   const updateDevice = useCallback(async (id: string, updates: Partial<Device>): Promise<Device> => {
-    const dev = devices.find((d) => d.id === id);
+    const dev = rawDevices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
     if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       throw new Error('Bu cihazı değiştirme yetkiniz yoktur');
@@ -1036,16 +1049,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(err.error || 'Cihaz güncellenemedi');
       }
       const updated: Device = await res.json();
-      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updated } : d)));
+      setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updated } : d)));
       return updated;
     } catch (e: any) {
       console.error('updateDevice error:', e);
       throw new Error(e.message || 'Cihaz güncellenemedi', { cause: e });
     }
-  }, [devices, user]);
+  }, [rawDevices, user]);
 
   const deleteDevice = useCallback(async (id: string) => {
-    const dev = devices.find((d) => d.id === id);
+    const dev = rawDevices.find((d) => d.id === id);
     if (!dev) return;
     if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       console.error('Yetkisiz silme işlemi yapıldı');
@@ -1053,14 +1066,14 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     try {
       await fetch(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      setDevices((prev) => prev.filter((d) => d.id !== id));
+      setRawDevices((prev) => prev.filter((d) => d.id !== id));
     } catch (e) {
       console.error('deleteDevice error:', e);
     }
-  }, [devices, user]);
+  }, [rawDevices, user]);
 
   const regenerateApiKey = useCallback(async (id: string): Promise<string> => {
-    const dev = devices.find((d) => d.id === id);
+    const dev = rawDevices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
     if (user?.role !== 'admin' && dev.tenantId !== user?.id) {
       throw new Error('Yetkisiz işlem');
@@ -1070,16 +1083,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!res.ok) throw new Error('Anahtar yenilenemedi');
       const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
       const newKey = data.apiKey;
-      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, apiKey: newKey } : d)));
+      setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, apiKey: newKey } : d)));
       return newKey;
     } catch (e: any) {
       console.error('regenerateApiKey error:', e);
       throw new Error(e.message || 'Anahtar yenilenemedi', { cause: e });
     }
-  }, [devices, user]);
+  }, [rawDevices, user]);
 
   const convertToPhysicalDevice = useCallback(async (id: string): Promise<{ device: Device; apiKey: string }> => {
-    const dev = devices.find((d) => d.id === id);
+    const dev = rawDevices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
     if (user?.role !== 'admin') {
       throw new Error('Sanal cihazı gerçek donanıma dönüştürme yetkisi yalnızca yöneticilere (Admin) aittir.');
@@ -1092,13 +1105,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
       const updatedDev: Device = data.device;
-      setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updatedDev } : d)));
+      setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updatedDev } : d)));
       return { device: updatedDev, apiKey: data.apiKey };
     } catch (e: any) {
       console.error('convertToPhysicalDevice error:', e);
       throw new Error(e.message || 'Cihaz dönüştürülemedi', { cause: e });
     }
-  }, [devices, user]);
+  }, [rawDevices, user]);
 
   const sendControlCommand = useCallback(
     async (deviceId: string, command: string, value?: any, outputPin?: string, unit?: string) => {

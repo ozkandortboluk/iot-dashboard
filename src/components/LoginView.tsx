@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database } from 'lucide-react';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const LoginView: React.FC = () => {
   const { login, register, setup, checkSetupStatus, isLoading } = useAuth();
@@ -104,8 +105,10 @@ export const LoginView: React.FC = () => {
 
       <div className="w-full max-w-md relative z-10 space-y-6">
         {/* Header Branding */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full">
+        <div className="text-center space-y-3 flex flex-col items-center">
+          <NexusNodeLogo variant="stacked" size="lg" showDomain={true} animated={true} />
+          
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full mt-1">
             <Sparkles className="w-3.5 h-3.5" />
             <span>{needSetup ? 'İlk Sistem Kurulum Sihirbazı' : 'Müşteri & IoT Cihaz Portalı'}</span>
           </div>
@@ -116,7 +119,7 @@ export const LoginView: React.FC = () => {
               ? 'Yeni Hesap Oluştur' 
               : 'Giriş Yapın'}
           </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400">
+          <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto">
             {needSetup
               ? 'Sistemi güvenli üretim modunda ayağa kaldırmak için ilk yönetici hesabını oluşturun.'
               : isRegistering

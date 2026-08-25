@@ -28,6 +28,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const DeploymentView: React.FC = () => {
   const { user } = useAuth();
@@ -515,8 +516,9 @@ void loop() {
       {/* Top Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-br from-slate-900 via-slate-900 to-[#0b1329] p-6 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden">
         <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10">
-          <div className="flex items-center gap-2">
+        <div className="relative z-10 space-y-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <NexusNodeLogo variant="compact" size="xs" showDomain={true} animated={true} theme="dark" />
             <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
               Yeni Başlayanlar İçin Kolay Kurulum
             </span>
@@ -524,7 +526,7 @@ void loop() {
               Docker + PostgreSQL + SSL
             </span>
           </div>
-          <h2 className="text-xl md:text-2xl font-extrabold text-white mt-2 flex items-center gap-2.5">
+          <h2 className="text-xl md:text-2xl font-extrabold text-white mt-1 flex items-center gap-2.5">
             <Server className="w-6 h-6 text-emerald-400 shrink-0" />
             <span>Sunucu & Veritabanı Kurulum ve Canlıya Alma Rehberi</span>
           </h2>

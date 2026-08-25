@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getRoleBadgeInfo } from '../lib/permissions';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 interface SidebarProps {
   activeTab: string;
@@ -316,15 +317,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 min-h-screen border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors">
       {/* Brand & Logo Header */}
       <div>
-        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white shadow-lg text-xs ${avatarInfo.bg}`}>
-            {avatarInfo.text}
+        <div className="p-4 border-b border-slate-200 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <NexusNodeLogo variant="full" size="sm" showDomain={true} animated={true} />
           </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-sm text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
-              {brandTitle}
-            </h1>
-            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider mt-0.5 ${roleInfo.badgeClass}`}>
+          <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800/60 text-[11px]">
+            <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[130px]">
+              {isCustomer ? (user?.companyName || user?.name || 'Müşteri Paneli') : (user?.name || 'Yönetici')}
+            </span>
+            <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider ${roleInfo.badgeClass}`}>
               {roleInfo.label}
             </span>
           </div>

@@ -35,6 +35,7 @@ import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import { formatDateTime } from '../lib/utils';
 import type { User } from '../types';
+import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const AccountSettingsView: React.FC = () => {
   const { user, updateUser, refreshUser, logout } = useAuth();
@@ -957,6 +958,21 @@ export const AccountSettingsView: React.FC = () => {
                 <span className="text-slate-500 dark:text-slate-400">Sunucu Gecikmesi (Latency):</span>
                 <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{wsLatency} ms</span>
               </div>
+            </div>
+          </div>
+
+          {/* Platform Identity & Domain Card */}
+          <div className="md:col-span-2 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl border border-indigo-500/20 p-6 shadow-md text-white flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <NexusNodeLogo variant="full" size="md" showDomain={true} animated={true} theme="dark" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/15 text-slate-300 font-mono">
+                nexusnodeiot.com.tr
+              </span>
+              <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                v1.2.1 Üretim Modu
+              </span>
             </div>
           </div>
         </div>
