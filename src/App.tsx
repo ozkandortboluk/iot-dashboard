@@ -122,7 +122,7 @@ function DashboardContent() {
         />
 
         {/* Navigation Breadcrumb Bar */}
-        <div className="px-3 sm:px-6 md:px-8 py-2 bg-white dark:bg-[#0a0f1d] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs min-w-0 shadow-sm dark:shadow-none">
+        <div className="sticky top-14 sm:top-16 z-20 px-3 sm:px-6 md:px-8 py-2 bg-white/95 dark:bg-[#0a0f1d]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs min-w-0 shadow-sm dark:shadow-none">
           <div className="flex items-center gap-1.5 sm:gap-2 text-slate-500 dark:text-slate-400 font-medium overflow-x-auto whitespace-nowrap min-w-0 pr-2 scrollbar-none">
             <Home className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
             <span className="hidden xs:inline shrink-0">

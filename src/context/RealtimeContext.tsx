@@ -987,13 +987,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [devices]);
 
   const createNewDevice = useCallback(async (data: Partial<Device>): Promise<Device> => {
+    const explicitOwner = data.tenantId || (data as any).userId;
     const targetOwner =
       user?.role === 'admin'
-        ? (data.tenantId || (selectedCustomerForAdmin !== 'all' ? selectedCustomerForAdmin : user?.id || 'usr_admin'))
+        ? (explicitOwner || (selectedCustomerForAdmin !== 'all' ? selectedCustomerForAdmin : user?.id || 'usr_admin'))
         : user?.id || 'usr_admin';
 
     const payload = {
       userId: targetOwner,
+      tenantId: targetOwner,
       name: data.name,
       type: data.type || 'sensor',
       location: data.location || 'Tanımsız Konum',
@@ -1051,12 +1053,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const updated: Device = await res.json();
       setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updated } : d)));
+      fetchDevices().catch(() => {});
       return updated;
     } catch (e: any) {
       console.error('updateDevice error:', e);
       throw new Error(e.message || 'Cihaz güncellenemedi', { cause: e });
     }
-  }, [rawDevices, user]);
+  }, [rawDevices, user, fetchDevices]);
 
   const deleteDevice = useCallback(async (id: string) => {
     const dev = rawDevices.find((d) => d.id === id);

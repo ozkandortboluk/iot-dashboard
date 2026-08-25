@@ -82,11 +82,16 @@ router.put('/:id', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin') {
+  if (currentUser.role === 'admin') {
+    if (req.body.userId && !req.body.tenantId) {
+      req.body.tenantId = req.body.userId;
+    }
+  } else {
     if (existingDev.tenantId !== currentUser.id) {
       return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınızı düzenleyebilirsiniz.' });
     }
     delete req.body.tenantId;
+    delete req.body.userId;
     delete req.body.isSimulated;
     delete req.body.saveSimulatedDataToDb;
     delete req.body.simulatedMetrics;

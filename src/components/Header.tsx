@@ -91,8 +91,8 @@ export const Header: React.FC<HeaderProps> = ({
   const customerUsers = customersList.filter((u) => u.role === 'customer' || u.companyName);
 
   return (
-    <header className="sticky top-0 z-30 min-h-[3.5rem] sm:min-h-[4rem] py-1.5 sm:py-2 bg-white/90 dark:bg-[#020617]/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex flex-col justify-center shadow-sm dark:shadow-none">
-      <div className="px-2.5 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
+    <header className="sticky top-0 z-30 h-14 sm:h-16 bg-white/95 dark:bg-[#020617]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex items-center shadow-sm dark:shadow-none">
+      <div className="w-full px-2.5 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
         {/* Left Section: Optional Customer Title, Connection Badge & Admin Customer Switcher */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
           {/* Mobile/Compact Brand Logo */}
@@ -173,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={toggleSimulator}
               title={simulatorActive ? 'Sanal Veri Simülatörü Açık' : 'Sanal Veri Simülatörü Kapalı'}
-              className={`flex items-center gap-1.5 p-1.5 xs:p-2 2xl:px-2.5 2xl:py-1 rounded-full text-xs font-medium transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 p-1.5 xs:p-2 2xl:px-2.5 2xl:py-1 rounded-full text-xs font-medium transition-all shrink-0 cursor-pointer ${
                 simulatorActive
                   ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
                   : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
@@ -193,7 +193,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onOpenAddWidgetModal}
                 title="Yeni Widget Ekle"
-                className="p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5 shrink-0"
+                className="p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
               >
                 <Layers className="w-4 h-4 2xl:w-3.5 2xl:h-3.5 shrink-0" />
                 <span className="hidden 2xl:inline">Widget Ekle</span>
@@ -202,7 +202,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onToggleEditMode}
                 title={editMode ? 'Düzenlemeyi Tamamla' : 'Dashboard Düzenleme Modu'}
-                className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 ${
+                className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 ${
                   editMode
                     ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20'
                     : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
@@ -218,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => setActiveTab('help')}
             title="Yardım, SSS & Sözlük"
-            className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-medium border transition-colors flex items-center gap-1.5 shrink-0 ${
+            className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-medium border transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
               activeTab === 'help'
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
                 : 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border-indigo-200 dark:border-indigo-500/30'
@@ -231,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Dark / Light Mode Toggle */}
           <button
             onClick={toggleTheme}
-            className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
+            className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
             title={theme === 'dark' ? 'Açık Moda Geç' : 'Karanlık Moda Geç'}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
@@ -241,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div ref={notificationsRef} className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors relative shrink-0"
+              className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors relative shrink-0 cursor-pointer"
               title="Bildirimler"
             >
               <Bell className="w-4 h-4" />
@@ -261,7 +261,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {unreadCount > 0 && (
                     <button
                       onClick={clearAllNotifications}
-                      className="text-[10px] sm:text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                      className="text-[10px] sm:text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium cursor-pointer"
                     >
                       Tümünü Okundu İşaretle
                     </button>
@@ -321,7 +321,7 @@ export const Header: React.FC<HeaderProps> = ({
                       setActiveTab('notifications');
                       setShowNotifications(false);
                     }}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 font-medium hover:underline"
+                    className="text-xs text-indigo-600 dark:text-indigo-400 font-medium hover:underline cursor-pointer"
                   >
                     Tüm Bildirim Geçmişi →
                   </button>

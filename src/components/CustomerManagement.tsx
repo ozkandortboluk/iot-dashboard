@@ -128,103 +128,105 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   }
 
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto text-slate-900 dark:text-slate-100">
-      {/* Top Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-indigo-50 via-slate-100 to-slate-100 dark:from-indigo-950/60 dark:via-slate-900 dark:to-slate-900 p-6 rounded-3xl border border-indigo-200 dark:border-indigo-500/20 shadow-lg dark:shadow-2xl">
-        <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-semibold rounded-full">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Sadece Yönetici Yetkisi</span>
+    <div className="space-y-4 md:space-y-5 text-slate-900 dark:text-slate-100">
+      {/* Customer Quick Status & Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+        <div className="bg-white dark:bg-[#0f172a] px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Toplam Müşteri</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:block">Kayıtlı hesaplar</p>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Müşteri & Cihaz Erişim Yönetimi</h2>
-          <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-            Tüm müşterilerinizi listeleyin, her müşteri için özel giriş hesabı ve yetkilendirmeler tanımlayın. Müşteri seçerek cihazlarını ve dashboard ekranlarını canlı olarak inceleyin.
-          </p>
+          <span className="text-lg sm:text-xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
+            {customersList.filter((u) => u.role === 'customer').length}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-2 px-4 py-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold rounded-2xl text-xs shadow-sm transition-colors shrink-0 cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">CSV İndir</span>
-          </button>
-          
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-indigo-600/30 transition-all shrink-0 cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Yeni Müşteri Ekle</span>
-          </button>
+        <div className="bg-white dark:bg-[#0f172a] px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Atanmış Cihaz</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:block">Müşteri / Toplam</p>
+          </div>
+          <span className="text-lg sm:text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+            {devices.filter((d) => d.tenantId !== 'usr_admin').length} / {devices.length}
+          </span>
+        </div>
+
+        <div className="bg-white dark:bg-[#0f172a] px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shadow-xs">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">İzleme Modu</p>
+            <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate" title={selectedCustomerForAdmin === 'all' ? 'Genel Görünüm' : customersList.find((c) => c.id === selectedCustomerForAdmin)?.companyName || selectedCustomerForAdmin}>
+              {selectedCustomerForAdmin === 'all'
+                ? '🌐 Genel Görünüm'
+                : customersList.find((c) => c.id === selectedCustomerForAdmin)?.companyName || selectedCustomerForAdmin}
+            </p>
+          </div>
+          {selectedCustomerForAdmin !== 'all' && (
+            <button
+              onClick={() => setSelectedCustomerForAdmin('all')}
+              className="text-[10px] px-2 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 font-medium cursor-pointer shrink-0"
+            >
+              Sıfırla
+            </button>
+          )}
         </div>
       </div>
 
       {/* Alert Messages */}
       {successMsg && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl text-xs flex items-center gap-3">
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs flex items-center gap-2.5">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
-      {/* Customer Selection Quick Status */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-[#0f172a] p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-none">
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Toplam Müşteri</p>
-          <p className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">
-            {customersList.filter((u) => u.role === 'customer').length}
-          </p>
-          <p className="text-[11px] text-slate-500">Kayıtlı kurum ve müşteri hesapları</p>
-        </div>
-
-        <div className="bg-white dark:bg-[#0f172a] p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-none">
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Atanmış Cihaz Sayısı</p>
-          <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
-            {devices.filter((d) => d.tenantId !== 'usr_admin').length} / {devices.length}
-          </p>
-          <p className="text-[11px] text-slate-500">Müşterilere zimmetlenmiş sensör/sayaçlar</p>
-        </div>
-
-        <div className="bg-white dark:bg-[#0f172a] p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1 shadow-sm dark:shadow-none">
-          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Seçili İzleme Modu</p>
-          <p className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">
-            {selectedCustomerForAdmin === 'all'
-              ? '🌐 Genel Görünüm (Tüm Cihazlar)'
-              : customersList.find((c) => c.id === selectedCustomerForAdmin)?.companyName || selectedCustomerForAdmin}
-          </p>
-          <button
-            onClick={() => setSelectedCustomerForAdmin('all')}
-            className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium cursor-pointer"
-          >
-            Tüm Müşterilere Dön
-          </button>
-        </div>
-      </div>
-
-      {/* Customer List Header & Search */}
-      <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-6 shadow-sm dark:shadow-none">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Müşteri Listesi & Firma Hesapları
+      {/* Customer List Section */}
+      <div className="bg-white dark:bg-[#0f172a] rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-sm dark:shadow-none">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/80">
+          <div className="shrink-0">
+            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span>Müşteri Listesi & Firma Hesapları</span>
+              <span className="text-xs font-normal text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full ml-1">
+                {filteredCustomers.length} Müşteri
+              </span>
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Müşterilerinizi yönetin, ayrıntılarını görüntüleyin ve sistem yapılandırmalarını düzenleyin.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Müşterilerinizi yönetin, hesap ayrıntılarını ve atanan saha cihazlarını inceleyin.
             </p>
           </div>
 
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Müşteri veya e-posta ara..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
+          {/* Action Tools: Search, CSV, Add Customer */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5">
+            {/* Search Input */}
+            <div className="relative min-w-[200px] sm:w-60 md:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Müşteri ara..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              />
+            </div>
+
+            {/* CSV Button */}
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold rounded-xl text-xs shadow-xs transition-colors cursor-pointer shrink-0"
+              title="Müşteri listesini CSV formatında dışa aktar"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+              <span>CSV İndir</span>
+            </button>
+
+            {/* New Customer Button */}
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-xs shadow-md shadow-indigo-600/25 transition-all cursor-pointer active:scale-95 shrink-0"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Yeni Müşteri Ekle</span>
+            </button>
           </div>
         </div>
 

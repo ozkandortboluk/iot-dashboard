@@ -449,7 +449,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditType(dev.type || 'sensor');
     setEditLocation(dev.location || '');
     setEditIpAddress(dev.ipAddress || '');
-    setEditOwnerId(dev.tenantId || '');
+    setEditOwnerId(dev.tenantId || 'usr_admin');
     setEditRateLimit(dev.rateLimitPerMin || 120);
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
     setEditStatus(dev.status || 'online');
@@ -464,12 +464,14 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const handleSaveEdit = async (e: React.FormEvent) => {
     if (!editingDevice) return;
     try {
+      const targetOwner = editOwnerId || 'usr_admin';
       const updated = await updateDevice(editingDevice.id, {
         name: editName,
         type: editType,
         location: editLocation,
         ipAddress: editIpAddress,
-        userId: editOwnerId,
+        tenantId: targetOwner,
+        userId: targetOwner,
         rateLimitPerMin: editRateLimit,
         encryptionMethod: editEncryption,
         status: editStatus,

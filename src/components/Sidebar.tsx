@@ -34,8 +34,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const isAnalyst = role === 'analyst';
   const isCustomer = role === 'customer';
 
-  const roleInfo = getRoleBadgeInfo(role);
-
   const customerMenuItems = [
     {
       id: 'dashboard',
@@ -314,21 +312,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   };
 
   return (
-    <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 min-h-screen border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors">
+    <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 h-screen sticky top-0 z-30 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors overflow-y-auto">
       {/* Brand & Logo Header */}
       <div>
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 space-y-2">
-          <div className="flex items-center justify-between">
-            <NexusNodeLogo variant="full" size="sm" showDomain={true} animated={true} />
-          </div>
-          <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800/60 text-[11px]">
-            <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[130px]">
-              {isCustomer ? (user?.companyName || user?.name || 'Müşteri Paneli') : (user?.name || 'Yönetici')}
-            </span>
-            <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded uppercase tracking-wider ${roleInfo.badgeClass}`}>
-              {roleInfo.label}
-            </span>
-          </div>
+        <div className="h-14 sm:h-16 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+          <NexusNodeLogo variant="full" size="sm" showDomain={true} animated={true} />
         </div>
 
         {/* Navigation Links */}

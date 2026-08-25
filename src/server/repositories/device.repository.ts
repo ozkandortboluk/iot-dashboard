@@ -279,7 +279,13 @@ export class DeviceRepository {
     if (updates.location !== undefined) dev.location = updates.location;
     if (updates.ipAddress !== undefined) dev.ipAddress = updates.ipAddress;
     if (updates.macAddress !== undefined) dev.macAddress = updates.macAddress;
-    if (updates.tenantId !== undefined) dev.tenantId = updates.tenantId;
+    const targetTenantId = updates.tenantId !== undefined ? updates.tenantId : (updates as any).userId;
+    if (targetTenantId !== undefined) {
+      if (dev.tenantId !== targetTenantId) {
+        this.db.addAuditLog('system', 'Yönetici', `Cihaz Sorumlu Müşteri/Firma Değiştirildi: ${dev.name} -> ${targetTenantId}`, 'medium');
+      }
+      dev.tenantId = targetTenantId;
+    }
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
     if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
