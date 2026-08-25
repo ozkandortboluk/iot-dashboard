@@ -79,7 +79,7 @@ export class DeviceRepository {
             );
 
             this.db.addNotification({
-              userId: dev.tenantId || 'usr_admin',
+              tenantId: dev.tenantId || 'usr_admin',
               title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
               message: `${dev.name} cihazından ${timeFormatted} sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
               severity: 'critical',
@@ -468,7 +468,7 @@ export class DeviceRepository {
         lastPacket: metricsText,
         registeredDeviceId: d.id,
         lastSeen: d.lastSeen,
-        userId: d.tenantId,
+        tenantId: d.tenantId,
       };
     });
 

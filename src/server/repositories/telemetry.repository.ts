@@ -194,7 +194,7 @@ export class TelemetryRepository {
     try {
       if (typeof this.db.addNotification === 'function') {
         this.db.addNotification({
-          userId: 'usr_admin',
+          tenantId: 'usr_admin',
           title,
           message,
           severity: isCritical ? 'critical' : 'warning',
@@ -1435,7 +1435,7 @@ export class TelemetryRepository {
       : title;
 
     this.db.addNotification({
-      userId: alarm.tenantId,
+      tenantId: alarm.tenantId,
       title: formattedTitle,
       message: msg,
       severity: eventType === 'RESOLVED' ? 'info' : alarm.severity,
@@ -1458,7 +1458,7 @@ export class TelemetryRepository {
 
     if (alarm.tenantId !== 'usr_admin') {
       this.db.addNotification({
-        userId: 'usr_admin',
+        tenantId: 'usr_admin',
         title: isSimulated
           ? (title.startsWith('🧪') ? title : `🧪 [TEST ALARMI] [${alarm.deviceName}] ${title}`)
           : `[${alarm.deviceName}] ${title}`,
@@ -1551,7 +1551,7 @@ export class TelemetryRepository {
         const queueItem: NotificationQueueItem = {
           id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           ruleId: rule.id,
-          userId: alarm.tenantId,
+          tenantId: alarm.tenantId,
           userName: user?.name || alarm.tenantId,
           channel,
           recipient,
@@ -1692,7 +1692,7 @@ export class TelemetryRepository {
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
-              userId: deviceOwnerId,
+              tenantId: deviceOwnerId,
               metricKey: reading.metric,
               operator: rule.operator,
               thresholdValue: rule.thresholdValue,
@@ -1716,7 +1716,7 @@ export class TelemetryRepository {
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
-              userId: deviceOwnerId,
+              tenantId: deviceOwnerId,
               metricKey: reading.metric,
               operator: rule.operator,
               thresholdValue: rule.thresholdValue,
@@ -1899,7 +1899,7 @@ export class TelemetryRepository {
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
-              userId: deviceOwnerId,
+              tenantId: deviceOwnerId,
               metricKey: reading.metric,
               operator: rule.operator,
               thresholdValue: rule.thresholdValue,
@@ -1923,7 +1923,7 @@ export class TelemetryRepository {
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
-              userId: deviceOwnerId,
+              tenantId: deviceOwnerId,
               metricKey: reading.metric,
               operator: rule.operator,
               thresholdValue: rule.thresholdValue,

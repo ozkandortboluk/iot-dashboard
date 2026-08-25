@@ -40,7 +40,7 @@ router.post('/', authenticateUser, (req, res) => {
 
   const device = db.createDevice({
     id: id && id.trim() ? id.trim() : undefined,
-    userId: targetOwnerId,
+    tenantId: targetOwnerId,
     name,
     type,
     location: location || 'Tanımsız Konum',

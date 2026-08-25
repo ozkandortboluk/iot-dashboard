@@ -90,7 +90,7 @@ export class UserRepository {
     
     const dashboard = {
       id: `dash_${newUser.id}`,
-      userId: newUser.id,
+      tenantId: newUser.id,
       title: `${companyName || name} Özel Dashboard`,
       widgets: [...defaultWidgets],
       updatedAt: new Date().toISOString(),
@@ -99,7 +99,7 @@ export class UserRepository {
     const auditLog: import('../../types.js').AuditLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
-      userId: newUser.id,
+      tenantId: newUser.id,
       userName: name,
       action: `Yeni Kullanıcı Kaydı Yapıldı: ${email} (${role})`,
       ip: '127.0.0.1',
@@ -235,7 +235,7 @@ export class UserRepository {
     const logItem: import('../../types.js').AuditLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
-      userId,
+      tenantId: userId,
       userName,
       action,
       ip: '127.0.0.1',

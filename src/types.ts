@@ -461,7 +461,7 @@ export interface NotificationServiceConfig {
 
 export interface ThresholdRule {
   id: string;
-  userId?: string;                   // Kullanıcı / Müşteri Sahipliği ('usr_admin' veya müşteri ID'si)
+  tenantId?: string;                   // Kullanıcı / Müşteri Sahipliği ('usr_admin' veya müşteri ID'si)
   userName?: string;                 // Sahip Kullanıcı Adı
   deviceId: string;                  // 'all' veya belirli cihaz ID'si
   metricKey: string;                 // Metrik ('cpu', 'temperature', 'power', vb.)
@@ -492,6 +492,7 @@ export interface AuditLog {
 }
 
 export interface DiscoveredNetworkDevice {
+  tenantId?: string;
   ip: string;
   mac: string;
   hostname: string;

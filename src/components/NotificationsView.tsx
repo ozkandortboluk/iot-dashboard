@@ -442,7 +442,7 @@ export const NotificationsView: React.FC = () => {
     const activeHoursPayload = ruleIs24h ? '00:00-23:59' : `${ruleActiveStart}-${ruleActiveEnd}`;
 
     const payload: Partial<ThresholdRule> = {
-      userId: ruleUserId,
+      tenantId: ruleUserId,
       deviceId: ruleDeviceId,
       metricKey: ruleMetric,
       operator: ruleOp,

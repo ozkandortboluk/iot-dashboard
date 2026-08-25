@@ -142,7 +142,7 @@ export class AlarmRepository {
     const newRule: ThresholdRule = {
       ...ruleData,
       id: `rule_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
-      userId: ownerId,
+      tenantId: ownerId,
       userName: ownerName,
       notificationChannels: ruleData.notificationChannels || ['app'],
       activeHours: ruleData.activeHours || '00:00-23:59',

@@ -51,7 +51,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     setSuccessMsg('');
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/customers/${customer.id}`, {
+      const res = await fetch(`/api/admin/tenants/${customer.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -61,7 +61,10 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Güncelleme başarısız');
+        if (data.details) {
+          throw new Error(data.details.map((d: any) => d.message).join(", "));
+        }
+        throw new Error(data.error || "Güncelleme başarısız");
       }
       setSuccessMsg('Müşteri bilgileri başarıyla güncellendi.');
     } catch (err: any) {
@@ -73,8 +76,8 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const handleStatusChange = async (status: 'active' | 'suspended') => {
     try {
-      const res = await fetch(`/api/customers/${customer.id}/status`, {
-        method: 'PATCH',
+      const res = await fetch(`/api/admin/tenants/${customer.id}/suspend`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -93,7 +96,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const handleResetPassword = async () => {
     try {
-      const res = await fetch(`/api/customers/${customer.id}/reset-password`, {
+      const res = await fetch(`/api/admin/tenants/${customer.id}/reset-password`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
@@ -106,7 +109,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const handleTerminateSessions = async () => {
     try {
-      const res = await fetch(`/api/customers/${customer.id}/terminate-sessions`, {
+      const res = await fetch(`/api/admin/tenants/${customer.id}/terminate-sessions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });

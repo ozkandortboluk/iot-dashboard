@@ -12,7 +12,7 @@ export function seedDemoDataForDatabase(
   const demoDevices: Device[] = [
     {
       id: 'dev_01_istanbul',
-      userId: userId,
+      tenantId: userId,
       name: '[Sanal] İstanbul Akıllı Lojistik İklim Sensörü',
       type: 'sensor',
       apiKey: genSecureKey('ist'),
@@ -27,7 +27,7 @@ export function seedDemoDataForDatabase(
     },
     {
       id: 'dev_03_bursa',
-      userId: userId,
+      tenantId: userId,
       name: '[Sanal] Bursa Fabrika #4 Akıllı Sayaç',
       type: 'meter',
       apiKey: genSecureKey('brs'),
@@ -42,7 +42,7 @@ export function seedDemoDataForDatabase(
     },
     {
       id: 'dev_02_frankfurt',
-      userId: userId,
+      tenantId: userId,
       name: '[Sanal] Frankfurt Bulut Sunucu Düğümü Alpha',
       type: 'server',
       apiKey: genSecureKey('fra'),
@@ -140,7 +140,7 @@ export function seedDemoDataForDatabase(
   const demoRules: ThresholdRule[] = [
     {
       id: `rule_cpu_high_${userId}`,
-      userId: userId,
+      tenantId: userId,
       userName: userName,
       deviceId: 'all',
       metricKey: 'cpu',
@@ -158,7 +158,7 @@ export function seedDemoDataForDatabase(
     },
     {
       id: `rule_temp_high_${userId}`,
-      userId: userId,
+      tenantId: userId,
       userName: userName,
       deviceId: 'all',
       metricKey: 'temperature',
@@ -178,7 +178,7 @@ export function seedDemoDataForDatabase(
   const demoNotifications: NotificationItem[] = [
     {
       id: `notif_init_${userId}`,
-      userId: userId,
+      tenantId: userId,
       title: 'Sistem Onboarding Tamamlandı',
       message: 'İlk kurulum ve akıllı IoT izleme katmanı güvenli bir şekilde aktifleştirildi.',
       severity: 'info',

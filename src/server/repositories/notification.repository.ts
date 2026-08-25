@@ -84,7 +84,7 @@ export class NotificationRepository {
 
     const newDash: DashboardLayout = {
       id: `dash_${userId}`,
-      userId,
+      tenantId: userId,
       title,
       widgets: [...defaultWidgets],
       updatedAt: new Date().toISOString(),

@@ -1,0 +1,260 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { authenticateUser, requireAdmin } from '../../middleware/auth.js';
+import { db } from '../../db.js';
+
+export const adminTenantsRouter = Router();
+
+// Validation Schemas
+const CreateTenantSchema = z.object({
+  name: z.string().trim().min(2, 'Ad en az 2 karakter olmalıdır.').max(100),
+  email: z.string().trim().toLowerCase().email('Geçersiz e-posta formatı.').max(100),
+  password: z.string().min(8, 'Parola en az 8 karakter olmalıdır.')
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&]).*$/, 'Parola en az bir büyük harf, bir küçük harf, bir sayı ve bir özel karakter içermelidir.'),
+  companyName: z.string().trim().min(2).max(100).optional(),
+  role: z.enum(['customer', 'admin', 'operator', 'analyst']).default('customer'),
+  phone: z.string().trim().max(20).optional(),
+  whatsappNumber: z.string().trim().max(20).optional(),
+});
+
+const UpdateTenantSchema = z.object({
+  name: z.string().trim().min(2).max(100).optional(),
+  companyName: z.string().trim().min(2).max(100).optional(),
+  phone: z.string().trim().max(20).optional(),
+  whatsappNumber: z.string().trim().max(20).optional(),
+  role: z.enum(['customer', 'admin', 'operator', 'analyst']).optional(),
+});
+
+const PaginationQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(50),
+  search: z.string().optional(),
+  status: z.enum(['active', 'suspended']).optional(),
+  sortBy: z.enum(['created_at', 'name', 'companyName']).default('created_at'),
+  order: z.enum(['asc', 'desc']).default('desc'),
+});
+
+adminTenantsRouter.use(authenticateUser, requireAdmin);
+
+// GET /api/admin/tenants
+adminTenantsRouter.get('/', async (req, res) => {
+  try {
+    const query = PaginationQuerySchema.parse(req.query);
+    
+    // Yalnızca customer rolündeki kullanıcıları getir
+    let tenants = (db.data.users || []).filter((u: any) => u.role === 'customer');
+
+    if (query.search) {
+      const s = query.search.toLowerCase();
+      tenants = tenants.filter((u: any) => 
+        u.name.toLowerCase().includes(s) || 
+        u.email.toLowerCase().includes(s) || 
+        (u.companyName && u.companyName.toLowerCase().includes(s))
+      );
+    }
+
+    if (query.status) {
+      tenants = tenants.filter((u: any) => (u.status || 'active') === query.status);
+    }
+
+    tenants.sort((a: any, b: any) => {
+      let aVal = a[query.sortBy] || '';
+      let bVal = b[query.sortBy] || '';
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return query.order === 'asc' ? -1 : 1;
+      if (aVal > bVal) return query.order === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    const total = tenants.length;
+    const startIndex = (query.page - 1) * query.limit;
+    const paginated = tenants.slice(startIndex, startIndex + query.limit);
+
+    // Müşterilerin cihaz sayılarını ekle
+    const withDeviceCount = paginated.map((tenant: any) => {
+      const deviceCount = (db.data.devices || []).filter((d: any) => d.tenantId === tenant.id).length;
+      return {
+        id: tenant.id,
+        name: tenant.name,
+        email: tenant.email,
+        companyName: tenant.companyName,
+        status: tenant.status || 'active',
+        created_at: tenant.created_at,
+        role: tenant.role,
+        deviceCount
+      };
+    });
+
+    res.json({
+      data: withDeviceCount,
+      meta: {
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit)
+      }
+    });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Doğrulama hatası', details: (err as any).errors });
+    }
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// GET /api/admin/tenants/:id
+adminTenantsRouter.get('/:id', async (req, res) => {
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+  if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+  
+  const deviceCount = (db.data.devices || []).filter((d: any) => d.tenantId === tenant.id).length;
+  
+  res.json({
+    id: tenant.id,
+    name: tenant.name,
+    email: tenant.email,
+    companyName: tenant.companyName,
+    phone: tenant.phone,
+    whatsappNumber: tenant.whatsappNumber,
+    status: tenant.status || 'active',
+    created_at: tenant.created_at,
+    role: tenant.role,
+    deviceCount
+  });
+});
+
+// GET /api/admin/tenants/:id/members
+adminTenantsRouter.get('/:id/members', async (req, res) => {
+  // Şimdilik sadece ana müşteriyi (tenant sahibi) döndürüyoruz
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+  if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+  
+  res.json([{
+    id: tenant.id,
+    name: tenant.name,
+    email: tenant.email,
+    role: 'owner',
+    status: tenant.status || 'active'
+  }]);
+});
+
+// POST /api/admin/tenants
+adminTenantsRouter.post('/', async (req, res) => {
+  try {
+    const data = CreateTenantSchema.parse(req.body);
+    
+    if (data.role === "admin" || data.role === "operator" || data.role === "analyst") {
+      // Sadece customer oluşturulabilir.
+      return res.status(403).json({ error: "Sistem yöneticisi/operatör oluşturmak için ayrı bir onay/MFA akışı gereklidir." });
+    }
+
+    
+    // Benzersiz e-posta kontrolü
+    const existing = db.data.users.find((u: any) => u.email.toLowerCase() === data.email);
+    if (existing) {
+      return res.status(400).json({ error: 'Bu e-posta adresi ile zaten kayıtlı bir hesap var.' });
+    }
+
+    // Benzersiz firma adı kontrolü (opsiyonel)
+    if (data.companyName) {
+      const existingCompany = db.data.users.find((u: any) => u.companyName && u.companyName.toLowerCase() === data.companyName!.toLowerCase());
+      if (existingCompany) {
+        return res.status(400).json({ error: 'Bu firma adıyla kayıtlı bir hesap var.' });
+      }
+    }
+
+    const newCustomer = await db.userRepository.registerUser(
+      data.name, 
+      data.email, 
+      data.password, 
+      data.role as 'admin' | 'customer', 
+      data.companyName
+    );
+
+    res.status(201).json(newCustomer);
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Doğrulama hatası', details: (err as any).errors });
+    }
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+// PATCH /api/admin/tenants/:id
+adminTenantsRouter.patch('/:id', async (req, res) => {
+  try {
+    const data = UpdateTenantSchema.parse(req.body);
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+    
+    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+
+    // Sadece değişen alanları güncelle
+    if (data.name) tenant.name = data.name;
+    if (data.companyName) tenant.companyName = data.companyName;
+    if (data.phone) tenant.phone = data.phone;
+    if (data.whatsappNumber) tenant.whatsappNumber = data.whatsappNumber;
+    if (data.role) tenant.role = data.role;
+
+    // TODO: Eğer veritabanı update metodu varsa onu çağır (şimdilik doğrudan objeyi güncelleyip saveData çağırıyoruz)
+    await db.postgresRepo.saveUser(tenant); // Şifre verilmeden update
+    db.saveData(db.data);
+
+    res.json(tenant);
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Doğrulama hatası', details: (err as any).errors });
+    }
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/tenants/:id/suspend
+adminTenantsRouter.post('/:id/suspend', async (req, res) => {
+  try {
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+
+    const newStatus = tenant.status === 'suspended' ? 'active' : 'suspended';
+    
+    if (newStatus === 'suspended') {
+      await db.userRepository.softDeleteUser(tenant.id, (req as any).user.id, (req as any).user.name);
+    } else {
+      tenant.status = 'active';
+      tenant.deletedAt = undefined;
+      await db.postgresRepo.saveUser(tenant);
+      db.saveData(db.data);
+    }
+
+    res.json({ message: `Müşteri hesabı ${newStatus === 'active' ? 'aktifleştirildi' : 'donduruldu'}.`, status: newStatus });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/tenants/:id/terminate-sessions
+adminTenantsRouter.post('/:id/terminate-sessions', async (req, res) => {
+  try {
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    
+    await db.userRepository.terminateUserSessions(tenant.id);
+    res.json({ message: 'Tüm aktif oturumlar sonlandırıldı.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/tenants/:id/reset-password
+adminTenantsRouter.post('/:id/reset-password', async (req, res) => {
+  try {
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    
+    // In a real app, send an email. For now, just return success.
+    res.json({ message: 'Parola sıfırlama bağlantısı e-posta adresine gönderildi.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});

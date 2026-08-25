@@ -95,10 +95,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Customers List (for Admin)
   const refreshCustomers = useCallback(async () => {
     try {
-      const res = await fetch('/api/customers');
+      const res = await fetch('/api/admin/tenants?limit=1000');
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
+        const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
         setCustomersList((prev) => {
           if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
           return data;
@@ -116,7 +116,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     companyName?: string;
     role?: User['role'];
   }): Promise<User> => {
-    const res = await fetch('/api/customers', {
+    const res = await fetch('/api/admin/tenants', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -127,11 +127,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await refreshCustomers();
       return result;
     }
-    throw new Error('Müşteri hesabı oluşturulamadı.');
+    if (contentType && contentType.includes("application/json")) {
+      const errRes = await res.json();
+      if (errRes.details) {
+        throw new Error(errRes.details.map((d: any) => d.message).join(", "));
+      }
+      throw new Error(errRes.error || "Müşteri hesabı oluşturulamadı.");
+    }
+    throw new Error("Müşteri hesabı oluşturulamadı.");
   };
 
   const deleteCustomer = async (id: string) => {
-    await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    await fetch(`/api/admin/tenants/${id}/suspend`, { method: 'POST' });
     if (selectedCustomerForAdmin === id) {
       setSelectedCustomerForAdmin('all');
     }
@@ -906,7 +913,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = await fetch('/api/simulator/toggle', { method: 'POST' });
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
-        const data = await res.json();
+        const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
         setSimulatorActive(data.simulatorActive);
       }
     } catch (e) {
@@ -1061,7 +1068,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const res = await fetch(`/api/devices/${encodeURIComponent(id)}/regen-key`, { method: 'POST' });
       if (!res.ok) throw new Error('Anahtar yenilenemedi');
-      const data = await res.json();
+      const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
       const newKey = data.apiKey;
       setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, apiKey: newKey } : d)));
       return newKey;
@@ -1083,7 +1090,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const errData = await res.json();
         throw new Error(errData.error || 'Dönüştürme işlemi başarısız oldu');
       }
-      const data = await res.json();
+      const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
       const updatedDev: Device = data.device;
       setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updatedDev } : d)));
       return { device: updatedDev, apiKey: data.apiKey };
@@ -1107,7 +1114,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           throw new Error(errData.error || 'Sinyal gönderilemedi');
         }
 
-        const data = await res.json();
+        const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
         return data;
       } catch (e: any) {
         console.error('sendControlCommand error:', e);

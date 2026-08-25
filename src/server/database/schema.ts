@@ -594,5 +594,10 @@ ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS boot_confirmed_at TIMES
 
 CREATE INDEX IF NOT EXISTS idx_ota_jobs_device ON ota_deployment_jobs(device_id);
 CREATE INDEX IF NOT EXISTS idx_ota_jobs_status ON ota_deployment_jobs(status);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+
 `;
+
 

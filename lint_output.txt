@@ -1,0 +1,5 @@
+
+> react-example@1.2.1 lint
+> eslint . && tsc --noEmit
+
+src/server/repositories/user.repository.ts(138,9): error TS1117: An object literal cannot have multiple properties with the same name.

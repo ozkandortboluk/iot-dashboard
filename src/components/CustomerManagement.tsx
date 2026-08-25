@@ -411,17 +411,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 ml-1">Hesap Türü (Rol)</label>
-                <select
-                  value={newCust.role}
-                  onChange={(e) => setNewCust({ ...newCust, role: e.target.value as any })}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
-                >
-                  <option value="customer">Müşteri (Sadece kendi cihazlarını görür)</option>
-                  <option value="admin">Sistem Yöneticisi (Tüm sisteme erişir)</option>
-                </select>
-              </div>
+              
 
               <div className="pt-4 flex justify-end gap-3">
                 <button

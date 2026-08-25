@@ -10,7 +10,8 @@ import { startOtaWorker } from './src/server/services/otaWorker.js';
 
 
 // Route Handlers
-import { authRouter, profileRouter, customersRouter } from './src/server/routes/auth.js';
+import { authRouter, profileRouter } from './src/server/routes/auth.js';
+import { adminTenantsRouter } from './src/server/routes/admin/tenants.js';
 import { devicesRouter, networkRouter, deviceCommandsRouter } from './src/server/routes/devices.js';
 import { telemetryRouter } from './src/server/routes/telemetry.js';
 import {
@@ -62,7 +63,7 @@ app.use(systemRouter);
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/profile', profileRouter);
-app.use('/api/customers', customersRouter);
+  app.use('/api/admin/tenants', adminTenantsRouter);
 app.use('/api/devices', devicesRouter);
 app.use('/api/network', networkRouter);
 app.use('/api/v1', deviceCommandsRouter);

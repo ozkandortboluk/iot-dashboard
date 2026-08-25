@@ -122,7 +122,7 @@ export type NotificationListener = (
 ) => void;
 
 class LocalDatabase {
-  private data: DatabaseSchema;
+  public data: DatabaseSchema;
   private firestoreQuotaExceeded = false;
   private firestoreUnsubscribers: Array<() => void> = [];
   private notificationListeners: NotificationListener[] = [];
@@ -682,7 +682,7 @@ class LocalDatabase {
         parsed.passwords[adminId] = hashPassword(envAdminPassword);
         parsed.dashboards.push({
           id: `dash_${adminId}`,
-          userId: adminId,
+          tenantId: adminId,
           title: `${adminCompany} Özel Dashboard`,
           widgets: [...defaultWidgets],
           updatedAt: new Date().toISOString(),
@@ -690,7 +690,7 @@ class LocalDatabase {
         parsed.auditLogs.push({
           id: 'log_env_init',
           timestamp: new Date().toISOString(),
-          userId: adminId,
+          tenantId: adminId,
           userName: adminName,
           action: 'İlk Yönetici Hesabı Ortam Değişkenleri ile Başarıyla Kuruldu (Güvenli Üretim Modu)',
           ip: '127.0.0.1',
@@ -832,7 +832,7 @@ class LocalDatabase {
     }, 2000);
   }
 
-  private saveData(dataToSave: DatabaseSchema, forceWrite = false) {
+  public saveData(dataToSave: DatabaseSchema, forceWrite = false) {
     if (this.postgresRepo.isReady() && !forceWrite) {
       // Normal çalışmada gerçek veri kaynağı PostgreSQL'dir.
       // Disk I/O (db.json) sürekli güncellenmez, sadece geçici cache/emergency buffer olarak tutulur.
@@ -1015,7 +1015,7 @@ class LocalDatabase {
     const dailyDeleteOffset = this.firestoreQuotaExceeded ? 150 + (hash * 2) : 25 + (hash * 3);
 
     const usersWithStats = this.data.users.map((u) => {
-      const userDevs = this.data.devices.filter((d) => d.userId === u.id);
+      const userDevs = this.data.devices.filter((d) => d.tenantId === u.id);
       const onlineDevs = userDevs.filter((d) => d.status === 'online');
       const userTelemetry = this.data.telemetry.filter((t) => userDevs.some((d) => d.id === t.deviceId));
       return {
@@ -1165,7 +1165,7 @@ class LocalDatabase {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           queueItemId: item.id,
           notificationId: item.notificationId,
-          userId: item.userId,
+          tenantId: item.tenantId,
           userName: item.userName,
           channel: item.channel,
           recipient: item.recipient,
@@ -1195,7 +1195,7 @@ class LocalDatabase {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           queueItemId: item.id,
           notificationId: item.notificationId,
-          userId: item.userId,
+          tenantId: item.tenantId,
           userName: item.userName,
           channel: item.channel,
           recipient: item.recipient,
@@ -1226,11 +1226,11 @@ class LocalDatabase {
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'customer') {
-      return this.data.notificationQueue.filter((q) => q.userId === requestingUserId);
+      return this.data.notificationQueue.filter((q) => q.tenantId === requestingUserId);
     }
 
     if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.data.notificationQueue.filter((q) => q.userId === targetCustomerId);
+      return this.data.notificationQueue.filter((q) => q.tenantId === targetCustomerId);
     }
 
     return this.data.notificationQueue;
@@ -1262,7 +1262,7 @@ class LocalDatabase {
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'customer') {
-      this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.userId !== requestingUserId);
+      this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.tenantId !== requestingUserId);
     } else {
       this.data.notificationQueue = [];
     }
@@ -1275,11 +1275,11 @@ class LocalDatabase {
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'customer') {
-      return this.data.dispatchLogs.filter((l) => l.userId === requestingUserId);
+      return this.data.dispatchLogs.filter((l) => l.tenantId === requestingUserId);
     }
 
     if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.data.dispatchLogs.filter((l) => l.userId === targetCustomerId);
+      return this.data.dispatchLogs.filter((l) => l.tenantId === targetCustomerId);
     }
 
     return this.data.dispatchLogs;
@@ -1328,7 +1328,7 @@ class LocalDatabase {
   ) {
     const testItem: NotificationQueueItem = {
       id: `test_${Date.now()}`,
-      userId: requestingUser.id,
+      tenantId: requestingUser.id,
       userName: requestingUser.name,
       channel,
       recipient,
@@ -1349,7 +1349,7 @@ class LocalDatabase {
     const logEntry: DispatchLogItem = {
       id: `log_test_${Date.now()}`,
       queueItemId: testItem.id,
-      userId: requestingUser.id,
+      tenantId: requestingUser.id,
       userName: requestingUser.name,
       channel,
       recipient,
