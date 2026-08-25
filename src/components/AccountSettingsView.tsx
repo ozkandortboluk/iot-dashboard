@@ -79,6 +79,11 @@ export const AccountSettingsView: React.FC = () => {
   const [savingNotif, setSavingNotif] = useState(false);
   const [notifSuccessMsg, setNotifSuccessMsg] = useState<string | null>(null);
 
+  // Mount olduğunda doğrudan veritabanından en güncel veriyi çek
+  useEffect(() => {
+    refreshUser();
+  }, []);
+
   // Sync state when user context changes
   useEffect(() => {
     if (user) {

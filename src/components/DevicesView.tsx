@@ -445,15 +445,15 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
 
   const handleOpenEdit = (dev: Device) => {
     setEditingDevice(dev);
-    setEditName(dev.name);
-    setEditType(dev.type);
-    setEditLocation(dev.location);
-    setEditIpAddress(dev.ipAddress);
-    setEditOwnerId(dev.tenantId);
+    setEditName(dev.name || '');
+    setEditType(dev.type || 'sensor');
+    setEditLocation(dev.location || '');
+    setEditIpAddress(dev.ipAddress || '');
+    setEditOwnerId(dev.tenantId || '');
     setEditRateLimit(dev.rateLimitPerMin || 120);
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
-    setEditStatus(dev.status);
-    setEditApiKey(dev.apiKey);
+    setEditStatus(dev.status || 'online');
+    setEditApiKey(dev.apiKey || '');
     setEditHeartbeatTimeout(dev.heartbeatTimeoutSeconds || 300);
     setEditIsSimulated(dev.isSimulated ?? false);
     setEditSaveSimulatedDataToDb(dev.saveSimulatedDataToDb ?? false);

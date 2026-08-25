@@ -10,19 +10,24 @@ const CreateTenantSchema = z.object({
   name: z.string().trim().min(2, 'Ad en az 2 karakter olmalıdır.').max(100),
   email: z.string().trim().toLowerCase().email('Geçersiz e-posta formatı.').max(100),
   password: z.string().min(8, 'Parola en az 8 karakter olmalıdır.')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&]).*$/, 'Parola en az bir büyük harf, bir küçük harf, bir sayı ve bir özel karakter içermelidir.'),
+    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).*$/, 'Parola en az bir büyük harf, bir küçük harf, bir sayı ve bir özel karakter içermelidir.'),
   companyName: z.string().trim().min(2).max(100).optional(),
   role: z.enum(['customer', 'admin', 'operator', 'analyst']).default('customer'),
-  phone: z.string().trim().max(20).optional(),
-  whatsappNumber: z.string().trim().max(20).optional(),
+  phone: z.string().trim().max(30).optional(),
+  whatsappNumber: z.string().trim().max(30).optional(),
+  notificationEmail: z.string().trim().email().optional(),
+  telegramChatId: z.string().trim().max(50).optional(),
 });
 
 const UpdateTenantSchema = z.object({
   name: z.string().trim().min(2).max(100).optional(),
-  companyName: z.string().trim().min(2).max(100).optional(),
-  phone: z.string().trim().max(20).optional(),
-  whatsappNumber: z.string().trim().max(20).optional(),
+  companyName: z.string().trim().max(100).optional(),
+  phone: z.string().trim().max(30).optional(),
+  whatsappNumber: z.string().trim().max(30).optional(),
+  notificationEmail: z.string().trim().email().optional().or(z.literal('')),
+  telegramChatId: z.string().trim().max(50).optional(),
   role: z.enum(['customer', 'admin', 'operator', 'analyst']).optional(),
+  status: z.enum(['active', 'suspended']).optional(),
 });
 
 const PaginationQuerySchema = z.object({
@@ -41,15 +46,17 @@ adminTenantsRouter.get('/', async (req, res) => {
   try {
     const query = PaginationQuerySchema.parse(req.query);
     
-    // Yalnızca customer rolündeki kullanıcıları getir
-    let tenants = (db.data.users || []).filter((u: any) => u.role === 'customer');
+    // Tüm kullanıcıları veya yetkiye göre olanları getir
+    let tenants = db.data.users || [];
 
     if (query.search) {
       const s = query.search.toLowerCase();
       tenants = tenants.filter((u: any) => 
         u.name.toLowerCase().includes(s) || 
         u.email.toLowerCase().includes(s) || 
-        (u.companyName && u.companyName.toLowerCase().includes(s))
+        (u.companyName && u.companyName.toLowerCase().includes(s)) ||
+        (u.phone && u.phone.toLowerCase().includes(s)) ||
+        (u.whatsappNumber && u.whatsappNumber.toLowerCase().includes(s))
       );
     }
 
@@ -72,14 +79,18 @@ adminTenantsRouter.get('/', async (req, res) => {
     const startIndex = (query.page - 1) * query.limit;
     const paginated = tenants.slice(startIndex, startIndex + query.limit);
 
-    // Müşterilerin cihaz sayılarını ekle
+    // Müşterilerin cihaz sayılarını ve tüm iletişim verilerini ekle
     const withDeviceCount = paginated.map((tenant: any) => {
       const deviceCount = (db.data.devices || []).filter((d: any) => d.tenantId === tenant.id).length;
       return {
         id: tenant.id,
         name: tenant.name,
         email: tenant.email,
-        companyName: tenant.companyName,
+        companyName: tenant.companyName || '',
+        phone: tenant.phone || '',
+        whatsappNumber: tenant.whatsappNumber || '',
+        notificationEmail: tenant.notificationEmail || '',
+        telegramChatId: tenant.telegramChatId || '',
         status: tenant.status || 'active',
         created_at: tenant.created_at,
         role: tenant.role,
@@ -106,8 +117,8 @@ adminTenantsRouter.get('/', async (req, res) => {
 
 // GET /api/admin/tenants/:id
 adminTenantsRouter.get('/:id', async (req, res) => {
-  const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
-  if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id);
+  if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
   
   const deviceCount = (db.data.devices || []).filter((d: any) => d.tenantId === tenant.id).length;
   
@@ -115,9 +126,12 @@ adminTenantsRouter.get('/:id', async (req, res) => {
     id: tenant.id,
     name: tenant.name,
     email: tenant.email,
-    companyName: tenant.companyName,
-    phone: tenant.phone,
-    whatsappNumber: tenant.whatsappNumber,
+    companyName: tenant.companyName || '',
+    phone: tenant.phone || '',
+    whatsappNumber: tenant.whatsappNumber || '',
+    notificationEmail: tenant.notificationEmail || '',
+    telegramChatId: tenant.telegramChatId || '',
+    notificationPreferences: tenant.notificationPreferences || { app: true, email: true },
     status: tenant.status || 'active',
     created_at: tenant.created_at,
     role: tenant.role,
@@ -128,8 +142,8 @@ adminTenantsRouter.get('/:id', async (req, res) => {
 // GET /api/admin/tenants/:id/members
 adminTenantsRouter.get('/:id/members', async (req, res) => {
   // Şimdilik sadece ana müşteriyi (tenant sahibi) döndürüyoruz
-  const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
-  if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id);
+  if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
   
   res.json([{
     id: tenant.id,
@@ -182,39 +196,61 @@ adminTenantsRouter.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/admin/tenants/:id
-adminTenantsRouter.patch('/:id', async (req, res) => {
+// PUT & PATCH /api/admin/tenants/:id
+const handleUpdateTenant = async (req: any, res: any) => {
   try {
     const data = UpdateTenantSchema.parse(req.body);
-    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     
-    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
-    // Sadece değişen alanları güncelle
-    if (data.name) tenant.name = data.name;
-    if (data.companyName) tenant.companyName = data.companyName;
-    if (data.phone) tenant.phone = data.phone;
-    if (data.whatsappNumber) tenant.whatsappNumber = data.whatsappNumber;
-    if (data.role) tenant.role = data.role;
+    // Alanları güncelle - eğer boş string gönderilmişse ve eski değer varsa veya silinmek isteniyorsa temizle
+    if (data.name !== undefined && data.name.trim() !== '') tenant.name = data.name.trim();
+    if (data.companyName !== undefined) tenant.companyName = data.companyName.trim();
+    if (data.phone !== undefined) tenant.phone = data.phone.trim();
+    if (data.whatsappNumber !== undefined) tenant.whatsappNumber = data.whatsappNumber.trim();
+    if (data.notificationEmail !== undefined) tenant.notificationEmail = data.notificationEmail.trim();
+    if (data.telegramChatId !== undefined) tenant.telegramChatId = data.telegramChatId.trim();
+    if (data.role !== undefined) tenant.role = data.role;
+    if (data.status !== undefined) tenant.status = data.status;
 
-    // TODO: Eğer veritabanı update metodu varsa onu çağır (şimdilik doğrudan objeyi güncelleyip saveData çağırıyoruz)
-    await db.postgresRepo.saveUser(tenant); // Şifre verilmeden update
+    tenant.updatedAt = new Date().toISOString();
+    tenant.version = (tenant.version || 1) + 1;
+
+    // PostgreSQL ve yerel belleğe yaz
+    await db.postgresRepo.saveUser(tenant);
     db.saveData(db.data);
 
-    res.json(tenant);
+    res.json({
+      id: tenant.id,
+      name: tenant.name,
+      email: tenant.email,
+      companyName: tenant.companyName || '',
+      phone: tenant.phone || '',
+      whatsappNumber: tenant.whatsappNumber || '',
+      notificationEmail: tenant.notificationEmail || '',
+      telegramChatId: tenant.telegramChatId || '',
+      status: tenant.status || 'active',
+      created_at: tenant.created_at,
+      updatedAt: tenant.updatedAt,
+      role: tenant.role,
+    });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: 'Doğrulama hatası', details: (err as any).errors });
     }
     res.status(500).json({ error: err.message || 'Sunucu hatası' });
   }
-});
+};
+
+adminTenantsRouter.patch('/:id', handleUpdateTenant);
+adminTenantsRouter.put('/:id', handleUpdateTenant);
 
 // POST /api/admin/tenants/:id/suspend
 adminTenantsRouter.post('/:id/suspend', async (req, res) => {
   try {
-    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
-    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
     const newStatus = tenant.status === 'suspended' ? 'active' : 'suspended';
     
@@ -236,8 +272,8 @@ adminTenantsRouter.post('/:id/suspend', async (req, res) => {
 // POST /api/admin/tenants/:id/terminate-sessions
 adminTenantsRouter.post('/:id/terminate-sessions', async (req, res) => {
   try {
-    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
-    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
     
     await db.userRepository.terminateUserSessions(tenant.id);
     res.json({ message: 'Tüm aktif oturumlar sonlandırıldı.' });
@@ -249,8 +285,8 @@ adminTenantsRouter.post('/:id/terminate-sessions', async (req, res) => {
 // POST /api/admin/tenants/:id/reset-password
 adminTenantsRouter.post('/:id/reset-password', async (req, res) => {
   try {
-    const tenant = db.data.users.find((u: any) => u.id === req.params.id && u.role === 'customer');
-    if (!tenant) return res.status(404).json({ error: 'Müşteri bulunamadı.' });
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
     
     // In a real app, send an email. For now, just return success.
     res.json({ message: 'Parola sıfırlama bağlantısı e-posta adresine gönderildi.' });

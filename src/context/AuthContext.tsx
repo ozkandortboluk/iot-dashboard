@@ -41,6 +41,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
+    const savedToken = localStorage.getItem('dashboard_token');
+    if (savedToken) {
+      refreshUser();
+    }
+  }, []);
+
+  useEffect(() => {
     if (user) {
       localStorage.setItem('dashboard_user', JSON.stringify(user));
     } else {
@@ -167,7 +174,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = async (): Promise<User | null> => {
     try {
-      const res = await fetch('/api/profile');
+      const savedToken = token || localStorage.getItem('dashboard_token');
+      const res = await fetch('/api/profile', {
+        headers: savedToken ? { Authorization: `Bearer ${savedToken}` } : {},
+      });
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
         const freshUser = await res.json();

@@ -404,11 +404,11 @@ export const NotificationsView: React.FC = () => {
   const openEditRuleModal = (rule: ThresholdRule) => {
     setEditingRule(rule);
     setRuleUserId(rule.tenantId || 'usr_admin');
-    setRuleDeviceId(rule.deviceId);
-    setRuleMetric(rule.metricKey);
-    setRuleOp(rule.operator);
-    setRuleVal(rule.thresholdValue);
-    setRuleSeverity(rule.severity);
+    setRuleDeviceId(rule.deviceId || 'all');
+    setRuleMetric(rule.metricKey || 'cpu');
+    setRuleOp(rule.operator || '>');
+    setRuleVal(rule.thresholdValue ?? 0);
+    setRuleSeverity(rule.severity || 'critical');
     setRuleHysteresis(rule.hysteresis || 2);
     setRuleMinBreach(rule.minBreachDurationSeconds || 0);
     setRuleRepeatInterval(rule.repeatIntervalSeconds || 300);
@@ -428,7 +428,7 @@ export const NotificationsView: React.FC = () => {
     }
 
     setRuleRecipientsStr((rule.recipients || []).join(', '));
-    setRuleMsg(rule.messageTemplate);
+    setRuleMsg(rule.messageTemplate || '');
     setShowRuleModal(true);
   };
 

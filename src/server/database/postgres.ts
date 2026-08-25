@@ -32,6 +32,7 @@ export class PostgresRepository {
     this.pool = pool;
     this.isConnected = false;
     this.connectionErrorNotified = false;
+    this.isSchemaEnsured = false;
   }
 
   public setConnected(connected: boolean) {
@@ -56,6 +57,68 @@ export class PostgresRepository {
     if (!this.pool || this.isSchemaEnsured) return;
     try {
       const statements = [
+        // 1. Users Table & Columns
+        `CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(128) NOT NULL,
+          email VARCHAR(128) UNIQUE NOT NULL,
+          phone VARCHAR(32),
+          notification_email VARCHAR(128),
+          whatsapp_number VARCHAR(32),
+          telegram_chat_id VARCHAR(64),
+          password_hash VARCHAR(256) NOT NULL,
+          role VARCHAR(32) DEFAULT 'operator',
+          company_name VARCHAR(128),
+          notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
+          status VARCHAR(32) DEFAULT 'active',
+          deleted_at TIMESTAMP WITH TIME ZONE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32);`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(128);`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(32);`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(64);`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name VARCHAR(128);`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb;`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'operator';`,
+
+        // 2. Devices Table & Columns
+        `CREATE TABLE IF NOT EXISTS devices (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+          name VARCHAR(128) NOT NULL,
+          device_type VARCHAR(32) NOT NULL,
+          api_key VARCHAR(128),
+          api_key_prefix VARCHAR(32),
+          api_key_hash VARCHAR(128),
+          status VARCHAR(32) DEFAULT 'online',
+          location VARCHAR(256),
+          ip_address VARCHAR(45),
+          mac_address VARCHAR(32),
+          last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          rate_limit_per_min INT DEFAULT 120,
+          encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
+          metrics JSONB DEFAULT '{}'::jsonb,
+          data_flow_active BOOLEAN DEFAULT TRUE,
+          is_simulated BOOLEAN DEFAULT FALSE,
+          save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
+          simulated_metrics JSONB DEFAULT '[]'::jsonb,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;`,
+
+        // 3. Telemetry Packets & Readings
         `CREATE TABLE IF NOT EXISTS telemetry_packets (
           id VARCHAR(192) PRIMARY KEY,
           device_id VARCHAR(64) NOT NULL,
@@ -134,6 +197,215 @@ export class PostgresRepository {
         `CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);`,
         `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);`,
         `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);`,
+
+        // 4. Threshold Rules
+        `CREATE TABLE IF NOT EXISTS threshold_rules (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_name VARCHAR(128),
+          device_id VARCHAR(64) DEFAULT 'all',
+          metric_key VARCHAR(64) NOT NULL,
+          operator VARCHAR(8) NOT NULL,
+          threshold_value NUMERIC NOT NULL,
+          severity VARCHAR(32) DEFAULT 'warning',
+          enabled BOOLEAN DEFAULT TRUE,
+          message_template TEXT,
+          hysteresis NUMERIC DEFAULT 0,
+          min_breach_duration_sec INT DEFAULT 0,
+          repeat_interval_sec INT DEFAULT 0,
+          notification_channels JSONB DEFAULT '["app"]'::jsonb,
+          active_hours JSONB,
+          recipients JSONB,
+          silenced_until TIMESTAMP WITH TIME ZONE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS hysteresis NUMERIC DEFAULT 0;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS notification_channels JSONB DEFAULT '["app"]'::jsonb;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;`,
+
+        // 5. Active Alarms
+        `CREATE TABLE IF NOT EXISTS active_alarms (
+          id VARCHAR(128) PRIMARY KEY,
+          rule_id VARCHAR(64) REFERENCES threshold_rules(id) ON DELETE CASCADE,
+          device_id VARCHAR(64),
+          device_name VARCHAR(128) NOT NULL,
+          user_id VARCHAR(64),
+          metric_key VARCHAR(64) NOT NULL,
+          operator VARCHAR(8) NOT NULL,
+          threshold_value NUMERIC NOT NULL,
+          current_value NUMERIC NOT NULL,
+          severity VARCHAR(32) DEFAULT 'warning',
+          state VARCHAR(32) DEFAULT 'TRIGGERED',
+          first_breach_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          triggered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          last_notified_at TIMESTAMP WITH TIME ZONE,
+          resolved_at TIMESTAMP WITH TIME ZONE,
+          acknowledged BOOLEAN DEFAULT FALSE,
+          acknowledged_at TIMESTAMP WITH TIME ZONE,
+          acknowledged_by VARCHAR(128),
+          silenced_until TIMESTAMP WITH TIME ZONE,
+          repeat_count INT DEFAULT 0,
+          message TEXT,
+          source VARCHAR(32) DEFAULT 'physical',
+          environment VARCHAR(32) DEFAULT 'production',
+          is_simulation BOOLEAN DEFAULT FALSE,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;`,
+
+        // 6. Dashboard Layouts
+        `CREATE TABLE IF NOT EXISTS dashboard_layouts (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          title VARCHAR(128) NOT NULL,
+          widgets_json JSONB NOT NULL,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS title VARCHAR(128) DEFAULT 'Özel Dashboard';`,
+
+        // 7. Notifications
+        `CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          title VARCHAR(256) NOT NULL,
+          message TEXT NOT NULL,
+          severity VARCHAR(32) DEFAULT 'info',
+          device_id VARCHAR(64),
+          device_name VARCHAR(128),
+          is_read BOOLEAN DEFAULT FALSE,
+          alarm_id VARCHAR(128),
+          rule_id VARCHAR(64),
+          alarm_state VARCHAR(32),
+          acknowledged BOOLEAN DEFAULT FALSE,
+          acknowledged_at TIMESTAMP WITH TIME ZONE,
+          acknowledged_by VARCHAR(128),
+          repeat_count INT DEFAULT 0,
+          current_value NUMERIC,
+          threshold_value NUMERIC,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_id VARCHAR(128);`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS rule_id VARCHAR(64);`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_state VARCHAR(32);`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN DEFAULT FALSE;`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS current_value NUMERIC;`,
+        `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS threshold_value NUMERIC;`,
+
+        // 8. Audit Logs
+        `CREATE TABLE IF NOT EXISTS audit_logs (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_name VARCHAR(128),
+          action TEXT NOT NULL,
+          ip_address VARCHAR(64),
+          severity VARCHAR(32) DEFAULT 'low',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);`,
+
+        // 9. User Sessions
+        `CREATE TABLE IF NOT EXISTS user_sessions (
+          token VARCHAR(128) PRIMARY KEY,
+          user_id VARCHAR(64) NOT NULL,
+          user_role VARCHAR(32) NOT NULL,
+          user_email VARCHAR(128) NOT NULL,
+          user_name VARCHAR(128) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+        );`,
+        `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+
+        // 10. Dispatch Logs
+        `CREATE TABLE IF NOT EXISTS dispatch_logs (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_name VARCHAR(128),
+          channel VARCHAR(32) NOT NULL,
+          recipient VARCHAR(128) NOT NULL,
+          title VARCHAR(256),
+          message TEXT NOT NULL,
+          severity VARCHAR(32) DEFAULT 'info',
+          status VARCHAR(32) DEFAULT 'delivered',
+          attempt_count INT DEFAULT 1,
+          latency_ms INT DEFAULT 0,
+          error_details TEXT,
+          sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);`,
+
+        // 11. Firmwares & OTA Jobs
+        `CREATE TABLE IF NOT EXISTS firmwares (
+          id VARCHAR(64) PRIMARY KEY,
+          name VARCHAR(128) NOT NULL,
+          device_type VARCHAR(64) NOT NULL,
+          role_key VARCHAR(64) DEFAULT 'ALL',
+          hardware_model VARCHAR(64) DEFAULT 'ALL',
+          version VARCHAR(32) NOT NULL,
+          description TEXT,
+          binary_data BYTEA,
+          binary_size BIGINT DEFAULT 0,
+          sha256 VARCHAR(64) NOT NULL,
+          signature TEXT,
+          file_path TEXT,
+          min_hardware_revision VARCHAR(32),
+          is_active BOOLEAN DEFAULT TRUE,
+          uploaded_by VARCHAR(128) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS signature TEXT;`,
+        `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS file_path TEXT;`,
+        `CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
+          id VARCHAR(64) PRIMARY KEY,
+          firmware_id VARCHAR(64) REFERENCES firmwares(id) ON DELETE CASCADE,
+          firmware_version VARCHAR(32) NOT NULL,
+          firmware_name VARCHAR(128) NOT NULL,
+          device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+          device_name VARCHAR(128) NOT NULL,
+          device_type VARCHAR(64) NOT NULL,
+          role_key VARCHAR(64) NOT NULL,
+          target_scope VARCHAR(32) DEFAULT 'single',
+          status VARCHAR(32) DEFAULT 'PENDING',
+          progress_percent INT DEFAULT 0,
+          error_message TEXT,
+          initiated_by VARCHAR(128) NOT NULL,
+          download_token VARCHAR(128),
+          expires_at TIMESTAMP WITH TIME ZONE,
+          attempt_count INT DEFAULT 0,
+          max_attempts INT DEFAULT 3,
+          last_attempt_at TIMESTAMP WITH TIME ZONE,
+          next_retry_at TIMESTAMP WITH TIME ZONE,
+          download_started_at TIMESTAMP WITH TIME ZONE,
+          boot_confirmed_at TIMESTAMP WITH TIME ZONE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          completed_at TIMESTAMP WITH TIME ZONE
+        );`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_token VARCHAR(128);`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 0;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS max_attempts INT DEFAULT 3;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_started_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS boot_confirmed_at TIMESTAMP WITH TIME ZONE;`
       ];
 
       for (const stmt of statements) {
@@ -187,6 +459,7 @@ export class PostgresRepository {
   // ==========================================
   public async saveUser(user: User, passwordHash?: string): Promise<void> {
     if (!this.pool) return;
+    await this.ensureTelemetrySchema();
     const sql = `
       INSERT INTO users (
         id, name, email, phone, notification_email, whatsapp_number, 
@@ -1011,6 +1284,7 @@ export class PostgresRepository {
 
     if (!this.pool) return null;
     try {
+      await this.ensureTelemetrySchema();
       // 1. Users
       const usersRes = await this.query(`SELECT * FROM users ORDER BY created_at ASC;`);
       const users: User[] = [];
@@ -1495,6 +1769,7 @@ export class PostgresRepository {
     if (!this.pool) {
       return { success: false, counts: {} };
     }
+    await this.ensureTelemetrySchema();
 
     const counts: Record<string, number> = {
       users: 0,

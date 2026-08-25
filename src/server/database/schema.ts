@@ -26,9 +26,27 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(32) DEFAULT 'operator',
     company_name VARCHAR(128),
     notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
+    status VARCHAR(32) DEFAULT 'active',
+    deleted_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure users columns exist on existing databases
+DO $$
+BEGIN
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(128);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(32);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(64);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name VARCHAR(128);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'users table alter notice: %', SQLERRM;
+END $$;
 
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
@@ -102,9 +120,9 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
 -- Ensure tenant_id, customer_id, user_id, packet_id, sequence, source, environment and simulation_run_id columns exist on telemetry_readings
 DO $$
 BEGIN
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) NOT NULL;
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) NOT NULL;
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';
