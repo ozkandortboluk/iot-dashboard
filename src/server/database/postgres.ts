@@ -233,12 +233,14 @@ export class PostgresRepository {
         // 5. Active Alarms
         `CREATE TABLE IF NOT EXISTS active_alarms (
           id VARCHAR(128) PRIMARY KEY,
+          incident_id VARCHAR(128),
+          last_evaluated_at TIMESTAMP WITH TIME ZONE,
           rule_id VARCHAR(64) REFERENCES threshold_rules(id) ON DELETE CASCADE,
           device_id VARCHAR(64),
           device_name VARCHAR(128) NOT NULL,
           user_id VARCHAR(64),
           metric_key VARCHAR(64) NOT NULL,
-          operator VARCHAR(8) NOT NULL,
+          operator VARCHAR(16) NOT NULL,
           threshold_value NUMERIC NOT NULL,
           current_value NUMERIC NOT NULL,
           severity VARCHAR(32) DEFAULT 'warning',
@@ -262,6 +264,25 @@ export class PostgresRepository {
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS incident_id VARCHAR(128);`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE active_alarms ALTER COLUMN operator TYPE VARCHAR(32);`,
+
+        // 5.5 Alarm Events
+        `CREATE TABLE IF NOT EXISTS alarm_events (
+          id VARCHAR(128) PRIMARY KEY,
+          incident_id VARCHAR(128) NOT NULL,
+          alarm_id VARCHAR(128) NOT NULL,
+          rule_id VARCHAR(64) NOT NULL,
+          device_id VARCHAR(64) NOT NULL,
+          tenant_id VARCHAR(64) NOT NULL,
+          event_type VARCHAR(32) NOT NULL,
+          message TEXT,
+          triggered_by VARCHAR(128),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );`,
+        `CREATE INDEX IF NOT EXISTS idx_alarm_events_incident ON alarm_events(incident_id);`,
+        `CREATE INDEX IF NOT EXISTS idx_alarm_events_alarm ON alarm_events(alarm_id);`,
 
         // 6. Dashboard Layouts
         `CREATE TABLE IF NOT EXISTS dashboard_layouts (
@@ -847,7 +868,7 @@ export class PostgresRepository {
       JSON.stringify(rule.notificationChannels || ['app']),
       rule.activeHours || '00:00-23:59',
       JSON.stringify(rule.recipients || []),
-      rule.silencedUntil || null,
+      rule.disabledUntil || null,
       new Date().toISOString(),
       rule.updatedAt || new Date().toISOString(),
     ]);
@@ -865,12 +886,14 @@ export class PostgresRepository {
     if (!this.pool) return;
     const sql = `
       INSERT INTO active_alarms (
-        id, rule_id, device_id, device_name, user_id, metric_key, operator,
+        id, incident_id, last_evaluated_at, rule_id, device_id, device_name, user_id, metric_key, operator,
         threshold_value, current_value, severity, state, first_breach_at,
         triggered_at, last_notified_at, resolved_at, acknowledged,
         acknowledged_at, acknowledged_by, silenced_until, repeat_count, message, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       ON CONFLICT (id) DO UPDATE SET
+        incident_id = EXCLUDED.incident_id,
+        last_evaluated_at = EXCLUDED.last_evaluated_at,
         state = EXCLUDED.state,
         current_value = EXCLUDED.current_value,
         last_notified_at = EXCLUDED.last_notified_at,
@@ -885,6 +908,8 @@ export class PostgresRepository {
     `;
     await this.query(sql, [
       alarm.id,
+      alarm.incidentId || null,
+      alarm.lastEvaluatedAt || null,
       alarm.ruleId,
       alarm.deviceId,
       alarm.deviceName,
@@ -1376,7 +1401,7 @@ export class PostgresRepository {
             notificationChannels: typeof r.notification_channels === 'string' ? JSON.parse(r.notification_channels) : r.notification_channels || ['app'],
             activeHours: r.active_hours || '00:00-23:59',
             recipients: typeof r.recipients === 'string' ? JSON.parse(r.recipients) : r.recipients || [],
-            silencedUntil: r.silenced_until ? new Date(r.silenced_until).toISOString() : undefined,
+            disabledUntil: r.silenced_until ? new Date(r.silenced_until).toISOString() : undefined,
             updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
           });
         });
@@ -1389,6 +1414,8 @@ export class PostgresRepository {
         alarmRes.rows.forEach((r: any) => {
           alarms.push({
             id: r.id,
+            incidentId: r.incident_id || undefined,
+            lastEvaluatedAt: r.last_evaluated_at ? new Date(r.last_evaluated_at).toISOString() : undefined,
             ruleId: r.rule_id,
             deviceId: r.device_id,
             deviceName: r.device_name,

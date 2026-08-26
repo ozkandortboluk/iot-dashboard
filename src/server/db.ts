@@ -1,5 +1,5 @@
 import { UserRepository } from "./repositories/user.repository.js";
-import { hashPassword } from "./utils/crypto.js";
+import { hashPassword, encryptSecret, decryptSecret, isMaskedSecret, maskSecret } from "./utils/crypto.js";
 import { DeviceRepository } from "./repositories/device.repository.js";
 import { TelemetryRepository } from "./repositories/telemetry.repository.js";
 import { AlarmRepository } from "./repositories/alarm.repository.js";
@@ -76,6 +76,7 @@ interface DatabaseSchema {
   notifications: NotificationItem[];
   rules: ThresholdRule[];
   activeAlarms?: ActiveAlarm[];
+  alarmEvents?: import('../types.js').AlarmEvent[];
   notificationQueue?: NotificationQueueItem[];
   dispatchLogs?: DispatchLogItem[];
   serviceConfig?: NotificationServiceConfig;
@@ -117,8 +118,8 @@ function cleanFirestoreData<T extends Record<string, any>>(obj: T): Record<strin
 }
 
 export type NotificationListener = (
-  event: 'notification:new' | 'notifications:updated',
-  payload?: NotificationItem | NotificationItem[]
+  event: 'notification:new' | 'notifications:updated' | 'notification-queue:updated' | 'dispatch-logs:updated',
+  payload?: any
 ) => void;
 
 class LocalDatabase {
@@ -132,7 +133,7 @@ class LocalDatabase {
   }
 
   private notifyNotificationListeners(
-    event: 'notification:new' | 'notifications:updated',
+    event: 'notification:new' | 'notifications:updated' | 'notification-queue:updated' | 'dispatch-logs:updated',
     payload?: any
   ) {
     for (const listener of this.notificationListeners) {
@@ -929,13 +930,13 @@ class LocalDatabase {
   public getDashboard(userId: string): DashboardLayout { return this.notificationRepository.getDashboard(userId); }
   public saveDashboardWidgets(userId: string, widgets: any[], title?: string): DashboardLayout { return this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
   public resetDashboard(userId: string): DashboardLayout { return this.notificationRepository.resetDashboard(userId); }
-  public getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string): ActiveAlarm[] { return this.alarmRepository.getAlarms(requestingUserId, targetCustomerId); }
-  public acknowledgeAlarm(alarmId: string, userId: string, userName: string) { return this.alarmRepository.acknowledgeAlarm(alarmId, userId, userName); }
-  public silenceAlarm(alarmId: string, durationMinutes: number, userId: string, userName: string) { return this.alarmRepository.silenceAlarm(alarmId, durationMinutes, userId, userName); }
-  public resolveAlarm(alarmId: string, userId: string, userName: string) { return this.alarmRepository.resolveAlarm(alarmId, userId, userName); }
-  public getRules(requestingUserId = 'usr_admin', targetCustomerId?: string): ThresholdRule[] { return this.alarmRepository.getRules(requestingUserId, targetCustomerId); }
+  public getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): any { return this.alarmRepository.getAlarms(requestingUserId, targetCustomerId, options); }
+  public acknowledgeAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.acknowledgeAlarm(alarmId, currentUser); }
+  public silenceAlarm(alarmId: string, durationMinutes: number, currentUser: any): boolean { return this.alarmRepository.silenceAlarm(alarmId, durationMinutes, currentUser); }
+  public resolveAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.resolveAlarm(alarmId, currentUser); }
+  public getRules(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): any { return this.alarmRepository.getRules(requestingUserId, targetCustomerId, options); }
   public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): ThresholdRule { return this.alarmRepository.createRule(ruleData, requestingUser); }
-  public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any): ThresholdRule | null { return this.alarmRepository.updateRule(id, updates, requestingUser); }
+  public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
   public deleteRule(id: string, requestingUser?: any): boolean { return this.alarmRepository.deleteRule(id, requestingUser); }
   public toggleRule(id: string, enabled: boolean, requestingUser?: any): boolean { return this.alarmRepository.toggleRule(id, enabled, requestingUser); }
   // Audit Logs
@@ -1111,25 +1112,89 @@ class LocalDatabase {
     };
   }
 
-  public getServiceConfig(): NotificationServiceConfig {
+  public getServiceConfig(decrypt = true): NotificationServiceConfig {
     if (!this.data.serviceConfig) {
-      this.data.serviceConfig = defaultNotificationConfig;
+      this.data.serviceConfig = { ...defaultNotificationConfig };
       this.saveData(this.data);
     }
-    return this.data.serviceConfig;
+    const raw = this.data.serviceConfig;
+
+    const whatsappToken = process.env.WHATSAPP_API_TOKEN || (decrypt ? decryptSecret(raw.whatsapp?.apiToken) : raw.whatsapp?.apiToken) || '';
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN || (decrypt ? decryptSecret(raw.telegram?.botToken) : raw.telegram?.botToken) || '';
+    const webhookSecret = process.env.WEBHOOK_SECRET_HEADER || (decrypt ? decryptSecret(raw.webhook?.secretHeader) : raw.webhook?.secretHeader) || '';
+
+    return {
+      email: { ...raw.email },
+      whatsapp: {
+        ...raw.whatsapp,
+        apiToken: whatsappToken,
+      },
+      telegram: {
+        ...raw.telegram,
+        botToken: telegramToken,
+      },
+      sms: { ...raw.sms },
+      webhook: {
+        ...raw.webhook,
+        secretHeader: webhookSecret,
+      },
+    };
   }
 
   public updateServiceConfig(newConfig: Partial<NotificationServiceConfig>): NotificationServiceConfig {
-    const current = this.getServiceConfig();
+    const current = this.getServiceConfig(true);
+
+    let whatsappApiToken = current.whatsapp?.apiToken || '';
+    if (newConfig.whatsapp?.apiToken !== undefined) {
+      const incoming = (newConfig.whatsapp.apiToken || '').trim();
+      if (incoming && !isMaskedSecret(incoming)) {
+        whatsappApiToken = incoming;
+      } else if (!incoming) {
+        whatsappApiToken = '';
+      }
+    }
+
+    let telegramBotToken = current.telegram?.botToken || '';
+    if (newConfig.telegram?.botToken !== undefined) {
+      const incoming = (newConfig.telegram.botToken || '').trim();
+      if (incoming && !isMaskedSecret(incoming)) {
+        telegramBotToken = incoming;
+      } else if (!incoming) {
+        telegramBotToken = '';
+      }
+    }
+
+    let webhookSecretHeader = current.webhook?.secretHeader || '';
+    if (newConfig.webhook?.secretHeader !== undefined) {
+      const incoming = (newConfig.webhook.secretHeader || '').trim();
+      if (incoming && !isMaskedSecret(incoming)) {
+        webhookSecretHeader = incoming;
+      } else if (!incoming) {
+        webhookSecretHeader = '';
+      }
+    }
+
     this.data.serviceConfig = {
       email: { ...current.email, ...newConfig.email },
-      whatsapp: { ...current.whatsapp, ...newConfig.whatsapp },
-      telegram: { ...current.telegram, ...newConfig.telegram },
+      whatsapp: {
+        ...current.whatsapp,
+        ...newConfig.whatsapp,
+        apiToken: encryptSecret(whatsappApiToken),
+      },
+      telegram: {
+        ...current.telegram,
+        ...newConfig.telegram,
+        botToken: encryptSecret(telegramBotToken),
+      },
       sms: { ...current.sms, ...newConfig.sms },
-      webhook: { ...current.webhook, ...newConfig.webhook },
+      webhook: {
+        ...current.webhook,
+        ...newConfig.webhook,
+        secretHeader: encryptSecret(webhookSecretHeader),
+      },
     };
     this.saveData(this.data);
-    return this.data.serviceConfig;
+    return this.getServiceConfig(true);
   }
 
   public async processQueue() {
@@ -1221,26 +1286,72 @@ class LocalDatabase {
     this.saveData(this.data);
   }
 
-  public getNotificationQueue(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationQueueItem[] {
+  public getNotificationQueue(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
+    let list = this.data.notificationQueue;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'customer') {
-      return this.data.notificationQueue.filter((q) => q.tenantId === requestingUserId);
+      list = list.filter((q) => q.tenantId === requestingUserId);
+    } else if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+      list = list.filter((q) => q.tenantId === targetCustomerId);
     }
 
-    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.data.notificationQueue.filter((q) => q.tenantId === targetCustomerId);
+    if (!options) {
+      return list;
     }
 
-    return this.data.notificationQueue;
+    if (options.status && options.status !== 'all') {
+      list = list.filter((q) => q.status === options.status);
+    }
+    if (options.channel && options.channel !== 'all') {
+      list = list.filter((q) => q.channel === options.channel);
+    }
+    if (options.search && options.search.trim()) {
+      const s = options.search.trim().toLowerCase();
+      list = list.filter(
+        (q) =>
+          q.title?.toLowerCase().includes(s) ||
+          q.message?.toLowerCase().includes(s) ||
+          q.recipient?.toLowerCase().includes(s)
+      );
+    }
+
+    const total = list.length;
+    const limit = Math.max(1, Math.min(200, Number(options.limit) || 50));
+    let startIndex = 0;
+    if (options.cursor) {
+      const idx = list.findIndex((q) => q.id === options.cursor);
+      if (idx >= 0) {
+        startIndex = idx + 1;
+      }
+    }
+
+    const paged = list.slice(startIndex, startIndex + limit);
+    const nextCursor = paged.length === limit && startIndex + limit < total ? paged[paged.length - 1].id : null;
+    const hasMore = nextCursor !== null;
+
+    return {
+      data: paged,
+      total,
+      limit,
+      nextCursor,
+      hasMore,
+    };
   }
 
-  public retryQueueItem(queueItemId: string): NotificationQueueItem {
+  public retryQueueItem(queueItemId: string, currentUser: any): NotificationQueueItem {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     const item = this.data.notificationQueue.find((q) => q.id === queueItemId);
     if (!item) {
-      throw new Error('Kuyruk övesi bulunamadı.');
+      throw new Error('Kuyruk öğesi bulunamadı.');
+    }
+
+    if (
+      currentUser.role !== 'admin' &&
+      item.tenantId !== currentUser.id
+    ) {
+      throw new Error('Bu bildirime erişim yetkiniz yok.');
     }
 
     item.status = 'retrying';
@@ -1250,6 +1361,7 @@ class LocalDatabase {
     item.updatedAt = new Date().toISOString();
 
     this.saveData(this.data);
+    this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
     setTimeout(() => {
       this.processQueue();
     }, 50);
@@ -1268,21 +1380,61 @@ class LocalDatabase {
     }
 
     this.saveData(this.data);
+    this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
   }
 
-  public getDispatchLogs(requestingUserId = 'usr_admin', targetCustomerId?: string): DispatchLogItem[] {
+  public getDispatchLogs(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
+    let list = this.data.dispatchLogs;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'customer') {
-      return this.data.dispatchLogs.filter((l) => l.tenantId === requestingUserId);
+      list = list.filter((l) => l.tenantId === requestingUserId);
+    } else if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+      list = list.filter((l) => l.tenantId === targetCustomerId);
     }
 
-    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.data.dispatchLogs.filter((l) => l.tenantId === targetCustomerId);
+    if (!options) {
+      return list;
     }
 
-    return this.data.dispatchLogs;
+    if (options.status && options.status !== 'all') {
+      list = list.filter((l) => l.status === options.status);
+    }
+    if (options.channel && options.channel !== 'all') {
+      list = list.filter((l) => l.channel === options.channel);
+    }
+    if (options.search && options.search.trim()) {
+      const s = options.search.trim().toLowerCase();
+      list = list.filter(
+        (l) =>
+          l.title?.toLowerCase().includes(s) ||
+          l.message?.toLowerCase().includes(s) ||
+          l.recipient?.toLowerCase().includes(s)
+      );
+    }
+
+    const total = list.length;
+    const limit = Math.max(1, Math.min(200, Number(options.limit) || 50));
+    let startIndex = 0;
+    if (options.cursor) {
+      const idx = list.findIndex((l) => l.id === options.cursor);
+      if (idx >= 0) {
+        startIndex = idx + 1;
+      }
+    }
+
+    const paged = list.slice(startIndex, startIndex + limit);
+    const nextCursor = paged.length === limit && startIndex + limit < total ? paged[paged.length - 1].id : null;
+    const hasMore = nextCursor !== null;
+
+    return {
+      data: paged,
+      total,
+      limit,
+      nextCursor,
+      hasMore,
+    };
   }
 
   public async updateUserProfile(userId: string, data: Partial<User>): Promise<User> {

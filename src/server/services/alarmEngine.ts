@@ -1,5 +1,5 @@
 import { db } from '../db.js';
-import { broadcast } from './websocket.js';
+import { broadcast, broadcastToTenant } from './websocket.js';
 import type { ActiveAlarm, ThresholdRule, TelemetryReading, User } from '../../types.js';
 
 export class AlarmEngine {
@@ -11,22 +11,43 @@ export class AlarmEngine {
     return db.getRules(requestingUserId, targetCustomerId);
   }
 
-  public acknowledge(alarmId: string, user: User) {
-    db.acknowledgeAlarm(alarmId, user.id, user.name);
-    broadcast('alarms:updated', db.getAlarms());
-    broadcast('notifications:updated', db.getNotifications());
+  public acknowledge(alarmId: string, user: User): boolean {
+    const alarmsBefore = db.getAlarms('usr_admin');
+    const alarm = alarmsBefore.find(a => a.id === alarmId);
+    const success = db.acknowledgeAlarm(alarmId, user);
+    if (success && alarm) {
+      const tenantAlarms = db.getAlarms(alarm.tenantId, alarm.tenantId);
+      const tenantNotifications = db.getNotifications(alarm.tenantId, alarm.tenantId);
+      broadcastToTenant(alarm.tenantId, 'alarms:updated', tenantAlarms, db.getAlarms());
+      broadcastToTenant(alarm.tenantId, 'notifications:updated', tenantNotifications, db.getNotifications());
+    }
+    return success;
   }
 
-  public silence(alarmId: string, durationMinutes: number, user: User) {
-    db.silenceAlarm(alarmId, durationMinutes, user.id, user.name);
-    broadcast('alarms:updated', db.getAlarms());
-    broadcast('notifications:updated', db.getNotifications());
+  public silence(alarmId: string, durationMinutes: number, user: User): boolean {
+    const alarmsBefore = db.getAlarms('usr_admin');
+    const alarm = alarmsBefore.find(a => a.id === alarmId);
+    const success = db.silenceAlarm(alarmId, durationMinutes, user);
+    if (success && alarm) {
+      const tenantAlarms = db.getAlarms(alarm.tenantId, alarm.tenantId);
+      const tenantNotifications = db.getNotifications(alarm.tenantId, alarm.tenantId);
+      broadcastToTenant(alarm.tenantId, 'alarms:updated', tenantAlarms, db.getAlarms());
+      broadcastToTenant(alarm.tenantId, 'notifications:updated', tenantNotifications, db.getNotifications());
+    }
+    return success;
   }
 
-  public resolve(alarmId: string, user: User) {
-    db.resolveAlarm(alarmId, user.id, user.name);
-    broadcast('alarms:updated', db.getAlarms());
-    broadcast('notifications:updated', db.getNotifications());
+  public resolve(alarmId: string, user: User): boolean {
+    const alarmsBefore = db.getAlarms('usr_admin');
+    const alarm = alarmsBefore.find(a => a.id === alarmId);
+    const success = db.resolveAlarm(alarmId, user);
+    if (success && alarm) {
+      const tenantAlarms = db.getAlarms(alarm.tenantId, alarm.tenantId);
+      const tenantNotifications = db.getNotifications(alarm.tenantId, alarm.tenantId);
+      broadcastToTenant(alarm.tenantId, 'alarms:updated', tenantAlarms, db.getAlarms());
+      broadcastToTenant(alarm.tenantId, 'notifications:updated', tenantNotifications, db.getNotifications());
+    }
+    return success;
   }
 }
 

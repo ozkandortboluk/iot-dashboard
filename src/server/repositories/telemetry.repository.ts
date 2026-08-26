@@ -1406,26 +1406,57 @@ export class TelemetryRepository {
   }
 
   private updateActiveNotificationDeduplicated(alarm: ActiveAlarm) {
-    const existingNotif = (this.db.data.notifications || []).find(
+    const matchingNotifs = (this.db.data.notifications || []).filter(
       (n: any) => n.alarmId === alarm.id && n.alarmState !== 'RESOLVED' && !n.read
     );
-    if (existingNotif) {
-      existingNotif.message = `${alarm.message} (Ölçüm #${alarm.repeatCount}, Anlık: ${alarm.currentValue})`;
-      existingNotif.repeatCount = alarm.repeatCount;
-      existingNotif.currentValue = alarm.currentValue;
-      existingNotif.timestamp = new Date().toISOString();
-      existingNotif.updatedAt = existingNotif.timestamp;
-      existingNotif.version = (existingNotif.version || 1) + 1;
+    for (const notif of matchingNotifs) {
+      notif.message = `${alarm.message} (Ölçüm #${alarm.repeatCount}, Anlık: ${alarm.currentValue})`;
+      notif.repeatCount = alarm.repeatCount;
+      notif.currentValue = alarm.currentValue;
+      notif.timestamp = new Date().toISOString();
+      notif.updatedAt = notif.timestamp;
+      notif.version = (notif.version || 1) + 1;
+      this.db.notifyNotificationListeners('notification:new', notif);
+    }
+  }
 
-      this.db.notifyNotificationListeners('notification:new', existingNotif);
+  public emitAlarmEvent(
+    alarm: ActiveAlarm,
+    eventType: import('../../types.js').AlarmEvent['eventType'],
+    message: string,
+    triggeredBy?: string
+  ) {
+    if (!this.db.data.alarmEvents) {
+      this.db.data.alarmEvents = [];
+    }
+
+    const event: import('../../types.js').AlarmEvent = {
+      id: `evt_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`,
+      incidentId: alarm.incidentId || alarm.id,
+      alarmId: alarm.id,
+      ruleId: alarm.ruleId,
+      deviceId: alarm.deviceId,
+      tenantId: alarm.tenantId,
+      eventType,
+      message,
+      createdAt: new Date().toISOString(),
+      triggeredBy,
+    };
+
+    this.db.data.alarmEvents.push(event);
+
+    // Keep event log at a reasonable size, limit to last 10000 events
+    if (this.db.data.alarmEvents.length > 10000) {
+      this.db.data.alarmEvents = this.db.data.alarmEvents.slice(-10000);
     }
   }
 
   public emitAlarmNotification(
     alarm: ActiveAlarm,
-    eventType: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED',
+    eventType: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED' | 'SILENCED',
     title: string,
-    customMsg?: string
+    customMsg?: string,
+    triggeredBy?: string
   ) {
     const isSimulated = alarm.isSimulation || alarm.source === 'simulator';
     const msg = customMsg || `${alarm.message} (Eşik: ${alarm.thresholdValue}, Ölçülen: ${alarm.currentValue})`;
@@ -1433,6 +1464,18 @@ export class TelemetryRepository {
     const formattedTitle = isSimulated
       ? (title.startsWith('🧪') ? title : `🧪 [TEST ALARMI] ${title}`)
       : title;
+
+    let historyEventType: import('../../types.js').AlarmEvent['eventType'] = 'OPENED';
+    if (eventType === 'RESOLVED') historyEventType = 'RESOLVED';
+    if (eventType === 'REPEAT') historyEventType = 'REPEATED';
+    if (eventType === 'ACKNOWLEDGED') historyEventType = 'ACKNOWLEDGED';
+    if (eventType === 'SILENCED') historyEventType = 'SILENCED';
+
+    this.emitAlarmEvent(alarm, historyEventType, msg, triggeredBy);
+
+    if (eventType === 'SILENCED') {
+      return; // Silencing shouldn't create a visual notification box, just history
+    }
 
     this.db.addNotification({
       tenantId: alarm.tenantId,
@@ -1628,8 +1671,23 @@ export class TelemetryRepository {
         }
 
         if (startStr && endStr && (startStr !== '00:00' || endStr !== '23:59')) {
-          const now = new Date(nowIso);
-          const currentMinutes = now.getHours() * 60 + now.getMinutes();
+          let currentMinutes: number;
+          const tz = rule.timezone || 'Europe/Istanbul';
+          try {
+            const trParts = new Intl.DateTimeFormat('en-GB', {
+              timeZone: tz,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).formatToParts(new Date(nowIso));
+            const h = parseInt(trParts.find((p) => p.type === 'hour')?.value || '0', 10);
+            const m = parseInt(trParts.find((p) => p.type === 'minute')?.value || '0', 10);
+            currentMinutes = h * 60 + m;
+          } catch {
+            const now = new Date(nowIso);
+            currentMinutes = now.getHours() * 60 + now.getMinutes();
+          }
+
           const [startH, startM] = startStr.split(':').map(Number);
           const [endH, endM] = endStr.split(':').map(Number);
           const startMinutes = (startH || 0) * 60 + (startM || 0);
@@ -1638,36 +1696,74 @@ export class TelemetryRepository {
           if (startMinutes < endMinutes) {
             if (currentMinutes < startMinutes || currentMinutes > endMinutes) continue;
           } else if (startMinutes > endMinutes) {
-            if (currentMinutes < startMinutes && currentMinutes > endMinutes) continue;
+            if (currentMinutes < startMinutes && currentMinutes >= endMinutes) continue;
           }
         }
       }
 
       const alarmKey = `alarm_${rule.id}_${reading.deviceId}_${reading.metric}`;
 
-      if (rule.silencedUntil && new Date(rule.silencedUntil).getTime() > nowMs) {
+      if (rule.disabledUntil && new Date(rule.disabledUntil).getTime() > nowMs) {
         continue;
       }
 
       let existingAlarm = this.db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmKey);
 
+      // Out-of-order protection: If reading timestamp is strictly older than existing alarm's last update, skip degradation
+      const readingTimestampMs = new Date(reading.timestamp || nowIso).getTime();
+      if (existingAlarm && existingAlarm.lastEvaluatedAt) {
+        const lastEvaluatedMs = new Date(existingAlarm.lastEvaluatedAt).getTime();
+        if (readingTimestampMs < lastEvaluatedMs) {
+          continue;
+        }
+      }
+      if (existingAlarm) {
+        existingAlarm.lastEvaluatedAt = reading.timestamp || nowIso;
+      }
+
+      const tv = rule.thresholdValue;
+      const tm = rule.thresholdMax ?? tv;
       let isBreached = false;
-      if (rule.operator === '>' && reading.value > rule.thresholdValue) isBreached = true;
-      if (rule.operator === '<' && reading.value < rule.thresholdValue) isBreached = true;
-      if (rule.operator === '==' && reading.value === rule.thresholdValue) isBreached = true;
+      
+      switch(rule.operator) {
+        case '>': isBreached = reading.value > tv; break;
+        case '>=': isBreached = reading.value >= tv; break;
+        case '<': isBreached = reading.value < tv; break;
+        case '<=': isBreached = reading.value <= tv; break;
+        case 'OUTSIDE_RANGE': isBreached = reading.value < tv || reading.value > tm; break;
+        case 'INSIDE_RANGE': isBreached = reading.value >= tv && reading.value <= tm; break;
+        case 'UNCHANGED': isBreached = false; break; // Currently unsupported without state history
+        case 'NO_DATA': isBreached = false; break; // Checked separately
+        default: if ((rule as any).operator === '==') isBreached = Math.abs(reading.value - tv) < 0.0001;
+      }
 
       const hysteresis = rule.hysteresis || 0;
       let isRecovered = false;
-      if (rule.operator === '>' && reading.value <= rule.thresholdValue - hysteresis) isRecovered = true;
-      if (rule.operator === '<' && reading.value >= rule.thresholdValue + hysteresis) isRecovered = true;
-      if (rule.operator === '==' && reading.value !== rule.thresholdValue) isRecovered = true;
+      switch(rule.operator) {
+        case '>': isRecovered = reading.value <= tv - hysteresis; break;
+        case '>=': isRecovered = reading.value < tv - hysteresis; break;
+        case '<': isRecovered = reading.value >= tv + hysteresis; break;
+        case '<=': isRecovered = reading.value > tv + hysteresis; break;
+        case 'OUTSIDE_RANGE': isRecovered = reading.value >= tv + hysteresis && reading.value <= tm - hysteresis; break;
+        case 'INSIDE_RANGE': isRecovered = reading.value < tv - hysteresis || reading.value > tm + hysteresis; break;
+        default: if ((rule as any).operator === '==') isRecovered = Math.abs(reading.value - tv) > hysteresis; else isRecovered = !isBreached;
+      }
 
       const minBreachSec = rule.minBreachDurationSeconds || 0;
       const repeatIntervalSec = rule.repeatIntervalSeconds || 300;
 
+      const customerName = deviceOwnerId !== 'usr_admin' ? this.db.data.users.find((u: any) => u.id === deviceOwnerId)?.name || 'Müşteri' : 'Global';
+
       const formattedMsg = rule.messageTemplate
-        .replace('{deviceName}', reading.deviceName)
-        .replace('{value}', String(reading.value));
+        .replace(/{deviceName}/g, reading.deviceName)
+        .replace(/{deviceId}/g, reading.deviceId)
+        .replace(/{metric}/g, reading.metric)
+        .replace(/{value}/g, String(reading.value))
+        .replace(/{unit}/g, reading.unit || '')
+        .replace(/{threshold}/g, rule.operator === 'OUTSIDE_RANGE' || rule.operator === 'INSIDE_RANGE' ? `${tv}-${tm}` : String(tv))
+        .replace(/{severity}/g, rule.severity)
+        .replace(/{timestamp}/g, new Date(nowIso).toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
+        .replace(/{customerName}/g, customerName);
 
       if (isBreached) {
         if (
@@ -1687,8 +1783,11 @@ export class TelemetryRepository {
           existingAlarm.state === 'RESOLVED'
         ) {
           if (minBreachSec > 0) {
+            const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
               id: alarmKey,
+              incidentId,
+              lastEvaluatedAt: reading.timestamp || nowIso,
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
@@ -1711,8 +1810,11 @@ export class TelemetryRepository {
             };
             this.upsertActiveAlarm(existingAlarm);
           } else {
+            const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
               id: alarmKey,
+              incidentId,
+              lastEvaluatedAt: reading.timestamp || nowIso,
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
@@ -1849,32 +1951,117 @@ export class TelemetryRepository {
         continue;
       }
 
+      if (rule.activeHours) {
+        let startStr = '';
+        let endStr = '';
+        if (typeof rule.activeHours === 'string' && rule.activeHours.includes('-')) {
+          const parts = rule.activeHours.split('-');
+          startStr = parts[0].trim();
+          endStr = parts[1].trim();
+        } else if (
+          typeof rule.activeHours === 'object' &&
+          (rule.activeHours as any).start &&
+          (rule.activeHours as any).end
+        ) {
+          startStr = (rule.activeHours as any).start;
+          endStr = (rule.activeHours as any).end;
+        }
+
+        if (startStr && endStr && (startStr !== '00:00' || endStr !== '23:59')) {
+          let currentMinutes: number;
+          const tz = rule.timezone || 'Europe/Istanbul';
+          try {
+            const trParts = new Intl.DateTimeFormat('en-GB', {
+              timeZone: tz,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).formatToParts(new Date(nowIso));
+            const h = parseInt(trParts.find((p) => p.type === 'hour')?.value || '0', 10);
+            const m = parseInt(trParts.find((p) => p.type === 'minute')?.value || '0', 10);
+            currentMinutes = h * 60 + m;
+          } catch {
+            const now = new Date(nowIso);
+            currentMinutes = now.getHours() * 60 + now.getMinutes();
+          }
+
+          const [startH, startM] = startStr.split(':').map(Number);
+          const [endH, endM] = endStr.split(':').map(Number);
+          const startMinutes = (startH || 0) * 60 + (startM || 0);
+          const endMinutes = (endH || 0) * 60 + (endM || 0);
+
+          if (startMinutes < endMinutes) {
+            if (currentMinutes < startMinutes || currentMinutes > endMinutes) continue;
+          } else if (startMinutes > endMinutes) {
+            if (currentMinutes < startMinutes && currentMinutes >= endMinutes) continue;
+          }
+        }
+      }
+
       // Distinct Key for Simulation Alarms (sim_alarm_...)
       const alarmKey = `sim_alarm_${rule.id}_${reading.deviceId}_${reading.metric}`;
 
-      if (rule.silencedUntil && new Date(rule.silencedUntil).getTime() > nowMs) {
+      if (rule.disabledUntil && new Date(rule.disabledUntil).getTime() > nowMs) {
         continue;
       }
 
       let existingAlarm = this.db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmKey);
 
+      // Out-of-order protection: If reading timestamp is strictly older than existing alarm's last update, skip degradation
+      const readingTimestampMs = new Date(reading.timestamp || nowIso).getTime();
+      if (existingAlarm && existingAlarm.lastEvaluatedAt) {
+        const lastEvaluatedMs = new Date(existingAlarm.lastEvaluatedAt).getTime();
+        if (readingTimestampMs < lastEvaluatedMs) {
+          continue;
+        }
+      }
+      if (existingAlarm) {
+        existingAlarm.lastEvaluatedAt = reading.timestamp || nowIso;
+      }
+
+      const tv = rule.thresholdValue;
+      const tm = rule.thresholdMax ?? tv;
       let isBreached = false;
-      if (rule.operator === '>' && reading.value > rule.thresholdValue) isBreached = true;
-      if (rule.operator === '<' && reading.value < rule.thresholdValue) isBreached = true;
-      if (rule.operator === '==' && reading.value === rule.thresholdValue) isBreached = true;
+      
+      switch(rule.operator) {
+        case '>': isBreached = reading.value > tv; break;
+        case '>=': isBreached = reading.value >= tv; break;
+        case '<': isBreached = reading.value < tv; break;
+        case '<=': isBreached = reading.value <= tv; break;
+        case 'OUTSIDE_RANGE': isBreached = reading.value < tv || reading.value > tm; break;
+        case 'INSIDE_RANGE': isBreached = reading.value >= tv && reading.value <= tm; break;
+        case 'UNCHANGED': isBreached = false; break; // Currently unsupported without state history
+        case 'NO_DATA': isBreached = false; break; // Checked separately
+        default: if ((rule as any).operator === '==') isBreached = Math.abs(reading.value - tv) < 0.0001;
+      }
 
       const hysteresis = rule.hysteresis || 0;
       let isRecovered = false;
-      if (rule.operator === '>' && reading.value <= rule.thresholdValue - hysteresis) isRecovered = true;
-      if (rule.operator === '<' && reading.value >= rule.thresholdValue + hysteresis) isRecovered = true;
-      if (rule.operator === '==' && reading.value !== rule.thresholdValue) isRecovered = true;
+      switch(rule.operator) {
+        case '>': isRecovered = reading.value <= tv - hysteresis; break;
+        case '>=': isRecovered = reading.value < tv - hysteresis; break;
+        case '<': isRecovered = reading.value >= tv + hysteresis; break;
+        case '<=': isRecovered = reading.value > tv + hysteresis; break;
+        case 'OUTSIDE_RANGE': isRecovered = reading.value >= tv + hysteresis && reading.value <= tm - hysteresis; break;
+        case 'INSIDE_RANGE': isRecovered = reading.value < tv - hysteresis || reading.value > tm + hysteresis; break;
+        default: if ((rule as any).operator === '==') isRecovered = Math.abs(reading.value - tv) > hysteresis; else isRecovered = !isBreached;
+      }
 
       const minBreachSec = rule.minBreachDurationSeconds || 0;
       const repeatIntervalSec = rule.repeatIntervalSeconds || 300;
 
+      const customerName = deviceOwnerId !== 'usr_admin' ? this.db.data.users.find((u: any) => u.id === deviceOwnerId)?.name || 'Müşteri' : 'Global';
+
       const formattedMsg = `[TEST ALARMI] ${rule.messageTemplate
-        .replace('{deviceName}', reading.deviceName)
-        .replace('{value}', String(reading.value))}`;
+        .replace(/{deviceName}/g, reading.deviceName)
+        .replace(/{deviceId}/g, reading.deviceId)
+        .replace(/{metric}/g, reading.metric)
+        .replace(/{value}/g, String(reading.value))
+        .replace(/{unit}/g, reading.unit || '')
+        .replace(/{threshold}/g, rule.operator === 'OUTSIDE_RANGE' || rule.operator === 'INSIDE_RANGE' ? `${tv}-${tm}` : String(tv))
+        .replace(/{severity}/g, rule.severity)
+        .replace(/{timestamp}/g, new Date(nowIso).toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
+        .replace(/{customerName}/g, customerName)}`;
 
       if (isBreached) {
         if (
@@ -1894,8 +2081,11 @@ export class TelemetryRepository {
           existingAlarm.state === 'RESOLVED'
         ) {
           if (minBreachSec > 0) {
+            const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
               id: alarmKey,
+              incidentId,
+              lastEvaluatedAt: reading.timestamp || nowIso,
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,
@@ -1918,8 +2108,11 @@ export class TelemetryRepository {
             };
             this.upsertActiveAlarm(existingAlarm);
           } else {
+            const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
               id: alarmKey,
+              incidentId,
+              lastEvaluatedAt: reading.timestamp || nowIso,
               ruleId: rule.id,
               deviceId: reading.deviceId,
               deviceName: reading.deviceName,

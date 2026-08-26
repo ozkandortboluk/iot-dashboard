@@ -60,6 +60,8 @@ export interface User {
   version?: number;
 }
 
+export type Customer = User;
+
 export interface UserSession {
   token: string;
   userId: string;
@@ -320,12 +322,14 @@ export type AlarmState = 'NORMAL' | 'BREACH_PENDING' | 'ACTIVE' | 'SILENCED' | '
 
 export interface ActiveAlarm {
   id: string; // ruleId_deviceId_metric
+  incidentId?: string; // Unique ID per alarm lifecycle
+  lastEvaluatedAt?: string; // Telemetry reading timestamp used for evaluation
   ruleId: string;
   deviceId: string;
   deviceName: string;
   tenantId: string;
   metricKey: string;
-  operator: '>' | '<' | '==';
+  operator: '>' | '>=' | '<' | '<=' | 'OUTSIDE_RANGE' | 'INSIDE_RANGE' | 'UNCHANGED' | 'NO_DATA' | '==';
   thresholdValue: number;
   currentValue: number;
   severity: NotificationSeverity;
@@ -349,6 +353,19 @@ export interface ActiveAlarm {
   message: string;
   updatedAt: string;
   version?: number;
+}
+
+export interface AlarmEvent {
+  id: string;
+  incidentId: string;
+  alarmId: string;
+  ruleId: string;
+  deviceId: string;
+  tenantId: string;
+  eventType: 'OPENED' | 'REPEATED' | 'ACKNOWLEDGED' | 'SILENCED' | 'RESOLVED';
+  message: string;
+  createdAt: string;
+  triggeredBy?: string; // User ID or System
 }
 
 export interface NotificationItem {
@@ -465,8 +482,9 @@ export interface ThresholdRule {
   userName?: string;                 // Sahip Kullanıcı Adı
   deviceId: string;                  // 'all' veya belirli cihaz ID'si
   metricKey: string;                 // Metrik ('cpu', 'temperature', 'power', vb.)
-  operator: '>' | '<' | '==';        // Koşul
-  thresholdValue: number;            // Eşik değeri
+  operator: '>' | '>=' | '<' | '<=' | 'OUTSIDE_RANGE' | 'INSIDE_RANGE' | 'UNCHANGED' | 'NO_DATA'; // Koşul
+  thresholdValue: number;            // Eşik değeri (alt sınır veya limit veya süre)
+  thresholdMax?: number;             // Aralık üst sınır değeri (OUTSIDE_RANGE/INSIDE_RANGE için)
   severity: NotificationSeverity;    // Uyarı şiddeti
   enabled: boolean;                  // Aktif/Pasif
   messageTemplate: string;           // Şablon
@@ -475,8 +493,9 @@ export interface ThresholdRule {
   repeatIntervalSeconds?: number;    // Tekrar bildirim aralığı (ör. 300 sn)
   notificationChannels?: NotificationChannel[]; // Bildirim kanalları (örn: ['app', 'email', 'sms'])
   activeHours?: { start: string; end: string } | string; // Aktif saatler (ör. "08:00-18:00" veya "24s")
+  timezone?: string;                 // Saat dilimi (ör. "Europe/Istanbul")
   recipients?: string[];             // Alıcı listesi (e-posta/telefon listesi)
-  silencedUntil?: string;            // Susturma bitiş tarihi
+  disabledUntil?: string;            // Kuralın geçici olarak devre dışı kalacağı zaman (eski silencedUntil)
   updatedAt?: string;
   version?: number;
 }
@@ -630,6 +649,14 @@ export interface RetentionCleanupResult {
   };
   cleanedAt: string;
   message: string;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  limit: number;
+  nextCursor?: string | null;
+  hasMore?: boolean;
 }
 
 

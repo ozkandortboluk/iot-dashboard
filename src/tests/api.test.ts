@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isSsrfSafeWebhookUrl } from '../server/routes/alarms.js';
 
 export interface TelemetryPayload {
   deviceId: string;
@@ -94,5 +95,38 @@ describe('IoT REST Ingestion API Validation Test Suite', () => {
     expect(result.valid).toBe(true);
     expect(result.parsedReadings).toHaveLength(3);
     expect(result.parsedReadings.find((r) => r.metric === 'rpm')?.value).toBe(3600);
+  });
+});
+
+describe('SSRF Webhook Validation Test Suite', () => {
+  it('should accept valid external HTTPS URLs', () => {
+    expect(isSsrfSafeWebhookUrl('https://api.external.com/webhook')).toBe(true);
+    expect(isSsrfSafeWebhookUrl('https://google.com')).toBe(true);
+    expect(isSsrfSafeWebhookUrl('https://142.250.186.46/hook')).toBe(true);
+  });
+
+  it('should reject non-HTTPS URLs', () => {
+    expect(isSsrfSafeWebhookUrl('http://api.external.com/webhook')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('ftp://external.com')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('file:///etc/passwd')).toBe(false);
+  });
+
+  it('should reject localhost and loopback addresses', () => {
+    expect(isSsrfSafeWebhookUrl('https://localhost/api')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('https://127.0.0.1/api')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('https://[::1]/api')).toBe(false);
+  });
+
+  it('should reject local network IPv4 ranges (10.x, 172.16-31.x, 192.168.x)', () => {
+    expect(isSsrfSafeWebhookUrl('https://10.0.0.5/api')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('https://10.255.255.255/api')).toBe(false);
+    
+    expect(isSsrfSafeWebhookUrl('https://172.16.0.5/api')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('https://172.31.255.255/api')).toBe(false);
+    // 172.32 is public
+    expect(isSsrfSafeWebhookUrl('https://172.32.0.1/api')).toBe(true);
+    
+    expect(isSsrfSafeWebhookUrl('https://192.168.1.1/api')).toBe(false);
+    expect(isSsrfSafeWebhookUrl('https://192.168.255.255/api')).toBe(false);
   });
 });

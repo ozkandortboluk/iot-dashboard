@@ -367,6 +367,21 @@ export function broadcast(event: string, payload: unknown) {
   });
 }
 
+export function broadcastToTenant(tenantId: string, event: string, tenantPayload: unknown, adminPayload?: unknown) {
+  if (!wss) return;
+
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
+    if (client.readyState !== WebSocket.OPEN) return;
+    if (!client.isAuth || !client.user) return;
+
+    if (client.user.role === 'admin') {
+      safeSend(client, JSON.stringify({ event, payload: adminPayload !== undefined ? adminPayload : tenantPayload, timestamp: new Date().toISOString() }));
+    } else if (client.user.id === tenantId) {
+      safeSend(client, JSON.stringify({ event, payload: tenantPayload, timestamp: new Date().toISOString() }));
+    }
+  });
+}
+
 export function getWebSocketClientsCount(): number {
   return wss ? wss.clients.size : 0;
 }

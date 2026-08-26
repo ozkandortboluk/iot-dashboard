@@ -55,6 +55,7 @@ interface RealtimeContextType {
     outputPin?: string,
     unit?: string
   ) => Promise<any>;
+  subscribeWsEvent: (event: string, callback: (payload: any) => void) => () => void;
 }
 
 const RealtimeContext = createContext<RealtimeContextType | undefined>(undefined);
@@ -116,6 +117,17 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [rawNotifications, user, selectedCustomerForAdmin]);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const wsEventListeners = useRef<Map<string, Set<(payload: any) => void>>>(new Map());
+
+  const subscribeWsEvent = useCallback((event: string, callback: (payload: any) => void) => {
+    if (!wsEventListeners.current.has(event)) {
+      wsEventListeners.current.set(event, new Set());
+    }
+    wsEventListeners.current.get(event)!.add(callback);
+    return () => {
+      wsEventListeners.current.get(event)?.delete(callback);
+    };
+  }, []);
 
   // Customers List (for Admin)
   const refreshCustomers = useCallback(async () => {
@@ -764,6 +776,20 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 refreshCustomers();
               }
             }
+
+            // Dispatch to any dynamically subscribed event listeners
+            if (data && data.event) {
+              const listeners = wsEventListeners.current.get(data.event);
+              if (listeners && listeners.size > 0) {
+                listeners.forEach((cb) => {
+                  try {
+                    cb(data.payload);
+                  } catch (err) {
+                    console.error('Error in WS subscriber callback:', err);
+                  }
+                });
+              }
+            }
           } catch (err) {
             console.error('WebSocket message parsing error:', err);
           }
@@ -804,13 +830,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     window.addEventListener('online', handleOnline);
 
-    // Fallback polling: When disconnected, poll REST API every 6 seconds
+    // Fallback polling: When WebSocket is disconnected, poll REST API every 20 seconds
     const fallbackPollInterval = setInterval(() => {
       if (!isCleanedUp && !isConnectedRef.current && user) {
         fetchDevices();
         fetchHistory();
       }
-    }, 6000);
+    }, 20000);
 
     return () => {
       isCleanedUp = true;
@@ -1196,6 +1222,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,
+      subscribeWsEvent,
     }),
     [
       isConnected,
@@ -1233,6 +1260,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,
+      subscribeWsEvent,
     ]
   );
 
