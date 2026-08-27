@@ -51,19 +51,21 @@ export class DeviceAuthService {
         ip: clientIp || '—',
         mac: mac || '—',
         hostname: unregName,
-        vendor: unregName.toLowerCase().includes('nodemcu')
+        vendor: payload.hardwareModel || (unregName.toLowerCase().includes('nodemcu')
           ? 'Espressif (NodeMCU)'
           : unregName.toLowerCase().includes('esp')
           ? 'Espressif (ESP32/ESP8266)'
-          : 'IoT Cihazı',
-        openPorts: [80, 3000],
+          : 'IoT Cihazı'),
+        openPorts: [],
         status: 'unregistered',
-        pingMs: 12,
-        rssi: -60,
         lastPacket: rawBodyText ? `${rawBodyText} (Token / DeviceId Eksik)` : 'Token / DeviceId Gönderilmedi (Eksik Paket)',
         tokenProvided: 'Yok',
+        pairingCode: payload.pairingCode,
+        hardwareModel: payload.hardwareModel,
+        roleKey: payload.roleKey,
+        firmwareVersion: payload.firmwareVersion,
         lastSeen: new Date().toISOString(),
-      });
+      } as any);
 
       if (unreg) {
         broadcast('network:unregistered_device', unreg);
@@ -101,19 +103,21 @@ export class DeviceAuthService {
         ip: clientIp || '—',
         mac: mac || '—',
         hostname: unregName,
-        vendor: unregName.toLowerCase().includes('nodemcu')
+        vendor: payload.hardwareModel || (unregName.toLowerCase().includes('nodemcu')
           ? 'Espressif (NodeMCU)'
           : unregName.toLowerCase().includes('esp')
           ? 'Espressif (ESP32/ESP8266)'
-          : 'IoT Cihazı',
-        openPorts: [80, 3000],
+          : 'IoT Cihazı'),
+        openPorts: [],
         status: 'unregistered',
-        pingMs: 14,
-        rssi: -62,
         lastPacket: rawBodyText ? `${rawBodyText} (Kayıtsız Cihaz: ${token})` : `Kayıtsız Cihaz Kimliği: ${token}`,
         tokenProvided: token,
+        pairingCode: payload.pairingCode,
+        hardwareModel: payload.hardwareModel,
+        roleKey: payload.roleKey,
+        firmwareVersion: payload.firmwareVersion,
         lastSeen: new Date().toISOString(),
-      });
+      } as any);
 
       if (unreg) {
         broadcast('network:unregistered_device', unreg);

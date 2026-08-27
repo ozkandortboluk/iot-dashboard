@@ -518,13 +518,48 @@ export interface DiscoveredNetworkDevice {
   vendor: string;
   openPorts: number[];
   status: 'active' | 'transmitting' | 'idle' | 'unregistered';
-  pingMs: number;
-  rssi: number;
+  pingMs?: number;
+  rssi?: number;
   lastPacket?: string;
-  tokenProvided?: string;
+  hasAuthToken?: boolean;
+  pairingCode?: string;
+  hardwareModel?: string;
+  roleKey?: string;
+  firmwareVersion?: string;
   lastSeen?: string;
   registeredDeviceId?: string;
   userId?: string;
+}
+
+export interface NetworkScanJob {
+  id: string;
+  tenantId: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  subnet: string;
+  progress: number;
+  discoveredDevices: DiscoveredNetworkDevice[];
+  agentId?: string; // Which field agent is performing the scan
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface NetworkAgent {
+  id: string;
+  tenantId: string;
+  hostname: string;
+  ip: string;
+  status: 'online' | 'offline';
+  lastSeen: string;
+  version: string;
+}
+
+export interface NetworkPingResult {
+  ip: string;
+  success: boolean;
+  timeMs?: number;
+  output?: string;
 }
 
 export interface ServerStats {

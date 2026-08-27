@@ -74,6 +74,95 @@ export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
   // Comprehensive, 100% Working Code Examples Registry (Always kept working and updated)
   const codeExamples = [
     {
+      id: 'code_python_field_agent',
+      title: 'Python - Saha Ajanı (Ağ Taraması & Ping Botu)',
+      category: 'python',
+      categoryLabel: 'Python',
+      badge: 'Yeni Ağ Mimarisi',
+      description: 'Saha ajanı/mDNS mimarisi ile yerel ağ taraması (Subnet Scanning) ve ICMP ping işlemlerini asenkron yöneterek merkezi buluta (VPS) sonuçları raporlar. Sunucuyla uzun süreli bağlantı (long-polling) veya WebSocket ile çalışır.',
+      tags: ['python', 'saha ajanı', 'ağ keşfi', 'nmap', 'ping', 'asenkron', 'jobs'],
+      endpoint: 'POST /api/network/scans & /api/network/ping',
+      code: `import time
+import requests
+import json
+import subprocess
+import threading
+
+SERVER_URL = "${originUrl}"
+AGENT_API_KEY = "saha_ajani_gizli_anahtari_001"
+AGENT_ID = "field_agent_rpi_1"
+
+def perform_network_scan(subnet, job_id):
+    print(f"[{job_id}] Tarama baslatiliyor: {subnet}")
+    
+    # Gercek hayatta NMAP veya ARP taramasi calistirilir
+    # Ornek Nmap: nmap -sn -oG - {subnet}
+    
+    # Ilerlemeyi sunucuya bildir:
+    requests.post(
+        f"{SERVER_URL}/api/network/scans/{job_id}/progress",
+        headers={"Authorization": f"Bearer {AGENT_API_KEY}"},
+        json={"progress": 50}
+    )
+    time.sleep(2) # Tarama simulasyonu
+    
+    # Ornek kesfedilen cihazlar (Gercek ARP listesi)
+    discovered_devices = [
+        {
+            "ip": "192.168.1.100", 
+            "mac": "AA:BB:CC:DD:EE:01", 
+            "hostname": "ESP32-Saha-Node-1", 
+            "vendor": "Espressif",
+            "openPorts": [80],
+            "hasAuthToken": False
+        },
+        {
+            "ip": "192.168.1.102", 
+            "mac": "AA:BB:CC:DD:EE:02", 
+            "hostname": "Endustriyel-Gateway", 
+            "vendor": "Siemens",
+            "openPorts": [3000, 502],
+            "hasAuthToken": True
+        }
+    ]
+    
+    # Sonuclari sunucuya ilet ve gorevi tamamla
+    requests.post(
+        f"{SERVER_URL}/api/network/scans/{job_id}/results",
+        headers={"Authorization": f"Bearer {AGENT_API_KEY}"},
+        json={"status": "completed", "progress": 100, "discoveredDevices": discovered_devices}
+    )
+    print(f"[{job_id}] Tarama tamamlandi ve sunucuya gonderildi.")
+
+def poll_for_jobs():
+    print(f"[{AGENT_ID}] Saha ajani calisiyor. Sunucudan gorev bekleniyor...")
+    while True:
+        try:
+            # 1. Bekleyen Tarama veya Ping gorevlerini al
+            # Not: Cift yonlu gercek zamanli iletisim (WebSocket/MQTT) tavsiye edilir
+            res = requests.get(
+                f"{SERVER_URL}/api/network/agent/{AGENT_ID}/jobs",
+                headers={"Authorization": f"Bearer {AGENT_API_KEY}"},
+                timeout=10
+            )
+            
+            if res.status_code == 200:
+                jobs = res.json()
+                for job in jobs:
+                    if job["type"] == "scan":
+                        threading.Thread(target=perform_network_scan, args=(job["subnet"], job["id"])).start()
+                    elif job["type"] == "ping":
+                        # Ping calistir...
+                        print(f"Ping istegi alindi: {job['ip']}")
+        except Exception as e:
+            pass
+        time.sleep(5)
+
+if __name__ == "__main__":
+    poll_for_jobs()
+`
+    },
+    {
       id: 'code_esp32_http_telemetry',
       title: 'ESP32 - HTTP Telemetri & Röle Yanıtı (Piggybacking)',
       category: 'esp32',

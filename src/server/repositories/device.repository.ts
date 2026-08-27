@@ -393,10 +393,10 @@ export class DeviceRepository {
 
     const isRealToken = (t?: string) => t && t !== 'Yok' && t !== 'none' && t.trim() !== '';
 
-    const existingIndex = this.db.data.unregisteredDevices.findIndex((d: DiscoveredNetworkDevice) => {
+    const existingIndex = this.db.data.unregisteredDevices.findIndex((d: any) => {
       if (discDev.ip && d.ip === discDev.ip) return true;
       if (discDev.mac && d.mac === discDev.mac) return true;
-      if (isRealToken(discDev.tokenProvided) && d.tokenProvided === discDev.tokenProvided) return true;
+      if (isRealToken((discDev as any).tokenProvided) && d.tokenProvided === (discDev as any).tokenProvided) return true;
       return false;
     });
 
@@ -410,7 +410,7 @@ export class DeviceRepository {
       this.db.scheduleSave();
       return this.db.data.unregisteredDevices[existingIndex];
     } else {
-      const newItem: DiscoveredNetworkDevice = {
+      const newItem: any = {
         ...discDev,
         status: 'unregistered',
         lastSeen: new Date().toISOString(),
@@ -419,7 +419,7 @@ export class DeviceRepository {
       this.db.addAuditLog(
         'system',
         'Ağ Taraması',
-        `Yeni Kayıtsız ESP/IoT Cihazı Ağda Tespit Edildi (IP: ${discDev.ip}, Token: ${discDev.tokenProvided || 'Yok'})`,
+        `Yeni Kayıtsız ESP/IoT Cihazı Ağda Tespit Edildi (IP: ${discDev.ip}, Token: ${(discDev as any).tokenProvided || 'Yok'})`,
         'high'
       );
       this.db.saveData(this.db.data);
@@ -430,7 +430,7 @@ export class DeviceRepository {
   public removeUnregisteredDevice(ipOrMacOrToken: string) {
     if (!this.db.data.unregisteredDevices || !ipOrMacOrToken) return;
     const target = ipOrMacOrToken.toLowerCase().trim();
-    this.db.data.unregisteredDevices = this.db.data.unregisteredDevices.filter((d: DiscoveredNetworkDevice) => {
+    this.db.data.unregisteredDevices = this.db.data.unregisteredDevices.filter((d: any) => {
       if (d.ip && d.ip.toLowerCase().trim() === target) return false;
       if (d.mac && d.mac.toLowerCase().trim() === target) return false;
       if (d.hostname && d.hostname.toLowerCase().trim() === target) return false;
@@ -467,10 +467,10 @@ export class DeviceRepository {
         mac: d.macAddress && d.macAddress.trim() !== '' ? d.macAddress : '—',
         hostname: d.name,
         vendor: d.type === 'sensor' ? 'Espressif (NodeMCU)' : d.type || 'IoT Cihazı',
-        openPorts: [80, 3000],
+        openPorts: [], // Real ports will be populated by field agents
         status: d.status === 'online' ? 'transmitting' : 'idle',
-        pingMs: d.status === 'online' ? (d.pingMs || 8) : 0,
-        rssi: d.status === 'online' ? (d.rssi || -55) : -85,
+        pingMs: d.pingMs,
+        rssi: d.rssi,
         lastPacket: metricsText,
         registeredDeviceId: d.id,
         lastSeen: d.lastSeen,
@@ -513,10 +513,14 @@ export class DeviceRepository {
 
         return true;
       })
-      .map((d: DiscoveredNetworkDevice) => ({
-        ...d,
-        status: 'unregistered' as const,
-      }));
+      .map((d: any) => {
+        const { tokenProvided, ...rest } = d;
+        return {
+          ...rest,
+          hasAuthToken: !!tokenProvided,
+          status: 'unregistered' as const,
+        };
+      });
 
     return [...registeredDiscovered, ...unregList];
   }

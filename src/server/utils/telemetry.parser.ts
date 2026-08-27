@@ -11,6 +11,10 @@ export interface ParsedTelemetryPayload {
   token: string;
   deviceIdFromPayload?: string;
   deviceNameFromPayload: string;
+  pairingCode?: string;
+  hardwareModel?: string;
+  roleKey?: string;
+  firmwareVersion?: string;
   sequence?: number;
   bootId?: string;
   idempotencyKey?: string;
@@ -183,6 +187,11 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     bodyObj.name ||
     ''
   ).toString().trim();
+
+  const pairingCode = (bodyObj.pairingCode || bodyObj.pairing_code || '').toString().trim();
+  const hardwareModel = (bodyObj.hardwareModel || bodyObj.hardware_model || bodyObj.model || '').toString().trim();
+  const roleKey = (bodyObj.roleKey || bodyObj.role_key || '').toString().trim();
+  const firmwareVersion = (bodyObj.firmwareVersion || bodyObj.firmware_version || bodyObj.version || '').toString().trim();
 
   // Extract Sequence Number & Boot ID
   let sequence: number | undefined = undefined;
@@ -401,6 +410,10 @@ export function parseProductionTelemetryPayload(req: any): ParsedTelemetryPayloa
     token,
     deviceIdFromPayload,
     deviceNameFromPayload,
+    pairingCode,
+    hardwareModel,
+    roleKey,
+    firmwareVersion,
     sequence,
     bootId,
     idempotencyKey,

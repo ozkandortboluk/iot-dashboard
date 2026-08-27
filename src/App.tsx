@@ -72,7 +72,7 @@ function DashboardContent() {
     dashboard: isCustomer ? 'Özel Dashboard\'um' : 'Canlı İzleme Dashboard',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
     firmware_ota: 'Firmware & OTA Yönetimi',
-    network_discovery: 'Ağdaki Cihazlar & Tarayıcı',
+    network_discovery: 'Cihaz Keşfi ve Eşleştirme',
     customers: 'Müşteri Yönetimi & Hesaplar',
     generator: 'Sanal Veri & Telemetri Üreteci',
     analytics: 'Veri Analizi & Raporlama',

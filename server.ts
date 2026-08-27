@@ -12,7 +12,8 @@ import { startOtaWorker } from './src/server/services/otaWorker.js';
 // Route Handlers
 import { authRouter, profileRouter } from './src/server/routes/auth.js';
 import { adminTenantsRouter } from './src/server/routes/admin/tenants.js';
-import { devicesRouter, networkRouter, deviceCommandsRouter } from './src/server/routes/devices.js';
+import { devicesRouter, deviceCommandsRouter } from './src/server/routes/devices.js';
+import { networkRouter } from './src/server/routes/network.js';
 import { telemetryRouter } from './src/server/routes/telemetry.js';
 import {
   alarmsRouter,

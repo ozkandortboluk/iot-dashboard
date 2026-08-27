@@ -48,7 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     },
     {
       id: 'network_discovery',
-      label: 'Ağdaki Cihazlar & Tarayıcı',
+      label: 'Cihaz Keşfi ve Eşleştirme',
       icon: Wifi,
     },
     {
@@ -92,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         },
         {
           id: 'network_discovery',
-          label: 'Ağdaki Cihazlar & Tarayıcı',
+          label: 'Cihaz Keşfi ve Eşleştirme',
           icon: Wifi,
         },
       ],
@@ -197,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         },
         {
           id: 'network_discovery',
-          label: 'Ağdaki Cihazlar & Tarayıcı',
+          label: 'Cihaz Keşfi ve Eşleştirme',
           icon: Wifi,
           badge: 'Ağ',
         },

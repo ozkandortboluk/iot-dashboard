@@ -38,6 +38,20 @@ router.post('/', authenticateUser, (req, res) => {
   const targetOwnerId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
   const allowSimulated = currentUser.role === 'admin';
 
+  let finalApiKey = apiKey && apiKey.trim() ? apiKey.trim() : undefined;
+  
+  if (finalApiKey === '__USE_CACHED_TOKEN__') {
+    // Try to recover token from unregistered devices cache
+    const unreg = (db.data.unregisteredDevices || []).find((d: any) => 
+      (ipAddress && d.ip === ipAddress) || (macAddress && d.mac === macAddress) || (name && d.hostname === name)
+    );
+    if (unreg && (unreg as any).tokenProvided) {
+      finalApiKey = (unreg as any).tokenProvided;
+    } else {
+      finalApiKey = undefined;
+    }
+  }
+
   const device = db.createDevice({
     id: id && id.trim() ? id.trim() : undefined,
     tenantId: targetOwnerId,
@@ -49,7 +63,7 @@ router.post('/', authenticateUser, (req, res) => {
     status: 'online',
     rateLimitPerMin: rateLimitPerMin || 120,
     encryptionMethod: encryptionMethod || 'AES-256-GCM',
-    apiKey: apiKey && apiKey.trim() ? apiKey.trim() : undefined,
+    apiKey: finalApiKey,
     heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 300,
     expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : undefined,
     isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
@@ -281,18 +295,6 @@ router.delete('/:id', authenticateUser, (req, res) => {
 });
 
 export const devicesRouter = router;
-
-// Network Discovery Router
-const networkRouter = Router();
-networkRouter.get('/discovered', authenticateUser, (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const targetCustomer = currentUser.role === 'admin' ? (req.query.targetCustomerId as string | undefined) : undefined;
-  
-  const discovered = db.getDiscoveredDevices(currentUser.id, targetCustomer);
-  res.json(discovered);
-});
-export { networkRouter };
 
 // Device Commands Router (v1 API)
 const deviceCommandsRouter = Router();
