@@ -1,6 +1,8 @@
 {
   "name": "Web-Based Real-Time Analytics Dashboard",
   "description": "NexusNode IoT (nexusnodeiot.com.tr) - Industrial real-time IoT platform powered by PostgreSQL and TimescaleDB with hypertable time-series data, WebSocket streaming, device control, and role-based access.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "camera"
+  ],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

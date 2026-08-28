@@ -4,6 +4,7 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch } from '../lib/apiFetch';
+import { DeviceStabilitySparkline } from './DeviceStabilitySparkline';
 import {
   Cpu,
   Plus,
@@ -873,7 +874,7 @@ void sendHeartbeat() {
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span className="relative flex h-3 w-3 shrink-0">
                         {dev.status === 'online' && (
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -919,6 +920,11 @@ void sendHeartbeat() {
                           </span>
                         </div>
                       </div>
+                    </div>
+
+                    {/* 24-Hour Connection Stability Sparkline */}
+                    <div className="shrink-0 hidden md:block">
+                      <DeviceStabilitySparkline device={dev} />
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">

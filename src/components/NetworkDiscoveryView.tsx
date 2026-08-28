@@ -32,7 +32,9 @@ import {
   Building,
   Shield,
   Tag,
+  QrCode,
 } from 'lucide-react';
+import { Scanner } from '@yudiel/react-qr-scanner';
 import type { Device, DiscoveredNetworkDevice } from '../types';
 
 export const NetworkDiscoveryView: React.FC<{
@@ -43,6 +45,7 @@ export const NetworkDiscoveryView: React.FC<{
   const { user } = useAuth();
   
   const [pairingCode, setPairingCode] = useState('');
+  const [isScanningQR, setIsScanningQR] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredNetworkDevice[]>([]);
   const [foundDevice, setFoundDevice] = useState<DiscoveredNetworkDevice | null>(null);
@@ -70,17 +73,14 @@ export const NetworkDiscoveryView: React.FC<{
     return () => clearInterval(intv);
   }, []);
 
-  const handleSearch = () => {
-    if (!pairingCode.trim()) return;
+  const handleSearch = (codeToSearch?: string) => {
+    const code = typeof codeToSearch === 'string' ? codeToSearch : pairingCode.trim();
+    if (!code) return;
     setIsSearching(true);
     
     setTimeout(() => {
       // Find device in pending list
-      const matched = discoveredDevices.find(
-        (d) => d.pairingCode === pairingCode.trim() || d.hasAuthToken
-      );
-      // For demo or if pairing code explicitly matches
-      const explicitMatch = discoveredDevices.find((d) => d.pairingCode === pairingCode.trim());
+      const explicitMatch = discoveredDevices.find((d) => d.pairingCode === code);
       
       if (explicitMatch) {
         setFoundDevice(explicitMatch);
@@ -91,6 +91,23 @@ export const NetworkDiscoveryView: React.FC<{
       }
       setIsSearching(false);
     }, 800);
+  };
+
+  const handleQRScan = (text: string) => {
+    if (!text) return;
+    let code = text;
+    try {
+       const url = new URL(text);
+       if (url.searchParams.has('code')) code = url.searchParams.get('code') || text;
+    } catch(e) {}
+    try {
+       const obj = JSON.parse(text);
+       if (obj.pairingCode) code = obj.pairingCode;
+    } catch(e) {}
+    
+    setPairingCode(code);
+    setIsScanningQR(false);
+    handleSearch(code);
   };
 
   const handleRegister = async () => {
@@ -160,20 +177,27 @@ export const NetworkDiscoveryView: React.FC<{
                 value={pairingCode}
                 onChange={(e) => setPairingCode(e.target.value)}
                 placeholder="Örn: 482913"
-                className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-center tracking-widest focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white"
+                className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-center tracking-widest focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white"
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               />
               <button
-                onClick={handleSearch}
+                onClick={() => setIsScanningQR(true)}
+                title="Kare Kod (QR) Okut"
+                className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 rounded-xl font-medium transition flex items-center justify-center"
+              >
+                <QrCode className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => handleSearch()}
                 disabled={isSearching || !pairingCode.trim()}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-500 text-white px-6 rounded-xl font-medium transition flex items-center gap-2"
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-500 text-white px-6 rounded-xl font-medium transition flex items-center gap-2 shrink-0"
               >
                 {isSearching ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
                 Bul
               </button>
             </div>
             <p className="mt-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              * Cihazınızı ilk kez enerjiye bağladığınızda seri port ekranında veya yapılandırma sayfasında gösterilen tek kullanımlık 6 haneli eşleştirme kodunu girin.
+              * Cihazınızı ilk kez enerjiye bağladığınızda seri port ekranında veya yapılandırma sayfasında gösterilen tek kullanımlık 6 haneli eşleştirme kodunu girin veya cihaz üzerindeki Kare Kodu okutun.
             </p>
           </div>
 
@@ -331,6 +355,56 @@ export const NetworkDiscoveryView: React.FC<{
           )}
         </div>
       </div>
+
+      {isScanningQR && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950">
+              <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-indigo-500" />
+                Cihaz Kare Kodunu Okutun
+              </h3>
+              <button
+                onClick={() => setIsScanningQR(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg transition"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 relative bg-black flex justify-center items-center aspect-square">
+              <div className="absolute inset-0 overflow-hidden">
+                <Scanner
+                  onScan={(detectedCodes) => {
+                    if (detectedCodes && detectedCodes.length > 0) {
+                      handleQRScan(detectedCodes[0].rawValue);
+                    }
+                  }}
+                  onError={(error) => console.error('QR Scan Error:', error)}
+                  formats={['qr_code']}
+                  components={{
+                    audio: false,
+                    tracker: true,
+                    finder: false,
+                  }}
+                  styles={{
+                    container: { width: '100%', height: '100%' },
+                  }}
+                />
+              </div>
+              {/* Overlay targeting frame */}
+              <div className="absolute inset-8 border-2 border-indigo-500/50 rounded-3xl pointer-events-none">
+                <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-indigo-500 rounded-tl-2xl"></div>
+                <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-indigo-500 rounded-tr-2xl"></div>
+                <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-indigo-500 rounded-bl-2xl"></div>
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-indigo-500 rounded-br-2xl"></div>
+              </div>
+            </div>
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
+              Kameranızı cihazın üzerindeki veya kullanım kılavuzundaki QR koda hizalayın.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
