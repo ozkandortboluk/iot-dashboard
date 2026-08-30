@@ -461,12 +461,28 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
                       }}
                       className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                     >
-                      <option value="usr_admin">Sistem Yöneticisi (Global / Ortak)</option>
-                      {customersList.map((cust) => (
-                        <option key={cust.id} value={cust.id}>
-                          {cust.companyName} - {cust.name} ({cust.email})
-                        </option>
-                      ))}
+                      <option value="usr_admin">👑 Sistem Yöneticisi / Merkez Yönetim (Tüm Cihazlar & Ortak Kural)</option>
+                      {customersList
+                        .filter((cust) => cust.role !== 'admin' && cust.id !== 'usr_admin')
+                        .map((cust) => {
+                          const hasCompany = cust.companyName && cust.companyName.trim().length > 0;
+                          const hasName = cust.name && cust.name.trim().length > 0;
+                          let displayName = '';
+                          if (hasCompany && hasName && cust.companyName !== cust.name) {
+                            displayName = `${cust.companyName} (${cust.name})`;
+                          } else if (hasCompany) {
+                            displayName = cust.companyName;
+                          } else if (hasName) {
+                            displayName = cust.name;
+                          } else {
+                            displayName = cust.email;
+                          }
+                          return (
+                            <option key={cust.id} value={cust.id}>
+                              🏢 {displayName} — {cust.email}
+                            </option>
+                          );
+                        })}
                     </select>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
