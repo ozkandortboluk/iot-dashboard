@@ -1076,6 +1076,43 @@ export class PostgresRepository {
     ]);
   }
 
+  
+  public async getCommands(deviceId: string, limit: number = 100): Promise<DeviceCommand[]> {
+    if (!this.pool) return [];
+    const res = await this.query(
+      `SELECT * FROM device_commands WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [deviceId, limit]
+    );
+    return res.rows.map(r => ({
+      id: r.id,
+      deviceId: r.device_id,
+      command: r.command_name,
+      payload: r.parameters?.payload ?? '',
+      status: r.status,
+      created_at: r.created_at,
+      executed_at: r.executed_at,
+      source: r.sent_by
+    }));
+  }
+
+  public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
+    if (!this.pool) return [];
+    const res = await this.query(
+      `SELECT * FROM device_commands WHERE device_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT 20`,
+      [deviceId]
+    );
+    return res.rows.map(r => ({
+      id: r.id,
+      deviceId: r.device_id,
+      command: r.command_name,
+      payload: r.parameters?.payload ?? '',
+      status: r.status,
+      created_at: r.created_at,
+      executed_at: r.executed_at,
+      source: r.sent_by
+    }));
+  }
+
   public async markCommandsDelivered(commandIds: string[]): Promise<void> {
     if (!this.pool || !commandIds.length) return;
     await this.query(
@@ -1318,14 +1355,7 @@ export class PostgresRepository {
     rules: ThresholdRule[];
     alarms: ActiveAlarm[];
     dashboards: DashboardLayout[];
-    notifications: NotificationItem[];
-    auditLogs: AuditLog[];
-    telemetry: TelemetryReading[];
-    dispatchLogs?: DispatchLogItem[];
-    commands?: DeviceCommand[];
     sessions?: any[];
-    firmwares?: Firmware[];
-    otaJobs?: OtaDeploymentJob[];
   } | null> {
 
     if (!this.pool) return null;
@@ -1477,117 +1507,7 @@ export class PostgresRepository {
         });
       }
 
-      // 6. Notifications
-      const notifRes = await this.query(`SELECT * FROM notifications ORDER BY created_at DESC LIMIT 150;`);
-      const notifications: NotificationItem[] = [];
-      if (notifRes?.rows) {
-        notifRes.rows.forEach((r: any) => {
-          notifications.push({
-            id: r.id,
-            tenantId: r.user_id,
-            title: r.title,
-            message: r.message,
-            severity: r.severity || 'info',
-            deviceId: r.device_id || undefined,
-            deviceName: r.device_name || undefined,
-            read: Boolean(r.is_read),
-            alarmId: r.alarm_id || undefined,
-            ruleId: r.rule_id || undefined,
-            alarmState: r.alarm_state || undefined,
-            acknowledged: Boolean(r.acknowledged),
-            acknowledgedAt: r.acknowledged_at ? new Date(r.acknowledged_at).toISOString() : undefined,
-            acknowledgedBy: r.acknowledged_by || undefined,
-            repeatCount: r.repeat_count || 0,
-            currentValue: r.current_value !== null ? Number(r.current_value) : undefined,
-            thresholdValue: r.threshold_value !== null ? Number(r.threshold_value) : undefined,
-            timestamp: new Date(r.created_at).toISOString(),
-          });
-        });
-      }
-
-      // 7. Audit Logs
-      const auditRes = await this.query(`SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200;`);
-      const auditLogs: AuditLog[] = [];
-      if (auditRes?.rows) {
-        auditRes.rows.forEach((r: any) => {
-          auditLogs.push({
-            id: r.id,
-            tenantId: r.user_id || undefined,
-            userName: r.user_name || undefined,
-            action: r.action,
-            ip: r.ip_address || undefined,
-            severity: r.severity || 'low',
-            timestamp: new Date(r.created_at).toISOString(),
-          });
-        });
-      }
-
-      // 8. Latest Telemetry (Strictly Physical Production Data)
-      const telRes = await this.query(`SELECT * FROM telemetry_readings WHERE source = 'physical' OR source IS NULL ORDER BY created_at DESC LIMIT 500;`);
-      const telemetry: TelemetryReading[] = [];
-      if (telRes?.rows) {
-        telRes.rows.forEach((r: any) => {
-          telemetry.push({
-            id: r.id,
-            packetId: r.packet_id || undefined,
-            userId: r.tenant_id || r.customer_id || r.user_id || 'usr_admin',
-            deviceId: r.device_id,
-            deviceName: r.device_name,
-            metric: r.metric,
-            value: Number(r.metric_value),
-            unit: r.unit || '',
-            status: r.status_level || 'normal',
-            sequence: r.sequence !== null && r.sequence !== undefined ? Number(r.sequence) : undefined,
-            source: r.source || 'physical',
-            environment: r.environment || 'production',
-            simulationRunId: r.simulation_run_id || undefined,
-            timestamp: new Date(r.created_at).toISOString(),
-          });
-        });
-        telemetry.reverse(); // ascending order
-      }
-
-      // 9. Dispatch Logs
-      const dispatchRes = await this.query(`SELECT * FROM dispatch_logs ORDER BY sent_at DESC LIMIT 200;`);
-      const dispatchLogs: DispatchLogItem[] = [];
-      if (dispatchRes?.rows) {
-        dispatchRes.rows.forEach((r: any) => {
-          dispatchLogs.push({
-            id: r.id,
-            tenantId: r.user_id || 'usr_admin',
-            userName: r.user_name || undefined,
-            channel: r.channel,
-            recipient: r.recipient,
-            title: r.title || 'Bildirim',
-            message: r.message,
-            severity: r.severity || 'info',
-            status: r.status || 'delivered',
-            attemptCount: Number(r.attempt_count) || 1,
-            latencyMs: r.latency_ms || 0,
-            errorDetails: r.error_details || undefined,
-            sentAt: new Date(r.sent_at).toISOString(),
-          });
-        });
-      }
-
-      // 10. Device Commands
-      const cmdRes = await this.query(`SELECT * FROM device_commands ORDER BY created_at DESC LIMIT 100;`);
-      const commands: DeviceCommand[] = [];
-      if (cmdRes?.rows) {
-        cmdRes.rows.forEach((r: any) => {
-          commands.push({
-            id: r.id,
-            deviceId: r.device_id,
-            command: r.command_name,
-            payload: typeof r.parameters === 'string' ? r.parameters : JSON.stringify(r.parameters || {}),
-            status: r.status || 'pending',
-            source: (r.sent_by as any) || 'api',
-            created_at: new Date(r.created_at).toISOString(),
-          });
-        });
-      }
-
-      // 11. User Sessions
+                                    // 11. User Sessions
       const sessRes = await this.query(`SELECT * FROM user_sessions WHERE expires_at > NOW();`);
       const sessions: UserSession[] = [];
       if (sessRes?.rows) {
@@ -1604,82 +1524,14 @@ export class PostgresRepository {
         });
       }
 
-      // 12. Firmwares
-      const fwRes = await this.query(`SELECT * FROM firmwares ORDER BY created_at DESC;`);
-      const firmwares: Firmware[] = [];
-      if (fwRes?.rows) {
-        fwRes.rows.forEach((r: any) => {
-          firmwares.push({
-            id: r.id,
-            name: r.name,
-            deviceType: r.device_type,
-            roleKey: r.role_key,
-            hardwareModel: r.hardware_model || 'ALL',
-            version: r.version,
-            description: r.description || undefined,
-            binarySize: Number(r.binary_size) || 0,
-            sha256: r.sha256,
-            signature: r.signature || undefined,
-            filePath: r.file_path || undefined,
-            minHardwareRevision: r.min_hardware_revision || undefined,
-            isActive: r.is_active !== false,
-            uploadedBy: r.uploaded_by,
-            created_at: new Date(r.created_at).toISOString(),
-            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-
-          });
-        });
-      }
-
-      // 13. OTA Deployment Jobs
-      const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs ORDER BY created_at DESC;`);
-      const otaJobs: OtaDeploymentJob[] = [];
-      if (otaRes?.rows) {
-        otaRes.rows.forEach((r: any) => {
-          otaJobs.push({
-            id: r.id,
-            firmwareId: r.firmware_id,
-            firmwareVersion: r.firmware_version,
-            firmwareName: r.firmware_name,
-            deviceId: r.device_id,
-            deviceName: r.device_name,
-            deviceType: r.device_type,
-            roleKey: r.role_key,
-            targetScope: r.target_scope || 'single',
-            status: r.status || 'PENDING',
-            progressPercent: Number(r.progress_percent) || 0,
-            errorMessage: r.error_message || undefined,
-            initiatedBy: r.initiated_by,
-            downloadToken: r.download_token || undefined,
-            expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
-            attemptCount: Number(r.attempt_count) || 0,
-            maxAttempts: Number(r.max_attempts) || 3,
-            lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
-            nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
-            downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
-            bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
-            created_at: new Date(r.created_at).toISOString(),
-            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-            completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
-          });
-        });
-      }
-
-      return {
+                  return {
         users,
         passwords,
         devices,
         rules,
         alarms,
         dashboards,
-        notifications,
-        auditLogs,
-        telemetry,
-        dispatchLogs,
-        commands,
         sessions,
-        firmwares,
-        otaJobs,
       };
     } catch (err: any) {
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
@@ -1805,7 +1657,6 @@ export class PostgresRepository {
     users: User[];
     passwords: Record<string, string>;
     devices: Device[];
-    telemetry: TelemetryReading[];
     rules: ThresholdRule[];
     dashboards: DashboardLayout[];
     notifications: NotificationItem[];
@@ -1868,12 +1719,7 @@ export class PostgresRepository {
       counts.auditLogs++;
     }
 
-    // 7. Telemetry
-    for (const t of data.telemetry.slice(-200)) {
-      await this.saveTelemetry(t);
-      counts.telemetry++;
-    }
-
+    // 7. Telemetry (Skipped: Real-time telemetry is synced continuously)
     // 8. Dispatch Logs
     if (data.dispatchLogs) {
       for (const dl of data.dispatchLogs.slice(0, 100)) {
@@ -1905,6 +1751,143 @@ export class PostgresRepository {
    * PostgreSQL RLS (Row Level Security) uyumlu, tenant bağlamında izole sorgu çalıştırır.
    * "Fail-closed" izolasyonu sebebiyle, tenant belirtilmezse RLS politikaları hiçbir veriyi döndürmez.
    */
+  
+  public async getAlarms(tenantId?: string): Promise<any[]> {
+    if (!this.pool) return [];
+    let sql = `SELECT * FROM active_alarms`;
+    const params: any[] = [];
+    if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
+      sql += ` WHERE tenant_id = $1`;
+      params.push(tenantId);
+    }
+    sql += ` ORDER BY updated_at DESC LIMIT 200`;
+    const res = await this.query(sql, params);
+    return res.rows.map(r => ({
+      id: r.id,
+      incidentId: r.incident_id,
+      lastEvaluatedAt: r.last_evaluated_at,
+      ruleId: r.rule_id,
+      deviceId: r.device_id,
+      deviceName: r.device_name,
+      tenantId: r.tenant_id,
+      metricKey: r.metric_key,
+      operator: r.operator,
+      thresholdValue: r.threshold_value,
+      currentValue: r.current_value,
+      severity: r.severity,
+      state: r.state,
+      firstBreachAt: r.first_breach_at,
+      triggeredAt: r.triggered_at,
+      lastNotifiedAt: r.last_notified_at,
+      resolvedAt: r.resolved_at,
+      acknowledged: r.acknowledged,
+      acknowledgedAt: r.acknowledged_at,
+      acknowledgedBy: r.acknowledged_by,
+      silencedUntil: r.silenced_until,
+      repeatCount: r.repeat_count,
+      message: r.message,
+      updatedAt: r.updated_at,
+      userId: r.user_id,
+      source: r.source,
+      environment: r.environment,
+      isSimulation: r.is_simulation
+    }));
+  }
+
+  public async getAlarmEvents(tenantId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
+    if (!this.pool) return [];
+    let sql = `SELECT * FROM alarm_events WHERE 1=1`;
+    const params: any[] = [];
+    let idx = 1;
+
+    if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
+      sql += ` AND tenant_id = $${idx++}`;
+      params.push(tenantId);
+    }
+    if (incidentId) {
+      sql += ` AND incident_id = $${idx++}`;
+      params.push(incidentId);
+    }
+    if (alarmId) {
+      sql += ` AND alarm_id = $${idx++}`;
+      params.push(alarmId);
+    }
+    if (deviceId) {
+      sql += ` AND device_id = $${idx++}`;
+      params.push(deviceId);
+    }
+    sql += ` ORDER BY created_at DESC LIMIT 200`;
+    const res = await this.query(sql, params);
+    return res.rows.map(r => ({
+      id: r.id,
+      incidentId: r.incident_id,
+      alarmId: r.alarm_id,
+      deviceId: r.device_id,
+      deviceName: r.device_name,
+      tenantId: r.tenant_id,
+      eventType: r.event_type,
+      alarmState: r.alarm_state,
+      metricKey: r.metric_key,
+      value: r.value,
+      message: r.message,
+      createdAt: r.created_at,
+      metadata: r.metadata,
+      source: r.source,
+      isSimulation: r.is_simulation,
+      environment: r.environment
+    }));
+  }
+
+  public async getNotifications(tenantId?: string): Promise<any[]> {
+    if (!this.pool) return [];
+    let sql = `SELECT * FROM notifications`;
+    const params: any[] = [];
+    if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
+      sql += ` WHERE tenant_id = $1`;
+      params.push(tenantId);
+    }
+    sql += ` ORDER BY created_at DESC LIMIT 100`;
+    const res = await this.query(sql, params);
+    return res.rows.map(r => ({
+      id: r.id,
+      tenantId: r.tenant_id,
+      userId: r.user_id,
+      type: r.type,
+      title: r.title,
+      message: r.message,
+      read: r.is_read,
+      createdAt: r.created_at,
+      alarmId: r.alarm_id,
+      ruleId: r.rule_id,
+      alarmState: r.alarm_state
+    }));
+  }
+
+  public async getDispatchLogs(tenantId?: string): Promise<any[]> {
+    if (!this.pool) return [];
+    let sql = `SELECT * FROM dispatch_logs`;
+    const params: any[] = [];
+    if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
+      sql += ` WHERE tenant_id = $1`;
+      params.push(tenantId);
+    }
+    sql += ` ORDER BY sent_at DESC LIMIT 100`;
+    const res = await this.query(sql, params);
+    return res.rows.map(r => ({
+      id: r.id,
+      ruleId: r.rule_id,
+      alarmId: r.alarm_id,
+      tenantId: r.tenant_id,
+      userId: r.user_id,
+      userName: r.user_name,
+      channel: r.channel,
+      recipient: r.recipient,
+      status: r.status,
+      error: r.error,
+      sentAt: r.sent_at
+    }));
+  }
+
   public async queryWithTenant(tenantId: string, isAdmin: boolean, text: string, params: any[] = []): Promise<any> {
     if (!this.pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı hazır veya aktif değil');

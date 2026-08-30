@@ -71,7 +71,7 @@ interface DatabaseSchema {
   devices: Device[];
   unregisteredDevices?: DiscoveredNetworkDevice[];
   commands?: DeviceCommand[];
-  telemetry: TelemetryReading[];
+  telemetry?: TelemetryReading[]; // Optional transport array
   dashboards: DashboardLayout[];
   notifications: NotificationItem[];
   rules: ThresholdRule[];
@@ -249,11 +249,11 @@ class LocalDatabase {
     this.opWritesCount =
       this.data.users.length +
       this.data.devices.length +
-      this.data.telemetry.length +
+      this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize +
       this.data.notifications.length +
       this.data.dashboards.length +
       (this.data.auditLogs || []).length;
-    this.opReadsCount = this.data.telemetry.length + (this.data.auditLogs || []).length * 2 + 120;
+    this.opReadsCount = this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize + (this.data.auditLogs || []).length * 2 + 120;
     this.opDeletesCount = (this.data.auditLogs || []).filter((a) => a.action.includes('delete') || a.action.includes('remove')).length;
 
     this.setupFirestoreSync();
@@ -262,6 +262,15 @@ class LocalDatabase {
     this.startAutoRetentionWorker();
     this.initPostgresRepository().catch(() => {});
     this.startPostgresAutoReconnect();
+    this.startAutoBackupWorker();
+  }
+
+  private autoBackupInterval: any = null;
+  private startAutoBackupWorker(): void {
+    if (this.autoBackupInterval) return;
+    this.autoBackupInterval = setInterval(() => {
+      this.createBackup().catch(() => {});
+    }, 3600 * 1000);
   }
 
   private postgresAutoReconnectInterval: any = null;
@@ -420,21 +429,9 @@ class LocalDatabase {
             this.data.activeAlarms = hydrated.alarms;
           }
 
-          if (hydrated.notifications.length > 0) {
-            this.data.notifications = hydrated.notifications;
-          }
 
-          if (hydrated.telemetry.length > 0) {
-            this.data.telemetry = hydrated.telemetry;
-          }
 
-          if (hydrated.dispatchLogs && hydrated.dispatchLogs.length > 0) {
-            this.data.dispatchLogs = hydrated.dispatchLogs;
-          }
 
-          if (hydrated.commands && hydrated.commands.length > 0) {
-            this.data.commands = hydrated.commands;
-          }
 
           if (hydrated.sessions && hydrated.sessions.length > 0) {
             const sessionMap = new Map<string, UserSession>();
@@ -449,21 +446,7 @@ class LocalDatabase {
             }
           }
 
-          if (hydrated.firmwares && hydrated.firmwares.length > 0) {
-            this.data.firmwares = hydrated.firmwares;
-          } else if (this.data.firmwares && this.data.firmwares.length > 0) {
-            for (const fw of this.data.firmwares) {
-              await this.postgresRepo.saveFirmware(fw).catch((err) => console.warn('[PostgreSQL Firmwares Seed Error]', err));
-            }
-          }
 
-          if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
-            this.data.otaJobs = hydrated.otaJobs;
-          } else if (this.data.otaJobs && this.data.otaJobs.length > 0) {
-            for (const job of this.data.otaJobs) {
-              await this.postgresRepo.saveOtaJob(job).catch((err) => console.warn('[PostgreSQL OtaJobs Seed Error]', err));
-            }
-          }
 
           this.saveData(this.data);
 
@@ -591,6 +574,10 @@ class LocalDatabase {
     // Firestore sync is disabled since we are completely migrated to PostgreSQL
   }
 
+  public isPostgresProductionMode() {
+    return process.env.DB_ENGINE === 'postgres' || process.env.LOCAL_DB_ENABLED === 'false';
+  }
+
   private ensureDirectory() {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -602,7 +589,6 @@ class LocalDatabase {
       users: [],
       passwords: {},
       devices: [],
-      telemetry: [],
       dashboards: [],
       sessions: [],
       notifications: [],
@@ -613,6 +599,11 @@ class LocalDatabase {
       sites: [],
       subscriptions: [],
     };
+
+    if (this.isPostgresProductionMode()) {
+      console.log('[BOOTSTRAP] PostgreSQL mode active, skipping db.json load into RAM.');
+      return emptyData;
+    }
 
     let parsed = emptyData;
     const fileExists = fs.existsSync(DB_FILE);
@@ -625,7 +616,7 @@ class LocalDatabase {
         if (!parsed.passwords) parsed.passwords = {};
         if (!parsed.sessions) parsed.sessions = [];
         if (!parsed.devices) parsed.devices = [];
-        if (!parsed.telemetry) parsed.telemetry = [];
+        delete (parsed as any).telemetry;
         if (!parsed.notifications) parsed.notifications = [];
         if (!parsed.rules) parsed.rules = [];
         if (!parsed.dashboards) parsed.dashboards = [];
@@ -733,9 +724,34 @@ class LocalDatabase {
     }
   }
 
-  public createBackup(): { success: boolean; filename: string; size: number } {
+  public async createBackup(): Promise<{ success: boolean; filename: string; size: number }> {
     this.ensureBackupDir();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+    if (this.isPostgresProductionMode()) {
+      const filename = `pg_backup_${timestamp}.sql`;
+      const backupPath = path.join(this.BACKUP_DIR, filename);
+      const dbUrl = process.env.DATABASE_URL;
+      
+      if (!dbUrl) {
+         console.error('[BACKUP] DATABASE_URL is not set for pg_dump');
+         return { success: false, filename: '', size: 0 };
+      }
+
+      try {
+        const { execSync } = await import('node:child_process');
+        execSync(`pg_dump "${dbUrl}" > "${backupPath}"`);
+        
+        this.pruneBackups();
+        const stats = fs.statSync(backupPath);
+        return { success: true, filename, size: stats.size };
+      } catch (err) {
+        console.error('[BACKUP] pg_dump failed:', err);
+        return { success: false, filename: '', size: 0 };
+      }
+    }
+
+
     const filename = `db_backup_${timestamp}.json`;
     const backupPath = path.join(this.BACKUP_DIR, filename);
 
@@ -762,7 +778,7 @@ class LocalDatabase {
     try {
       const files = fs.readdirSync(this.BACKUP_DIR);
       return files
-        .filter((f) => f.startsWith('db_backup_') && f.endsWith('.json'))
+        .filter((f) => (f.startsWith('db_backup_') && f.endsWith('.json')) || (f.startsWith('pg_backup_') && f.endsWith('.sql')))
         .map((f) => {
           const stats = fs.statSync(path.join(this.BACKUP_DIR, f));
           return {
@@ -817,7 +833,7 @@ class LocalDatabase {
       queuedWritesCount: this.writeQueue.length,
       usersCount: this.data.users.length,
       devicesCount: this.data.devices.length,
-      telemetryRecordsCount: this.data.telemetry.length,
+      telemetryRecordsCount: this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize,
       activeBackupsCount: this.listBackups().length,
       firestoreSyncStatus: 'Active / Multi-Region',
     };
@@ -834,6 +850,9 @@ class LocalDatabase {
   }
 
   public saveData(dataToSave: DatabaseSchema, forceWrite = false) {
+    if (this.isPostgresProductionMode()) {
+      return;
+    }
     if (this.postgresRepo.isReady() && !forceWrite) {
       // Normal çalışmada gerçek veri kaynağı PostgreSQL'dir.
       // Disk I/O (db.json) sürekli güncellenmez, sadece geçici cache/emergency buffer olarak tutulur.
@@ -859,12 +878,7 @@ class LocalDatabase {
       fs.writeFileSync(tmpFile, serialized, 'utf-8');
       fs.renameSync(tmpFile, DB_FILE);
 
-      // 2. Periodic automatic rolling backup (once per hour)
-      const now = Date.now();
-      if (now - this.lastBackupTime > 3600 * 1000) {
-        this.lastBackupTime = now;
-        this.createBackup();
-      }
+      // Periodic backup moved to setInterval in constructor
 
       // 3. Cloud Firestore Mirror Sync
       this.safeFirestoreWrite(
@@ -872,7 +886,7 @@ class LocalDatabase {
           updatedAt: new Date().toISOString(),
           usersCount: latestData.users.length,
           devicesCount: latestData.devices.length,
-          telemetryCount: latestData.telemetry.length,
+          telemetryCount: this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize,
         }),
         'sync_system_state'
       );
@@ -923,14 +937,31 @@ class LocalDatabase {
   public getTelemetry(deviceId?: string, metric?: string, limit: number = 100, userId?: string, customerId?: string): TelemetryReading[] { return this.telemetryRepository.getTelemetry(deviceId, metric, limit, userId, customerId); }
   public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string): Promise<any[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution); }
     // Notifications
-  public getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationItem[] { return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId); }
+  public async getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): Promise<NotificationItem[]> {
+    if (this.isPostgresProductionMode()) {
+       return await this.postgresRepo.getNotifications(targetCustomerId || requestingUserId);
+    }
+    return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId);
+  }
   public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem { return this.notificationRepository.addNotification(notif); }
   public markNotificationRead(id: string, userId = 'usr_admin') { return this.notificationRepository.markNotificationRead(id, userId); }
   public markAllNotificationsRead(userId = 'usr_admin') { return this.notificationRepository.markAllNotificationsRead(userId); }
   public getDashboard(userId: string): DashboardLayout { return this.notificationRepository.getDashboard(userId); }
   public saveDashboardWidgets(userId: string, widgets: any[], title?: string): DashboardLayout { return this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
   public resetDashboard(userId: string): DashboardLayout { return this.notificationRepository.resetDashboard(userId); }
-  public getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): any { return this.alarmRepository.getAlarms(requestingUserId, targetCustomerId, options); }
+  public async getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): Promise<any> {
+    if (this.isPostgresProductionMode()) {
+       let list = await this.postgresRepo.getAlarms(targetCustomerId || requestingUserId);
+       if (options?.status && options.status !== 'all') {
+         list = list.filter((a: any) => options.status === 'resolved' ? a.state === 'RESOLVED' : a.state !== 'RESOLVED');
+       }
+       if (options?.severity && options.severity !== 'all') {
+         list = list.filter((a: any) => a.severity === options.severity);
+       }
+       return { data: list, total: list.length };
+    }
+    return this.alarmRepository.getAlarms(requestingUserId, targetCustomerId, options);
+  }
   public acknowledgeAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.acknowledgeAlarm(alarmId, currentUser); }
   public silenceAlarm(alarmId: string, durationMinutes: number, currentUser: any): boolean { return this.alarmRepository.silenceAlarm(alarmId, durationMinutes, currentUser); }
   public resolveAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.resolveAlarm(alarmId, currentUser); }
@@ -938,12 +969,35 @@ class LocalDatabase {
   public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): ThresholdRule { return this.alarmRepository.createRule(ruleData, requestingUser); }
   public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
   public deleteRule(id: string, requestingUser?: any): boolean { return this.alarmRepository.deleteRule(id, requestingUser); }
+  
+  public async getAlarmEvents(requestingUserId = 'usr_admin', targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
+    if (this.isPostgresProductionMode()) {
+       return await this.postgresRepo.getAlarmEvents(targetCustomerId || requestingUserId, incidentId, alarmId, deviceId);
+    }
+    let events = this.data.alarmEvents || [];
+    const effectiveTenant = targetCustomerId || requestingUserId;
+    if (effectiveTenant && effectiveTenant !== 'usr_admin' && effectiveTenant !== 'all') {
+      events = events.filter((e) => e.tenantId === effectiveTenant);
+    }
+    if (incidentId) events = events.filter((e) => e.incidentId === incidentId);
+    if (alarmId) events = events.filter((e) => e.alarmId === alarmId);
+    if (deviceId) events = events.filter((e) => e.deviceId === deviceId);
+    return events.slice(-1000).reverse();
+  }
+
   public toggleRule(id: string, enabled: boolean, requestingUser?: any): boolean { return this.alarmRepository.toggleRule(id, enabled, requestingUser); }
   // Audit Logs
   public getAuditLogs(): AuditLog[] { return this.userRepository.getAuditLogs(); }
   public addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): void { return this.userRepository.addAuditLog(userId, userName, action, severity); }
   // Device Downlink Commands
-  public getCommands(deviceId?: string): DeviceCommand[] {
+  public async getCommands(deviceId?: string): Promise<DeviceCommand[]> {
+    if (this.isPostgresProductionMode()) {
+      if (deviceId && deviceId !== 'all') {
+         return await this.postgresRepo.getCommands(deviceId);
+      } else {
+         return []; // Not supported/used currently to fetch all commands for all devices from PG without limit
+      }
+    }
     if (!this.data.commands) this.data.commands = [];
     if (deviceId && deviceId !== 'all') {
       return this.data.commands.filter((c) => c.deviceId === deviceId);
@@ -951,12 +1005,15 @@ class LocalDatabase {
     return this.data.commands.slice(-100).reverse();
   }
 
-  public getPendingCommands(deviceId: string): DeviceCommand[] {
+  public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
+    if (this.isPostgresProductionMode()) {
+       return await this.postgresRepo.getPendingCommands(deviceId);
+    }
     if (!this.data.commands) this.data.commands = [];
     return this.data.commands.filter((c) => c.deviceId === deviceId && c.status === 'pending');
   }
 
-  public addCommand(deviceId: string, commandStr: string, payloadStr: string | number, source: string = 'user_ui'): DeviceCommand {
+  public async addCommand(deviceId: string, commandStr: string, payloadStr: string | number, source: string = 'user_ui'): Promise<DeviceCommand> {
     if (!this.data.commands) this.data.commands = [];
     const dev = this.data.devices.find((d) => d.id === deviceId);
     const cmd: DeviceCommand = {
@@ -970,12 +1027,27 @@ class LocalDatabase {
       source,
     };
     this.data.commands.push(cmd);
-    this.saveData(this.data);
-    this.postgresRepo.saveCommand(cmd).catch(() => {});
+    
+    // RAM cache sınırlandır (sadece son 500 komutu tut)
+    if (this.data.commands.length > 500) {
+       this.data.commands = this.data.commands.slice(-500);
+    }
+
+    if (this.isPostgresProductionMode()) {
+       await this.postgresRepo.saveCommand(cmd).catch(() => {});
+    } else {
+       this.saveData(this.data);
+    }
     return cmd;
   }
 
   public markCommandsDelivered(commandIds: string[]): void {
+    if (!commandIds || commandIds.length === 0) return;
+    
+    if (this.isPostgresProductionMode()) {
+      this.postgresRepo.markCommandsDelivered(commandIds).catch(() => {});
+    }
+
     if (!this.data.commands) return;
     let updated = false;
     const now = new Date().toISOString();
@@ -986,9 +1058,9 @@ class LocalDatabase {
         updated = true;
       }
     }
-    if (updated) {
+    
+    if (updated && !this.isPostgresProductionMode()) {
       this.saveData(this.data);
-      this.postgresRepo.markCommandsDelivered(commandIds).catch(() => {});
     }
   }
 
@@ -996,7 +1068,7 @@ class LocalDatabase {
     return { success: true, message: 'Firestore devre dışı bırakıldı ve tamamen kaldırıldı.' };
   }
 
-  public getDatabaseStats() {
+  public async getDatabaseStats() {
     this.recordReadOp(1);
     let fileSizeKB = 0;
     try {
@@ -1015,15 +1087,37 @@ class LocalDatabase {
     const dailyWriteOffset = this.firestoreQuotaExceeded ? 20000 + (hash * 7) : 4800 + (hash * 19);
     const dailyDeleteOffset = this.firestoreQuotaExceeded ? 150 + (hash * 2) : 25 + (hash * 3);
 
+    let pgTelemetryStats = {};
+    if (this.isPostgresProductionMode()) {
+       try {
+           const res = await this.postgresRepo.query('SELECT tenant_id, COUNT(*) AS count FROM telemetry_readings GROUP BY tenant_id');
+           if (res?.rows) {
+               res.rows.forEach(r => {
+                  pgTelemetryStats[r.tenant_id] = parseInt(r.count, 10) || 0;
+               });
+           }
+       } catch (err) {
+           console.error("PG Stats fetch error:", err);
+       }
+    }
+
     const usersWithStats = this.data.users.map((u) => {
       const userDevs = this.data.devices.filter((d) => d.tenantId === u.id);
       const onlineDevs = userDevs.filter((d) => d.status === 'online');
-      const userTelemetry = this.data.telemetry.filter((t) => userDevs.some((d) => d.id === t.deviceId));
+      
+      let telemetryCount = 0;
+      if (this.isPostgresProductionMode()) {
+         telemetryCount = pgTelemetryStats[u.id] || 0;
+      } else {
+         const userTelemetry = this.telemetryRepository.getTelemetry(undefined, undefined, 50, u.id);
+         telemetryCount = userTelemetry.length;
+      }
+      
       return {
         ...u,
         assignedDevicesCount: userDevs.length,
         activeDevicesCount: onlineDevs.length,
-        telemetryCount: userTelemetry.length,
+        telemetryCount,
         devicesList: userDevs.map((d) => ({
           id: d.id,
           name: d.name,
@@ -1081,7 +1175,7 @@ class LocalDatabase {
       collections: {
         users: this.data.users.length,
         devices: this.data.devices.length,
-        telemetry: this.data.telemetry.length,
+        telemetry: this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize,
         dashboards: this.data.dashboards.length,
         notifications: this.data.notifications.length,
         rules: this.data.rules.length,
@@ -1383,7 +1477,14 @@ class LocalDatabase {
     this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
   }
 
-  public getDispatchLogs(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
+  public async getDispatchLogs(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
+    if (this.isPostgresProductionMode()) {
+       let list = await this.postgresRepo.getDispatchLogs(targetCustomerId || requestingUserId);
+       if (options?.status && options.status !== 'all') list = list.filter((l: any) => l.status === options.status);
+       if (options?.channel && options.channel !== 'all') list = list.filter((l: any) => l.channel === options.channel);
+       return { data: list, total: list.length, limit: options?.limit || 50, hasMore: false };
+    }
+
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     let list = this.data.dispatchLogs;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
@@ -1674,7 +1775,7 @@ class LocalDatabase {
       bucket === '1h' ? 3600000 :
       86400000;
 
-    let readings = this.data.telemetry || [];
+    let readings = this.telemetryRepository.getTelemetry();
     if (deviceId && deviceId !== 'all') {
       readings = readings.filter((r) => r.deviceId === deviceId);
     }
@@ -2108,7 +2209,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     switch (tableName) {
       case 'users': rawItems = this.data.users || []; break;
       case 'devices': rawItems = this.data.devices || []; break;
-      case 'telemetry_readings': case 'telemetry': rawItems = this.data.telemetry || []; break;
+      case 'telemetry_readings': case 'telemetry': rawItems = this.telemetryRepository.getTelemetry(); break;
       case 'threshold_rules': case 'rules': rawItems = this.data.rules || []; break;
       case 'active_alarms': case 'activeAlarms': rawItems = this.data.activeAlarms || []; break;
       case 'notifications': rawItems = this.data.notifications || []; break;
@@ -2165,7 +2266,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     switch (tableName) {
       case 'users': collectionName = 'users'; break;
       case 'devices': collectionName = 'devices'; break;
-      case 'telemetry_readings': case 'telemetry': collectionName = 'telemetry'; break;
+      case 'telemetry_readings': case 'telemetry': collectionName = null; break;
       case 'threshold_rules': case 'rules': collectionName = 'rules'; break;
       case 'active_alarms': case 'activeAlarms': collectionName = 'activeAlarms'; break;
       case 'notifications': collectionName = 'notifications'; break;
@@ -2204,7 +2305,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     switch (tableName) {
       case 'users': collectionName = 'users'; break;
       case 'devices': collectionName = 'devices'; break;
-      case 'telemetry_readings': case 'telemetry': collectionName = 'telemetry'; break;
+      case 'telemetry_readings': case 'telemetry': collectionName = null; break;
       case 'threshold_rules': case 'rules': collectionName = 'rules'; break;
       case 'active_alarms': case 'activeAlarms': collectionName = 'activeAlarms'; break;
       case 'notifications': collectionName = 'notifications'; break;
@@ -2251,7 +2352,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     switch (tableName) {
       case 'users': collectionName = 'users'; break;
       case 'devices': collectionName = 'devices'; break;
-      case 'telemetry_readings': case 'telemetry': collectionName = 'telemetry'; break;
+      case 'telemetry_readings': case 'telemetry': collectionName = null; break;
       case 'threshold_rules': case 'rules': collectionName = 'rules'; break;
       case 'active_alarms': case 'activeAlarms': collectionName = 'activeAlarms'; break;
       case 'notifications': collectionName = 'notifications'; break;
@@ -2276,7 +2377,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     return {
       users: this.data.users?.length || 0,
       devices: this.data.devices?.length || 0,
-      telemetry_readings: this.data.telemetry?.length || 0,
+      telemetry_readings: this.telemetryRepository.getTelemetryStats().rawBufferCurrentSize,
       threshold_rules: this.data.rules?.length || 0,
       active_alarms: this.data.activeAlarms?.length || 0,
       notifications: this.data.notifications?.length || 0,
@@ -2340,9 +2441,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     // Telemetry
     if (policies.telemetryDays && policies.telemetryDays > 0) {
       const cutoff = now - policies.telemetryDays * 24 * 3600 * 1000;
-      const initial = this.data.telemetry.length;
-      this.data.telemetry = this.data.telemetry.filter((t) => new Date(t.timestamp).getTime() >= cutoff);
-      cleaned.telemetry = initial - this.data.telemetry.length;
+      cleaned.telemetry = 0;
     }
 
     // Resolved Alarms
@@ -2486,11 +2585,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     );
 
     // Filter in-memory arrays
-    const initTel = this.data.telemetry.length;
-    this.data.telemetry = this.data.telemetry.filter(
-      (t) => !simDeviceIds.has(t.deviceId) && !t.deviceId?.startsWith('sim_')
-    );
-    cleaned.telemetry = initTel - this.data.telemetry.length;
+    cleaned.telemetry = 0;
 
     if (this.data.activeAlarms) {
       const initAlarms = this.data.activeAlarms.length;
@@ -2570,9 +2665,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     const optionsForPg: any = {};
 
     if (category === 'telemetry') {
-      const init = this.data.telemetry.length;
-      this.data.telemetry = this.data.telemetry.filter((t) => new Date(t.timestamp).getTime() >= cutoff);
-      cleaned.telemetry = init - this.data.telemetry.length;
+      cleaned.telemetry = 0;
       optionsForPg.telemetryDays = days;
     } else if (category === 'resolvedAlarms' || category === 'alarms') {
       if (this.data.activeAlarms) {

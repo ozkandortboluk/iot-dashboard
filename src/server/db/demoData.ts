@@ -188,10 +188,12 @@ export function seedDemoDataForDatabase(
   ];
 
   dbInstance.data.devices = [...(dbInstance.data.devices || []), ...demoDevices];
-  dbInstance.data.telemetry = [...(dbInstance.data.telemetry || []), ...readings];
+  // Telemetry is processed in bulk later
   dbInstance.data.rules = [...(dbInstance.data.rules || []), ...demoRules];
   dbInstance.data.notifications = [...(dbInstance.data.notifications || []), ...demoNotifications];
   dbInstance.saveData(dbInstance.data);
+
+  dbInstance.telemetryRepository.addTelemetryBatchAsync(readings).catch(() => {});
 
   // Sync to PostgreSQL if active
   const pool = dbInstance.getPgPool();

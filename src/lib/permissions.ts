@@ -167,6 +167,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
   admin: [
     'dashboard',
     'devices',
+    'device_health',
     'customers',
     'firmware_ota',
     'network_discovery',
@@ -182,6 +183,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
   operator: [
     'dashboard',
     'devices',
+    'device_health',
     'firmware_ota',
     'network_discovery',
     'analytics',
@@ -192,6 +194,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
   analyst: [
     'dashboard',
     'devices',
+    'device_health',
     'network_discovery',
     'analytics',
     'notifications',
@@ -201,6 +204,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
   customer: [
     'dashboard',
     'devices',
+    'device_health',
     'network_discovery',
     'notifications',
     'account_settings',

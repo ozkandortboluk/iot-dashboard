@@ -8,7 +8,7 @@ import { maskSecret } from '../utils/crypto.js';
 const router = Router();
 
 // Active Alarms Endpoints
-router.get('/', authenticateUser, (req, res) => {
+router.get('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const requestedUserId = (req.query.tenantId as string) || currentUser.id;
@@ -27,7 +27,7 @@ router.get('/', authenticateUser, (req, res) => {
 
   const hasOptions = options.limit !== undefined || options.cursor !== undefined || options.status !== undefined || options.severity !== undefined || options.deviceId !== undefined || options.search !== undefined;
 
-  const result = db.getAlarms(
+  const result = await db.getAlarms(
     targetUserId,
     currentUser.role === 'admin' ? targetCustomerId : currentUser.id,
     hasOptions ? options : undefined
@@ -36,7 +36,7 @@ router.get('/', authenticateUser, (req, res) => {
 });
 
 // Alarm Events History Endpoint
-router.get('/events', authenticateUser, (req, res) => {
+router.get('/events', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   
@@ -44,33 +44,17 @@ router.get('/events', authenticateUser, (req, res) => {
   const alarmId = req.query.alarmId as string | undefined;
   const deviceId = req.query.deviceId as string | undefined;
   
-  let events = db.data.alarmEvents || [];
-
-  if (currentUser.role !== 'admin') {
-    events = events.filter((e) => e.tenantId === currentUser.id);
-  }
-
-  if (incidentId) {
-    events = events.filter((e) => e.incidentId === incidentId);
-  }
-  if (alarmId) {
-    events = events.filter((e) => e.alarmId === alarmId);
-  }
-  if (deviceId) {
-    events = events.filter((e) => e.deviceId === deviceId);
-  }
-
-  // Sort descending by creation date
+  const events = await db.getAlarmEvents(currentUser.id, currentUser.role === 'admin' ? undefined : currentUser.id, incidentId, alarmId, deviceId);
   events.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   res.json(events);
 });
 
-router.post('/:id/acknowledge', authenticateUser, (req, res) => {
+router.post('/:id/acknowledge', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = alarmEngine.acknowledge(req.params.id, currentUser);
+    const success = await alarmEngine.acknowledge(req.params.id, currentUser);
     if (!success) {
       return res.status(404).json({ error: 'Alarm bulunamadı.' });
     }
@@ -80,11 +64,11 @@ router.post('/:id/acknowledge', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/ack', authenticateUser, (req, res) => {
+router.post('/:id/ack', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = alarmEngine.acknowledge(req.params.id, currentUser);
+    const success = await alarmEngine.acknowledge(req.params.id, currentUser);
     if (!success) {
       return res.status(404).json({ error: 'Alarm bulunamadı.' });
     }
@@ -94,12 +78,12 @@ router.post('/:id/ack', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/silence', authenticateUser, (req, res) => {
+router.post('/:id/silence', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { durationMinutes = 15 } = req.body;
   try {
-    const success = alarmEngine.silence(req.params.id, Number(durationMinutes), currentUser);
+    const success = await alarmEngine.silence(req.params.id, Number(durationMinutes), currentUser);
     if (!success) {
       return res.status(404).json({ error: 'Alarm bulunamadı.' });
     }
@@ -109,11 +93,11 @@ router.post('/:id/silence', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/resolve', authenticateUser, (req, res) => {
+router.post('/:id/resolve', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = alarmEngine.resolve(req.params.id, currentUser);
+    const success = await alarmEngine.resolve(req.params.id, currentUser);
     if (!success) {
       return res.status(404).json({ error: 'Alarm bulunamadı.' });
     }
@@ -206,14 +190,14 @@ export { rulesRouter };
 // Notifications Router
 const notificationsRouter = Router();
 
-notificationsRouter.get('/', authenticateUser, (req, res) => {
+notificationsRouter.get('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const requestedUserId = (req.query.tenantId as string) || currentUser.id;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
   const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
-  res.json(db.getNotifications(targetUserId, currentUser.role === 'admin' ? targetCustomerId : currentUser.id));
+  res.json(await db.getNotifications(targetUserId, currentUser.role === 'admin' ? targetCustomerId : currentUser.id));
 });
 
 notificationsRouter.put('/:id/read', authenticateUser, (req, res) => {
@@ -282,7 +266,7 @@ export { notificationQueueRouter };
 
 // Dispatch Logs Router
 const dispatchLogsRouter = Router();
-dispatchLogsRouter.get('/', authenticateUser, (req, res) => {
+dispatchLogsRouter.get('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
@@ -297,7 +281,7 @@ dispatchLogsRouter.get('/', authenticateUser, (req, res) => {
 
   const hasOptions = options.limit !== undefined || options.cursor !== undefined || options.status !== undefined || options.channel !== undefined || options.search !== undefined;
 
-  const logs = db.getDispatchLogs(currentUser.id, targetCustomerId, hasOptions ? options : undefined);
+  const logs = await db.getDispatchLogs(currentUser.id, targetCustomerId, hasOptions ? options : undefined);
   res.json(logs);
 });
 export { dispatchLogsRouter };

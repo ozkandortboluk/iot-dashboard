@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticateUser, requireAdmin } from '../../middleware/auth.js';
+import { authenticateUser, requireAdmin, requireAdminOrStaff } from '../../middleware/auth.js';
 import { db } from '../../db.js';
 
 export const adminTenantsRouter = Router();
@@ -38,10 +38,10 @@ const PaginationQuerySchema = z.object({
   order: z.enum(['asc', 'desc']).default('desc'),
 });
 
-adminTenantsRouter.use(authenticateUser, requireAdmin);
+adminTenantsRouter.use(authenticateUser);
 
 // GET /api/admin/tenants
-adminTenantsRouter.get('/', async (req, res) => {
+adminTenantsRouter.get('/', requireAdminOrStaff, async (req, res) => {
   try {
     const query = PaginationQuerySchema.parse(req.query);
     
@@ -115,7 +115,7 @@ adminTenantsRouter.get('/', async (req, res) => {
 });
 
 // GET /api/admin/tenants/:id
-adminTenantsRouter.get('/:id', async (req, res) => {
+adminTenantsRouter.get('/:id', requireAdminOrStaff, async (req, res) => {
   const tenant = db.data.users.find((u: any) => u.id === req.params.id);
   if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
   
@@ -139,7 +139,7 @@ adminTenantsRouter.get('/:id', async (req, res) => {
 });
 
 // GET /api/admin/tenants/:id/members
-adminTenantsRouter.get('/:id/members', async (req, res) => {
+adminTenantsRouter.get('/:id/members', requireAdminOrStaff, async (req, res) => {
   // Şimdilik sadece ana müşteriyi (tenant sahibi) döndürüyoruz
   const tenant = db.data.users.find((u: any) => u.id === req.params.id);
   if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
@@ -154,7 +154,7 @@ adminTenantsRouter.get('/:id/members', async (req, res) => {
 });
 
 // POST /api/admin/tenants
-adminTenantsRouter.post('/', async (req, res) => {
+adminTenantsRouter.post('/', requireAdmin, async (req, res) => {
   try {
     const data = CreateTenantSchema.parse(req.body);
     
@@ -242,11 +242,11 @@ const handleUpdateTenant = async (req: any, res: any) => {
   }
 };
 
-adminTenantsRouter.patch('/:id', handleUpdateTenant);
-adminTenantsRouter.put('/:id', handleUpdateTenant);
+adminTenantsRouter.patch('/:id', requireAdmin, handleUpdateTenant);
+adminTenantsRouter.put('/:id', requireAdmin, handleUpdateTenant);
 
 // POST /api/admin/tenants/:id/suspend
-adminTenantsRouter.post('/:id/suspend', async (req, res) => {
+adminTenantsRouter.post('/:id/suspend', requireAdmin, async (req, res) => {
   try {
     const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
@@ -269,7 +269,7 @@ adminTenantsRouter.post('/:id/suspend', async (req, res) => {
 });
 
 // POST /api/admin/tenants/:id/terminate-sessions
-adminTenantsRouter.post('/:id/terminate-sessions', async (req, res) => {
+adminTenantsRouter.post('/:id/terminate-sessions', requireAdmin, async (req, res) => {
   try {
     const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
@@ -282,7 +282,7 @@ adminTenantsRouter.post('/:id/terminate-sessions', async (req, res) => {
 });
 
 // POST /api/admin/tenants/:id/reset-password
-adminTenantsRouter.post('/:id/reset-password', async (req, res) => {
+adminTenantsRouter.post('/:id/reset-password', requireAdmin, async (req, res) => {
   try {
     const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });

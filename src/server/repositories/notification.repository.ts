@@ -53,7 +53,7 @@ export class NotificationRepository {
 
       notif.read = true;
       this.db.scheduleSave();
-      this.db.notifyNotificationListeners('notifications:updated', this.getNotifications());
+      this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
       this.db.postgresRepo.markNotificationRead(id).catch(() => {});
     }
   }
@@ -69,7 +69,7 @@ export class NotificationRepository {
     });
     if (updated) {
       this.db.scheduleSave();
-      this.db.notifyNotificationListeners('notifications:updated', this.getNotifications());
+      this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
       this.db.postgresRepo.markAllNotificationsRead(userId === 'usr_admin' ? undefined : userId).catch(() => {});
     }
   }

@@ -48,3 +48,14 @@ export function requireAdmin(req: express.Request, res: express.Response, next: 
   }
   next();
 }
+
+// Authorization Middleware: Staff (Admin, Operator, Analyst) Enforcement
+export function requireAdminOrStaff(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user || (user.role !== 'admin' && user.role !== 'operator' && user.role !== 'analyst')) {
+    return res.status(403).json({
+      error: 'Yetkisiz İşlem (403): Bu işlem için Yönetici veya Personel (Operatör/Analist) yetkisi gereklidir.',
+    });
+  }
+  next();
+}

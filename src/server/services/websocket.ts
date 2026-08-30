@@ -81,20 +81,10 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'dashboard:layout', payload: userDashboard }));
     }
 
-    const userNotifs = user.role === 'admin'
-      ? db.getNotifications()
-      : db.getNotifications(user.id, user.id);
-    safeSend(ws, JSON.stringify({ event: 'notifications:updated', payload: userNotifs }));
-
     if (user.role === 'admin') {
-      safeSend(ws, JSON.stringify({ event: 'users:updated', payload: db.getUsers() }));
-      safeSend(ws, JSON.stringify({ event: 'network:updated', payload: db.getDiscoveredDevices(user.id) }));
-      safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: db.getAlarms() }));
-      safeSend(ws, JSON.stringify({ event: 'rules:updated', payload: db.getRules() }));
+      db.getAlarms('usr_admin', undefined, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a })));
     } else {
-      safeSend(ws, JSON.stringify({ event: 'network:updated', payload: db.getDiscoveredDevices(user.id, user.id) }));
-      safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: db.getAlarms(user.id, user.id) }));
-      safeSend(ws, JSON.stringify({ event: 'rules:updated', payload: db.getRules(user.id, user.id) }));
+      db.getAlarms(user.id, user.id, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a })));
     }
 
     // Default channels assignment: Connections default to both physical and simulation channels
@@ -268,10 +258,11 @@ export function broadcast(event: string, payload: unknown) {
     // 4. Notifications update broadcast
     if (event === 'notifications:updated') {
       if (isAdmin) {
-        safeSend(client, JSON.stringify({ event, payload: db.getNotifications(), timestamp: new Date().toISOString() }));
+        db.getNotifications().then(n => safeSend(client, JSON.stringify({ event, payload: n, timestamp: new Date().toISOString() })));
       } else {
-        const userNotifs = db.getNotifications(clientUser.id, clientUser.id);
-        safeSend(client, JSON.stringify({ event, payload: userNotifs, timestamp: new Date().toISOString() }));
+        db.getNotifications(clientUser.id, clientUser.id).then(userNotifs => {
+          safeSend(client, JSON.stringify({ event, payload: userNotifs, timestamp: new Date().toISOString() }));
+        });
       }
       return;
     }
@@ -345,9 +336,9 @@ export function broadcast(event: string, payload: unknown) {
     // 9. Alarms update broadcast
     if (event === 'alarms:updated') {
       if (isAdmin) {
-        safeSend(client, JSON.stringify({ event, payload: db.getAlarms(), timestamp: new Date().toISOString() }));
+        db.getAlarms().then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() })));
       } else {
-        safeSend(client, JSON.stringify({ event, payload: db.getAlarms(clientUser.id, clientUser.id), timestamp: new Date().toISOString() }));
+        db.getAlarms(clientUser.id, clientUser.id).then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() })));
       }
       return;
     }
@@ -401,7 +392,7 @@ export function initWebSocketServer(server: http.Server) {
     if (statusChanged) {
       broadcast('devices:updated', db.getDevices());
       broadcast('network:updated', db.getDiscoveredDevices());
-      broadcast('notifications:updated', db.getNotifications());
+      db.getNotifications().then(n => broadcast('notifications:updated', n));
     }
   }, 3000);
 
@@ -624,8 +615,8 @@ export function initWebSocketServer(server: http.Server) {
                 authResult.devInfoUpdated,
                 parsedPayload.sequence
               )
-              .then(({ addedReadings, writeAck }) => {
-                const commands = commandService.getAndDeliverPendingCommands(device.id);
+              .then(async ({ addedReadings, writeAck }) => {
+                const commands = await commandService.getAndDeliverPendingCommands(device.id);
                 const packetAck = buildPacketAck({
                   sequence: parsedPayload.sequence,
                   receivedCount: parsedPayload.metricsToProcess.length,

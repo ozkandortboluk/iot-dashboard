@@ -114,7 +114,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 1. Müşteriler arası alarm/kural erişim izolasyonu (Cross-Tenant Isolation)
   // =========================================================================
   describe('1. Müşteriler arası alarm/kural erişim izolasyonu', () => {
-    it('Müşteri A sadece kendi kurallarını görmeli, Müşteri B veya Yöneticinin kurallarını görememeli', () => {
+    it('Müşteri A sadece kendi kurallarını görmeli, Müşteri B veya Yöneticinin kurallarını görememeli', async () => {
       const ruleA = db.createRule(
         {
           deviceId: deviceA.id,
@@ -162,7 +162,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(adminFilterB[0].id).toBe(ruleB.id);
     });
 
-    it('Müşteri A başka bir müşterinin kuralını güncelleyememeli, silememeli veya açıp kapatamamalı', () => {
+    it('Müşteri A başka bir müşterinin kuralını güncelleyememeli, silememeli veya açıp kapatamamalı', async () => {
       const ruleB = db.createRule(
         {
           deviceId: deviceB.id,
@@ -195,7 +195,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(refreshedRuleB?.enabled).toBe(true);
     });
 
-    it('Müşteri A cihazından gelen telemetri sadece Müşteri A kurallarını tetiklemeli, Müşteri B kurallarını tetiklememeli', () => {
+    it('Müşteri A cihazından gelen telemetri sadece Müşteri A kurallarını tetiklemeli, Müşteri B kurallarını tetiklememeli', async () => {
       // Rule for Customer A
       db.createRule(
         {
@@ -236,7 +236,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       db.telemetryRepository.evaluateProductionRules(reading, deviceA);
 
       // Only Customer A alarm must be generated
-      const alarmsForA = db.getAlarms(customerA.id);
+      const alarmsForA = await db.getAlarms(customerA.id);
       const alarmsForB = db.getAlarms(customerB.id);
 
       expect(alarmsForA).toHaveLength(1);
@@ -249,7 +249,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 2. Minimum ihlal süresi (Min Breach Duration)
   // =========================================================================
   describe('2. Minimum ihlal süresi (Min Breach Duration)', () => {
-    it('Minimum ihlal süresi dolana kadar alarm BREACH_PENDING kalmalı, süre dolunca ACTIVE olmalı', () => {
+    it('Minimum ihlal süresi dolana kadar alarm BREACH_PENDING kalmalı, süre dolunca ACTIVE olmalı', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -313,7 +313,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(db.data.notifications.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('BREACH_PENDING aşamasındayken değer normale dönerse alarm tetiklenmeden temizlenmeli/kapanmalı', () => {
+    it('BREACH_PENDING aşamasındayken değer normale dönerse alarm tetiklenmeden temizlenmeli/kapanmalı', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -360,7 +360,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 3. Histerezisle normale dönüş (Hysteresis Band)
   // =========================================================================
   describe('3. Histerezisle normale dönüş (Hysteresis Band)', () => {
-    it('Büyüktür (>) kuralında değer eşik altına inse bile histerezis bandı içindeyse alarm ACTIVE kalmalı, bandın altına inince RESOLVED olmalı', () => {
+    it('Büyüktür (>) kuralında değer eşik altına inse bile histerezis bandı içindeyse alarm ACTIVE kalmalı, bandın altına inince RESOLVED olmalı', async () => {
       // Rule: > 80, Hysteresis: 5 (Recovery threshold: <= 80 - 5 = 75)
       const rule = db.createRule(
         {
@@ -427,7 +427,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(alarm?.state).toBe('RESOLVED');
     });
 
-    it('Küçüktür (<) kuralında histerezis bandı doğru değerlendirilmeli', () => {
+    it('Küçüktür (<) kuralında histerezis bandı doğru değerlendirilmeli', async () => {
       // Rule: < 20, Hysteresis: 3 (Recovery threshold: >= 20 + 3 = 23)
       const rule = db.createRule(
         {
@@ -499,7 +499,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 4. Geceyi aşan çalışma saatleri (Overnight Schedule e.g. 22:00-06:00)
   // =========================================================================
   describe('4. Geceyi aşan çalışma saatleri (Overnight Schedule)', () => {
-    it('Gece vardiyası (22:00 - 06:00) kuralı gece saatlerinde tetiklenmeli, gündüz saatlerinde yoksayılmalı', () => {
+    it('Gece vardiyası (22:00 - 06:00) kuralı gece saatlerinde tetiklenmeli, gündüz saatlerinde yoksayılmalı', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -579,7 +579,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 5. Türkiye saat dilimi (Europe/Istanbul / UTC+3)
   // =========================================================================
   describe('5. Türkiye saat dilimi (Europe/Istanbul)', () => {
-    it('09:00 - 18:00 TRT kuralı UTC saat farkını doğru hesaplayarak değerlendirmeli', () => {
+    it('09:00 - 18:00 TRT kuralı UTC saat farkını doğru hesaplayarak değerlendirmeli', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -635,7 +635,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 6. Alarm onaylandıktan sonra tekrar gönderilmemesi (Acknowledged Alarm)
   // =========================================================================
   describe('6. Alarm onaylandıktan sonra tekrar gönderilmemesi', () => {
-    it('Alarm onaylandığında (acknowledged=true) repeatInterval süresi geçse bile yeni REPEAT bildirimleri engellenmeli', () => {
+    it('Alarm onaylandığında (acknowledged=true) repeatInterval süresi geçse bile yeni REPEAT bildirimleri engellenmeli', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -680,7 +680,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       const alarm = db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmKey);
       expect(alarm?.acknowledged).toBe(true);
 
-      const notifCountAfterAck = db.getNotifications(customerA.id).length;
+      const notifCountAfterAck = (await db.getNotifications(customerA.id)).length;
 
       // 3. Telemetry arrives at T=120s (past repeatInterval of 60s)
       const t120 = new Date(now + 120 * 1000).toISOString();
@@ -699,7 +699,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       // Repeat count is updated, but NO new REPEAT notification is spawned
       expect(alarm?.repeatCount).toBe(2);
       expect(alarm?.currentValue).toBe(88);
-      expect(db.getNotifications(customerA.id).length).toBe(notifCountAfterAck);
+      expect((await db.getNotifications(customerA.id)).length).toBe(notifCountAfterAck);
       const repeatNotifs = db.data.notifications.filter((n) => n.alarmState === 'REPEAT');
       expect(repeatNotifs).toHaveLength(0);
     });
@@ -709,7 +709,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 7. Susturma süresi bitince davranış (Silenced Alarm Expiry)
   // =========================================================================
   describe('7. Susturma süresi bitince davranış', () => {
-    it('Susturma süresi boyunca bildirim gönderilmemeli; süre dolduğunda ihlal devam ediyorsa alarm aktifleşmeli', () => {
+    it('Susturma süresi boyunca bildirim gönderilmemeli; süre dolduğunda ihlal devam ediyorsa alarm aktifleşmeli', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -786,7 +786,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 8. Sırasız telemetri (Out-of-Order Telemetry Protection)
   // =========================================================================
   describe('8. Sırasız telemetri (Out-of-Order Telemetry)', () => {
-    it('Eski zaman damgalı gecikmiş paket aktif alarm durumunu bozmamalı veya geriletmemeli', () => {
+    it('Eski zaman damgalı gecikmiş paket aktif alarm durumunu bozmamalı veya geriletmemeli', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -843,7 +843,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 9. Simülasyon alarmının WhatsApp/e-posta kuyruğuna girmemesi
   // =========================================================================
   describe('9. Simülasyon alarmının dış bildirim kuyruğuna girmemesi', () => {
-    it('Sanal/simülasyon cihazı eşiği aştığında panel bildirimi üretilmeli ancak WhatsApp/Email kuyruğuna ASLA girmemeli', () => {
+    it('Sanal/simülasyon cihazı eşiği aştığında panel bildirimi üretilmeli ancak WhatsApp/Email kuyruğuna ASLA girmemeli', async () => {
       // Create a rule with external notification channels
       const rule = db.createRule(
         {
@@ -948,7 +948,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 11. Aynı bildirimin kuyrukta çoğalmaması (Deduplication)
   // =========================================================================
   describe('11. Bildirim tekilleştirme (Deduplication / Debounce)', () => {
-    it('Aynı alarm süresince gelen ardışık telemetriler yeni bildirim satırları basmak yerine mevcut bildirimi yerinde güncellemelidir', () => {
+    it('Aynı alarm süresince gelen ardışık telemetriler yeni bildirim satırları basmak yerine mevcut bildirimi yerinde güncellemelidir', async () => {
       const rule = db.createRule(
         {
           deviceId: deviceA.id,
@@ -1008,7 +1008,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 12. Sunucu yeniden başladıktan sonra aktif alarmın devam etmesi
   // =========================================================================
   describe('12. Aktif alarmların sunucu yeniden başladığında korunması (Persistence)', () => {
-    it('Sunucu/veritabanı reload edildiğinde aktif alarmlar durumları, repeat sayıları ve onay bilgileriyle korunmalıdır', () => {
+    it('Sunucu/veritabanı reload edildiğinde aktif alarmlar durumları, repeat sayıları ve onay bilgileriyle korunmalıdır', async () => {
       const activeAlarm: ActiveAlarm = {
         id: 'alarm_persisted_test_01',
         ruleId: 'rule_temp_crit',
@@ -1038,7 +1038,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       db.telemetryRepository.upsertActiveAlarm(activeAlarm);
 
       // Verify alarm in current session
-      const foundBefore = db.getAlarms(customerA.id);
+      const foundBefore = await db.getAlarms(customerA.id);
       expect(foundBefore.some((a: ActiveAlarm) => a.id === activeAlarm.id)).toBe(true);
 
       // Simulate rehydration from database schema
@@ -1057,7 +1057,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // 13. Yetkisiz kuyruk retry ve alarm kapatma/onaylama girişimi (403 Forbidden)
   // =========================================================================
   describe('13. Yetkisiz işlem engelleme (403 Forbidden & Access Control)', () => {
-    it('Müşteri A, Müşteri B ye ait bir alarmı kapatamaz (resolve), onaylayamaz (ack) veya susturamaz (silence)', () => {
+    it('Müşteri A, Müşteri B ye ait bir alarmı kapatamaz (resolve), onaylayamaz (ack) veya susturamaz (silence)', async () => {
       const alarmB: ActiveAlarm = {
         id: 'alarm_b_specific_01',
         ruleId: 'rule_b',
@@ -1106,7 +1106,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmB.id)?.acknowledged).toBe(true);
     });
 
-    it('Müşteri A, Müşteri B ye ait kuyruk öğesini retry edemez (Hata fırlatılmalı)', () => {
+    it('Müşteri A, Müşteri B ye ait kuyruk öğesini retry edemez (Hata fırlatılmalı)', async () => {
       const queueItemB: NotificationQueueItem = {
         id: 'q_item_b_01',
         ruleId: 'rule_b',

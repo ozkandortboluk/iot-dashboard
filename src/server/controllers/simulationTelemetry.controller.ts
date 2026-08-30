@@ -100,7 +100,7 @@ export class SimulationTelemetryController {
       );
 
       // 6. Deliver pending commands for simulated device
-      const commands = commandService.getAndDeliverPendingCommands(device.id);
+      const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
       return res.status(201).json({
         status: 'accepted',

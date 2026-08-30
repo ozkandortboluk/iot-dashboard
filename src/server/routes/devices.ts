@@ -205,7 +205,7 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/control', authenticateUser, (req, res) => {
+router.post('/:id/control', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -257,8 +257,8 @@ router.post('/:id/control', authenticateUser, (req, res) => {
     db.addAuditLog(currentUser.id, currentUser.name, `Cihaz Çıkış Sinyali Gönderildi: [${device.name}] -> ${pinOrMetric} = ${displayValue}`, 'medium');
 
     // Queue downlink command for physical ESP devices
-    const queuedCmd = db.addCommand(deviceId, command || pinOrMetric, displayValue, 'user_control');
-    broadcast('commands:updated', db.getCommands(deviceId));
+    const queuedCmd = await db.addCommand(deviceId, command || pinOrMetric, displayValue, 'user_control');
+    broadcast('commands:updated', await db.getCommands(deviceId));
 
     res.json({
       success: true,
@@ -299,7 +299,7 @@ export const devicesRouter = router;
 // Device Commands Router (v1 API)
 const deviceCommandsRouter = Router();
 
-deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, res) => {
+deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { deviceId } = req.params;
@@ -318,8 +318,8 @@ deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, 
     return res.status(400).json({ error: 'Komut adı gereklidir (ör. RELAY_1, FAN, REBOOT)' });
   }
 
-  const newCmd = db.addCommand(deviceId, command, payload ?? '1', source || 'user_ui');
-  broadcast('commands:updated', db.getCommands(deviceId));
+  const newCmd = await db.addCommand(deviceId, command, payload ?? '1', source || 'user_ui');
+  broadcast('commands:updated', await db.getCommands(deviceId));
 
   res.status(201).json({
     status: 'success',
@@ -328,7 +328,7 @@ deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, 
   });
 });
 
-deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, (req, res) => {
+deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { deviceId } = req.params;
@@ -342,12 +342,12 @@ deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, (req, 
     return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihazın komutlarını görüntüleyemezsiniz.' });
   }
 
-  const cmds = db.getCommands(deviceId);
+  const cmds = await db.getCommands(deviceId);
   res.json(cmds);
 });
 
 // Endpoint for ESP devices to poll commands directly
-deviceCommandsRouter.get('/device/commands', (req, res) => {
+deviceCommandsRouter.get('/device/commands', async (req, res) => {
   const token = (req.query.token as string) || (req.headers['x-api-key'] as string);
   if (!token) {
     return res.status(401).json({ error: 'Token eksik' });
@@ -357,10 +357,10 @@ deviceCommandsRouter.get('/device/commands', (req, res) => {
     return res.status(403).json({ error: 'Geçersiz Token' });
   }
 
-  const pending = db.getPendingCommands(device.id);
+  const pending = await db.getPendingCommands(device.id);
   if (pending.length > 0) {
     db.markCommandsDelivered(pending.map((c) => c.id));
-    broadcast('commands:updated', db.getCommands(device.id));
+    broadcast('commands:updated', await db.getCommands(device.id));
   }
 
   res.json({

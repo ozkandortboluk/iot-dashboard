@@ -36,10 +36,11 @@ export class TelemetryRepository {
   private isFlushingPhysicalQueue = false;
   private isFlushingSimulationQueue = false;
   private retryWorkerTimer: NodeJS.Timeout | null = null;
-  private readonly MAX_PHYSICAL_QUEUE_SIZE = 50000;
+  private readonly MAX_PHYSICAL_QUEUE_SIZE = 2000;
   private readonly PHYSICAL_QUEUE_WARN_THRESHOLD = 5000;
   private readonly MAX_SIMULATION_QUEUE_SIZE = 1000;
   private lastQueueAlarmAt = 0;
+  private latestTelemetryCache: Record<string, Record<string, TelemetryReading>> = {};
 
   constructor(private db: any) {
     this.loadPersistentQueue();
@@ -58,9 +59,12 @@ export class TelemetryRepository {
       if (fs.existsSync(this.physicalQueueFilePath)) {
         const content = fs.readFileSync(this.physicalQueueFilePath, 'utf8');
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
+        const recentLines = lines.slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
         let loadedPackets = 0;
+        let totalPacketsInWal = lines.length;
+
         let loadedReadings = 0;
-        for (const line of lines) {
+        for (const line of recentLines) {
           try {
             const parsed = JSON.parse(line);
             if (parsed && Array.isArray(parsed.readings) && parsed.readings.length > 0) {
@@ -81,7 +85,7 @@ export class TelemetryRepository {
           }
         }
         if (loadedPackets > 0) {
-          console.log(`[Physical WAL] Diskten ${loadedPackets} fiziksel paket (${loadedReadings} metrik kaydı) yüklendi (${this.physicalQueueFilePath}).`);
+          console.log(`[Physical WAL] Diskten ${loadedPackets} fiziksel paket (${loadedReadings} metrik kaydı) RAM'e yüklendi (WAL dosyasında toplam ${totalPacketsInWal} paket var).`);
         }
       }
 
@@ -89,9 +93,12 @@ export class TelemetryRepository {
       if (fs.existsSync(this.simulationQueueFilePath)) {
         const content = fs.readFileSync(this.simulationQueueFilePath, 'utf8');
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
+        const recentLines = lines.slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
         let loadedPackets = 0;
+        let totalPacketsInWal = lines.length;
+
         let loadedReadings = 0;
-        for (const line of lines) {
+        for (const line of recentLines) {
           try {
             const parsed = JSON.parse(line);
             if (parsed && Array.isArray(parsed.readings) && parsed.readings.length > 0) {
@@ -112,7 +119,7 @@ export class TelemetryRepository {
           }
         }
         if (loadedPackets > 0) {
-          console.log(`[Simulation WAL] Diskten ${loadedPackets} simülasyon paketi (${loadedReadings} metrik kaydı) yüklendi (${this.simulationQueueFilePath}).`);
+          console.log(`[Simulation WAL] Diskten ${loadedPackets} simülasyon paketi (${loadedReadings} metrik kaydı) RAM'e yüklendi (WAL dosyasında toplam ${totalPacketsInWal} paket var).`);
         }
       }
 
@@ -328,46 +335,12 @@ export class TelemetryRepository {
 
   // Synchronize remaining physical packets to disk atomically
   private savePhysicalDiskQueue() {
-    try {
-      const walDir = path.dirname(this.physicalQueueFilePath);
-      if (!fs.existsSync(walDir)) {
-        fs.mkdirSync(walDir, { recursive: true });
-      }
-      if (this.physicalRetryQueue.length === 0) {
-        if (fs.existsSync(this.physicalQueueFilePath)) {
-          fs.writeFileSync(this.physicalQueueFilePath, '', 'utf8');
-        }
-      } else {
-        const ndjson = this.physicalRetryQueue.map((item) => JSON.stringify(item)).join('\n') + '\n';
-        const tmpFile = `${this.physicalQueueFilePath}.tmp`;
-        fs.writeFileSync(tmpFile, ndjson, 'utf8');
-        fs.renameSync(tmpFile, this.physicalQueueFilePath);
-      }
-    } catch (err: any) {
-      console.warn(`[Physical Queue Sync Error]: ${err?.message || err}`);
-    }
+    // Disk queue is now append-only from enqueue and flushed via batch reading in flushPhysicalRetryQueue
   }
 
   // Synchronize remaining simulation packets to disk atomically
   private saveSimulationDiskQueue() {
-    try {
-      const walDir = path.dirname(this.simulationQueueFilePath);
-      if (!fs.existsSync(walDir)) {
-        fs.mkdirSync(walDir, { recursive: true });
-      }
-      if (this.simulationRetryQueue.length === 0) {
-        if (fs.existsSync(this.simulationQueueFilePath)) {
-          fs.writeFileSync(this.simulationQueueFilePath, '', 'utf8');
-        }
-      } else {
-        const ndjson = this.simulationRetryQueue.map((item) => JSON.stringify(item)).join('\n') + '\n';
-        const tmpFile = `${this.simulationQueueFilePath}.tmp`;
-        fs.writeFileSync(tmpFile, ndjson, 'utf8');
-        fs.renameSync(tmpFile, this.simulationQueueFilePath);
-      }
-    } catch (err: any) {
-      console.warn(`[Simulation Queue Sync Error]: ${err?.message || err}`);
-    }
+    // Disk queue is now append-only
   }
 
   // Auto-retry worker runs every 5 seconds to flush pending telemetry packets atomically
@@ -378,75 +351,85 @@ export class TelemetryRepository {
     }, 5000);
   }
 
-  public async flushPhysicalRetryQueue(): Promise<{
+public async flushPhysicalRetryQueue(): Promise<{
     flushedPacketCount: number;
     flushedReadingCount: number;
     remainingPacketCount: number;
     remainingReadingCount: number;
   }> {
-    const initialRemainingReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
-    if (this.isFlushingPhysicalQueue || this.physicalRetryQueue.length === 0 || !this.db.postgresRepo?.isReady()) {
+    if (this.isFlushingPhysicalQueue || !this.db.postgresRepo?.isReady()) {
       return {
         flushedPacketCount: 0,
         flushedReadingCount: 0,
         remainingPacketCount: this.physicalRetryQueue.length,
-        remainingReadingCount: initialRemainingReadings,
+        remainingReadingCount: this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0),
       };
     }
-
+    
     this.isFlushingPhysicalQueue = true;
     let flushedPacketCount = 0;
     let flushedReadingCount = 0;
-    const packetsToFlush = [...this.physicalRetryQueue];
-    this.physicalRetryQueue = [];
-    const failedPackets: TelemetryPacket[] = [];
+    let remainingPacketCount = 0;
+    let remainingReadingCount = 0;
 
     try {
-      for (const packet of packetsToFlush) {
-        try {
-          // Strictly insert into physical hypertable (telemetry_readings)
-          const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
-          if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
-            flushedPacketCount++;
-            flushedReadingCount += packet.readings.length;
-          } else {
-            packet.attempts = (packet.attempts || 0) + 1;
-            packet.lastAttemptAt = new Date().toISOString();
-            failedPackets.push(packet);
-          }
-        } catch (err: any) {
-          console.warn(`[Physical Telemetry Retry Warning] Paket (${packet.packetId}) fiziksel veritabanına yazılamadı: ${err?.message || err}. Tekrar sıraya alındı.`);
-          packet.attempts = (packet.attempts || 0) + 1;
-          packet.lastAttemptAt = new Date().toISOString();
-          failedPackets.push(packet);
+      const processingFile = `${this.physicalQueueFilePath}.processing`;
+      
+      // Move current WAL to processing
+      if (!fs.existsSync(processingFile) && fs.existsSync(this.physicalQueueFilePath)) {
+         fs.renameSync(this.physicalQueueFilePath, processingFile);
+      }
+
+      if (fs.existsSync(processingFile)) {
+        const content = fs.readFileSync(processingFile, 'utf8');
+        const lines = content.split('\n').filter(l => l.trim().length > 0);
+        const failedLines: string[] = [];
+        
+        for (const line of lines) {
+           try {
+              const packet = JSON.parse(line);
+              const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
+              if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
+                 flushedPacketCount++;
+                 flushedReadingCount += packet.readings.length;
+              } else {
+                 packet.attempts = (packet.attempts || 0) + 1;
+                 packet.lastAttemptAt = new Date().toISOString();
+                 failedLines.push(JSON.stringify(packet));
+                 remainingPacketCount++;
+                 remainingReadingCount += packet.readings.length;
+              }
+           } catch (err) {
+              failedLines.push(line);
+           }
+        }
+        
+        if (failedLines.length > 0) {
+           // Put failed lines back to active WAL
+           fs.appendFileSync(this.physicalQueueFilePath, failedLines.join('\n') + '\n', 'utf8');
+        }
+        fs.unlinkSync(processingFile);
+        
+        // Update RAM buffer
+        this.physicalRetryQueue = failedLines.map(l => {
+           try { return JSON.parse(l); } catch(e) { return null; }
+        }).filter(Boolean).slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
+        
+        if (flushedPacketCount > 0) {
+           console.log(`[Physical Telemetry WAL Flush] ${flushedPacketCount} paket DB'ye aktarıldı, ${remainingPacketCount} paket retry'a döndü.`);
         }
       }
-
-      if (failedPackets.length > 0) {
-        this.physicalRetryQueue.unshift(...failedPackets);
-      }
-
-      if (flushedPacketCount > 0) {
-        console.log(`[Physical Telemetry Persistence] ${flushedPacketCount} adet fiziksel paket (${flushedReadingCount} metrik kaydı) telemetry_readings hypertable'ına aktarıldı.`);
-      }
-
-      this.savePhysicalDiskQueue();
     } catch (err: any) {
-      console.warn(`[Physical Telemetry Global Retry Error]: ${err?.message || err}`);
-      if (packetsToFlush.length > 0) {
-        this.physicalRetryQueue.unshift(...packetsToFlush);
-        this.savePhysicalDiskQueue();
-      }
+      console.warn(`[Physical WAL Flush Error]: ${err?.message || err}`);
     } finally {
       this.isFlushingPhysicalQueue = false;
     }
 
-    const currentRemainingReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
     return {
       flushedPacketCount,
       flushedReadingCount,
-      remainingPacketCount: this.physicalRetryQueue.length,
-      remainingReadingCount: currentRemainingReadings,
+      remainingPacketCount,
+      remainingReadingCount,
     };
   }
 
@@ -790,12 +773,9 @@ export class TelemetryRepository {
     }
 
     // ONLY IF NOT DUPLICATE: Update RAM ring buffer, device metrics, history, and evaluate alarm rules!
-    if (!this.db.data.telemetry) this.db.data.telemetry = [];
-    this.db.data.telemetry.push(...fullReadings);
-
-    // High-performance sliding ring buffer (10,000 raw points in memory)
-    if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
-      this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
+    for (const r of fullReadings) {
+      if (!this.latestTelemetryCache[r.deviceId]) this.latestTelemetryCache[r.deviceId] = {};
+      this.latestTelemetryCache[r.deviceId][r.metric] = r;
     }
 
     if (device) {
@@ -824,7 +804,7 @@ export class TelemetryRepository {
       device.version = (device.version || 1) + 1;
     }
 
-    this.db.scheduleSave();
+    if (!this.db.isPostgresProductionMode()) this.db.scheduleSave();
 
     return {
       readings: fullReadings,
@@ -855,13 +835,8 @@ export class TelemetryRepository {
       simulationRunId: reading.simulationRunId,
     };
 
-    if (!this.db.data.telemetry) this.db.data.telemetry = [];
-    this.db.data.telemetry.push(fullReading);
-
-    // High-performance sliding ring buffer (10,000 raw points in memory)
-    if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
-      this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
-    }
+    if (!this.latestTelemetryCache[fullReading.deviceId]) this.latestTelemetryCache[fullReading.deviceId] = {};
+    this.latestTelemetryCache[fullReading.deviceId][fullReading.metric] = fullReading;
 
     // Persist to PostgreSQL / TimescaleDB hypertable with safety net
     this.writeTelemetryToPostgres(fullReading).catch((err) => {
@@ -896,7 +871,9 @@ export class TelemetryRepository {
       this.evaluateSimulationRules(fullReading, device);
     }
 
-    this.db.scheduleSave();
+    if (!this.db.isPostgresProductionMode()) {
+      if (!this.db.isPostgresProductionMode()) this.db.scheduleSave();
+    }
     return fullReading;
   }
 
@@ -913,12 +890,15 @@ export class TelemetryRepository {
       }
     }
 
+    let currentSize = 0;
+    for (const devMetrics of Object.values(this.latestTelemetryCache)) {
+      currentSize += Object.keys(devMetrics).length;
+    }
+
     return {
-      rawBufferCurrentSize: this.db.data.telemetry?.length || 0,
+      rawBufferCurrentSize: currentSize,
       rawBufferMaxSize: this.RAW_TELEMETRY_MAX_BUFFER,
-      bufferUtilizationPercent: Math.round(
-        ((this.db.data.telemetry?.length || 0) / this.RAW_TELEMETRY_MAX_BUFFER) * 100
-      ),
+      bufferUtilizationPercent: 0,
       timeSeriesAggregatedBuckets: totalAggregatedBuckets,
       persistentQueue: this.getRetryQueueStats(),
       retentionPolicy: {
@@ -1079,7 +1059,11 @@ export class TelemetryRepository {
     requestingUserId?: string,
     targetCustomerId?: string
   ): TelemetryReading[] {
-    let list: TelemetryReading[] = this.db.data.telemetry || [];
+    let list: TelemetryReading[] = [];
+    for (const devMetrics of Object.values(this.latestTelemetryCache)) {
+      list.push(...Object.values(devMetrics));
+    }
+    list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     // Get list of allowed device IDs for this user or target customer
     const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);
@@ -1446,8 +1430,8 @@ export class TelemetryRepository {
     this.db.data.alarmEvents.push(event);
 
     // Keep event log at a reasonable size, limit to last 10000 events
-    if (this.db.data.alarmEvents.length > 10000) {
-      this.db.data.alarmEvents = this.db.data.alarmEvents.slice(-10000);
+    if (this.db.data.alarmEvents.length > 500) {
+      this.db.data.alarmEvents = this.db.data.alarmEvents.slice(-500);
     }
   }
 
@@ -2222,7 +2206,147 @@ export class TelemetryRepository {
     }
   }
 
+  public evaluateNoDataRules(): boolean {
+    const nowMs = Date.now();
+    const rules = (this.db.data.rules || []).filter(r => r.enabled && r.operator === 'NO_DATA');
+    if (rules.length === 0) return false;
+
+    const devices = this.db.data.devices || [];
+    let hasChanges = false;
+
+    for (const rule of rules) {
+      if (rule.disabledUntil && new Date(rule.disabledUntil).getTime() > nowMs) {
+        continue;
+      }
+      
+      const durationMs = (rule.thresholdValue || 5) * 60 * 1000;
+      const repeatSec = rule.repeatIntervalSeconds || 300;
+
+      for (const device of devices) {
+        if (device.isSimulated) continue; // STRICT: Simulated devices don't get NO_DATA notifications
+
+        if (rule.deviceId !== 'all' && rule.deviceId !== device.id) continue;
+        const deviceOwnerId = device.tenantId || 'usr_admin';
+        if (rule.tenantId && rule.tenantId !== 'usr_admin' && deviceOwnerId !== rule.tenantId) continue;
+        if (rule.tenantId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') continue;
+
+        const lastSeenStr = device.lastSeen || device.createdAt;
+        const lastSeenMs = lastSeenStr ? new Date(lastSeenStr).getTime() : nowMs;
+        const timeSinceLastDataMs = nowMs - lastSeenMs;
+        const isBreached = timeSinceLastDataMs >= durationMs;
+
+        const alarmKey = `alarm_${rule.id}_${device.id}_${rule.metricKey}`;
+        const existingAlarm = this.db.data.activeAlarms?.find(a => a.id === alarmKey);
+
+        const customerName = deviceOwnerId !== 'usr_admin' ? this.db.data.users.find((u: any) => u.id === deviceOwnerId)?.name || 'Müşteri' : 'Global';
+        const minutes = Math.floor(timeSinceLastDataMs / 60000);
+
+        if (isBreached) {
+          if (existingAlarm) {
+            existingAlarm.currentValue = minutes;
+            existingAlarm.updatedAt = new Date(nowMs).toISOString();
+
+            if (existingAlarm.silencedUntil && new Date(existingAlarm.silencedUntil).getTime() > nowMs) continue;
+            if (existingAlarm.state === 'ACKNOWLEDGED' || existingAlarm.state === 'SILENCED') continue;
+
+            const lastNotifiedMs = existingAlarm.lastNotifiedAt ? new Date(existingAlarm.lastNotifiedAt).getTime() : new Date(existingAlarm.triggeredAt).getTime();
+            if (nowMs - lastNotifiedMs >= repeatSec * 1000) {
+              existingAlarm.repeatCount++;
+              existingAlarm.lastNotifiedAt = new Date(nowMs).toISOString();
+
+              const msg = rule.messageTemplate
+                  .replace(/{deviceName}/g, device.name)
+                  .replace(/{deviceId}/g, device.id)
+                  .replace(/{metric}/g, rule.metricKey)
+                  .replace(/{value}/g, String(minutes))
+                  .replace(/{unit}/g, 'Dakika')
+                  .replace(/{threshold}/g, String(rule.thresholdValue))
+                  .replace(/{severity}/g, rule.severity)
+                  .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
+                  .replace(/{customerName}/g, customerName);
+
+              this.emitAlarmNotification(existingAlarm, 'REPEAT', `🔄 [TEKRAR] Cihaz Çevrimdışı: ${device.name}`, `(Tekrar) Cihaz ${minutes} dakikadır veri göndermiyor.\n\n${msg}`, 'System Worker');
+              hasChanges = true;
+            }
+          } else {
+            const newAlarm: import('../../types.js').ActiveAlarm = {
+              id: alarmKey,
+              ruleId: rule.id,
+              deviceId: device.id,
+              deviceName: device.name,
+              tenantId: device.tenantId || 'usr_admin',
+              metricKey: rule.metricKey,
+              operator: rule.operator,
+              thresholdValue: rule.thresholdValue,
+              currentValue: minutes,
+              severity: rule.severity,
+              state: 'ACTIVE',
+              source: 'physical',
+              isSimulation: false,
+              environment: 'production',
+              triggeredAt: new Date(nowMs).toISOString(),
+              updatedAt: new Date(nowMs).toISOString(),
+              lastNotifiedAt: new Date(nowMs).toISOString(),
+              acknowledged: false,
+              repeatCount: 1,
+              message: `Cihaz ${rule.thresholdValue} dakikadan uzun süredir çevrimdışı.`
+            };
+            if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
+            this.db.data.activeAlarms.push(newAlarm);
+            
+            const msg = rule.messageTemplate
+                  .replace(/{deviceName}/g, device.name)
+                  .replace(/{deviceId}/g, device.id)
+                  .replace(/{metric}/g, rule.metricKey)
+                  .replace(/{value}/g, String(minutes))
+                  .replace(/{unit}/g, 'Dakika')
+                  .replace(/{threshold}/g, String(rule.thresholdValue))
+                  .replace(/{severity}/g, rule.severity)
+                  .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
+                  .replace(/{customerName}/g, customerName);
+
+            this.emitAlarmNotification(newAlarm, 'OPEN', `🚨 [${rule.severity}] Cihaz Çevrimdışı: ${device.name}`, msg, 'System Worker');
+            hasChanges = true;
+          }
+        } else {
+          // Data has arrived, device is online. Resolve NO_DATA alarm if it exists.
+          if (existingAlarm) {
+            existingAlarm.state = 'RESOLVED';
+            existingAlarm.resolvedAt = new Date(nowMs).toISOString();
+            existingAlarm.updatedAt = new Date(nowMs).toISOString();
+
+            this.db.data.activeAlarms = this.db.data.activeAlarms.filter((a: import('../../types.js').ActiveAlarm) => a.id !== existingAlarm!.id);
+            if (!this.db.data.alarmHistory) this.db.data.alarmHistory = [];
+            this.db.data.alarmHistory.unshift({ ...existingAlarm });
+            if (this.db.data.alarmHistory.length > 2000) this.db.data.alarmHistory.length = 2000;
+
+            const msg = rule.messageTemplate
+                  .replace(/{deviceName}/g, device.name)
+                  .replace(/{deviceId}/g, device.id)
+                  .replace(/{metric}/g, rule.metricKey)
+                  .replace(/{value}/g, String(minutes))
+                  .replace(/{unit}/g, 'Dakika')
+                  .replace(/{threshold}/g, String(rule.thresholdValue))
+                  .replace(/{severity}/g, rule.severity)
+                  .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
+                  .replace(/{customerName}/g, customerName);
+
+            this.emitAlarmNotification(existingAlarm, 'RESOLVED', `✅ [ÇÖZÜLDÜ] Cihaz Yeniden Çevrimiçi: ${device.name}`, `Cihazdan tekrar veri alınmaya başlandı. Alarm çözüldü.\n\nÖnceki Alarm:\n${msg}`, 'System Worker');
+            hasChanges = true;
+          }
+        }
+      }
+    }
+
+    if (hasChanges) {
+      this.db.saveData(this.db.data);
+    }
+    return hasChanges;
+  }
+
   public processHistory(reading: TelemetryReading, isSimulated: boolean, saveSimulatedDataToDb: boolean = false) {
+    if (this.db.isPostgresProductionMode()) return;
+
     if (isSimulated && !saveSimulatedDataToDb) return;
 
     const { deviceId, metric, value, timestamp } = reading;

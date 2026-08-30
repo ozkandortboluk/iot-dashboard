@@ -1,0 +1,68 @@
+--- src/server/repositories/telemetry.repository.ts
++++ src/server/repositories/telemetry.repository.ts
+@@ -790,13 +790,10 @@
+       this.db.data.activeAlarms = [];
+     }
+ 
+-    if (!this.db.data.telemetry) this.db.data.telemetry = [];
+-    this.db.data.telemetry.push(...fullReadings);
+-
+-    // Local in-memory cap to prevent RAM issues in test env
+-    if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
+-      this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
+-    }
++    for (const r of fullReadings) {
++      if (!this.latestTelemetryCache[r.deviceId]) this.latestTelemetryCache[r.deviceId] = {};
++      this.latestTelemetryCache[r.deviceId][r.metric] = r;
++    }
+ 
+     // 3. Process each reading individually for Rules & Alarms
+     for (const r of fullReadings) {
+@@ -855,13 +852,8 @@
+     // Add to local DB arrays
+     if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
+ 
+-    if (!this.db.data.telemetry) this.db.data.telemetry = [];
+-    this.db.data.telemetry.push(fullReading);
+-
+-    // Limit local buffer
+-    if (this.db.data.telemetry.length > this.RAW_TELEMETRY_MAX_BUFFER) {
+-      this.db.data.telemetry = this.db.data.telemetry.slice(-this.RAW_TELEMETRY_MAX_BUFFER);
+-    }
++    if (!this.latestTelemetryCache[fullReading.deviceId]) this.latestTelemetryCache[fullReading.deviceId] = {};
++    this.latestTelemetryCache[fullReading.deviceId][fullReading.metric] = fullReading;
+ 
+     // Check threshold rules for notification trigger (strictly separated engines)
+     if (fullReading.source === 'physical') {
+@@ -914,10 +906,12 @@
+       }
+     }
+ 
++    // Count how many latest readings are currently cached
++    let currentSize = 0;
++    for (const devMetrics of Object.values(this.latestTelemetryCache)) {
++      currentSize += Object.keys(devMetrics).length;
++    }
++
+     return {
+-      rawBufferCurrentSize: this.db.data.telemetry?.length || 0,
+-      rawBufferMaxSize: this.RAW_TELEMETRY_MAX_BUFFER,
+-      bufferUtilizationPercent: Math.round(
+-        ((this.db.data.telemetry?.length || 0) / this.RAW_TELEMETRY_MAX_BUFFER) * 100
+-      ),
++      rawBufferCurrentSize: currentSize,
++      rawBufferMaxSize: this.RAW_TELEMETRY_MAX_BUFFER, // keep for compatibility
++      bufferUtilizationPercent: 0,
+@@ -1079,7 +1073,15 @@
+     requestingUserId?: string,
+     targetCustomerId?: string
+   ): TelemetryReading[] {
+-    let list: TelemetryReading[] = this.db.data.telemetry || [];
++    let list: TelemetryReading[] = [];
++    for (const devMetrics of Object.values(this.latestTelemetryCache)) {
++      list.push(...Object.values(devMetrics));
++    }
++    list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+ 
+     // Get list of allowed device IDs for this user or target customer
+     const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);

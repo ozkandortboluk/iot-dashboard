@@ -59,7 +59,8 @@ export class UserRepository {
   }
 
   public authenticate(email: string, pass: string): { user: User; token: string } | null {
-    const user = this.db.data.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+    const cleanEmail = email.trim().toLowerCase();
+    const user = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (!user) return null;
     const storedHash = this.db.data.passwords[user.id];
     if (storedHash && verifyPassword(pass, storedHash)) {
@@ -76,13 +77,14 @@ export class UserRepository {
   }
 
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> {
-    const existing = this.db.data.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (existing) throw new Error('Bu e-posta adresi zaten kayıtlı.');
 
     const newUser: User = {
       id: `usr_${Date.now()}`,
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       role,
       companyName: companyName || undefined,
       created_at: new Date().toISOString(),
@@ -109,7 +111,16 @@ export class UserRepository {
     const hashedPassword = hashPassword(pass);
 
     // 1. Yazma önceliği: PostgreSQL
-    await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+    try {
+      await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('unique constraint') || errMsg.includes('users_email_key') || err.code === '23505') {
+        throw new Error('Bu e-posta adresi zaten kayıtlı.', { cause: err });
+      }
+      throw err;
+    }
+    
     await this.db.postgresRepo.saveDashboard(dashboard);
     await this.db.postgresRepo.saveAuditLog(auditLog);
 

@@ -156,8 +156,8 @@ systemRouter.get('/system/postgres-schema', authenticateUser, requireAdmin, (req
 // Admin Stats & Quotas
 const adminRouter = Router();
 
-adminRouter.get('/database-stats', authenticateUser, requireAdmin, (req, res) => {
-  res.json(db.getDatabaseStats());
+adminRouter.get('/database-stats', authenticateUser, requireAdmin, async (req, res) => {
+  res.json(await db.getDatabaseStats());
 });
 
 adminRouter.post('/test-firestore-quota', authenticateUser, requireAdmin, async (req, res) => {
@@ -172,8 +172,8 @@ databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getDatabaseHealth());
 });
 
-databaseRouter.post('/backup', authenticateUser, requireAdmin, (req, res) => {
-  const result = db.createBackup();
+databaseRouter.post('/backup', authenticateUser, requireAdmin, async (req, res) => {
+  const result = await db.createBackup();
   if (result.success) {
     res.json({ message: 'Veritabanı yedeği başarıyla oluşturuldu.', result });
   } else {

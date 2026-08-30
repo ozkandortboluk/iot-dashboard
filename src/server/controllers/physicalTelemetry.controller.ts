@@ -85,7 +85,7 @@ export class PhysicalTelemetryController {
 
     db.updateDevice(device.id, devUpdates);
 
-    const commands = commandService.getAndDeliverPendingCommands(device.id);
+    const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
     return res.status(200).json({
       status: 'ok',
@@ -192,7 +192,7 @@ export class PhysicalTelemetryController {
           status: device.status,
           ipAddress: device.ipAddress,
         });
-        const commands = commandService.getAndDeliverPendingCommands(device.id);
+        const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
         return res.status(200).json({
           status: 'ok',
@@ -235,7 +235,7 @@ export class PhysicalTelemetryController {
     );
 
     // 7. Retrieve & Deliver Pending Commands for Physical Device
-    const commands = commandService.getAndDeliverPendingCommands(device.id);
+    const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
     // 8. Build Standardized Packet ACK
     const packetAck = buildPacketAck({
