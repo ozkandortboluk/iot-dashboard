@@ -47,6 +47,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       icon: Cpu,
     },
     {
+      id: 'device_health',
+      label: 'Cihaz Sağlığı',
+      icon: ShieldCheck,
+      badge: 'Yeni',
+    },
+    {
       id: 'network_discovery',
       label: 'Cihaz Keşfi ve Eşleştirme',
       icon: Wifi,
@@ -83,6 +89,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'devices',
           label: 'Saha Cihazları & Kontrol',
           icon: Cpu,
+        },
+        {
+          id: 'device_health',
+          label: 'Cihaz Sağlığı',
+          icon: ShieldCheck,
+          badge: 'Yeni',
         },
         {
           id: 'firmware_ota',
@@ -146,6 +158,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           icon: Cpu,
         },
         {
+          id: 'device_health',
+          label: 'Cihaz Sağlığı',
+          icon: ShieldCheck,
+          badge: 'Yeni',
+        },
+        {
           id: 'network_discovery',
           label: 'Ağ Keşif İzleme',
           icon: Wifi,
@@ -188,6 +206,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'devices',
           label: 'Tüm Saha Cihazları',
           icon: Cpu,
+        },
+        {
+          id: 'device_health',
+          label: 'Cihaz Sağlığı',
+          icon: ShieldCheck,
+          badge: 'Yeni',
         },
         {
           id: 'firmware_ota',

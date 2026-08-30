@@ -6,6 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { WidgetGrid } from './components/WidgetGrid';
 import { DevicesView } from './components/DevicesView';
+import { DeviceHealthView } from './components/DeviceHealthView';
 import { CustomerManagement } from './components/CustomerManagement';
 import { AnalyticsView } from './components/AnalyticsView';
 import { NotificationsView } from './components/NotificationsView';
@@ -71,6 +72,7 @@ function DashboardContent() {
   const tabTitles: Record<string, string> = {
     dashboard: isCustomer ? 'Özel Dashboard\'um' : 'Canlı İzleme Dashboard',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
+    device_health: 'Cihaz Sağlığı & Metrikleri',
     firmware_ota: 'Firmware & OTA Yönetimi',
     network_discovery: 'Cihaz Keşfi ve Eşleştirme',
     customers: 'Müşteri Yönetimi & Hesaplar',
@@ -154,6 +156,9 @@ function DashboardContent() {
           )}
           {safeActiveTab === 'devices' && (
             <DevicesView onNavigateToHelp={() => setActiveTab('help')} />
+          )}
+          {safeActiveTab === 'device_health' && (
+            <DeviceHealthView />
           )}
           {(isAdmin || isOperator) && safeActiveTab === 'firmware_ota' && (
             <FirmwareView

@@ -1,9 +1,0 @@
-sed -i 's/tenantId: string/userId: string/g' src/server/db.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/db/demoData.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/repositories/alarm.repository.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/repositories/device.repository.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/repositories/notification.repository.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/repositories/telemetry.repository.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/repositories/user.repository.ts
-sed -i 's/tenantId: string/userId: string/g' src/tests/simulator.test.ts
-sed -i 's/tenantId: string/userId: string/g' src/server/routes/devices.ts

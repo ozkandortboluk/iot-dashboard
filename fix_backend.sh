@@ -1,1 +1,0 @@
-sed -i '/const data = CreateTenantSchema.parse(req.body);/a \    \n    if (data.role === "admin" || data.role === "operator" || data.role === "analyst") {\n      // Sadece customer oluşturulabilir.\n      return res.status(403).json({ error: "Sistem yöneticisi/operatör oluşturmak için ayrı bir onay/MFA akışı gereklidir." });\n    }\n' src/server/routes/admin/tenants.ts

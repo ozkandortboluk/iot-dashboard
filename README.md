@@ -1,7 +1,6 @@
 # 🏭 Endüstriyel IoT Gerçek Zamanlı Analitik & Veri Yönetim Paneli
 ### (Industrial IoT Real-Time Analytics & Dashboard with PostgreSQL + TimescaleDB)
 
-[![CI Pipeline](https://github.com/your-org/iot-analytics-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/iot-analytics-dashboard/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![TimescaleDB](https://img.shields.io/badge/TimescaleDB-Hypertable%20Compression-gold.svg)](https://www.timescale.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -35,7 +34,6 @@ Modern, yüksek verimli ve sıfır bulut maliyetli endüstriyel IoT izleme platf
 - 🚨 **Akıllı Alarm Motoru:** Eşik değerleri (`>`, `<`, `>=`, `<=`), histerezis, cooldown ve önem derecesi (`critical`, `warning`, `info`) yönetimi.
 - 🛡️ **Rol Tabanlı Yetkilendirme (RBAC):** Admin, Operator ve Viewer rolleri ile cihaz erişim sınırlandırmaları.
 - 📊 **Özelleştirilebilir Widget'lar:** Göstergeler, alan grafikleri, termometreler, sayaçlar ve durum kartları.
-- 🔄 **Üçlü Hibrit DB Desteği:** PostgreSQL/TimescaleDB (varsayılan), Firebase Firestore (hibrit Spark plan) veya izole yerel JSON.
 
 ---
 
@@ -114,8 +112,8 @@ DATABASE_URL="postgresql://iot_admin:GizliSifreniz123!@localhost:5432/iot_dashbo
 
 ```bash
 # 1. Depoyu klonlayın
-git clone https://github.com/your-org/iot-analytics-dashboard.git
-cd iot-analytics-dashboard
+git clone https://github.com/ozkan-1403/iot-telemetry-platform.git
+cd iot-telemetry-platform
 
 # 2. Bağımlılıkları yükleyin
 npm install
@@ -138,7 +136,6 @@ npm start
 | Değişken | Açıklama | Varsayılan Değer |
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL / TimescaleDB bağlantı URL'i | `postgresql://...` |
-| `DB_ENGINE` | Aktif veritabanı motoru (`postgres`, `firestore-hybrid`, `local`) | `postgres` |
 | `TIMESCALE_COMPRESS_DAYS` | Kaç günden eski chunk'ların sıkıştırılacağı | `7` |
 | `TIMESCALE_RETENTION_DAYS` | Ham telemetri saklama süresi (gün) | `90` |
 | `PORT` | Web sunucu portu | `3000` |
