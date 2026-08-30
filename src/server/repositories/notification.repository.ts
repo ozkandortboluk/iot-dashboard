@@ -75,16 +75,19 @@ export class NotificationRepository {
   }
 
   public getDashboard(userId: string): DashboardLayout {
+    const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    const userDash = this.db.data.dashboards.find((d: any) => d.tenantId === userId);
+    const userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
     if (userDash) return userDash;
 
-    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
-    const title = user ? `${user.companyName || user.name} Özel Dashboard` : 'Sistem Dashboard';
+    const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
+    const title = user
+      ? `${user.companyName || user.name} Özel Dashboard`
+      : (effectiveUserId === 'usr_admin' ? 'Ana Analitik & Saha İzleme Dashboard' : 'Sistem Dashboard');
 
     const newDash: DashboardLayout = {
-      id: `dash_${userId}`,
-      tenantId: userId,
+      id: `dash_${effectiveUserId}`,
+      tenantId: effectiveUserId,
       title,
       widgets: [...defaultWidgets],
       updatedAt: new Date().toISOString(),
@@ -96,10 +99,11 @@ export class NotificationRepository {
   }
 
   public saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): DashboardLayout {
+    const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    let userDash = this.db.data.dashboards.find((d: any) => d.tenantId === userId);
+    let userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
     if (!userDash) {
-      userDash = this.getDashboard(userId);
+      userDash = this.getDashboard(effectiveUserId);
     }
     userDash.widgets = widgets;
     if (title) userDash.title = title;
@@ -110,8 +114,11 @@ export class NotificationRepository {
   }
 
   public resetDashboard(userId: string): DashboardLayout {
-    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
-    const title = user ? `${user.companyName || user.name} Özel Dashboard` : 'Varsayılan Sistem Dashboard';
-    return this.saveDashboardWidgets(userId, defaultWidgets, title);
+    const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
+    const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
+    const title = user
+      ? `${user.companyName || user.name} Özel Dashboard`
+      : (effectiveUserId === 'usr_admin' ? 'Ana Analitik & Saha İzleme Dashboard' : 'Varsayılan Sistem Dashboard');
+    return this.saveDashboardWidgets(effectiveUserId, defaultWidgets, title);
   }
 }

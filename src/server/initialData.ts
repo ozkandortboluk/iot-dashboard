@@ -6,6 +6,13 @@ export const initialDevices: Device[] = [];
 
 export const defaultWidgets: WidgetConfig[] = [
   {
+    id: 'w_quick_access',
+    title: 'Hızlı Erişim & Sağlık / Alarm Merkezi',
+    type: 'quick_access',
+    span: 4,
+    colorScheme: '#6366f1',
+  },
+  {
     id: 'w_power_analyzer',
     title: 'Elektrik Sayacı & Reaktif Analizör',
     type: 'power_analyzer',

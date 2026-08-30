@@ -7,6 +7,7 @@ interface NexusNodeLogoProps {
   animated?: boolean;
   className?: string;
   theme?: 'dark' | 'light' | 'auto';
+  onClick?: () => void;
 }
 
 export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
@@ -16,6 +17,7 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
   animated = true,
   className = '',
   theme = 'auto',
+  onClick,
 }) => {
   // Dimensions
   const getIconSize = () => {
@@ -159,7 +161,14 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
   );
 
   if (variant === 'mark') {
-    return <div className={`inline-flex items-center ${className}`}>{MarkIcon}</div>;
+    return (
+      <div
+        onClick={onClick}
+        className={`inline-flex items-center ${onClick ? 'cursor-pointer transition-transform hover:scale-105' : ''} ${className}`}
+      >
+        {MarkIcon}
+      </div>
+    );
   }
 
   const textColor =
@@ -178,7 +187,10 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
 
   if (variant === 'stacked') {
     return (
-      <div className={`flex flex-col items-center text-center gap-3 ${className}`}>
+      <div
+        onClick={onClick}
+        className={`flex flex-col items-center text-center gap-3 ${onClick ? 'cursor-pointer transition-transform hover:scale-[1.02]' : ''} ${className}`}
+      >
         {MarkIcon}
         <div className="flex flex-col items-center">
           <div className="flex items-center gap-1.5 font-extrabold tracking-tight">
@@ -201,7 +213,10 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
   }
 
   return (
-    <div className={`inline-flex items-center gap-3 select-none ${className}`}>
+    <div
+      onClick={onClick}
+      className={`inline-flex items-center gap-3 select-none ${onClick ? 'cursor-pointer transition-opacity hover:opacity-90' : ''} ${className}`}
+    >
       {MarkIcon}
       <div className="flex flex-col justify-center min-w-0">
         <div className={`flex items-center gap-1.5 font-black tracking-tight leading-none ${getTitleSize()}`}>

@@ -258,6 +258,60 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     notificationsRef.current = notifications;
   }, [notifications]);
 
+  // Fetch initial & on-demand telemetry history
+  const fetchHistory = useCallback(async () => {
+    if (!user) return;
+    try {
+      const queryUser = user.id;
+      const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
+      let url = `/api/telemetry/history?limit=100&userId=${encodeURIComponent(queryUser)}`;
+      if (targetCust && targetCust !== 'all') {
+        url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
+      }
+      const res = await fetch(url);
+      const history = await safeJson<TelemetryReading[]>(res, []);
+      if (Array.isArray(history) && history.length > 0) {
+        const seen = new Set<string>();
+        const uniqueHistory: TelemetryReading[] = [];
+        for (const h of history) {
+          if (h && h.id && !seen.has(h.id)) {
+            seen.add(h.id);
+            uniqueHistory.push(h);
+          }
+        }
+        // Ensure history is ordered DESCENDING BY TIMESTAMP (newest at index 0)
+        uniqueHistory.sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+
+        const physicalHistory = uniqueHistory.filter((r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox'));
+        const simHistory = uniqueHistory.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
+
+        setPhysicalTelemetry(physicalHistory.slice(0, 500));
+        setSimulationTelemetry(simHistory.slice(0, 500));
+        setLatestTelemetry(uniqueHistory.slice(0, 500));
+      } else if (Array.isArray(history) && history.length === 0 && targetCust && targetCust !== 'all') {
+        // If selected customer has no historical records yet, clear old customer records
+        setPhysicalTelemetry([]);
+        setSimulationTelemetry([]);
+        setLatestTelemetry([]);
+      }
+
+      const simRes = await fetch('/api/simulator/status');
+      const simData = await safeJson<{ simulatorActive?: boolean }>(simRes, {});
+      if (simData.simulatorActive !== undefined) {
+        setSimulatorActive(simData.simulatorActive);
+      }
+    } catch (err) {
+      console.warn('History/Simulator status fetch notice:', err);
+    }
+  }, [user, selectedCustomerForAdmin]);
+
+  // Re-fetch telemetry history when user or selected customer changes
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
   // WebSocket for Live Telemetry, Device Updates and Server Stats
   const connectRef = useRef<() => void>();
 
@@ -267,92 +321,6 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let pingTimer: any = null;
     let watchdogTimer: any = null;
     let isCleanedUp = false;
-
-    // Fetch initial telemetry history & simulator status
-    const fetchHistory = async () => {
-      if (!user) return;
-      try {
-        const queryUser = user.id;
-        const targetCust = user.role === 'admin' ? selectedCustomerForAdmin : undefined;
-        let url = `/api/telemetry/history?limit=100&userId=${encodeURIComponent(queryUser)}`;
-        if (targetCust) {
-          url += `&targetCustomerId=${encodeURIComponent(targetCust)}`;
-        }
-        const res = await fetch(url);
-        const history = await safeJson<TelemetryReading[]>(res, []);
-        if (Array.isArray(history) && history.length > 0) {
-          const seen = new Set<string>();
-          const uniqueHistory: TelemetryReading[] = [];
-          for (const h of history) {
-            if (h && h.id && !seen.has(h.id)) {
-              seen.add(h.id);
-              uniqueHistory.push(h);
-            }
-          }
-          // Ensure history is ordered DESCENDING BY TIMESTAMP (newest at index 0)
-          uniqueHistory.sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
-          
-          const physicalHistory = uniqueHistory.filter((r) => r.source === 'physical' || (!r.source && r.environment !== 'sandbox'));
-          const simHistory = uniqueHistory.filter((r) => r.source === 'simulator' || r.source === 'manual_test' || r.environment === 'sandbox');
-
-          if (physicalHistory.length > 0) {
-            setPhysicalTelemetry((prev) => {
-              const merged = [...prev, ...physicalHistory];
-              const unique = Array.from(
-                new Map(merged.map((item) => [item.id, item])).values()
-              );
-              return unique
-                .sort(
-                  (a, b) =>
-                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-                )
-                .slice(0, 500);
-            });
-          }
-
-          if (simHistory.length > 0) {
-            setSimulationTelemetry((prev) => {
-              const merged = [...prev, ...simHistory];
-              const unique = Array.from(
-                new Map(merged.map((item) => [item.id, item])).values()
-              );
-              return unique
-                .sort(
-                  (a, b) =>
-                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-                )
-                .slice(0, 500);
-            });
-          }
-
-          if (uniqueHistory.length > 0) {
-            setLatestTelemetry((prev) => {
-              const merged = [...prev, ...uniqueHistory];
-              const unique = Array.from(
-                new Map(merged.map((item) => [item.id, item])).values()
-              );
-              return unique
-                .sort(
-                  (a, b) =>
-                    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-                )
-                .slice(0, 500);
-            });
-          }
-        }
-
-        const simRes = await fetch('/api/simulator/status');
-        const simData = await safeJson<{ simulatorActive?: boolean }>(simRes, {});
-        if (simData.simulatorActive !== undefined) {
-          setSimulatorActive(simData.simulatorActive);
-        }
-      } catch (err) {
-        console.warn('History/Simulator status fetch notice:', err);
-      }
-    };
-    fetchHistory();
 
     const connect = () => {
       if (isCleanedUp) return;
@@ -955,11 +923,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = await fetch('/api/simulator/toggle', { method: 'POST' });
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
-        const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
-        setSimulatorActive(data.simulatorActive);
+        const json = await res.json();
+        const active = json.simulatorActive !== undefined ? json.simulatorActive : (json.data && json.data.simulatorActive);
+        if (typeof active === 'boolean') {
+          setSimulatorActive(active);
+        } else {
+          setSimulatorActive((prev) => !prev);
+        }
+      } else if (res.ok) {
+        setSimulatorActive((prev) => !prev);
       }
     } catch (e) {
-      console.error(e);
+      console.error('toggleSimulator error:', e);
     }
   }, []);
 
@@ -1113,7 +1088,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const res = await fetch(`/api/devices/${encodeURIComponent(id)}/regen-key`, { method: 'POST' });
       if (!res.ok) throw new Error('Anahtar yenilenemedi');
-      const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
+      const data = await res.json();
       const newKey = data.apiKey;
       setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, apiKey: newKey } : d)));
       return newKey;
@@ -1135,7 +1110,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const errData = await res.json();
         throw new Error(errData.error || 'Dönüştürme işlemi başarısız oldu');
       }
-      const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
+      const data = await res.json();
       const updatedDev: Device = data.device;
       setRawDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updatedDev } : d)));
       return { device: updatedDev, apiKey: data.apiKey };
@@ -1159,7 +1134,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           throw new Error(errData.error || 'Sinyal gönderilemedi');
         }
 
-        const json = await res.json(); const data = Array.isArray(json) ? json : (json.data || []);
+        const data = await res.json();
         return data;
       } catch (e: any) {
         console.error('sendControlCommand error:', e);

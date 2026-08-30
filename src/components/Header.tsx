@@ -97,7 +97,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
           {/* Mobile/Compact Brand Logo */}
           <div className="md:hidden shrink-0">
-            <NexusNodeLogo variant="compact" size="xs" showDomain={false} animated={true} />
+            <NexusNodeLogo
+              variant="compact"
+              size="xs"
+              showDomain={false}
+              animated={true}
+              onClick={() => window.location.reload()}
+            />
           </div>
 
           {/* Customer Title (if applicable, without 'Canlı İzleme') */}

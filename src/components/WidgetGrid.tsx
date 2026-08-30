@@ -19,6 +19,7 @@ import { SwitchControlWidget } from './widgets/SwitchControlWidget';
 import { ProgressBarWidget } from './widgets/ProgressBarWidget';
 import { DataTableWidget } from './widgets/DataTableWidget';
 import { PowerAnalyzerWidget } from './widgets/PowerAnalyzerWidget';
+import { QuickAccessWidget } from './widgets/QuickAccessWidget';
 import { EditWidgetModal } from './EditWidgetModal';
 import {
   ArrowLeft,
@@ -36,9 +37,10 @@ interface WidgetGridProps {
   onOpenAddWidgetModal: () => void;
   editMode: boolean;
   setEditMode: (mode: boolean) => void;
+  onNavigateToTab?: (tab: string) => void;
 }
 
-export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, editMode, setEditMode }) => {
+export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, editMode, setEditMode, onNavigateToTab }) => {
   const { widgets, saveWidgets, resetWidgetsToDefault } = useRealtime();
 
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
@@ -140,6 +142,8 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
         return <LogStreamWidget config={widget} />;
       case 'notifications':
         return <NotificationsWidget config={widget} />;
+      case 'quick_access':
+        return <QuickAccessWidget config={widget} onEdit={handleEdit} onNavigateToTab={onNavigateToTab} />;
       default:
         return <ChartWidget config={widget} />;
     }

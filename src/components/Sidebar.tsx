@@ -39,7 +39,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       id: 'dashboard',
       label: "Özel Dashboard'um",
       icon: LayoutDashboard,
-      badge: 'Canlı',
     },
     {
       id: 'devices',
@@ -50,7 +49,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       id: 'device_health',
       label: 'Cihaz Sağlığı',
       icon: ShieldCheck,
-      badge: 'Yeni',
     },
     {
       id: 'network_discovery',
@@ -71,7 +69,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       id: 'help',
       label: 'Yardım & Bilgi Merkezi',
       icon: HelpCircle,
-      badge: 'Destek',
     },
   ];
 
@@ -83,7 +80,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'dashboard',
           label: 'Operasyon Dashboard',
           icon: LayoutDashboard,
-          badge: 'Canlı',
         },
         {
           id: 'devices',
@@ -94,13 +90,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'device_health',
           label: 'Cihaz Sağlığı',
           icon: ShieldCheck,
-          badge: 'Yeni',
         },
         {
           id: 'firmware_ota',
           label: 'Firmware & OTA Durumu',
           icon: HardDrive,
-          badge: 'OTA',
         },
         {
           id: 'network_discovery',
@@ -144,13 +138,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'dashboard',
           label: 'Analiz Dashboard',
           icon: LayoutDashboard,
-          badge: 'Canlı',
         },
         {
           id: 'analytics',
           label: 'Veri Analizi & Export',
           icon: BarChart3,
-          badge: 'Rapor',
         },
         {
           id: 'devices',
@@ -161,7 +153,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'device_health',
           label: 'Cihaz Sağlığı',
           icon: ShieldCheck,
-          badge: 'Yeni',
         },
         {
           id: 'network_discovery',
@@ -197,10 +188,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       section: 'MÜŞTERİ & SAHA YÖNETİMİ',
       items: [
         {
+          id: 'dashboard',
+          label: 'Canlı İzleme Dashboard',
+          icon: LayoutDashboard,
+        },
+        {
           id: 'customers',
           label: 'Müşteri Yönetimi',
           icon: Users,
-          badge: 'Admin',
         },
         {
           id: 'devices',
@@ -211,25 +206,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'device_health',
           label: 'Cihaz Sağlığı',
           icon: ShieldCheck,
-          badge: 'Yeni',
         },
         {
           id: 'firmware_ota',
           label: 'Firmware & OTA Yönetimi',
           icon: HardDrive,
-          badge: 'OTA',
         },
         {
           id: 'network_discovery',
           label: 'Cihaz Keşfi ve Eşleştirme',
           icon: Wifi,
-          badge: 'Ağ',
-        },
-        {
-          id: 'dashboard',
-          label: 'Canlı İzleme Dashboard',
-          icon: LayoutDashboard,
-          badge: 'Canlı',
         },
       ],
     },
@@ -240,7 +226,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'generator',
           label: 'Sanal Veri Üreteci',
           icon: Radio,
-          badge: 'Admin',
         },
         {
           id: 'analytics',
@@ -256,7 +241,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'database_data',
           label: 'PostgreSQL & Veritabanı',
           icon: Database,
-          badge: 'Postgres',
         },
         {
           id: 'deployment',
@@ -277,7 +261,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'help',
           label: 'Yardım & Bilgi Merkezi',
           icon: HelpCircle,
-          badge: 'Sözlük',
         },
       ],
     },
@@ -323,11 +306,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                 <Icon className={`w-4 h-4 ${isActive ? iconActiveColor : 'text-slate-400'}`} />
                 <span>{item.label}</span>
               </div>
-              {item.badge && (
-                <span className="px-1.5 py-0.5 text-[9px] font-bold bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded border border-slate-500/20">
-                  {item.badge}
-                </span>
-              )}
             </button>
           );
         })}
@@ -340,7 +318,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       {/* Brand & Logo Header */}
       <div>
         <div className="h-14 sm:h-16 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-          <NexusNodeLogo variant="full" size="sm" showDomain={true} animated={true} />
+          <NexusNodeLogo
+            variant="full"
+            size="sm"
+            showDomain={true}
+            animated={true}
+            onClick={() => window.location.reload()}
+            className="hover:opacity-85 transition-opacity"
+          />
         </div>
 
         {/* Navigation Links */}
@@ -367,11 +352,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                       <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                       <span>{item.label}</span>
                     </div>
-                    {item.badge && (
-                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded border border-emerald-500/20">
-                        {item.badge}
-                      </span>
-                    )}
                   </button>
                 );
               })}

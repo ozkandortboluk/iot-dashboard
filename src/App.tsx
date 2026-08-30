@@ -34,25 +34,11 @@ import {
 } from 'lucide-react';
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState(() => {
-    try {
-      return localStorage.getItem('iot_dashboard_active_tab') || 'dashboard';
-    } catch {
-      return 'dashboard';
-    }
-  });
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem('iot_dashboard_active_tab', activeTab);
-    } catch {
-      // ignore
-    }
-  }, [activeTab]);
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const { user, logout } = useAuth();
-  const { selectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
+  const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
   // Dynamic animated tab pulse favicon synchronized with real-time state
   useAnimatedFavicon(isConnected, true);
@@ -152,6 +138,7 @@ function DashboardContent() {
               onOpenAddWidgetModal={() => setIsAddWidgetOpen(true)}
               editMode={editMode}
               setEditMode={setEditMode}
+              onNavigateToTab={(tab) => setActiveTab(tab)}
             />
           )}
           {safeActiveTab === 'devices' && (
@@ -175,7 +162,10 @@ function DashboardContent() {
           )}
           {isAdmin && safeActiveTab === 'customers' && (
             <CustomerManagement
-              onSelectCustomerForDashboard={() => setActiveTab('dashboard')}
+              onSelectCustomerForDashboard={(customerId) => {
+                setSelectedCustomerForAdmin(customerId);
+                setActiveTab('dashboard');
+              }}
               onNavigateToDevices={() => setActiveTab('devices')}
             />
           )}

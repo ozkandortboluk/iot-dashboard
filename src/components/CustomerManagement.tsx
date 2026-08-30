@@ -24,12 +24,15 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     devices,
     setSelectedCustomerForAdmin,
     selectedCustomerForAdmin,
+    notifications,
   } = useRealtime();
   const { user } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [deviceFilter, setDeviceFilter] = useState<string>('all');
+  const [alarmFilter, setAlarmFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('newest');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -49,11 +52,13 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     };
   }, [showFilterDropdown]);
 
-  const activeFilterCount = (roleFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (sortBy !== 'newest' ? 1 : 0);
+  const activeFilterCount = (roleFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (deviceFilter !== 'all' ? 1 : 0) + (alarmFilter !== 'all' ? 1 : 0) + (sortBy !== 'newest' ? 1 : 0);
 
   const resetFilters = () => {
     setRoleFilter('all');
     setStatusFilter('all');
+    setDeviceFilter('all');
+    setAlarmFilter('all');
     setSortBy('newest');
   };
 
@@ -79,7 +84,24 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
       const matchRole = roleFilter === 'all' || c.role === roleFilter;
       const matchStatus = statusFilter === 'all' || (c.status || 'active') === statusFilter;
       
-      return matchSearch && matchRole && matchStatus;
+      let matchDevice = true;
+      if (deviceFilter !== 'all') {
+        const customerDevices = devices.filter(d => d.tenantId === c.id);
+        if (deviceFilter === 'has_devices') matchDevice = customerDevices.length > 0;
+        else if (deviceFilter === 'no_devices') matchDevice = customerDevices.length === 0;
+        else if (deviceFilter === 'has_offline') matchDevice = customerDevices.some(d => d.status === 'offline');
+        else if (deviceFilter === 'has_critical') matchDevice = customerDevices.some(d => d.status === 'warning');
+        else if (deviceFilter === 'has_simulated') matchDevice = customerDevices.some(d => d.isSimulated);
+      }
+
+      let matchAlarm = true;
+      if (alarmFilter !== 'all') {
+        const customerNotifs = notifications.filter(n => n.tenantId === c.id && !n.read);
+        if (alarmFilter === 'has_alarms') matchAlarm = customerNotifs.length > 0;
+        else if (alarmFilter === 'has_critical_alarms') matchAlarm = customerNotifs.some(n => n.severity === 'critical');
+      }
+      
+      return matchSearch && matchRole && matchStatus && matchDevice && matchAlarm;
     }
   ).sort((a, b) => {
     if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -383,6 +405,63 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                     </div>
                   </div>
 
+                  {/* Device Status Filter */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                      Cihaz Durumu (Operasyonel)
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { id: 'all', label: 'Tümü' },
+                        { id: 'has_devices', label: 'Cihazı Olanlar' },
+                        { id: 'no_devices', label: 'Cihazı Olmayanlar' },
+                        { id: 'has_offline', label: 'Çevrimdışı Cihazı Olanlar' },
+                        { id: 'has_critical', label: 'Kritik / Hatalı Cihazlılar' },
+                        { id: 'has_simulated', label: 'Sanal Cihazlılar' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => setDeviceFilter(s.id)}
+                          className={`text-[10px] py-1.5 px-2 rounded-lg border text-center font-medium transition-all cursor-pointer ${
+                            deviceFilter === s.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 text-indigo-600 dark:text-indigo-400 shadow-2xs font-semibold'
+                              : 'bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Alarm Filter */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                      Aktif Alarmlar (Okunmamış)
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'all', label: 'Tümü' },
+                        { id: 'has_alarms', label: 'Alarm Var' },
+                        { id: 'has_critical_alarms', label: 'Kritik Alarmlar' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => setAlarmFilter(s.id)}
+                          className={`text-[10px] py-1.5 px-1.5 rounded-lg border text-center font-medium transition-all cursor-pointer ${
+                            alarmFilter === s.id
+                              ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500 text-rose-600 dark:text-rose-400 shadow-2xs font-semibold'
+                              : 'bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   {/* Sort By */}
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
@@ -468,6 +547,28 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
                 <span>Sıralama: {sortBy === 'oldest' ? 'En Eski' : sortBy === 'nameAsc' ? 'A-Z' : 'Z-A'}</span>
                 <button type="button" onClick={() => setSortBy('newest')} className="hover:text-indigo-800 dark:hover:text-indigo-200 cursor-pointer">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {deviceFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
+                <span>Cihaz: {
+                  deviceFilter === 'has_devices' ? 'Cihazlılar' :
+                  deviceFilter === 'no_devices' ? 'Cihazsızlar' :
+                  deviceFilter === 'has_offline' ? 'Çevrimdışı Var' :
+                  deviceFilter === 'has_critical' ? 'Kritik Cihaz Var' :
+                  deviceFilter === 'has_simulated' ? 'Sanal Cihazlılar' : deviceFilter
+                }</span>
+                <button type="button" onClick={() => setDeviceFilter('all')} className="hover:text-indigo-800 dark:hover:text-indigo-200 cursor-pointer">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {alarmFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                <span>Alarm: {alarmFilter === 'has_alarms' ? 'Aktif' : 'Kritik'}</span>
+                <button type="button" onClick={() => setAlarmFilter('all')} className="hover:text-rose-800 dark:hover:text-rose-200 cursor-pointer">
                   <X className="w-3 h-3" />
                 </button>
               </span>

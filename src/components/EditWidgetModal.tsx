@@ -362,6 +362,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
                 <option value="data_table">📋 Canlı Veri Tablosu (CSV)</option>
                 <option value="log_stream">💻 Ingestion Terminal Konsolu</option>
                 <option value="notifications">🔔 Sistem Bildirim Akışı</option>
+                <option value="quick_access">⚡ Hızlı Erişim (Cihaz Sağlığı & Kritik Alarmlar)</option>
               </select>
             </div>
           </div>
@@ -798,7 +799,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
             </div>
           )}
 
-          {type !== 'power_analyzer' && type !== 'multi_metric' && type !== 'metric_matrix' && (
+          {type !== 'power_analyzer' && type !== 'multi_metric' && type !== 'metric_matrix' && type !== 'quick_access' && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="block font-semibold text-slate-700 dark:text-slate-300">

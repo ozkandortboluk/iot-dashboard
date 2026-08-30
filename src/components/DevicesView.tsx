@@ -4,7 +4,6 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch } from '../lib/apiFetch';
-import { DeviceStabilitySparkline } from './DeviceStabilitySparkline';
 import {
   Cpu,
   Plus,
@@ -920,11 +919,6 @@ void sendHeartbeat() {
                           </span>
                         </div>
                       </div>
-                    </div>
-
-                    {/* 24-Hour Connection Stability Sparkline */}
-                    <div className="shrink-0 hidden md:block">
-                      <DeviceStabilitySparkline device={dev} />
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">

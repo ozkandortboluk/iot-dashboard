@@ -251,7 +251,8 @@ export type WidgetType =
   | 'slider_control'
   | 'switch_control'
   | 'progress_bar'
-  | 'data_table';
+  | 'data_table'
+  | 'quick_access';
 
 export type WidgetSpan = 1 | 2 | 3 | 4;
 

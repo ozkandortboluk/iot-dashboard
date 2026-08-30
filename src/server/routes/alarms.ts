@@ -474,7 +474,7 @@ const dashboardRouter = Router();
 dashboardRouter.get('/widgets', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const requestedUserId = (req.query.tenantId as string) || currentUser.id;
+  const requestedUserId = (req.query.userId as string) || (req.query.tenantId as string) || currentUser.id;
   const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
 
   const dash = db.getDashboard(targetUserId);
@@ -484,8 +484,9 @@ dashboardRouter.get('/widgets', authenticateUser, (req, res) => {
 dashboardRouter.put('/widgets', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const { userId, widgets, title } = req.body;
-  const targetUserId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
+  const { userId, tenantId, widgets, title } = req.body;
+  const requestedUserId = userId || tenantId || currentUser.id;
+  const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
 
   const updated = db.saveDashboardWidgets(targetUserId, widgets, title);
   broadcast('dashboard:layout', updated);
@@ -495,8 +496,9 @@ dashboardRouter.put('/widgets', authenticateUser, (req, res) => {
 dashboardRouter.post('/widgets/reset', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const { userId } = req.body;
-  const targetUserId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
+  const { userId, tenantId } = req.body;
+  const requestedUserId = userId || tenantId || currentUser.id;
+  const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
 
   const resetDash = db.resetDashboard(targetUserId);
   broadcast('dashboard:layout', resetDash);

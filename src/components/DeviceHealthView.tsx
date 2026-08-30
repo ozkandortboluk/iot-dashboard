@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useRealtime } from '../context/RealtimeContext';
 import { Cpu, Activity, Signal, Clock, AlertTriangle, CheckCircle2, ShieldAlert, HeartPulse, RefreshCw, HardDrive, AlertCircle, Search } from 'lucide-react';
 import { formatRelativeTime } from '../lib/utils';
-import type { Device } from '../../types';
+import type { Device } from '../types';
 
 export const DeviceHealthView: React.FC = () => {
   const { devices, isConnected } = useRealtime();
@@ -22,11 +22,11 @@ export const DeviceHealthView: React.FC = () => {
     const msSinceLastSeen = nowMs - lastSeenMs;
     const intervalMs = (device.expectedIntervalSeconds || 60) * 1000;
     
-    const rssi = device.lastRSSI ?? -75;
+    const rssi = device.rssi ?? -75;
     const isRssiBad = rssi < -85;
     const isDelayed = isOnline && (msSinceLastSeen > intervalMs * 3);
 
-    if (device.status === 'error' || (!isOnline && msSinceLastSeen > intervalMs * 10 && lastSeenMs !== 0)) {
+    if (device.status === 'warning' || (!isOnline && msSinceLastSeen > intervalMs * 10 && lastSeenMs !== 0)) {
         return { status: 'critical', text: 'Kritik / Kesintili', color: 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-400', iconColor: 'text-rose-500', Icon: ShieldAlert };
     }
     if (isDelayed || isRssiBad) {
@@ -99,8 +99,8 @@ export const DeviceHealthView: React.FC = () => {
                     {health.text}
                   </span>
                   <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                    <Signal className={`w-3 h-3 ${getRssiColor(device.lastRSSI)}`} />
-                    {device.lastRSSI ? `${device.lastRSSI} dBm` : 'Bilinmiyor'}
+                    <Signal className={`w-3 h-3 ${getRssiColor(device.rssi)}`} />
+                    {device.rssi ? `${device.rssi} dBm` : 'Bilinmiyor'}
                   </span>
                 </div>
               </div>
@@ -115,7 +115,7 @@ export const DeviceHealthView: React.FC = () => {
                     <span className="font-medium text-[10px] uppercase tracking-wider">Son Görülme</span>
                   </div>
                   <p className="font-semibold text-slate-800 dark:text-slate-200">
-                    {device.lastSeen ? formatRelativeTime(new Date(device.lastSeen).getTime()) : 'Hiç görülmedi'}
+                    {device.lastSeen ? formatRelativeTime(device.lastSeen) : 'Hiç görülmedi'}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     Beklenen: {device.expectedIntervalSeconds || 60}s
@@ -132,7 +132,7 @@ export const DeviceHealthView: React.FC = () => {
                     {device.firmwareVersion || 'v1.0.0'}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-0.5 font-mono truncate">
-                    Boot: {device.bootId || 'N/A'}
+                    Boot: {(device as any).bootId || 'N/A'}
                   </p>
                 </div>
 
@@ -148,7 +148,7 @@ export const DeviceHealthView: React.FC = () => {
                     </p>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Sıra No (Seq): {device.sequence || 0}
+                    Sıra No (Seq): {(device as any).sequence || 0}
                   </p>
                 </div>
 
