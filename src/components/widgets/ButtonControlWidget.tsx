@@ -12,8 +12,13 @@ interface ButtonControlWidgetProps {
 export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config, onEdit }) => {
   const { devices, sendControlCommand } = useRealtime();
 
-  // Find target device or pick first
-  const targetDevice = devices.find((d) => d.id === config.deviceId) || devices[0];
+  // Find target device strictly if configured
+  const isSpecificConfigured = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDevice = isSpecificConfigured
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId) || null
+    : (devices.length === 1 ? devices[0] : null);
+
+  const isMissingDevice = isSpecificConfigured && !targetDevice;
 
   const buttonCount = config.buttonCount || (config.buttons?.length as 1 | 2 | 3 | 4) || 1;
 
@@ -90,7 +95,7 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
           >
             <Power className="w-4 h-4" />
           </div>
-          <DeviceStatusDot device={targetDevice} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDevice} />
           <div>
             <div className="flex items-center gap-1.5">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -101,7 +106,11 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
               </span>
             </div>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
-              {targetDevice ? `${targetDevice.name} (${targetDevice.location})` : 'Cihaz Seçilmedi'}
+              {targetDevice
+                ? `${targetDevice.name} (${targetDevice.location})`
+                : isMissingDevice
+                ? `⚠️ Cihaz Bulunamadı / Silinmiş (${config.deviceId})`
+                : 'Cihaz Seçilmedi'}
             </p>
           </div>
         </div>
@@ -116,6 +125,24 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
           </button>
         )}
       </div>
+
+      {(!targetDevice || isMissingDevice) && (
+        <div className="mb-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[11px] flex items-center justify-between gap-2">
+          <span>
+            {isMissingDevice
+              ? `Seçili cihaz (${config.deviceId}) bulunamadı veya silinmiş. Güvenlik için komut gönderimi kilitlendi.`
+              : 'Kontrol paneli için henüz bir donanım cihazı seçilmedi.'}
+          </span>
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="px-2 py-0.5 rounded-lg bg-amber-500 text-white font-bold text-[10px] shrink-0 hover:bg-amber-600 transition-colors"
+            >
+              Cihaz Ata
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Buttons Grid */}
       <div className={`grid gap-3 my-2 ${getGridClass()}`}>

@@ -1,6 +1,5 @@
 node_modules/
 build/
-dist/
 coverage/
 .DS_Store
 *.log
@@ -10,7 +9,6 @@ data/
 db.json
 uploads/keys/
 uploads/firmware/
--e 
 # Backups
 backups/
 *.bak

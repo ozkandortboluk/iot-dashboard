@@ -53,29 +53,34 @@ export const MetricMatrixWidget: React.FC<MetricMatrixWidgetProps> = ({ config, 
   const getSlotData = (slot: MatrixSlotConfig) => {
     let rawValue: number | null = null;
     let unit = getMetricUnit(slot.metricKey);
-    let dev =
-      slot.deviceId && slot.deviceId !== 'all'
-        ? devices.find((d) => d.id === slot.deviceId || d.apiKey === slot.deviceId)
-        : null;
+    const isSpecific = Boolean(slot.deviceId && slot.deviceId !== 'all');
+    let dev = isSpecific
+      ? devices.find((d) => d.id === slot.deviceId || d.apiKey === slot.deviceId)
+      : null;
 
-    if (dev) {
-      if (dev.metrics) {
-        const matchKey = Object.keys(dev.metrics).find(
-          (k) => k.toLowerCase() === slot.metricKey.toLowerCase()
-        );
-        if (matchKey && (dev.metrics as Record<string, number | undefined>)[matchKey] !== undefined) {
-          rawValue = (dev.metrics as Record<string, number | undefined>)[matchKey] ?? null;
+    if (isSpecific) {
+      if (dev) {
+        if (dev.metrics) {
+          const matchKey = Object.keys(dev.metrics).find(
+            (k) => k.toLowerCase() === slot.metricKey.toLowerCase()
+          );
+          if (matchKey && (dev.metrics as Record<string, number | undefined>)[matchKey] !== undefined) {
+            rawValue = (dev.metrics as Record<string, number | undefined>)[matchKey] ?? null;
+          }
         }
-      }
-      const tele = latestTelemetry.find(
-        (t) =>
-          (t.deviceId === dev!.id || t.deviceId === dev!.apiKey || t.deviceName === dev!.name) &&
-          t.metric &&
-          t.metric.toLowerCase() === slot.metricKey.toLowerCase()
-      );
-      if (tele && typeof tele.value === 'number' && !isNaN(tele.value)) {
-        rawValue = tele.value;
-        if (tele.unit) unit = tele.unit;
+        const tele = latestTelemetry.find(
+          (t) =>
+            (t.deviceId === dev!.id || t.deviceId === dev!.apiKey || t.deviceName === dev!.name) &&
+            t.metric &&
+            t.metric.toLowerCase() === slot.metricKey.toLowerCase()
+        );
+        if (tele && typeof tele.value === 'number' && !isNaN(tele.value)) {
+          rawValue = tele.value;
+          if (tele.unit) unit = tele.unit;
+        }
+      } else {
+        // Specific device was assigned but is now missing/deleted
+        rawValue = null;
       }
     } else {
       const tele = latestTelemetry.find(
@@ -105,7 +110,7 @@ export const MetricMatrixWidget: React.FC<MetricMatrixWidgetProps> = ({ config, 
     }
 
     // Determine device online status
-    const isOnline = dev ? dev.status === 'online' : devices.some((d) => d.status === 'online');
+    const isOnline = isSpecific ? (dev ? dev.status === 'online' : false) : devices.some((d) => d.status === 'online');
 
     // Threshold evaluation
     const warningLimit = slot.thresholdWarning ?? getMetricDefaultWarning(slot.metricKey);

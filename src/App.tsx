@@ -241,7 +241,14 @@ function DashboardContent() {
       </div>
 
       {/* Add Widget Modal */}
-      <AddWidgetModal isOpen={isAddWidgetOpen} onClose={() => setIsAddWidgetOpen(false)} />
+      <AddWidgetModal
+        isOpen={isAddWidgetOpen}
+        onClose={() => setIsAddWidgetOpen(false)}
+        onNavigateToAlarms={() => {
+          setIsAddWidgetOpen(false);
+          setActiveTab('notifications');
+        }}
+      />
     </div>
   );
 }

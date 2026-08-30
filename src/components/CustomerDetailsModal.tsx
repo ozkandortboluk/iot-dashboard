@@ -20,6 +20,7 @@ import {
 import type { User as UserType } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
+import { CustomerAvatar } from './CustomerAvatar';
 
 interface CustomerDetailsModalProps {
   customer: UserType;
@@ -186,9 +187,11 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800/60 bg-slate-50/70 dark:bg-slate-800/20">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xl">
-              {formData.companyName ? formData.companyName[0].toUpperCase() : formData.name ? formData.name[0].toUpperCase() : 'M'}
-            </div>
+            <CustomerAvatar
+              companyName={formData.companyName}
+              name={formData.name}
+              size="lg"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">

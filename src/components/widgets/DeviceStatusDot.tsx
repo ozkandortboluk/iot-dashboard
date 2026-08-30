@@ -11,14 +11,26 @@ interface DeviceStatusDotProps {
 export const DeviceStatusDot: React.FC<DeviceStatusDotProps> = ({ deviceId, device, className = '' }) => {
   const { devices } = useRealtime();
 
-  const targetDevice = device || (deviceId ? devices.find((d) => d.id === deviceId) : null);
+  const isSpecificDeviceConfigured = Boolean(device || (deviceId && deviceId !== 'all'));
+  const targetDevice = device || (deviceId && deviceId !== 'all' ? devices.find((d) => d.id === deviceId || d.apiKey === deviceId) : null);
+  const isMissing = isSpecificDeviceConfigured && !targetDevice;
 
-  const isOnline = targetDevice
+  const isOnline = isMissing
+    ? false
+    : targetDevice
     ? targetDevice.status === 'online' && targetDevice.dataFlowActive !== false
     : devices.some((d) => d.status === 'online' && d.dataFlowActive !== false);
 
-  const deviceName = targetDevice ? targetDevice.name : 'Saha Cihazı';
-  const statusLabel = isOnline ? 'Çevrimiçi (Online)' : 'Çevrimdışı (Offline)';
+  const deviceName = isMissing
+    ? `Kayıp/Silinmiş Cihaz (${deviceId})`
+    : targetDevice
+    ? targetDevice.name
+    : 'Tüm Saha Cihazları';
+  const statusLabel = isMissing
+    ? 'Cihaz Bulunamadı / Silinmiş'
+    : isOnline
+    ? 'Çevrimiçi (Online)'
+    : 'Çevrimdışı (Offline)';
   const tooltipText = `${deviceName}: ${statusLabel}`;
 
   return (
@@ -26,7 +38,11 @@ export const DeviceStatusDot: React.FC<DeviceStatusDotProps> = ({ deviceId, devi
       className={`relative inline-flex items-center justify-center shrink-0 ${className}`}
       title={tooltipText}
     >
-      {isOnline ? (
+      {isMissing ? (
+        <span className="relative flex h-2.5 w-2.5 items-center justify-center" title={tooltipText}>
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500 shadow-xs shadow-amber-500/50" />
+        </span>
+      ) : isOnline ? (
         <span className="relative flex h-2.5 w-2.5 items-center justify-center">
           <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50" />

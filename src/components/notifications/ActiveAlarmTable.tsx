@@ -51,7 +51,6 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDevice, setSelectedDevice] = useState<string>('all');
-  const [selectedCustomer, setSelectedCustomer] = useState<string>('all');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedState, setSelectedState] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -71,11 +70,6 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
 
         // Device filter
         if (selectedDevice !== 'all' && alarm.deviceId !== selectedDevice) {
-          return false;
-        }
-
-        // Customer filter
-        if (selectedCustomer !== 'all' && alarm.tenantId !== selectedCustomer) {
           return false;
         }
 
@@ -102,7 +96,7 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
         const timeB = new Date(b.updatedAt || b.triggeredAt || 0).getTime();
         return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
       });
-  }, [alarms, searchTerm, selectedDevice, selectedCustomer, selectedSeverity, selectedState, sortOrder]);
+  }, [alarms, searchTerm, selectedDevice, selectedSeverity, selectedState, sortOrder]);
 
   const getMetricIcon = (metricKey: string) => {
     const key = metricKey.toLowerCase();
@@ -242,24 +236,6 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
               ))}
             </select>
           </div>
-
-          {/* Customer Filter (if admin) */}
-          {currentUserRole === 'admin' && customersList.length > 0 && (
-            <div>
-              <select
-                value={selectedCustomer}
-                onChange={(e) => setSelectedCustomer(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              >
-                <option value="all">Tüm Müşteriler / Hesaplar</option>
-                {customersList.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.companyName} ({c.name})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Severity Filter */}
           <div>

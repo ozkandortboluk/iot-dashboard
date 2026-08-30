@@ -12,16 +12,21 @@ interface DataTableWidgetProps {
 }
 
 export const DataTableWidget: React.FC<DataTableWidgetProps> = ({ config, onEdit }) => {
-  const { latestTelemetry } = useRealtime();
+  const { latestTelemetry, devices } = useRealtime();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMetric, setSelectedMetric] = useState<string>('all');
   const [dataSource, setDataSource] = useState<'live' | 'timescale'>('live');
   const [historyRows, setHistoryRows] = useState<TelemetryReading[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
+
   const fetchHistoryFromDb = () => {
     setIsLoadingHistory(true);
-    const devParam = config.deviceId ? `&deviceId=${encodeURIComponent(config.deviceId)}` : '';
+    const devParam = isSpecificDevice ? `&deviceId=${encodeURIComponent(config.deviceId!)}` : '';
     const metricParam = selectedMetric !== 'all' ? `&metric=${encodeURIComponent(selectedMetric)}` : '';
 
     fetch(`/api/telemetry/history?limit=100${devParam}${metricParam}`)
@@ -46,10 +51,10 @@ export const DataTableWidget: React.FC<DataTableWidgetProps> = ({ config, onEdit
   const sourceData = dataSource === 'live' ? latestTelemetry : historyRows;
 
   const filtered = sourceData.filter((item) => {
-    const matchesDevice = !config.deviceId || item.deviceId === config.deviceId;
+    const matchesDevice = !isSpecificDevice || (targetDev ? (item.deviceId === targetDev.id || item.deviceId === targetDev.apiKey) : item.deviceId === config.deviceId);
     const matchesSearch =
-      item.deviceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.metric.toLowerCase().includes(searchTerm.toLowerCase());
+      (item.deviceName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.metric || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesMetric = selectedMetric === 'all' || item.metric === selectedMetric;
     return matchesDevice && matchesSearch && matchesMetric;
   });

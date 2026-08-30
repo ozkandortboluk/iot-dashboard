@@ -116,14 +116,33 @@ export class DeviceRepository {
   public getDevices(requestingUserId?: string, targetCustomerId?: string): Device[] {
     this.checkDeviceStatuses();
     let list: Device[] = this.db.data.devices || [];
-    const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
+    const users = this.db.data.users || [];
+    const reqUser = users.find((u: any) => u.id === requestingUserId);
 
     if (reqUser && reqUser.role === 'admin') {
       if (targetCustomerId && targetCustomerId !== 'all') {
-        list = list.filter((d) => d.tenantId === targetCustomerId);
+        const targetUser = users.find((u: any) => u.id === targetCustomerId);
+        const isTargetAdmin = targetCustomerId === 'usr_admin' || targetCustomerId === 'admin' || (targetUser && targetUser.role === 'admin') || targetCustomerId === reqUser.id;
+        
+        if (isTargetAdmin) {
+          const adminIds = new Set(
+            users.filter((u: any) => u.role === 'admin' || u.id === 'usr_admin' || u.id === 'admin').map((u: any) => u.id)
+          );
+          adminIds.add('usr_admin');
+          adminIds.add('admin');
+          adminIds.add(reqUser.id);
+          if (targetCustomerId) adminIds.add(targetCustomerId);
+
+          list = list.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
+        } else {
+          list = list.filter((d) => d.tenantId === targetCustomerId);
+        }
       }
     } else if (requestingUserId) {
       const allowedTenants = this.getUserTenants(requestingUserId);
+      if (!allowedTenants.includes(requestingUserId)) {
+        allowedTenants.push(requestingUserId);
+      }
       list = list.filter((d) => allowedTenants.includes(d.tenantId));
     }
 

@@ -19,6 +19,7 @@ interface RealtimeContextType {
   reconnectWebSocket: () => void;
   wsLatency: number;
   devices: Device[];
+  rawDevices: Device[];
   latestTelemetry: TelemetryReading[];
   physicalTelemetry: TelemetryReading[];
   simulationTelemetry: TelemetryReading[];
@@ -101,20 +102,60 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!user) return [];
     if (user.role === 'admin') {
       if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') return rawDevices;
+      const targetUser = customersList.find((c) => c.id === selectedCustomerForAdmin);
+      const isTargetAdmin =
+        selectedCustomerForAdmin === 'usr_admin' ||
+        selectedCustomerForAdmin === 'admin' ||
+        selectedCustomerForAdmin === user.id ||
+        (targetUser && targetUser.role === 'admin');
+
+      if (isTargetAdmin) {
+        const adminIds = new Set(
+          customersList
+            .filter((c) => c.role === 'admin' || c.id === 'usr_admin' || c.id === 'admin')
+            .map((c) => c.id)
+        );
+        adminIds.add('usr_admin');
+        adminIds.add('admin');
+        if (user.id) adminIds.add(user.id);
+        if (selectedCustomerForAdmin) adminIds.add(selectedCustomerForAdmin);
+
+        return rawDevices.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
+      }
       return rawDevices.filter((d) => d.tenantId === selectedCustomerForAdmin);
     }
     return rawDevices.filter((d) => d.tenantId === user.id);
-  }, [rawDevices, user, selectedCustomerForAdmin]);
+  }, [rawDevices, user, selectedCustomerForAdmin, customersList]);
 
   // Synchronous, flicker-free derived notifications list based on active customer filter
   const notifications = useMemo(() => {
     if (!user) return [];
     if (user.role === 'admin') {
       if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') return rawNotifications;
+      const targetUser = customersList.find((c) => c.id === selectedCustomerForAdmin);
+      const isTargetAdmin =
+        selectedCustomerForAdmin === 'usr_admin' ||
+        selectedCustomerForAdmin === 'admin' ||
+        selectedCustomerForAdmin === user.id ||
+        (targetUser && targetUser.role === 'admin');
+
+      if (isTargetAdmin) {
+        const adminIds = new Set(
+          customersList
+            .filter((c) => c.role === 'admin' || c.id === 'usr_admin' || c.id === 'admin')
+            .map((c) => c.id)
+        );
+        adminIds.add('usr_admin');
+        adminIds.add('admin');
+        if (user.id) adminIds.add(user.id);
+        if (selectedCustomerForAdmin) adminIds.add(selectedCustomerForAdmin);
+
+        return rawNotifications.filter((n) => !n.tenantId || adminIds.has(n.tenantId));
+      }
       return rawNotifications.filter((n) => !n.tenantId || n.tenantId === selectedCustomerForAdmin);
     }
     return rawNotifications.filter((n) => !n.tenantId || n.tenantId === user.id);
-  }, [rawNotifications, user, selectedCustomerForAdmin]);
+  }, [rawNotifications, user, selectedCustomerForAdmin, customersList]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const wsEventListeners = useRef<Map<string, Set<(payload: any) => void>>>(new Map());
@@ -1167,6 +1208,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       reconnectWebSocket,
       wsLatency,
       devices,
+      rawDevices,
       latestTelemetry,
       physicalTelemetry,
       simulationTelemetry,
@@ -1205,6 +1247,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       reconnectWebSocket,
       wsLatency,
       devices,
+      rawDevices,
       latestTelemetry,
       physicalTelemetry,
       simulationTelemetry,

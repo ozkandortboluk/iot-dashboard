@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
@@ -57,24 +57,45 @@ export const DataGeneratorView: React.FC = () => {
   // Console Log filters
   const [logFilterMetric, setLogFilterMetric] = useState<string>('all');
   const [logPaused, setLogPaused] = useState<boolean>(false);
-  const [localLogs, setLocalLogs] = useState<typeof simulationTelemetry>([]);
+  const [clearedLogTimestamp, setClearedLogTimestamp] = useState<number>(0);
+  const [frozenLogs, setFrozenLogs] = useState<typeof simulationTelemetry>([]);
 
   // Only allow simulated devices
-  const simulatedDevices = devices.filter((d) => d.isSimulated);
+  const simulatedDevices = useMemo(() => devices.filter((d) => d.isSimulated), [devices]);
 
   // Set default selected device once loaded
   useEffect(() => {
-    if (simulatedDevices.length > 0 && (!selectedDeviceId || !simulatedDevices.some((d) => d.id === selectedDeviceId))) {
-      setSelectedDeviceId(simulatedDevices[0].id);
+    if (simulatedDevices.length > 0) {
+      if (!selectedDeviceId || !simulatedDevices.some((d) => d.id === selectedDeviceId)) {
+        setSelectedDeviceId(simulatedDevices[0].id);
+      }
     }
   }, [simulatedDevices, selectedDeviceId]);
 
-  // Keep track of live simulation telemetry logs
-  useEffect(() => {
+  const activeLogs = useMemo(() => {
+    if (logPaused) return frozenLogs;
+    return simulationTelemetry
+      .filter((l) => !clearedLogTimestamp || new Date(l.timestamp).getTime() > clearedLogTimestamp)
+      .slice(0, 80);
+  }, [logPaused, frozenLogs, simulationTelemetry, clearedLogTimestamp]);
+
+  const handleToggleLogPause = () => {
     if (!logPaused) {
-      setLocalLogs(simulationTelemetry.slice(0, 80));
+      setFrozenLogs(
+        simulationTelemetry
+          .filter((l) => !clearedLogTimestamp || new Date(l.timestamp).getTime() > clearedLogTimestamp)
+          .slice(0, 80)
+      );
+      setLogPaused(true);
+    } else {
+      setLogPaused(false);
     }
-  }, [simulationTelemetry, logPaused]);
+  };
+
+  const handleClearLogs = () => {
+    setClearedLogTimestamp(Date.now());
+    setFrozenLogs([]);
+  };
 
   // Fetch initial simulator status
   useEffect(() => {
@@ -765,7 +786,7 @@ export const DataGeneratorView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setLogPaused(!logPaused)}
+                  onClick={handleToggleLogPause}
                   className={`px-2 py-1 rounded text-[10px] font-bold border flex items-center gap-1 transition ${
                     logPaused
                       ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
@@ -777,7 +798,7 @@ export const DataGeneratorView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLocalLogs([])}
+                  onClick={handleClearLogs}
                   title="Temizle"
                   className="p-1 text-slate-400 hover:text-slate-200"
                 >
@@ -804,12 +825,12 @@ export const DataGeneratorView: React.FC = () => {
 
             {/* Terminal Window */}
             <div className="bg-slate-950 rounded-xl border border-slate-800/80 p-3 h-80 overflow-y-auto font-mono text-[11px] space-y-1.5 scrollbar-thin">
-              {localLogs.length === 0 ? (
+              {activeLogs.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-600 text-[11px] italic">
                   Henüz veri konsolunda paket bulunmuyor...
                 </div>
               ) : (
-                localLogs
+                activeLogs
                   .filter((log) => logFilterMetric === 'all' || log.metric.toLowerCase().includes(logFilterMetric))
                   .map((log, idx) => (
                     <div

@@ -252,6 +252,10 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
         widget={editingWidget}
         isOpen={!!editingWidget}
         onClose={() => setEditingWidget(null)}
+        onNavigateToAlarms={() => {
+          setEditingWidget(null);
+          if (onNavigateToTab) onNavigateToTab('notifications');
+        }}
       />
     </div>
   );

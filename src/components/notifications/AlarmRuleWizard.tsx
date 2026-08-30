@@ -39,6 +39,7 @@ import { extractDeviceMetrics, getChannelStatus, METRIC_DICTIONARY, type MetricM
 interface AlarmRuleWizardProps {
   isOpen: boolean;
   editingRule: ThresholdRule | null;
+  initialRule?: Partial<ThresholdRule> | null;
   devices: Device[];
   customersList?: Customer[];
   serviceConfig: NotificationServiceConfig | null;
@@ -51,6 +52,7 @@ interface AlarmRuleWizardProps {
 export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
   isOpen,
   editingRule,
+  initialRule,
   devices,
   customersList = [],
   serviceConfig,
@@ -94,9 +96,22 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
   // Track initial state for unsaved changes detection
   const [isDirty, setIsDirty] = useState(false);
 
+  // Use refs to prevent spurious resets while the modal is open
+  const prevIsOpenRef = React.useRef(false);
+  const prevEditingRuleIdRef = React.useRef<string | null | undefined>(null);
+  const prevInitialMetricRef = React.useRef<string | undefined>(undefined);
+
   // Populate form on open / edit
   useEffect(() => {
-    if (isOpen) {
+    const justOpened = isOpen && !prevIsOpenRef.current;
+    const ruleChanged = isOpen && editingRule && editingRule.id !== prevEditingRuleIdRef.current;
+    const initialChanged = isOpen && !editingRule && initialRule?.metricKey !== prevInitialMetricRef.current;
+
+    prevIsOpenRef.current = isOpen;
+    prevEditingRuleIdRef.current = editingRule?.id;
+    prevInitialMetricRef.current = initialRule?.metricKey;
+
+    if (justOpened || ruleChanged || initialChanged) {
       setCurrentStep(1);
       setShowUnsavedPrompt(false);
       setIsDirty(false);
@@ -132,6 +147,26 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
         setMessageTemplate(
           editingRule.messageTemplate || 'Cihaz {deviceName} üzerinde {metric} eşik değerini aştı! Mevcut Değer: {value} {unit}'
         );
+      } else if (initialRule) {
+        setTenantId(initialRule.tenantId || (currentUserRole === 'admin' ? 'usr_admin' : currentUserId || 'usr_customer1'));
+        setDeviceId(initialRule.deviceId || 'all');
+        setMetricKey(initialRule.metricKey || 'cpu');
+        setOperator(initialRule.operator || '>');
+        setThresholdValue(initialRule.thresholdValue ?? 80);
+        setThresholdMax(initialRule.thresholdMax ?? 100);
+        setSeverity(initialRule.severity || 'critical');
+        setMinBreachDurationSeconds(initialRule.minBreachDurationSeconds ?? 10);
+        setHysteresis(initialRule.hysteresis ?? 2);
+        setRepeatIntervalSeconds(initialRule.repeatIntervalSeconds ?? 300);
+        setTimezone(initialRule.timezone || 'Europe/Istanbul');
+        setIs24h(true);
+        setActiveHoursStart('08:00');
+        setActiveHoursEnd('18:00');
+        setChannels(initialRule.notificationChannels || ['app', 'email', 'whatsapp', 'telegram']);
+        setRecipientsStr((initialRule.recipients || []).join(', '));
+        setMessageTemplate(
+          initialRule.messageTemplate || 'Cihaz {deviceName} üzerinde {metric} eşik değerini aştı! Mevcut Değer: {value} {unit}'
+        );
       } else {
         setTenantId(currentUserRole === 'admin' ? 'usr_admin' : currentUserId || 'usr_customer1');
         setDeviceId('all');
@@ -152,7 +187,7 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
         setMessageTemplate('Cihaz {deviceName} üzerinde {metric} eşik değerini aştı! Mevcut Değer: {value} {unit}');
       }
     }
-  }, [isOpen, editingRule, currentUserRole, currentUserId]);
+  }, [isOpen, editingRule, initialRule, currentUserRole, currentUserId]);
 
   const markDirty = () => {
     if (!isDirty) setIsDirty(true);
@@ -281,10 +316,20 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleAttemptClose();
+        }
+      }}
+    >
       {/* Unsaved Changes Confirmation Dialog */}
       {showUnsavedPrompt && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70">
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/70"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 max-w-sm w-full text-center space-y-4">
             <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 mx-auto flex items-center justify-center">
               <AlertTriangle className="w-6 h-6" />
@@ -320,7 +365,10 @@ export const AlarmRuleWizard: React.FC<AlarmRuleWizardProps> = ({
       )}
 
       {/* Main Wizard Modal Box */}
-      <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Wizard Header */}
         <div className="px-5 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">

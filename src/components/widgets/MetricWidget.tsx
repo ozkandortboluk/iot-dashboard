@@ -17,16 +17,22 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
   const unit = config.unit || getMetricUnit(metricKey);
 
   // Target device lookup if specific deviceId is configured
-  const targetDev = config.deviceId
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
     ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
     : null;
+  const isMissingDevice = isSpecificDevice && !targetDev;
 
   // Get matching readings (latestTelemetry is sorted descending by timestamp: index 0 is newest)
   const filtered = latestTelemetry.filter((t) => {
-    if (config.deviceId && targetDev) {
-      if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
-    } else if (config.deviceId && t.deviceId !== config.deviceId) {
-      return false;
+    if (isSpecificDevice) {
+      if (targetDev && (t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey)) {
+        // match
+      } else if (t.deviceId === config.deviceId) {
+        // match
+      } else {
+        return false;
+      }
     }
     return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
   });
@@ -43,7 +49,7 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
     if (matchKey && (targetDev.metrics as Record<string, number>)[matchKey] !== undefined) {
       currentVal = Number((targetDev.metrics as Record<string, number>)[matchKey]);
     }
-  } else {
+  } else if (!isSpecificDevice) {
     for (const d of devices) {
       if (d.metrics) {
         const matchKey = Object.keys(d.metrics).find(
@@ -120,8 +126,14 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
 
       {/* Subtext info */}
       <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-        <span>Cihaz Sayısı: {devices.length}</span>
-        <span className="flex items-center gap-1 text-emerald-400 font-medium">
+        <span className="truncate max-w-[180px]">
+          {isSpecificDevice
+            ? targetDev
+              ? targetDev.name
+              : `⚠️ Kayıp Cihaz (${config.deviceId})`
+            : `Tüm Cihazlar (${devices.length})`}
+        </span>
+        <span className="flex items-center gap-1 text-emerald-400 font-medium shrink-0">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live WebSocket
         </span>
       </div>

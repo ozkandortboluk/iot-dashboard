@@ -53,8 +53,8 @@ export class PostgresRepository {
 
   private isSchemaEnsured = false;
 
-  public async ensureTelemetrySchema(): Promise<void> {
-    if (!this.pool || this.isSchemaEnsured) return;
+  public async ensureTelemetrySchema(force = false): Promise<void> {
+    if (!this.pool || (this.isSchemaEnsured && !force)) return;
     try {
       const statements = [
         // 1. Users Table & Columns
@@ -221,7 +221,15 @@ export class PostgresRepository {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS device_id VARCHAR(64) DEFAULT 'all';`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS metric_key VARCHAR(64);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS operator VARCHAR(8);`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS threshold_value NUMERIC;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'warning';`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS message_template TEXT;`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS hysteresis NUMERIC DEFAULT 0;`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;`,
@@ -229,6 +237,8 @@ export class PostgresRepository {
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;`,
         `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`,
+        `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;`,
 
         // 5. Active Alarms
         `CREATE TABLE IF NOT EXISTS active_alarms (
@@ -851,7 +861,7 @@ export class PostgresRepository {
         silenced_until = EXCLUDED.silenced_until,
         updated_at = CURRENT_TIMESTAMP;
     `;
-    await this.query(sql, [
+    const params = [
       rule.id,
       rule.tenantId || null,
       rule.userName || null,
@@ -871,7 +881,18 @@ export class PostgresRepository {
       rule.disabledUntil || null,
       new Date().toISOString(),
       rule.updatedAt || new Date().toISOString(),
-    ]);
+    ];
+
+    try {
+      await this.query(sql, params);
+    } catch (err: any) {
+      if (err?.message?.includes('column') || err?.message?.includes('does not exist')) {
+        await this.ensureTelemetrySchema(true);
+        await this.query(sql, params);
+      } else {
+        throw err;
+      }
+    }
   }
 
   public async deleteRule(ruleId: string): Promise<void> {

@@ -12,7 +12,13 @@ interface SwitchControlWidgetProps {
 export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config, onEdit }) => {
   const { devices, sendControlCommand } = useRealtime();
 
-  const targetDevice = devices.find((d) => d.id === config.deviceId) || devices[0];
+  // Find target device strictly if configured
+  const isSpecificConfigured = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDevice = isSpecificConfigured
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId) || null
+    : (devices.length === 1 ? devices[0] : null);
+
+  const isMissingDevice = isSpecificConfigured && !targetDevice;
 
   const switchChannels = [
     { id: 'sw_1', pin: 'RELAY_1', label: 'Ana Vana / Su Pompass' },
@@ -76,13 +82,17 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
           >
             <ToggleRight className="w-4 h-4" />
           </div>
-          <DeviceStatusDot device={targetDevice} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDevice} />
           <div>
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">
               {config.title || 'Çoklu Röle & Switch Paneli'}
             </h3>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
-              {targetDevice ? `${targetDevice.name} (${targetDevice.location})` : 'Cihaz Seçilmedi'}
+              {targetDevice
+                ? `${targetDevice.name} (${targetDevice.location})`
+                : isMissingDevice
+                ? `⚠️ Cihaz Bulunamadı (${config.deviceId})`
+                : 'Cihaz Seçilmedi'}
             </p>
           </div>
         </div>

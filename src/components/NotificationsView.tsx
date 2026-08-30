@@ -39,15 +39,12 @@ import { ContactPreferences } from './notifications/ContactPreferences';
 
 export const NotificationsView: React.FC = () => {
   const { user } = useAuth();
-  const { devices, customersList, isConnected, subscribeWsEvent } = useRealtime();
+  const { devices, customersList, isConnected, subscribeWsEvent, selectedCustomerForAdmin } = useRealtime();
 
   // Active Navigation Tab
   const [activeTab, setActiveTab] = useState<
     'alarms' | 'rules' | 'queue' | 'history' | 'channels' | 'preferences'
   >('alarms');
-
-  // Customer Filter (for Admin)
-  const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>('all');
 
   // Core Data States
   const [activeAlarms, setActiveAlarms] = useState<ActiveAlarm[]>([]);
@@ -94,8 +91,8 @@ export const NotificationsView: React.FC = () => {
       let rulesUrl = '/api/rules?limit=100';
       let alarmsUrl = '/api/alarms?limit=100';
 
-      if (user?.role === 'admin' && selectedCustomerFilter !== 'all') {
-        const param = `&targetCustomerId=${encodeURIComponent(selectedCustomerFilter)}`;
+      if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
+        const param = `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
         rulesUrl += param;
         alarmsUrl += param;
       }
@@ -121,15 +118,15 @@ export const NotificationsView: React.FC = () => {
     } catch (e) {
       console.error('Error fetching primary notification data:', e);
     }
-  }, [user, selectedCustomerFilter]);
+  }, [user, selectedCustomerForAdmin]);
 
   // 2. Lazy Fetchers for Specific Tabs
   const fetchQueueData = useCallback(async () => {
     setIsQueueLoading(true);
     try {
       let queueUrl = '/api/notification-queue?limit=100';
-      if (user?.role === 'admin' && selectedCustomerFilter !== 'all') {
-        queueUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerFilter)}`;
+      if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
+        queueUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(queueUrl);
       const data = await safeJson<any>(res, []);
@@ -140,14 +137,14 @@ export const NotificationsView: React.FC = () => {
     } finally {
       setIsQueueLoading(false);
     }
-  }, [user, selectedCustomerFilter]);
+  }, [user, selectedCustomerForAdmin]);
 
   const fetchLogsData = useCallback(async () => {
     setIsLogsLoading(true);
     try {
       let logsUrl = '/api/dispatch-logs?limit=100';
-      if (user?.role === 'admin' && selectedCustomerFilter !== 'all') {
-        logsUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerFilter)}`;
+      if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
+        logsUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(logsUrl);
       const data = await safeJson<any>(res, []);
@@ -158,7 +155,7 @@ export const NotificationsView: React.FC = () => {
     } finally {
       setIsLogsLoading(false);
     }
-  }, [user, selectedCustomerFilter]);
+  }, [user, selectedCustomerForAdmin]);
 
   const fetchServiceConfig = useCallback(async () => {
     if (user?.role !== 'admin') return;
@@ -196,8 +193,8 @@ export const NotificationsView: React.FC = () => {
       if (Array.isArray(payload)) {
         if (user?.role === 'customer') {
           setActiveAlarms(payload.filter((a) => a.tenantId === user.id));
-        } else if (selectedCustomerFilter !== 'all') {
-          setActiveAlarms(payload.filter((a) => a.tenantId === selectedCustomerFilter));
+        } else if (selectedCustomerForAdmin !== 'all') {
+          setActiveAlarms(payload.filter((a) => a.tenantId === selectedCustomerForAdmin));
         } else {
           setActiveAlarms(payload);
         }
@@ -210,8 +207,8 @@ export const NotificationsView: React.FC = () => {
       if (Array.isArray(payload)) {
         if (user?.role === 'customer') {
           setRules(payload.filter((r) => r.tenantId === user.id));
-        } else if (selectedCustomerFilter !== 'all') {
-          setRules(payload.filter((r) => r.tenantId === selectedCustomerFilter));
+        } else if (selectedCustomerForAdmin !== 'all') {
+          setRules(payload.filter((r) => r.tenantId === selectedCustomerForAdmin));
         } else {
           setRules(payload);
         }
@@ -224,8 +221,8 @@ export const NotificationsView: React.FC = () => {
       if (Array.isArray(payload)) {
         if (user?.role === 'customer') {
           setQueueItems(payload.filter((q) => q.tenantId === user.id));
-        } else if (selectedCustomerFilter !== 'all') {
-          setQueueItems(payload.filter((q) => q.tenantId === selectedCustomerFilter));
+        } else if (selectedCustomerForAdmin !== 'all') {
+          setQueueItems(payload.filter((q) => q.tenantId === selectedCustomerForAdmin));
         } else {
           setQueueItems(payload);
         }
@@ -236,8 +233,8 @@ export const NotificationsView: React.FC = () => {
       if (Array.isArray(payload)) {
         if (user?.role === 'customer') {
           setDispatchLogs(payload.filter((l) => l.tenantId === user.id));
-        } else if (selectedCustomerFilter !== 'all') {
-          setDispatchLogs(payload.filter((l) => l.tenantId === selectedCustomerFilter));
+        } else if (selectedCustomerForAdmin !== 'all') {
+          setDispatchLogs(payload.filter((l) => l.tenantId === selectedCustomerForAdmin));
         } else {
           setDispatchLogs(payload);
         }
@@ -250,7 +247,7 @@ export const NotificationsView: React.FC = () => {
       unsubQueue();
       unsubLogs();
     };
-  }, [subscribeWsEvent, user, selectedCustomerFilter, fetchPrimaryData]);
+  }, [subscribeWsEvent, user, selectedCustomerForAdmin, fetchPrimaryData]);
 
   // 4. Fallback Polling (ONLY when WebSocket is disconnected, 20s interval)
   useEffect(() => {
@@ -502,7 +499,7 @@ export const NotificationsView: React.FC = () => {
         </div>
       )}
 
-      {/* Top Banner & Customer Scope Filter (if admin) */}
+      {/* Top Banner & Customer Scope (Linked to Top Bar) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
@@ -514,21 +511,12 @@ export const NotificationsView: React.FC = () => {
           </p>
         </div>
 
-        {user?.role === 'admin' && customersList && customersList.length > 0 && (
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
-              value={selectedCustomerFilter}
-              onChange={(e) => setSelectedCustomerFilter(e.target.value)}
-              className="px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-900 dark:text-white shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-            >
-              <option value="all">🏢 Tüm Müşteri Kapsamı (Global)</option>
-              {customersList.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.companyName} ({c.name})
-                </option>
-              ))}
-            </select>
+        {user?.role === 'admin' && selectedCustomerForAdmin !== 'all' && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/80 rounded-xl text-xs font-semibold text-indigo-700 dark:text-indigo-300 self-start sm:self-auto shadow-xs">
+            <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <span>
+              Müşteri: <strong className="font-bold text-slate-900 dark:text-white">{customersList.find((c) => c.id === selectedCustomerForAdmin)?.companyName || selectedCustomerForAdmin}</strong>
+            </span>
           </div>
         )}
       </div>
@@ -538,7 +526,16 @@ export const NotificationsView: React.FC = () => {
         activeAlarms={activeAlarms}
         rules={rules}
         queueItems={queueItems}
-        dispatchLogs={dispatchLogs}
+        onOpenNewRule={() => {
+          setEditingRule(null);
+          setIsWizardOpen(true);
+        }}
+        onNavigateToTab={(tab) => {
+          if (tab === 'alarms_rules') setActiveTab('rules');
+          else if (tab === 'dispatch_queue') setActiveTab('queue');
+          else if (tab === 'delivery_logs') setActiveTab('history');
+          else if (tab === 'channel_settings') setActiveTab('channels');
+        }}
       />
 
       {/* Tab Navigation Pill Bar */}

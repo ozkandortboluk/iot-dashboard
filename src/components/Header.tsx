@@ -30,6 +30,8 @@ import { useRealtime } from '../context/RealtimeContext';
 import { formatShortTime } from '../lib/utils';
 import { getRoleBadgeInfo } from '../lib/permissions';
 import { NexusNodeLogo } from './NexusNodeLogo';
+import { CustomerSelectorDropdown } from './CustomerSelectorDropdown';
+import { CustomerAvatar } from './CustomerAvatar';
 
 interface HeaderProps {
   activeTab: string;
@@ -64,6 +66,8 @@ export const Header: React.FC<HeaderProps> = ({
     selectedCustomerForAdmin,
     setSelectedCustomerForAdmin,
     customersList,
+    devices,
+    rawDevices,
   } = useRealtime();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -88,7 +92,36 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, []);
 
-  const customerUsers = customersList.filter((u) => u.role === 'customer' || u.companyName);
+  const customerOptions = React.useMemo(() => {
+    const customerUsers = customersList.filter((u) => u.role === 'customer' || u.companyName);
+    const allAdminIds = new Set(
+      customersList
+        .filter((c) => c.role === 'admin' || c.id === 'usr_admin' || c.id === 'admin')
+        .map((c) => c.id)
+    );
+    allAdminIds.add('usr_admin');
+    allAdminIds.add('admin');
+
+    return customerUsers.map((cust) => {
+      const isCustAdmin = cust.role === 'admin' || cust.id === 'usr_admin' || cust.id === 'admin';
+      let devCount: number;
+      if (isCustAdmin) {
+        devCount = cust.deviceCount ?? rawDevices.filter((d) => !d.tenantId || allAdminIds.has(d.tenantId)).length;
+      } else {
+        devCount = cust.deviceCount ?? rawDevices.filter((d) => d.tenantId === cust.id).length;
+      }
+
+      return {
+        id: cust.id,
+        name: cust.name,
+        email: cust.email,
+        companyName: cust.companyName,
+        phone: cust.phone,
+        status: cust.status,
+        deviceCount: devCount,
+      };
+    });
+  }, [customersList, rawDevices]);
 
   return (
     <header className="sticky top-0 z-30 h-14 sm:h-16 bg-white/95 dark:bg-[#020617]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex items-center shadow-sm dark:shadow-none">
@@ -106,11 +139,18 @@ export const Header: React.FC<HeaderProps> = ({
             />
           </div>
 
-          {/* Customer Title (if applicable, without 'Canlı İzleme') */}
+          {/* Customer Title (if logged in as customer) */}
           {user?.role === 'customer' && (user.companyName || user.name) ? (
-            <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 tracking-tight truncate max-w-[90px] xs:max-w-[120px] sm:max-w-[180px] shrink-0">
-              {user.companyName || user.name}
-            </h1>
+            <div className="flex items-center gap-1.5 xs:gap-2 max-w-[120px] xs:max-w-[160px] sm:max-w-[220px] shrink-0">
+              <CustomerAvatar
+                companyName={user.companyName}
+                name={user.name}
+                size="xs"
+              />
+              <h1 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 tracking-tight truncate">
+                {user.companyName || user.name}
+              </h1>
+            </div>
           ) : null}
 
           {/* REALTIME CONNECTION STATUS INDICATOR - Compact Icon Badge */}
@@ -153,25 +193,14 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* ADMIN CUSTOMER SELECTOR */}
+          {/* ADMIN CUSTOMER SELECTOR (Searchable with Avatars) */}
           {user?.role === 'admin' && (
-            <div className="flex items-center gap-1 bg-slate-100 dark:bg-indigo-950/50 border border-slate-300 dark:border-indigo-500/30 rounded-xl p-1.5 2xl:px-2.5 2xl:py-1 text-xs max-w-[95px] xs:max-w-[125px] sm:max-w-[170px] min-w-0 shrink">
-              <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <select
-                value={selectedCustomerForAdmin}
-                onChange={(e) => setSelectedCustomerForAdmin(e.target.value)}
-                className="bg-transparent text-slate-800 dark:text-indigo-300 font-semibold focus:outline-none cursor-pointer text-xs truncate w-full"
-              >
-                <option value="all" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-200">
-                  🌐 Tüm Müşteriler
-                </option>
-                {customerUsers.map((cust) => (
-                  <option key={cust.id} value={cust.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-200">
-                    🏢 {cust.companyName || cust.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <CustomerSelectorDropdown
+              customers={customerOptions}
+              selectedCustomerId={selectedCustomerForAdmin}
+              onSelectCustomer={setSelectedCustomerForAdmin}
+              totalDevicesCount={devices.length}
+            />
           )}
 
           {/* Simulator Toggle Button - Compact (Admin Only) */}

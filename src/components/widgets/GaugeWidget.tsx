@@ -15,15 +15,21 @@ export const GaugeWidget: React.FC<GaugeWidgetProps> = ({ config }) => {
   const metricKey = config.metricKey || 'power';
   const unit = config.unit || getMetricUnit(metricKey);
 
-  const targetDev = config.deviceId
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
     ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
     : null;
+  const isMissingDevice = isSpecificDevice && !targetDev;
 
   const filtered = latestTelemetry.filter((t) => {
-    if (config.deviceId && targetDev) {
-      if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
-    } else if (config.deviceId && t.deviceId !== config.deviceId) {
-      return false;
+    if (isSpecificDevice) {
+      if (targetDev && (t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey)) {
+        // match
+      } else if (t.deviceId === config.deviceId) {
+        // match
+      } else {
+        return false;
+      }
     }
     return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
   });
@@ -39,7 +45,7 @@ export const GaugeWidget: React.FC<GaugeWidgetProps> = ({ config }) => {
     if (matchKey && (targetDev.metrics as Record<string, number>)[matchKey] !== undefined) {
       val = Number((targetDev.metrics as Record<string, number>)[matchKey]);
     }
-  } else {
+  } else if (!isSpecificDevice) {
     for (const d of devices) {
       if (d.metrics) {
         const matchKey = Object.keys(d.metrics).find(

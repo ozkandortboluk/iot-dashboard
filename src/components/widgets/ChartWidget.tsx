@@ -40,7 +40,8 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
   const metricKey = config.metricKey || 'cpu';
   const unit = config.unit || getMetricUnit(metricKey);
 
-  const targetDev = config.deviceId
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
     ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
     : null;
 
@@ -64,7 +65,7 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
       30 * 86400000;
     const startTime = new Date(now.getTime() - durationMs).toISOString();
 
-    const devParam = config.deviceId ? `&deviceId=${encodeURIComponent(config.deviceId)}` : '';
+    const devParam = isSpecificDevice ? `&deviceId=${encodeURIComponent(config.deviceId!)}` : '';
     const bucket = bucketMap[timeRange] || '5m';
 
     fetch(`/api/timescale/time-bucket?metric=${encodeURIComponent(metricKey)}&bucket=${bucket}&startTime=${encodeURIComponent(startTime)}${devParam}`)
@@ -89,10 +90,12 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
   if (timeRange === 'live') {
     // Filter telemetry for this widget (latestTelemetry is ordered newest-first)
     const matchingTelemetry = latestTelemetry.filter((t) => {
-      if (config.deviceId && targetDev) {
-        if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
-      } else if (config.deviceId && t.deviceId !== config.deviceId) {
-        return false;
+      if (isSpecificDevice) {
+        if (targetDev) {
+          if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
+        } else if (t.deviceId !== config.deviceId) {
+          return false;
+        }
       }
       return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
     });

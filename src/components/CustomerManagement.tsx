@@ -7,6 +7,7 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import type { User } from '../types';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
+import { CustomerAvatar } from './CustomerAvatar';
 
 interface CustomerManagementProps {
   onSelectCustomerForDashboard: (customerId: string) => void;
@@ -104,6 +105,12 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
       return matchSearch && matchRole && matchStatus && matchDevice && matchAlarm;
     }
   ).sort((a, b) => {
+    // 1. Admin / Merkez Yönetim her zaman listenin en üstünde yer alır
+    const isAAdmin = a.role === 'admin' || a.id === 'usr_admin' || a.id === 'admin';
+    const isBAdmin = b.role === 'admin' || b.id === 'usr_admin' || b.id === 'admin';
+    if (isAAdmin && !isBAdmin) return -1;
+    if (!isAAdmin && isBAdmin) return 1;
+
     if (sortBy === 'newest') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     if (sortBy === 'oldest') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     if (sortBy === 'nameAsc') return a.name.localeCompare(b.name);
@@ -617,9 +624,11 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                     >
                       <td className="py-4 px-4 font-medium text-slate-800 dark:text-slate-200">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-sm">
-                            {cust.companyName ? cust.companyName[0] : cust.name[0]}
-                          </div>
+                          <CustomerAvatar
+                            companyName={cust.companyName}
+                            name={cust.name}
+                            size="md"
+                          />
                           <div>
                             <p className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                               {cust.companyName || cust.name}

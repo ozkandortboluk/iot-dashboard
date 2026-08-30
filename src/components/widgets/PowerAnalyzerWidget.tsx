@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import type { WidgetConfig } from '../../types';
 import { useRealtime } from '../../context/RealtimeContext';
 import { Activity, AlertTriangle, CheckCircle2, Zap, Settings2, ShieldAlert } from 'lucide-react';
@@ -12,33 +12,23 @@ interface PowerAnalyzerWidgetProps {
 export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config, onEdit }) => {
   const { latestTelemetry, devices } = useRealtime();
 
-  // State for metrics
-  const [metrics, setMetrics] = useState({
-    l1: 0,
-    l2: 0,
-    l3: 0,
-    ri: 0,
-    rc: 0,
-    p: 0,
-    pct_ri: -1,
-    pct_rc: -1,
-  });
-
-  // Extract values from live telemetry or device metrics
-  useEffect(() => {
-    const targetDev = config.deviceId
+  // Extract values synchronously via useMemo from live telemetry or device metrics
+  const metrics = useMemo(() => {
+    const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+    const targetDev = isSpecificDevice
       ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
       : null;
 
     // Search for telemetry matching configured deviceId or overall
     const devTelemetry = latestTelemetry.filter((t) => {
-      if (config.deviceId && targetDev) {
-        return t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey;
+      if (isSpecificDevice) {
+        if (targetDev) return t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey;
+        return t.deviceId === config.deviceId;
       }
-      return !config.deviceId || t.deviceId === config.deviceId;
+      return true;
     });
 
-    const getMetric = (keys: string[], prevVal: number, defaultVal: number) => {
+    const getMetric = (keys: string[], defaultVal: number) => {
       const found = devTelemetry.find((t) =>
         keys.some((k) => k.toLowerCase() === t.metric?.toLowerCase())
       );
@@ -47,7 +37,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       }
 
       // Fallback check in device metrics (Case-Insensitive)
-      const dev = targetDev || (!config.deviceId ? devices.find((d) => d.metrics) : null);
+      const dev = targetDev || (!isSpecificDevice ? devices.find((d) => d.metrics) : null);
       if (dev && dev.metrics) {
         const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
@@ -58,11 +48,11 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
           }
         }
       }
-      return typeof prevVal === 'number' && !isNaN(prevVal) ? prevVal : defaultVal;
+      return defaultVal;
     };
 
-    // Check live telemetry batch or device metrics for pct_ri/pct_rc; fallback to previous value to prevent resetting
-    const getLivePctMetric = (keys: string[], prevVal: number) => {
+    // Check live telemetry batch or device metrics for pct_ri/pct_rc
+    const getLivePctMetric = (keys: string[]) => {
       const found = devTelemetry.find((t) =>
         keys.some((k) => k.toLowerCase() === t.metric?.toLowerCase())
       );
@@ -71,7 +61,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       }
 
       // Fallback check in device metrics (Case-Insensitive)
-      const dev = targetDev || (!config.deviceId ? devices.find((d) => d.metrics) : null);
+      const dev = targetDev || (!isSpecificDevice ? devices.find((d) => d.metrics) : null);
       if (dev && dev.metrics) {
         const metricKeys = Object.keys(dev.metrics);
         for (const k of keys) {
@@ -82,22 +72,20 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
           }
         }
       }
-      return typeof prevVal === 'number' && !isNaN(prevVal) ? prevVal : -1;
+      return -1;
     };
 
-    setMetrics((prev) => {
-      const mappings = config.metricMappings || {};
-      return {
-        l1: getMetric(mappings.l1 ? [mappings.l1] : ['l1', 'voltage_l1', 'v1', 'l1_voltage', 'phase1', 'voltage'], prev.l1, prev.l1),
-        l2: getMetric(mappings.l2 ? [mappings.l2] : ['l2', 'voltage_l2', 'v2', 'l2_voltage', 'phase2'], prev.l2, prev.l2),
-        l3: getMetric(mappings.l3 ? [mappings.l3] : ['l3', 'voltage_l3', 'v3', 'l3_voltage', 'phase3'], prev.l3, prev.l3),
-        ri: getMetric(mappings.ri ? [mappings.ri] : ['ri', 'reactive_ind', 'reactive_inductive', 'ind_reactive', 'induktif', 'enduktif', 'ri_kvar'], prev.ri, prev.ri),
-        rc: getMetric(mappings.rc ? [mappings.rc] : ['rc', 'reactive_cap', 'reactive_capacitive', 'cap_reactive', 'kapasitif', 'rc_kvar'], prev.rc, prev.rc),
-        p: getMetric(mappings.p ? [mappings.p] : ['p', 'power', 'active_power', 'kw', 'power_kw'], prev.p, prev.p),
-        pct_ri: getLivePctMetric(mappings.pct_ri ? [mappings.pct_ri] : ['pct_ri', 'percent_ri', 'percent_ind', 'yuzde_ri', 'ri_percent', 'ri_ratio', 'pct_ind'], prev.pct_ri),
-        pct_rc: getLivePctMetric(mappings.pct_rc ? [mappings.pct_rc] : ['pct_rc', 'percent_rc', 'percent_cap', 'yuzde_rc', 'rc_percent', 'rc_ratio', 'pct_cap'], prev.pct_rc),
-      };
-    });
+    const mappings = config.metricMappings || {};
+    return {
+      l1: getMetric(mappings.l1 ? [mappings.l1] : ['l1', 'voltage_l1', 'v1', 'l1_voltage', 'phase1', 'voltage'], 0),
+      l2: getMetric(mappings.l2 ? [mappings.l2] : ['l2', 'voltage_l2', 'v2', 'l2_voltage', 'phase2'], 0),
+      l3: getMetric(mappings.l3 ? [mappings.l3] : ['l3', 'voltage_l3', 'v3', 'l3_voltage', 'phase3'], 0),
+      ri: getMetric(mappings.ri ? [mappings.ri] : ['ri', 'reactive_ind', 'reactive_inductive', 'ind_reactive', 'induktif', 'enduktif', 'ri_kvar'], 0),
+      rc: getMetric(mappings.rc ? [mappings.rc] : ['rc', 'reactive_cap', 'reactive_capacitive', 'cap_reactive', 'kapasitif', 'rc_kvar'], 0),
+      p: getMetric(mappings.p ? [mappings.p] : ['p', 'power', 'active_power', 'kw', 'power_kw'], 0),
+      pct_ri: getLivePctMetric(mappings.pct_ri ? [mappings.pct_ri] : ['pct_ri', 'percent_ri', 'percent_ind', 'yuzde_ri', 'ri_percent', 'ri_ratio', 'pct_ind']),
+      pct_rc: getLivePctMetric(mappings.pct_rc ? [mappings.pct_rc] : ['pct_rc', 'percent_rc', 'percent_cap', 'yuzde_rc', 'rc_percent', 'rc_ratio', 'pct_cap']),
+    };
   }, [latestTelemetry, devices, config.deviceId, config.metricMappings]);
 
   // Meter baseline last index values from config

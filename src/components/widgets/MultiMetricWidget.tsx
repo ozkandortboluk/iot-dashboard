@@ -78,17 +78,23 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
   };
 
   // Target device lookup if specific deviceId is configured
-  const targetDev = config.deviceId
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
     ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
     : null;
+  const isMissingDevice = isSpecificDevice && !targetDev;
 
   // Helper to extract value and trend for a slot
   const getMetricData = (metricKey: string) => {
     const filtered = latestTelemetry.filter((t) => {
-      if (config.deviceId && targetDev) {
-        if (t.deviceId !== targetDev.id && t.deviceId !== targetDev.apiKey) return false;
-      } else if (config.deviceId && t.deviceId !== config.deviceId) {
-        return false;
+      if (isSpecificDevice) {
+        if (targetDev && (t.deviceId === targetDev.id || t.deviceId === targetDev.apiKey)) {
+          // match
+        } else if (t.deviceId === config.deviceId) {
+          // match
+        } else {
+          return false;
+        }
       }
       return t.metric && t.metric.toLowerCase() === metricKey.toLowerCase();
     });
@@ -105,7 +111,7 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
       if (matchKey && (targetDev.metrics as Record<string, number>)[matchKey] !== undefined) {
         currentVal = Number((targetDev.metrics as Record<string, number>)[matchKey]);
       }
-    } else {
+    } else if (!isSpecificDevice) {
       for (const d of devices) {
         if (d.metrics) {
           const matchKey = Object.keys(d.metrics).find(

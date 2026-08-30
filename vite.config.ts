@@ -16,5 +16,9 @@ export default defineConfig(() => {
         ignored: ['**/data/**', '**/*.json', path.resolve(__dirname, 'data', '**')],
       },
     },
+    build: {
+      outDir: 'dist',
+      emptyOutDir: false,
+    },
   };
 });

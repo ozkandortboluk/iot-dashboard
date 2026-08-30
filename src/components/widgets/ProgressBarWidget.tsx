@@ -12,6 +12,11 @@ interface ProgressBarWidgetProps {
 export const ProgressBarWidget: React.FC<ProgressBarWidgetProps> = ({ config, onEdit }) => {
   const { devices } = useRealtime();
 
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
+
   // Pick metric readings
   const metricsList = [
     { label: 'CPU Yük Oranı', key: 'cpu', unit: '%', max: 100, warn: 70, crit: 90 },
@@ -21,6 +26,12 @@ export const ProgressBarWidget: React.FC<ProgressBarWidgetProps> = ({ config, on
   ];
 
   const getMetricValue = (key: string) => {
+    if (isSpecificDevice) {
+      if (targetDev && targetDev.metrics) {
+        return Number(targetDev.metrics[key as keyof typeof targetDev.metrics] || 0);
+      }
+      return 0;
+    }
     const total = devices.reduce((acc, d) => acc + (d.metrics[key as keyof typeof d.metrics] || 0), 0);
     return Math.round((total / (devices.length || 1)) * 10) / 10;
   };

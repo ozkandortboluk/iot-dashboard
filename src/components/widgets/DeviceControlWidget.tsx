@@ -12,27 +12,30 @@ interface DeviceControlWidgetProps {
 export const DeviceControlWidget: React.FC<DeviceControlWidgetProps> = ({ config, onEdit }) => {
   const { devices, sendControlCommand, updateDevice } = useRealtime();
 
-  // Find target device or pick first
-  const targetDevice = devices.find((d) => d.id === config.deviceId) || devices[0];
+  // Find target device strictly if configured
+  const isSpecificConfigured = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDevice = isSpecificConfigured
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId) || null
+    : (devices.length === 1 ? devices[0] : null);
+
+  const isMissingDevice = isSpecificConfigured && !targetDevice;
 
   const [relayState, setRelayState] = useState(true);
   const [speedLevel, setSpeedLevel] = useState(75);
   const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
 
   const handleToggleRelay = () => {
+    if (!targetDevice) return;
     const newState = !relayState;
     setRelayState(newState);
-    if (targetDevice) {
-      sendControlCommand(targetDevice.id, newState ? 'RELAY_ON' : 'RELAY_OFF');
-    }
+    sendControlCommand(targetDevice.id, newState ? 'RELAY_ON' : 'RELAY_OFF');
     setLastActionStatus(`Röle kilit komutu ${newState ? 'AÇILDI' : 'KAPATILDI'}`);
     setTimeout(() => setLastActionStatus(null), 3000);
   };
 
   const handleReboot = () => {
-    if (targetDevice) {
-      sendControlCommand(targetDevice.id, 'REBOOT_DEVICE');
-    }
+    if (!targetDevice) return;
+    sendControlCommand(targetDevice.id, 'REBOOT_DEVICE');
     setLastActionStatus(`Yeniden başlatma (Reboot) sinyali iletildi.`);
     setTimeout(() => setLastActionStatus(null), 3000);
   };
@@ -45,13 +48,17 @@ export const DeviceControlWidget: React.FC<DeviceControlWidgetProps> = ({ config
           <div className="p-2 rounded-xl text-white font-bold" style={{ backgroundColor: config.colorScheme || '#3b82f6' }}>
             <Cpu className="w-4 h-4" />
           </div>
-          <DeviceStatusDot device={targetDevice} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDevice} />
           <div>
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">
               {config.title || 'Cihaz Anlık Kontrol Masası'}
             </h3>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
-              {targetDevice ? `${targetDevice.name} (${targetDevice.location})` : 'Cihaz seçilmedi'}
+              {targetDevice
+                ? `${targetDevice.name} (${targetDevice.location})`
+                : isMissingDevice
+                ? `⚠️ Cihaz Bulunamadı (${config.deviceId})`
+                : 'Cihaz seçilmedi'}
             </p>
           </div>
         </div>
