@@ -678,9 +678,9 @@ public async flushPhysicalRetryQueue(): Promise<{
 
     const fullReadings: TelemetryReading[] = readings.map((r, i) => {
       const dev = devLookup || (this.db.data.devices || []).find((d: Device) => d.id === r.deviceId);
-      const tenantId = r.tenantId || r.customerId || r.tenantId || dev?.tenantId || 'usr_admin';
-      const customerId = r.customerId || r.tenantId || r.tenantId || dev?.tenantId || 'usr_admin';
-      const userId = r.tenantId || customerId || tenantId || dev?.tenantId || 'usr_admin';
+      const tenantId = r.tenantId || r.customerId || dev?.tenantId || '';
+      const customerId = r.customerId || r.tenantId || dev?.tenantId || '';
+      const userId = r.userId || r.tenantId || dev?.tenantId || '';
       const bootId = r.bootId || 'default';
       const idempotencyKey = r.idempotencyKey || (
         r.deviceId && r.sequence !== undefined && r.sequence !== null
@@ -819,9 +819,9 @@ public async flushPhysicalRetryQueue(): Promise<{
   public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isDevSim = dev?.isSimulated || false;
-    const tenantId = reading.tenantId || reading.customerId || reading.tenantId || dev?.tenantId || 'usr_admin';
-    const customerId = reading.customerId || reading.tenantId || reading.tenantId || dev?.tenantId || 'usr_admin';
-    const userId = reading.tenantId || customerId || tenantId || dev?.tenantId || 'usr_admin';
+    const tenantId = reading.tenantId || reading.customerId || dev?.tenantId || '';
+    const customerId = reading.customerId || reading.tenantId || dev?.tenantId || '';
+    const userId = reading.userId || reading.tenantId || dev?.tenantId || '';
 
     const fullReading: TelemetryReading = {
       ...reading,
@@ -1119,7 +1119,7 @@ public async flushPhysicalRetryQueue(): Promise<{
             const isSimulatedQuery = queryDevObj ? queryDevObj.isSimulated : false;
             const rawTable = queryDev
               ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
-              : `(SELECT id, packet_id, COALESCE(tenant_id, 'usr_admin') AS tenant_id, COALESCE(customer_id, 'usr_admin') AS customer_id, COALESCE(user_id, 'usr_admin') AS user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, COALESCE(tenant_id, 'usr_admin') AS tenant_id, COALESCE(customer_id, 'usr_admin') AS customer_id, COALESCE(user_id, 'usr_admin') AS user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
+              : `(SELECT id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
 
             // Automated Resolution Selector:
             // Range <= 2 Hours -> Raw Telemetry
@@ -1316,7 +1316,7 @@ public async flushPhysicalRetryQueue(): Promise<{
               const mapped = res.rows.map((r: any) => ({
                 id: r.id || `agg_${r.deviceId}_${r.metric}_${new Date(r.timestamp).getTime()}`,
                 packetId: r.packetId || undefined,
-                tenantId: r.tenantId || "usr_admin",
+                tenantId: r.tenantId || "",
                 deviceId: r.deviceId,
                 deviceName: r.deviceName || r.deviceId,
                 metric: r.metric,

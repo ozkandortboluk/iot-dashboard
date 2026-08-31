@@ -1052,13 +1052,16 @@ class LocalDatabase {
   /**
    * Atomically claims pending commands for a device.
    * Transitions status from 'pending' to 'claimed' and awaits PostgreSQL update before returning.
+   * Reclaims any previously 'claimed' command whose lease expired (>60s) without an ACK.
    */
-  public async claimPendingCommands(deviceId: string, limit: number = 20): Promise<DeviceCommand[]> {
+  public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
     const now = new Date().toISOString();
+    const nowMs = Date.now();
+    const leaseMs = leaseSeconds * 1000;
     let claimed: DeviceCommand[] = [];
 
     if (this.isPostgresProductionMode()) {
-      claimed = await this.postgresRepo.claimPendingCommands(deviceId, limit);
+      claimed = await this.postgresRepo.claimPendingCommands(deviceId, limit, leaseSeconds);
       // Sync in-memory RAM cache
       if (!this.data.commands) this.data.commands = [];
       const claimedIds = new Set(claimed.map(c => c.id));
@@ -1071,7 +1074,16 @@ class LocalDatabase {
       }
     } else {
       if (!this.data.commands) this.data.commands = [];
-      const matching = this.data.commands.filter((c) => c.deviceId === deviceId && c.status === 'pending').slice(0, limit);
+      const matching = this.data.commands.filter((c) => {
+        if (c.deviceId !== deviceId) return false;
+        if (c.status === 'pending') return true;
+        if (c.status === 'claimed' && c.claimed_at) {
+          const claimedTime = new Date(c.claimed_at).getTime();
+          return nowMs - claimedTime > leaseMs;
+        }
+        return false;
+      }).slice(0, limit);
+
       for (const cmd of matching) {
         cmd.status = 'claimed';
         cmd.claimed_at = now;
@@ -1089,6 +1101,7 @@ class LocalDatabase {
   /**
    * Acknowledges command execution by device ID and command ID(s).
    * Transitions status to 'acknowledged' (or 'failed') and persists to PostgreSQL.
+   * Mandates strict deviceId matching to prevent cross-device ACK authorization attacks.
    */
   public async acknowledgeCommands(
     deviceId: string,
@@ -1097,20 +1110,20 @@ class LocalDatabase {
     result?: any
   ): Promise<number> {
     const ids = Array.isArray(commandIds) ? commandIds : [commandIds];
-    if (ids.length === 0) return 0;
+    if (ids.length === 0 || !deviceId) return 0;
     const now = new Date().toISOString();
     let count = 0;
 
     if (this.isPostgresProductionMode()) {
       for (const id of ids) {
-        const ok = await this.postgresRepo.acknowledgeCommand(id, status, result);
+        const ok = await this.postgresRepo.acknowledgeCommand(deviceId, id, status, result);
         if (ok) count++;
       }
     }
 
     if (!this.data.commands) this.data.commands = [];
     for (const cmd of this.data.commands) {
-      if (ids.includes(cmd.id) && (!deviceId || cmd.deviceId === deviceId)) {
+      if (ids.includes(cmd.id) && cmd.deviceId === deviceId) {
         cmd.status = status;
         cmd.executed_at = now;
         cmd.acknowledged_at = now;

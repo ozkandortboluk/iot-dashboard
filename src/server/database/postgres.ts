@@ -1119,16 +1119,21 @@ export class PostgresRepository {
   /**
    * Atomically claims pending commands in PostgreSQL to prevent duplicate execution across polling threads.
    * Transitions status from 'pending' -> 'claimed'.
+   * Reclaims any previously 'claimed' command whose lease expired (>60s) without an ACK.
    */
-  public async claimPendingCommands(deviceId: string, limit: number = 20): Promise<DeviceCommand[]> {
-    if (!this.pool) return [];
+  public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
+    if (!this.pool || !deviceId) return [];
     const sql = `
       UPDATE device_commands
       SET status = 'claimed',
           executed_at = CURRENT_TIMESTAMP
       WHERE id IN (
         SELECT id FROM device_commands
-        WHERE device_id = $1 AND status = 'pending'
+        WHERE device_id = $1 
+          AND (
+            status = 'pending' 
+            OR (status = 'claimed' AND executed_at < CURRENT_TIMESTAMP - ($3 || ' seconds')::INTERVAL)
+          )
         ORDER BY created_at ASC
         LIMIT $2
         FOR UPDATE SKIP LOCKED
@@ -1136,7 +1141,7 @@ export class PostgresRepository {
       RETURNING id, device_id, command_name, parameters, status, sent_by, created_at, executed_at;
     `;
     try {
-      const res = await this.query(sql, [deviceId, limit]);
+      const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
       return res.rows.map(r => ({
         id: r.id,
         deviceId: r.device_id,
@@ -1156,26 +1161,29 @@ export class PostgresRepository {
 
   /**
    * Transitions a claimed or pending command to 'acknowledged' (or 'failed') when the device confirms execution.
+   * Mandates matching both commandId AND deviceId for strict device security isolation.
    */
   public async acknowledgeCommand(
+    deviceId: string,
     commandId: string,
     status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
     result?: any
   ): Promise<boolean> {
-    if (!this.pool || !commandId) return false;
+    if (!this.pool || !commandId || !deviceId) return false;
     const sql = `
       UPDATE device_commands
-      SET status = $2,
+      SET status = $3,
           executed_at = CURRENT_TIMESTAMP,
           parameters = CASE 
-            WHEN $3::text IS NOT NULL THEN jsonb_set(COALESCE(parameters, '{}'::jsonb), '{result}', $3::jsonb)
+            WHEN $4::text IS NOT NULL THEN jsonb_set(COALESCE(parameters, '{}'::jsonb), '{result}', $4::jsonb)
             ELSE parameters
           END
-      WHERE id = $1;
+      WHERE id = $1 AND device_id = $2;
     `;
     try {
       const res = await this.query(sql, [
         commandId,
+        deviceId,
         status,
         result !== undefined ? JSON.stringify(result) : null
       ]);

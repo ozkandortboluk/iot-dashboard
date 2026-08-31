@@ -46,6 +46,9 @@ export const NetworkDiscoveryView: React.FC<{
   
   const [pairingCode, setPairingCode] = useState('');
   const [isScanningQR, setIsScanningQR] = useState(false);
+  const [qrScanError, setQrScanError] = useState<string | null>(null);
+  const [manualQrCode, setManualQrCode] = useState('');
+  const [scannerKey, setScannerKey] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredNetworkDevice[]>([]);
   const [foundDevice, setFoundDevice] = useState<DiscoveredNetworkDevice | null>(null);
@@ -181,7 +184,11 @@ export const NetworkDiscoveryView: React.FC<{
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               />
               <button
-                onClick={() => setIsScanningQR(true)}
+                onClick={() => {
+                  setQrScanError(null);
+                  setManualQrCode('');
+                  setIsScanningQR(true);
+                }}
                 title="Kare Kod (QR) Okut"
                 className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 rounded-xl font-medium transition flex items-center justify-center"
               >
@@ -365,42 +372,116 @@ export const NetworkDiscoveryView: React.FC<{
                 Cihaz Kare Kodunu Okutun
               </h3>
               <button
-                onClick={() => setIsScanningQR(false)}
+                onClick={() => {
+                  setIsScanningQR(false);
+                  setQrScanError(null);
+                }}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg transition"
               >
                 <XCircle className="w-6 h-6" />
               </button>
             </div>
-            <div className="p-6 relative bg-black flex justify-center items-center aspect-square">
-              <div className="absolute inset-0 overflow-hidden">
-                <Scanner
-                  onScan={(detectedCodes) => {
-                    if (detectedCodes && detectedCodes.length > 0) {
-                      handleQRScan(detectedCodes[0].rawValue);
+
+            <div className="p-4 relative bg-black flex justify-center items-center aspect-square overflow-hidden">
+              {qrScanError ? (
+                <div className="absolute inset-0 bg-slate-900 p-6 flex flex-col items-center justify-center text-center space-y-4">
+                  <ShieldAlert className="w-12 h-12 text-amber-500 animate-pulse" />
+                  <div className="space-y-1">
+                    <h4 className="font-semibold text-white text-base">Kamera İzni Reddedildi veya Erişilemedi</h4>
+                    <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
+                      {qrScanError}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setQrScanError(null);
+                      setScannerKey((k) => k + 1);
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-2.5 rounded-xl font-medium transition flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Kamerayı Tekrar Dene
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="absolute inset-0 overflow-hidden" key={scannerKey}>
+                    <Scanner
+                      onScan={(detectedCodes) => {
+                        if (detectedCodes && detectedCodes.length > 0) {
+                          handleQRScan(detectedCodes[0].rawValue);
+                        }
+                      }}
+                      onError={(error: any) => {
+                        console.warn('QR Scan Error:', error);
+                        let msg = 'Kamera erişim hatası oluştu.';
+                        const str = typeof error === 'object' ? JSON.stringify(error) : String(error);
+                        if (
+                          str.includes('permission-denied') ||
+                          str.includes('Permission dismissed') ||
+                          str.includes('NotAllowedError') ||
+                          str.includes('Permission denied')
+                        ) {
+                          msg = 'Kamera erişim izni verilmedi veya kapatıldı. Tarayıcınızdan kamera iznini onaylayın veya QR kod / Eşleştirme kodunu aşağıya elle girin.';
+                        } else if (str.includes('NotFoundError') || str.includes('DevicesNotFoundError')) {
+                          msg = 'Cihazınızda aktif bir kamera bulunamadı.';
+                        } else if (str.includes('NotReadableError') || str.includes('TrackStartError')) {
+                          msg = 'Kamera başka bir uygulama veya sekme tarafından kullanılıyor.';
+                        }
+                        setQrScanError(msg);
+                      }}
+                      formats={['qr_code']}
+                      components={{
+                        audio: false,
+                        tracker: true,
+                        finder: false,
+                      }}
+                      styles={{
+                        container: { width: '100%', height: '100%' },
+                      }}
+                    />
+                  </div>
+                  {/* Overlay targeting frame */}
+                  <div className="absolute inset-8 border-2 border-indigo-500/50 rounded-3xl pointer-events-none">
+                    <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-indigo-500 rounded-tl-2xl"></div>
+                    <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-indigo-500 rounded-tr-2xl"></div>
+                    <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-indigo-500 rounded-bl-2xl"></div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-indigo-500 rounded-br-2xl"></div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Manual QR / Code Fallback Input inside Modal */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="text-center text-xs text-slate-500 dark:text-slate-400">
+                Kameranızı cihaz üzerindeki QR koda hizalayın veya kodu elle yazın:
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={manualQrCode}
+                  onChange={(e) => setManualQrCode(e.target.value)}
+                  placeholder="Kare kod veya eşleştirme kodu (Örn: 482913)"
+                  className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && manualQrCode.trim()) {
+                      handleQRScan(manualQrCode.trim());
                     }
                   }}
-                  onError={(error) => console.error('QR Scan Error:', error)}
-                  formats={['qr_code']}
-                  components={{
-                    audio: false,
-                    tracker: true,
-                    finder: false,
-                  }}
-                  styles={{
-                    container: { width: '100%', height: '100%' },
-                  }}
                 />
+                <button
+                  onClick={() => {
+                    if (manualQrCode.trim()) {
+                      handleQRScan(manualQrCode.trim());
+                    }
+                  }}
+                  disabled={!manualQrCode.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shrink-0"
+                >
+                  Kod Kullan
+                </button>
               </div>
-              {/* Overlay targeting frame */}
-              <div className="absolute inset-8 border-2 border-indigo-500/50 rounded-3xl pointer-events-none">
-                <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-indigo-500 rounded-tl-2xl"></div>
-                <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-indigo-500 rounded-tr-2xl"></div>
-                <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-indigo-500 rounded-bl-2xl"></div>
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-indigo-500 rounded-br-2xl"></div>
-              </div>
-            </div>
-            <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
-              Kameranızı cihazın üzerindeki veya kullanım kılavuzundaki QR koda hizalayın.
             </div>
           </div>
         </div>
