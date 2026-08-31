@@ -173,7 +173,22 @@ export class DeviceRepository {
   }
 
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
-    const newId = (deviceData.id && deviceData.id.trim()) ? deviceData.id.trim() : `dev_${Date.now()}`;
+    let newId = (deviceData.id && deviceData.id.trim()) ? deviceData.id.trim() : `dev_${Date.now()}`;
+    
+    // Auto-recovery of historical data by MAC Address
+    if (deviceData.macAddress && this.db.data.archivedDevices) {
+      const archived = this.db.data.archivedDevices.find((a: any) => 
+        a.macAddress && a.macAddress.toLowerCase() === deviceData.macAddress!.toLowerCase()
+      );
+      if (archived && archived.id) {
+        newId = archived.id; // Reuse the old ID to link all historical telemetry!
+        // Optionally remove from archived list? Let's just leave it or remove it.
+        this.db.data.archivedDevices = this.db.data.archivedDevices.filter((a: any) => a.id !== newId);
+        
+        this.db.addAuditLog('system', 'API Manager', `Cihaz MAC eşleşmesiyle geçmiş verilerine bağlandı: ${deviceData.macAddress}`, 'info');
+      }
+    }
+
     const keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
     const isSimulated = deviceData.isSimulated ?? false;
     const saveSimulatedDataToDb = deviceData.saveSimulatedDataToDb ?? false;
@@ -387,6 +402,12 @@ export class DeviceRepository {
     const index = this.db.data.devices.findIndex((d: Device) => d.id === deviceId);
     if (index !== -1) {
       const removed = this.db.data.devices.splice(index, 1)[0];
+      
+      // Store in archivedDevices for MAC-based recovery
+      if (!this.db.data.archivedDevices) this.db.data.archivedDevices = [];
+      removed.deletedAt = new Date().toISOString();
+      this.db.data.archivedDevices.push(removed);
+
       this.db.addAuditLog('system', 'API Manager', `Cihaz Silindi: ${removed.name}`, 'medium');
       this.db.saveData(this.db.data);
 

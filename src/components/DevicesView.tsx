@@ -105,6 +105,12 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
   const [editCustomSimMetricInput, setEditCustomSimMetricInput] = useState('');
 
+  // Replace Hardware modal state
+  const [replacingDevice, setReplacingDevice] = useState<Device | null>(null);
+  const [replacePairingCode, setReplacePairingCode] = useState('');
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+
   // Delete confirmation modal state
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
 
@@ -541,6 +547,34 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     }
   };
 
+  const handleConfirmReplace = async () => {
+    if (!replacingDevice || !replacePairingCode.trim()) return;
+    setIsReplacing(true);
+    setReplaceError(null);
+    try {
+      const res = await fetch(`/api/devices/${replacingDevice.id}/replace`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        },
+        body: JSON.stringify({ pairingCode: replacePairingCode.trim() }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Donanım değiştirilemedi.');
+      }
+
+      setReplacingDevice(null);
+      setReplacePairingCode('');
+    } catch (err: any) {
+      setReplaceError(err.message || 'Bilinmeyen bir hata oluştu.');
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
   const getOwnerName = (userId: string) => {
     if (!userId || userId === 'usr_admin' || userId === 'admin') {
       return 'Merkez Yönetim';
@@ -967,6 +1001,18 @@ void sendHeartbeat() {
                         );
                       })()}
 
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReplacingDevice(dev);
+                          setReplacePairingCode('');
+                          setReplaceError(null);
+                        }}
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                        title="Donanım Değiştir (Eşleştirme)"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -2217,6 +2263,84 @@ void sendHeartbeat() {
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Evet, Cihazı Sil</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Replace Hardware Modal */}
+      {replacingDevice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-amber-500/30 space-y-4">
+            <div className="flex items-center gap-3 text-amber-500">
+              <div className="p-3 bg-amber-500/10 rounded-2xl">
+                <RefreshCw className="w-6 h-6 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Cihaz Donanımı Değiştir
+                </h3>
+                <p className="text-xs text-amber-500 font-semibold mt-0.5">Mevcut Veriler ve Ayarlar Korunur</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              <strong>"{replacingDevice.name}"</strong> cihazının fiziksel donanımını (ESP kartını) yenisiyle değiştirmek üzeresiniz. Lütfen yeni cihazın 6 haneli eşleştirme kodunu girin.
+            </p>
+
+            {replaceError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 font-medium flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {replaceError}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide">
+                Yeni Cihaz Eşleştirme Kodu (6 Hane)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={replacePairingCode}
+                  onChange={(e) => setReplacePairingCode(e.target.value.toUpperCase())}
+                  placeholder="Örn: 924718"
+                  className="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-mono tracking-widest text-center focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none transition"
+                  maxLength={6}
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">
+                Not: Yeni cihazın prize takılı ve Wi-Fi ağına bağlı olması gereklidir (Ağ Keşfi havuzunda beklemelidir).
+              </p>
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isReplacing}
+                onClick={() => setReplacingDevice(null)}
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                disabled={isReplacing || replacePairingCode.length !== 6}
+                onClick={handleConfirmReplace}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-amber-600/20 flex items-center gap-1.5 cursor-pointer transition"
+              >
+                {isReplacing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Değiştiriliyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>Donanımı Eşle</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

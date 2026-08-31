@@ -206,6 +206,61 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
   }
 });
 
+router.post('/:id/replace', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { pairingCode } = req.body;
+
+  const devices = db.getDevices();
+  const existingDev = devices.find((d) => d.id === deviceId);
+  
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Değiştirilecek cihaz bulunamadı.' });
+  }
+
+  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızı değiştirebilirsiniz.' });
+  }
+
+  if (!pairingCode) {
+    return res.status(400).json({ error: 'Eşleştirme kodu gereklidir.' });
+  }
+
+  try {
+    const discovered = db.getDiscoveredDevices().find(d => d.pairingCode === pairingCode);
+    if (!discovered) {
+      return res.status(404).json({ error: 'Eşleştirme kodu ile bekleyen cihaz bulunamadı. Lütfen cihazın açık olduğundan emin olun.' });
+    }
+
+    const updates: Partial<any> = {
+      macAddress: discovered.mac
+    };
+    if (discovered.ip) updates.ipAddress = discovered.ip;
+    if (discovered.firmwareVersion) updates.firmwareVersion = discovered.firmwareVersion;
+    if (discovered.hardwareModel) updates.hardwareModel = discovered.hardwareModel;
+
+    const updated = db.updateDevice(deviceId, updates);
+
+    // Remove from discovered pool
+    if (discovered.ip) db.removeUnregisteredDevice(discovered.ip);
+    if (discovered.mac) db.removeUnregisteredDevice(discovered.mac);
+
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+
+    res.json({
+      success: true,
+      device: updated,
+      message: 'Cihaz donanımı başarıyla değiştirildi.'
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Donanım değişikliği yapılamadı.';
+    res.status(400).json({ error: msg });
+  }
+});
+
 router.post('/:id/control', authenticateUser, (req, res) => commandController.controlDeviceOutput(req, res));
 router.post('/:deviceId/commands', authenticateUser, (req, res) => commandController.createCommand(req, res));
 router.post('/:deviceId/command', authenticateUser, (req, res) => commandController.createCommand(req, res));

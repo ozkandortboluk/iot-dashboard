@@ -71,6 +71,7 @@ interface DatabaseSchema {
   sites?: import('../types.js').Site[];
   subscriptions?: import('../types.js').Subscription[];
   devices: Device[];
+  archivedDevices?: Device[];
   unregisteredDevices?: DiscoveredNetworkDevice[];
   commands?: DeviceCommand[];
   telemetry?: TelemetryReading[]; // Optional transport array
