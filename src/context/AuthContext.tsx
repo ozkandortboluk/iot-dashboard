@@ -172,12 +172,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const logout = () => {
+    localStorage.removeItem('dashboard_token');
+    localStorage.removeItem('dashboard_user');
+    setUser(null);
+    setToken(null);
+  };
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      console.warn('[AuthContext] Oturum süresi doldu veya geçersiz jeton tespit edildi. Oturum temizleniyor...');
+      logout();
+    };
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
+  }, []);
+
   const refreshUser = async (): Promise<User | null> => {
     try {
       const savedToken = token || localStorage.getItem('dashboard_token');
+      if (!savedToken) return null;
       const res = await fetch('/api/profile', {
-        headers: savedToken ? { Authorization: `Bearer ${savedToken}` } : {},
+        headers: { Authorization: `Bearer ${savedToken}` },
       });
+      if (res.status === 401) {
+        logout();
+        return null;
+      }
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
         const freshUser = await res.json();
@@ -190,13 +214,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // ignore
     }
     return null;
-  };
-
-  const logout = () => {
-    localStorage.removeItem('dashboard_token');
-    localStorage.removeItem('dashboard_user');
-    setUser(null);
-    setToken(null);
   };
 
   return (

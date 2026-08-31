@@ -346,7 +346,7 @@ deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, async 
   res.json(cmds);
 });
 
-// Endpoint for ESP devices to poll commands directly
+// Endpoint for ESP devices to poll commands directly (Atomic Claim)
 deviceCommandsRouter.get('/device/commands', async (req, res) => {
   const token = (req.query.token as string) || (req.headers['x-api-key'] as string);
   if (!token) {
@@ -357,20 +357,52 @@ deviceCommandsRouter.get('/device/commands', async (req, res) => {
     return res.status(403).json({ error: 'Geçersiz Token' });
   }
 
-  const pending = await db.getPendingCommands(device.id);
-  if (pending.length > 0) {
-    db.markCommandsDelivered(pending.map((c) => c.id));
-    broadcast('commands:updated', await db.getCommands(device.id));
+  // Strict tenant check: Device must belong to a tenant
+  if (!device.tenantId) {
+    return res.status(403).json({ error: 'Cihaza ait geçerli bir tenantId bulunamadı.' });
   }
+
+  const { commandService } = await import('../services/command.service.js');
+  const claimedCommands = await commandService.getAndDeliverPendingCommands(device.id);
 
   res.json({
     deviceId: device.id,
     deviceName: device.name,
-    commands: pending.map((c) => ({
-      id: c.id,
-      command: c.command,
-      payload: c.payload,
-    })),
+    commands: claimedCommands,
+  });
+});
+
+// Endpoint for field devices (ESP32 / Python) to acknowledge command execution
+deviceCommandsRouter.post('/device/commands/ack', async (req, res) => {
+  const token = (req.query.token as string) || (req.headers['x-api-key'] as string) || req.body?.token;
+  if (!token) {
+    return res.status(401).json({ error: 'Token eksik' });
+  }
+  const device = db.getDeviceByApiKey(token);
+  if (!device) {
+    return res.status(403).json({ error: 'Geçersiz Token' });
+  }
+
+  const { commandId, commandIds, id, status, result } = req.body;
+  const targetIds = commandIds || commandId || id;
+
+  if (!targetIds) {
+    return res.status(400).json({ error: 'commandId veya commandIds parametresi gereklidir.' });
+  }
+
+  const { commandService } = await import('../services/command.service.js');
+  const updatedCount = await commandService.handleCommandAck(
+    device.id,
+    targetIds,
+    status === 'failed' ? 'failed' : 'acknowledged',
+    result
+  );
+
+  res.json({
+    success: true,
+    deviceId: device.id,
+    acknowledgedCount: updatedCount,
+    message: `${updatedCount} komut başarıyla onaylandı (status: ${status || 'acknowledged'}).`,
   });
 });
 

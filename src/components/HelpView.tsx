@@ -216,6 +216,7 @@ void loop() {
     float voltaj = 12.1 + (random(0, 40) / 100.0);
 
     // 2. Hafif & Hızlı Veri Formatı: TOKEN, CIHAZ_ADI, METRIK:DEGER...
+    // Önceki döngüde çalıştırılan komut id'leri varsa sunucuya ACK olarak iletilir
     String payload = String(API_KEY) + "," + DEVICE_NAME + 
                      ",sıcaklık:" + String(sicaklik, 2) + 
                      ",nem:" + String(nem, 1) + 
@@ -240,14 +241,30 @@ void loop() {
       if (!err && doc.containsKey("commands")) {
         JsonArray commands = doc["commands"];
         for (JsonObject cmd : commands) {
+          String cmdId       = cmd["id"] | "";
           String commandName = cmd["command"] | "";
           String payloadVal  = cmd["payload"] | "";
-          Serial.printf(">>> GELEN KOMUT: %s | DEĞER: %s\\n", commandName.c_str(), payloadVal.c_str());
+          Serial.printf(">>> GELEN KOMUT [ID: %s]: %s | DEĞER: %s\\n", cmdId.c_str(), commandName.c_str(), payloadVal.c_str());
 
+          bool executedOK = false;
           if (commandName == "RELAY_1" || commandName == "OUT_1") {
             digitalWrite(RELAY_PIN_1, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
+            executedOK = true;
           } else if (commandName == "RELAY_2" || commandName == "OUT_2") {
             digitalWrite(RELAY_PIN_2, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
+            executedOK = true;
+          }
+
+          // Komut çalıştırıldıysa anında Onay (ACK) Gönder:
+          if (executedOK && cmdId.length() > 0) {
+            HTTPClient ackHttp;
+            ackHttp.begin("${originUrl}/api/device/commands/ack");
+            ackHttp.addHeader("Content-Type", "application/json");
+            ackHttp.addHeader("X-API-Key", API_KEY);
+            String ackBody = "{\\"commandId\\":\\"" + cmdId + "\\",\\"status\\":\\"acknowledged\\"}";
+            ackHttp.POST(ackBody);
+            ackHttp.end();
+            Serial.println("[ACK GÖNDERİLDİ] Komut Onaylandı -> ID: " + cmdId);
           }
         }
       }
@@ -734,6 +751,15 @@ curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
     "command": "RELAY_1",
     "outputPin": "OUT_1",
     "value": "HIGH"
+  }'
+
+# 5. SAHA CİHAZI KOMUT İNFAK ONAYI (Command Execution ACK)
+curl -X POST "${originUrl}/api/device/commands/ack" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{
+    "commandId": "cmd_123456",
+    "status": "acknowledged"
   }'
 `,
     },

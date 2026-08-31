@@ -197,6 +197,21 @@ export class DeviceAuthService {
       };
     }
 
+    // 4.6. Strict Tenant Isolation Check (Fail-Closed: A device must have a verified tenant assigned)
+    if (!device.tenantId || typeof device.tenantId !== 'string' || device.tenantId.trim() === '') {
+      return {
+        success: false,
+        httpStatus: 403,
+        errorResponse: {
+          error: 'tenant_missing_forbidden',
+          status: 'unassigned_device',
+          deviceId: device.id,
+          deviceName: device.name,
+          message: 'Bu cihaz herhangi bir müşteri/tenant hesabına atanmamış (Eksik tenantId). Güvenlik ve tenant izolasyonu gereği telemetri işlenemez.',
+        },
+      };
+    }
+
     // 5. Check Device-Specific Rate Limit (rateLimitPerMin)
     const configuredLimit = device.rateLimitPerMin || 120;
     const deviceRateLimit = rateLimiterService.checkDeviceRateLimit(device.id, configuredLimit);

@@ -61,7 +61,7 @@ export class TelemetryRepository {
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
         const recentLines = lines.slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
         let loadedPackets = 0;
-        let totalPacketsInWal = lines.length;
+        const totalPacketsInWal = lines.length;
 
         let loadedReadings = 0;
         for (const line of recentLines) {
@@ -95,7 +95,7 @@ export class TelemetryRepository {
         const lines = content.split('\n').filter((l) => l.trim().length > 0);
         const recentLines = lines.slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
         let loadedPackets = 0;
-        let totalPacketsInWal = lines.length;
+        const totalPacketsInWal = lines.length;
 
         let loadedReadings = 0;
         for (const line of recentLines) {

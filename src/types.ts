@@ -224,11 +224,14 @@ export interface DeviceCommand {
   deviceName?: string;
   command: string;
   payload: string | number;
-  status: 'pending' | 'delivered' | 'executed' | 'failed';
+  status: 'pending' | 'claimed' | 'delivered' | 'acknowledged' | 'executed' | 'failed';
   created_at: string;
+  claimed_at?: string;
   delivered_at?: string;
+  acknowledged_at?: string;
   executed_at?: string;
   source?: string;
+  result?: any;
 }
 
 export type WidgetType = 

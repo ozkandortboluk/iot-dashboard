@@ -937,19 +937,21 @@ class LocalDatabase {
   public getTelemetry(deviceId?: string, metric?: string, limit: number = 100, userId?: string, customerId?: string): TelemetryReading[] { return this.telemetryRepository.getTelemetry(deviceId, metric, limit, userId, customerId); }
   public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string): Promise<any[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution); }
     // Notifications
-  public async getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): Promise<NotificationItem[]> {
+  public async getNotifications(requestingUserId?: string, targetCustomerId?: string): Promise<NotificationItem[]> {
+    if (!requestingUserId) return [];
     if (this.isPostgresProductionMode()) {
        return await this.postgresRepo.getNotifications(targetCustomerId || requestingUserId);
     }
     return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId);
   }
   public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem { return this.notificationRepository.addNotification(notif); }
-  public markNotificationRead(id: string, userId = 'usr_admin') { return this.notificationRepository.markNotificationRead(id, userId); }
-  public markAllNotificationsRead(userId = 'usr_admin') { return this.notificationRepository.markAllNotificationsRead(userId); }
+  public markNotificationRead(id: string, userId?: string) { return this.notificationRepository.markNotificationRead(id, userId); }
+  public markAllNotificationsRead(userId?: string) { return this.notificationRepository.markAllNotificationsRead(userId); }
   public getDashboard(userId: string): DashboardLayout { return this.notificationRepository.getDashboard(userId); }
   public saveDashboardWidgets(userId: string, widgets: any[], title?: string): DashboardLayout { return this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
   public resetDashboard(userId: string): DashboardLayout { return this.notificationRepository.resetDashboard(userId); }
-  public async getAlarms(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): Promise<any> {
+  public async getAlarms(requestingUserId?: string, targetCustomerId?: string, options?: any): Promise<any> {
+    if (!requestingUserId) return { data: [], total: 0 };
     if (this.isPostgresProductionMode()) {
        let list = await this.postgresRepo.getAlarms(targetCustomerId || requestingUserId);
        if (options?.status && options.status !== 'all') {
@@ -965,12 +967,13 @@ class LocalDatabase {
   public acknowledgeAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.acknowledgeAlarm(alarmId, currentUser); }
   public silenceAlarm(alarmId: string, durationMinutes: number, currentUser: any): boolean { return this.alarmRepository.silenceAlarm(alarmId, durationMinutes, currentUser); }
   public resolveAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.resolveAlarm(alarmId, currentUser); }
-  public getRules(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: any): any { return this.alarmRepository.getRules(requestingUserId, targetCustomerId, options); }
+  public getRules(requestingUserId?: string, targetCustomerId?: string, options?: any): any { return this.alarmRepository.getRules(requestingUserId, targetCustomerId, options); }
   public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): ThresholdRule { return this.alarmRepository.createRule(ruleData, requestingUser); }
   public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
   public deleteRule(id: string, requestingUser?: any): boolean { return this.alarmRepository.deleteRule(id, requestingUser); }
   
-  public async getAlarmEvents(requestingUserId = 'usr_admin', targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
+  public async getAlarmEvents(requestingUserId?: string, targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
+    if (!requestingUserId) return [];
     if (this.isPostgresProductionMode()) {
        return await this.postgresRepo.getAlarmEvents(targetCustomerId || requestingUserId, incidentId, alarmId, deviceId);
     }
@@ -989,13 +992,16 @@ class LocalDatabase {
   // Audit Logs
   public getAuditLogs(): AuditLog[] { return this.userRepository.getAuditLogs(); }
   public addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): void { return this.userRepository.addAuditLog(userId, userName, action, severity); }
-  // Device Downlink Commands
+  
+  // ==========================================
+  // Device Downlink Commands (State Machine: Pending -> Claimed -> Acknowledged/Failed)
+  // ==========================================
   public async getCommands(deviceId?: string): Promise<DeviceCommand[]> {
     if (this.isPostgresProductionMode()) {
       if (deviceId && deviceId !== 'all') {
          return await this.postgresRepo.getCommands(deviceId);
       } else {
-         return []; // Not supported/used currently to fetch all commands for all devices from PG without limit
+         return [];
       }
     }
     if (!this.data.commands) this.data.commands = [];
@@ -1028,24 +1034,105 @@ class LocalDatabase {
     };
     this.data.commands.push(cmd);
     
-    // RAM cache sınırlandır (sadece son 500 komutu tut)
+    // RAM cache limit (keep last 500 commands)
     if (this.data.commands.length > 500) {
        this.data.commands = this.data.commands.slice(-500);
     }
 
     if (this.isPostgresProductionMode()) {
-       await this.postgresRepo.saveCommand(cmd).catch(() => {});
+       await this.postgresRepo.saveCommand(cmd).catch((err) => {
+         console.warn(`[Command Sync Catch] Postgres komut kaydetme hatası: ${err?.message || err}`);
+       });
     } else {
        this.saveData(this.data);
     }
     return cmd;
   }
 
-  public markCommandsDelivered(commandIds: string[]): void {
+  /**
+   * Atomically claims pending commands for a device.
+   * Transitions status from 'pending' to 'claimed' and awaits PostgreSQL update before returning.
+   */
+  public async claimPendingCommands(deviceId: string, limit: number = 20): Promise<DeviceCommand[]> {
+    const now = new Date().toISOString();
+    let claimed: DeviceCommand[] = [];
+
+    if (this.isPostgresProductionMode()) {
+      claimed = await this.postgresRepo.claimPendingCommands(deviceId, limit);
+      // Sync in-memory RAM cache
+      if (!this.data.commands) this.data.commands = [];
+      const claimedIds = new Set(claimed.map(c => c.id));
+      for (const cmd of this.data.commands) {
+        if (claimedIds.has(cmd.id)) {
+          cmd.status = 'claimed';
+          cmd.claimed_at = now;
+          cmd.delivered_at = now;
+        }
+      }
+    } else {
+      if (!this.data.commands) this.data.commands = [];
+      const matching = this.data.commands.filter((c) => c.deviceId === deviceId && c.status === 'pending').slice(0, limit);
+      for (const cmd of matching) {
+        cmd.status = 'claimed';
+        cmd.claimed_at = now;
+        cmd.delivered_at = now;
+        claimed.push({ ...cmd });
+      }
+      if (claimed.length > 0) {
+        this.saveData(this.data);
+      }
+    }
+
+    return claimed;
+  }
+
+  /**
+   * Acknowledges command execution by device ID and command ID(s).
+   * Transitions status to 'acknowledged' (or 'failed') and persists to PostgreSQL.
+   */
+  public async acknowledgeCommands(
+    deviceId: string,
+    commandIds: string | string[],
+    status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
+    result?: any
+  ): Promise<number> {
+    const ids = Array.isArray(commandIds) ? commandIds : [commandIds];
+    if (ids.length === 0) return 0;
+    const now = new Date().toISOString();
+    let count = 0;
+
+    if (this.isPostgresProductionMode()) {
+      for (const id of ids) {
+        const ok = await this.postgresRepo.acknowledgeCommand(id, status, result);
+        if (ok) count++;
+      }
+    }
+
+    if (!this.data.commands) this.data.commands = [];
+    for (const cmd of this.data.commands) {
+      if (ids.includes(cmd.id) && (!deviceId || cmd.deviceId === deviceId)) {
+        cmd.status = status;
+        cmd.executed_at = now;
+        cmd.acknowledged_at = now;
+        if (result !== undefined) cmd.result = result;
+        if (!this.isPostgresProductionMode()) count++;
+      }
+    }
+
+    if (!this.isPostgresProductionMode() && count > 0) {
+      this.saveData(this.data);
+    }
+
+    return count;
+  }
+
+  public async markCommandsDelivered(commandIds: string[]): Promise<void> {
     if (!commandIds || commandIds.length === 0) return;
     
     if (this.isPostgresProductionMode()) {
-      this.postgresRepo.markCommandsDelivered(commandIds).catch(() => {});
+      await this.postgresRepo.markCommandsDelivered(commandIds).catch((err) => {
+        console.warn(`[Command Sync Catch] Postgres komut durum güncelleme hatası: ${err?.message || err}`);
+      });
     }
 
     if (!this.data.commands) return;
@@ -1053,7 +1140,8 @@ class LocalDatabase {
     const now = new Date().toISOString();
     for (const cmd of this.data.commands) {
       if (commandIds.includes(cmd.id) && cmd.status === 'pending') {
-        cmd.status = 'delivered';
+        cmd.status = 'claimed';
+        cmd.claimed_at = now;
         cmd.delivered_at = now;
         updated = true;
       }
@@ -1087,7 +1175,7 @@ class LocalDatabase {
     const dailyWriteOffset = this.firestoreQuotaExceeded ? 20000 + (hash * 7) : 4800 + (hash * 19);
     const dailyDeleteOffset = this.firestoreQuotaExceeded ? 150 + (hash * 2) : 25 + (hash * 3);
 
-    let pgTelemetryStats = {};
+    const pgTelemetryStats: Record<string, number> = {};
     if (this.isPostgresProductionMode()) {
        try {
            const res = await this.postgresRepo.query('SELECT tenant_id, COUNT(*) AS count FROM telemetry_readings GROUP BY tenant_id');
@@ -1380,14 +1468,16 @@ class LocalDatabase {
     this.saveData(this.data);
   }
 
-  public getNotificationQueue(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
+  public getNotificationQueue(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
+    if (!requestingUserId) return options ? { data: [], total: 0, limit: options.limit || 50, nextCursor: null, hasMore: false } : [];
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     let list = this.data.notificationQueue;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
 
-    if (reqUser && reqUser.role === 'customer') {
+    if (!isAdmin) {
       list = list.filter((q) => q.tenantId === requestingUserId);
-    } else if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+    } else if (targetCustomerId && targetCustomerId !== 'all') {
       list = list.filter((q) => q.tenantId === targetCustomerId);
     }
 
@@ -1463,11 +1553,13 @@ class LocalDatabase {
     return item;
   }
 
-  public clearQueue(requestingUserId = 'usr_admin') {
+  public clearQueue(requestingUserId?: string) {
+    if (!requestingUserId) return;
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
 
-    if (reqUser && reqUser.role === 'customer') {
+    if (!isAdmin) {
       this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.tenantId !== requestingUserId);
     } else {
       this.data.notificationQueue = [];
@@ -1477,7 +1569,8 @@ class LocalDatabase {
     this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
   }
 
-  public async getDispatchLogs(requestingUserId = 'usr_admin', targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
+  public async getDispatchLogs(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
+    if (!requestingUserId) return options ? { data: [], total: 0, limit: options.limit || 50, hasMore: false } : { data: [], total: 0 };
     if (this.isPostgresProductionMode()) {
        let list = await this.postgresRepo.getDispatchLogs(targetCustomerId || requestingUserId);
        if (options?.status && options.status !== 'all') list = list.filter((l: any) => l.status === options.status);
@@ -1488,10 +1581,11 @@ class LocalDatabase {
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     let list = this.data.dispatchLogs;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
 
-    if (reqUser && reqUser.role === 'customer') {
+    if (!isAdmin) {
       list = list.filter((l) => l.tenantId === requestingUserId);
-    } else if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
+    } else if (targetCustomerId && targetCustomerId !== 'all') {
       list = list.filter((l) => l.tenantId === targetCustomerId);
     }
 

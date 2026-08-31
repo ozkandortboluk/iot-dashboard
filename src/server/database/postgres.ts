@@ -1054,7 +1054,7 @@ export class PostgresRepository {
   }
 
   // ==========================================
-  // DEVICE COMMANDS
+  // DEVICE COMMANDS (Pending -> Claimed -> Acknowledged/Failed)
   // ==========================================
   public async saveCommand(cmd: DeviceCommand): Promise<void> {
     if (!this.pool) return;
@@ -1063,20 +1063,19 @@ export class PostgresRepository {
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT (id) DO UPDATE SET
         status = EXCLUDED.status,
-        executed_at = CASE WHEN EXCLUDED.status = 'delivered' THEN CURRENT_TIMESTAMP ELSE device_commands.executed_at END;
+        executed_at = CASE WHEN EXCLUDED.status IN ('acknowledged', 'executed', 'failed', 'delivered') THEN CURRENT_TIMESTAMP ELSE device_commands.executed_at END;
     `;
     await this.query(sql, [
       cmd.id,
       cmd.deviceId,
       cmd.command,
-      JSON.stringify(cmd.payload ? { payload: cmd.payload } : {}),
+      JSON.stringify(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
       cmd.status || 'pending',
       cmd.source || 'api',
       cmd.created_at || new Date().toISOString(),
     ]);
   }
 
-  
   public async getCommands(deviceId: string, limit: number = 100): Promise<DeviceCommand[]> {
     if (!this.pool) return [];
     const res = await this.query(
@@ -1090,8 +1089,12 @@ export class PostgresRepository {
       payload: r.parameters?.payload ?? '',
       status: r.status,
       created_at: r.created_at,
+      claimed_at: r.status === 'claimed' ? r.executed_at : undefined,
+      delivered_at: r.executed_at,
+      acknowledged_at: (r.status === 'acknowledged' || r.status === 'executed') ? r.executed_at : undefined,
       executed_at: r.executed_at,
-      source: r.sent_by
+      source: r.sent_by,
+      result: r.parameters?.result
     }));
   }
 
@@ -1113,10 +1116,80 @@ export class PostgresRepository {
     }));
   }
 
+  /**
+   * Atomically claims pending commands in PostgreSQL to prevent duplicate execution across polling threads.
+   * Transitions status from 'pending' -> 'claimed'.
+   */
+  public async claimPendingCommands(deviceId: string, limit: number = 20): Promise<DeviceCommand[]> {
+    if (!this.pool) return [];
+    const sql = `
+      UPDATE device_commands
+      SET status = 'claimed',
+          executed_at = CURRENT_TIMESTAMP
+      WHERE id IN (
+        SELECT id FROM device_commands
+        WHERE device_id = $1 AND status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, device_id, command_name, parameters, status, sent_by, created_at, executed_at;
+    `;
+    try {
+      const res = await this.query(sql, [deviceId, limit]);
+      return res.rows.map(r => ({
+        id: r.id,
+        deviceId: r.device_id,
+        command: r.command_name,
+        payload: r.parameters?.payload ?? '',
+        status: 'claimed',
+        created_at: r.created_at,
+        claimed_at: r.executed_at,
+        delivered_at: r.executed_at,
+        source: r.sent_by
+      }));
+    } catch (err: any) {
+      console.error('[PostgreSQL] claimPendingCommands error:', err.message || err);
+      return [];
+    }
+  }
+
+  /**
+   * Transitions a claimed or pending command to 'acknowledged' (or 'failed') when the device confirms execution.
+   */
+  public async acknowledgeCommand(
+    commandId: string,
+    status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
+    result?: any
+  ): Promise<boolean> {
+    if (!this.pool || !commandId) return false;
+    const sql = `
+      UPDATE device_commands
+      SET status = $2,
+          executed_at = CURRENT_TIMESTAMP,
+          parameters = CASE 
+            WHEN $3::text IS NOT NULL THEN jsonb_set(COALESCE(parameters, '{}'::jsonb), '{result}', $3::jsonb)
+            ELSE parameters
+          END
+      WHERE id = $1;
+    `;
+    try {
+      const res = await this.query(sql, [
+        commandId,
+        status,
+        result !== undefined ? JSON.stringify(result) : null
+      ]);
+      return (res?.rowCount || 0) > 0;
+    } catch (err: any) {
+      console.error('[PostgreSQL] acknowledgeCommand error:', err.message || err);
+      return false;
+    }
+  }
+
   public async markCommandsDelivered(commandIds: string[]): Promise<void> {
     if (!this.pool || !commandIds.length) return;
     await this.query(
-      `UPDATE device_commands SET status = 'delivered', executed_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]);`,
+      `UPDATE device_commands SET status = 'claimed', executed_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND status = 'pending';`,
       [commandIds]
     );
   }

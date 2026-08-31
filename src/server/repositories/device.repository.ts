@@ -462,11 +462,13 @@ export class DeviceRepository {
   public getDiscoveredDevices(requestingUserId?: string, targetCustomerId?: string): DiscoveredNetworkDevice[] {
     const allDevices: Device[] = this.db.data.devices || [];
 
-    // Determine admin privilege
-    let isAdmin = !requestingUserId || requestingUserId === 'usr_admin';
-    if (requestingUserId && !isAdmin) {
+    // Determine admin privilege (fail-closed: require explicit admin user)
+    let isAdmin = false;
+    if (requestingUserId) {
       const user = this.db.data.users?.find((u: any) => u.id === requestingUserId);
-      if (user?.role === 'admin') isAdmin = true;
+      if (user?.role === 'admin' || requestingUserId === 'usr_admin') {
+        isAdmin = true;
+      }
     }
 
     // Filter devices based on tenant permission

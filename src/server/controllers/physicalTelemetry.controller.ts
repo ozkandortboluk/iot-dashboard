@@ -234,7 +234,13 @@ export class PhysicalTelemetryController {
       parsedPayload.idempotencyKey
     );
 
-    // 7. Retrieve & Deliver Pending Commands for Physical Device
+    // 6.5. Process incoming Command ACKs if provided in request
+    const incomingAck = req.body?.ackCommands || req.body?.commandAck || req.body?.executedCommands || req.headers['x-command-ack'];
+    if (incomingAck) {
+      await commandService.handleCommandAck(device.id, incomingAck);
+    }
+
+    // 7. Retrieve & Deliver Pending Commands for Physical Device (Atomically Claimed)
     const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
     // 8. Build Standardized Packet ACK
