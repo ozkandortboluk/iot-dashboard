@@ -164,16 +164,17 @@ if __name__ == "__main__":
     },
     {
       id: 'code_esp32_http_telemetry',
-      title: 'ESP32 - HTTP Telemetri & Röle Yanıtı (Piggybacking)',
+      title: 'ESP32 - HTTP Telemetri & Generic Output (Piggybacking)',
       category: 'esp32',
       categoryLabel: 'ESP32 / C++',
-      badge: 'Canlı & Önerilen',
-      description: 'Sensör verilerini (sıcaklık, nem, voltaj) sunucuya POST eder ve gelen HTTP yanıtından anında röle/PWM komutlarını okuyarak pinleri tetikler.',
-      tags: ['esp32', 'http', 'telemetri', 'röle', 'piggybacking', 'komut yakalama'],
+      badge: 'Canlı & Generic Output',
+      description: 'Sensör verilerini (sıcaklık, nem, voltaj) sunucuya POST eder ve gelen yanıttan generic output komutlarını (relay, digital, analog DAC, PWM) setOutput(outputId, value) ile çalıştırır. Güvenli başlangıç (Safe-State) korumalıdır.',
+      tags: ['esp32', 'http', 'telemetri', 'generic output', 'relay', 'digital', 'analog', 'pwm', 'piggybacking'],
       endpoint: 'POST /api/v1/telemetry veya /api/telemetry',
       code: `// =========================================================================
-// NEXUSNODE IoT PLATFORMU - ESP32 HTTP TELEMETRİ & KOMUT YAKALAMA (PIGGYBACKING)
-// Bu kod derlenip doğrudan ESP32 kartınıza yüklenebilir.
+// NEXUSNODE IoT - ESP32 HTTP TELEMETRİ & GENERIC OUTPUT YÖNETİMİ
+// Desteklenen Çıkış Tipleri: relay, digital, analog (DAC), PWM
+// Güvenli Başlangıç (Safe-State Initialization) Korumalı
 // =========================================================================
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -184,26 +185,159 @@ const char* WIFI_PASS     = "WIFI_SIFRENIZ";
 const char* SERVER_URL    = "${originUrl}/api/v1/telemetry";
 const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihazlar sekmesinden alınan Token
 const char* DEVICE_NAME   = "Saha_ESP32_Sensor";
+const int   LED_STATUS    = 2;  // Dahili Durum LED'i
 
-const int RELAY_PIN_1 = 26; // Röle 1 pini
-const int RELAY_PIN_2 = 27; // Röle 2 pini
-const int LED_STATUS  = 2;  // Dahili LED
+// -------------------------------------------------------------------------
+// 1. GENERIC OUTPUT & CAPABILITY YAPILANDIRMASI
+// -------------------------------------------------------------------------
+enum OutputType {
+  TYPE_RELAY,    // Röle (ON/OFF)
+  TYPE_DIGITAL,  // Standart Dijital Çıkış (HIGH/LOW)
+  TYPE_ANALOG,   // Analog / DAC Gerilim Çıkışı (0-255 / 0-3.3V)
+  TYPE_PWM       // Donanımsal PWM Sinyali (0-255 Duty / Hız-Parlaklık)
+};
+
+struct OutputDef {
+  const char* id;          // "relay_1", "relay_2", "digital_1", "analog_1", "pwm_1"
+  OutputType  type;        // Çıkış Tipi
+  uint8_t     pin;         // ESP32 GPIO Numarası
+  bool        activeLow;   // Active-Low röleler için true
+  uint8_t     safeInitial; // Güvenli başlangıç değeri (0 = Kapalı/0V)
+  uint8_t     pwmChannel;  // ESP32 LEDC Kanalı (0-15)
+  uint32_t    pwmFreq;     // PWM Frekansı (Hz)
+  uint8_t     pwmResolution;// PWM Çözünürlüğü (8 bit = 0-255)
+  float       currentValue;// Mevcut aktif değer
+};
+
+// Cihazın Donanım Capability Tablosu
+OutputDef outputs[] = {
+  { "relay_1",   TYPE_RELAY,   26, false, 0, 0, 0,     0, 0.0 }, // GPIO 26 -> Röle 1
+  { "relay_2",   TYPE_RELAY,   27, false, 0, 0, 0,     0, 0.0 }, // GPIO 27 -> Röle 2
+  { "digital_1", TYPE_DIGITAL, 32, false, 0, 0, 0,     0, 0.0 }, // GPIO 32 -> Dijital Çıkış
+  { "analog_1",  TYPE_ANALOG,  25, false, 0, 0, 0,     0, 0.0 }, // GPIO 25 -> ESP32 DAC1 (0-3.3V)
+  { "pwm_1",     TYPE_PWM,     18, false, 0, 0, 5000,  8, 0.0 }  // GPIO 18 -> PWM Kanal 0 (5kHz)
+};
+const size_t OUTPUT_COUNT = sizeof(outputs) / sizeof(outputs[0]);
+
+// -------------------------------------------------------------------------
+// 2. GÜVENLİ BAŞLANGIÇ DURUMU (SAFE REBOOT INITIALIZATION)
+// -------------------------------------------------------------------------
+void initOutputs() {
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    switch (outputs[i].type) {
+      case TYPE_RELAY:
+      case TYPE_DIGITAL:
+        pinMode(outputs[i].pin, OUTPUT);
+        // Active-low tersleme mantığı ile güvenli başlangıç
+        if (outputs[i].activeLow) {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? LOW : HIGH);
+        } else {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? HIGH : LOW);
+        }
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_ANALOG:
+        #if defined(ESP32)
+          dacWrite(outputs[i].pin, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_PWM:
+        #if defined(ESP32)
+          ledcSetup(outputs[i].pwmChannel, outputs[i].pwmFreq, outputs[i].pwmResolution);
+          ledcAttachPin(outputs[i].pin, outputs[i].pwmChannel);
+          ledcWrite(outputs[i].pwmChannel, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+    }
+  }
+  Serial.println(F("[INIT] Tüm GPIO/Output pinleri güvenli başlangıç modunda (Safe-State) kuruldu."));
+}
+
+// -------------------------------------------------------------------------
+// 3. GENERIC OUTPUT YÖNETİM FONKSİYONU: setOutput(outputId, value)
+// -------------------------------------------------------------------------
+bool setOutput(const String& outputId, const String& value, String& outErrMsg) {
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    // outputId ile birebir eşleşme (relay_1, pwm_1, analog_1, digital_1 veya büyük harf)
+    if (outputId.equalsIgnoreCase(outputs[i].id) || 
+        outputId.equalsIgnoreCase(String("OUT_") + String(i + 1))) {
+      
+      switch (outputs[i].type) {
+        case TYPE_RELAY:
+        case TYPE_DIGITAL: {
+          bool turnOn = (value.equalsIgnoreCase("ON") || value.equalsIgnoreCase("1") || 
+                         value.equalsIgnoreCase("HIGH") || value.equalsIgnoreCase("TRUE"));
+          bool physicalPin = outputs[i].activeLow ? !turnOn : turnOn;
+          digitalWrite(outputs[i].pin, physicalPin ? HIGH : LOW);
+          outputs[i].currentValue = turnOn ? 1.0 : 0.0;
+          Serial.printf("[OUTPUT OK] %s (Pin %d) -> %s (fiziksel: %d)\\n", 
+                        outputs[i].id, outputs[i].pin, turnOn ? "ON" : "OFF", physicalPin);
+          return true;
+        }
+
+        case TYPE_ANALOG: {
+          int dacVal = value.toInt();
+          if (dacVal < 0) dacVal = 0;
+          if (dacVal > 255) dacVal = 255;
+          #if defined(ESP32)
+            dacWrite(outputs[i].pin, dacVal);
+          #else
+            analogWrite(outputs[i].pin, dacVal);
+          #endif
+          outputs[i].currentValue = dacVal;
+          Serial.printf("[OUTPUT OK] %s (DAC Pin %d) -> %d / 255 (%.2fV)\\n", 
+                        outputs[i].id, outputs[i].pin, dacVal, (dacVal / 255.0) * 3.3);
+          return true;
+        }
+
+        case TYPE_PWM: {
+          int pwmVal = value.toInt();
+          if (pwmVal < 0) pwmVal = 0;
+          if (pwmVal > 255) pwmVal = 255;
+          #if defined(ESP32)
+            ledcWrite(outputs[i].pwmChannel, pwmVal);
+          #else
+            analogWrite(outputs[i].pin, pwmVal);
+          #endif
+          outputs[i].currentValue = pwmVal;
+          Serial.printf("[OUTPUT OK] %s (PWM Pin %d, Ch %d) -> Duty: %d / 255\\n", 
+                        outputs[i].id, outputs[i].pin, outputs[i].pwmChannel, pwmVal);
+          return true;
+        }
+      }
+    }
+  }
+
+  outErrMsg = "Tanımsız çıkış (outputId): " + outputId;
+  Serial.println("[OUTPUT HATA] " + outErrMsg);
+  return false;
+}
 
 void setup() {
   Serial.begin(115200);
-  pinMode(RELAY_PIN_1, OUTPUT);
-  pinMode(RELAY_PIN_2, OUTPUT);
   pinMode(LED_STATUS, OUTPUT);
-  digitalWrite(RELAY_PIN_1, LOW);
-  digitalWrite(RELAY_PIN_2, LOW);
+  digitalWrite(LED_STATUS, LOW);
 
-  Serial.println("\\n>>> NexusNode ESP32 Istemcisi Baslatiliyor...");
+  // Çıkışları güvenli başlangıç durumuna al (Röleler açık/kapalı kalmaz)
+  initOutputs();
+
+  Serial.println("\\n>>> NexusNode ESP32 Başlatılıyor...");
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(400);
     Serial.print(".");
   }
-  Serial.println("\\n[OK] WiFi Baglantisi Basarili! IP: " + WiFi.localIP().toString());
+  Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
 }
 
 void loop() {
@@ -216,7 +350,6 @@ void loop() {
     float voltaj = 12.1 + (random(0, 40) / 100.0);
 
     // 2. Hafif & Hızlı Veri Formatı: TOKEN, CIHAZ_ADI, METRIK:DEGER...
-    // Önceki döngüde çalıştırılan komut id'leri varsa sunucuya ACK olarak iletilir
     String payload = String(API_KEY) + "," + DEVICE_NAME + 
                      ",sıcaklık:" + String(sicaklik, 2) + 
                      ",nem:" + String(nem, 1) + 
@@ -235,46 +368,62 @@ void loop() {
       String response = http.getString();
       Serial.println("[SUNUCU YANITI]: " + response);
 
-      // JSON Yanıt Ayrıştırma
       DynamicJsonDocument doc(1024);
       DeserializationError err = deserializeJson(doc, response);
       if (!err && doc.containsKey("commands")) {
         JsonArray commands = doc["commands"];
         for (JsonObject cmd : commands) {
-          String cmdId       = cmd["id"] | "";
-          String commandName = cmd["command"] | "";
-          String payloadVal  = cmd["payload"] | "";
-          Serial.printf(">>> GELEN KOMUT [ID: %s]: %s | DEĞER: %s\\n", cmdId.c_str(), commandName.c_str(), payloadVal.c_str());
+          String cmdId       = cmd["commandId"] | cmd["id"] | "";
+          String targetOut   = cmd["outputId"] | cmd["commandType"] | cmd["command"] | "";
+          String payloadVal  = cmd["value"] | cmd["payload"] | "";
+          Serial.printf(">>> GELEN KOMUT [ID: %s]: Hedef Çıkış: %s | Değer: %s\\n", 
+                        cmdId.c_str(), targetOut.c_str(), payloadVal.c_str());
 
-          bool executedOK = false;
-          if (commandName == "RELAY_1" || commandName == "OUT_1") {
-            digitalWrite(RELAY_PIN_1, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
-            executedOK = true;
-          } else if (commandName == "RELAY_2" || commandName == "OUT_2") {
-            digitalWrite(RELAY_PIN_2, payloadVal == "ON" || payloadVal == "HIGH" ? HIGH : LOW);
-            executedOK = true;
-          }
-
-          // Komut çalıştırıldıysa anında Onay (ACK) Gönder:
-          if (executedOK && cmdId.length() > 0) {
+          // 1. Aşama ACK: Komut Alındı (Received) Bildirimi
+          if (cmdId.length() > 0) {
             HTTPClient ackHttp;
             ackHttp.begin("${originUrl}/api/device/commands/ack");
             ackHttp.addHeader("Content-Type", "application/json");
             ackHttp.addHeader("X-API-Key", API_KEY);
-            String ackBody = "{\\"commandId\\":\\"" + cmdId + "\\",\\"status\\":\\"acknowledged\\"}";
+            String ackBody = "{\\"commandId\\":\\"" + cmdId + "\\",\\"status\\":\\"received\\"}";
             ackHttp.POST(ackBody);
             ackHttp.end();
-            Serial.println("[ACK GÖNDERİLDİ] Komut Onaylandı -> ID: " + cmdId);
+            Serial.println("[ACK 1/2] Komut Cihaza Ulaştı (received) -> ID: " + cmdId);
+          }
+
+          // 2. Aşama: Generic setOutput(outputId, value) Çağrısı
+          String errorMsg = "";
+          bool executedOK = setOutput(targetOut, payloadVal, errorMsg);
+
+          // 3. Aşama ACK: Komut İcra Edildi (executed) veya Başarısız (failed) Bildirimi
+          if (cmdId.length() > 0) {
+            HTTPClient ackHttp;
+            ackHttp.begin("${originUrl}/api/device/commands/ack");
+            ackHttp.addHeader("Content-Type", "application/json");
+            ackHttp.addHeader("X-API-Key", API_KEY);
+            
+            String ackStatus = executedOK ? "executed" : "failed";
+            String ackBody = "{\\"commandId\\":\\"" + cmdId + "\\",\\"status\\":\\"" + ackStatus + "\\"";
+            if (!executedOK) {
+              ackBody += ",\\"errorMessage\\":\\"" + errorMsg + "\\"";
+            } else {
+              ackBody += ",\\"result\\":{\\"outputId\\":\\"" + targetOut + "\\",\\"value\\":\\"" + payloadVal + "\\",\\"timestamp\\":" + String(millis()) + "}";
+            }
+            ackBody += "}";
+
+            ackHttp.POST(ackBody);
+            ackHttp.end();
+            Serial.printf("[ACK 2/2] Komut Sonucu Bildirildi (%s) -> ID: %s\\n", ackStatus.c_str(), cmdId.c_str());
           }
         }
       }
     } else {
-      Serial.printf("[HATA] HTTP Baglanti Hatasi, Kod: %d\\n", httpCode);
+      Serial.printf("[HATA] HTTP Bağlantı Hatası, Kod: %d\\n", httpCode);
     }
     http.end();
     digitalWrite(LED_STATUS, LOW);
   } else {
-    Serial.println("[UYARI] WiFi Baglantisi koptu, yeniden baglaniliyor...");
+    Serial.println("[UYARI] WiFi Bağlantısı koptu, yeniden bağlanılıyor...");
     WiFi.reconnect();
   }
 
@@ -575,16 +724,17 @@ void loop() {
     },
     {
       id: 'code_esp32_websocket_client',
-      title: 'ESP32 - Canlı Çift Yönlü WebSocket İstemcisi',
+      title: 'ESP32 - Canlı Çift Yönlü WebSocket & Generic Output İcrası',
       category: 'esp32',
       categoryLabel: 'ESP32 WebSocket',
-      badge: 'Gerçek Zamanlı (<20ms)',
-      description: 'WebSocketsClient kütüphanesi kullanarak sunucuya kalıcı WS soketi açar. Dashboard üzerinden butona basıldığında anında milisaniyeler içinde komutu yakalar.',
-      tags: ['esp32', 'websocket', 'realtime', 'düşük gecikme', 'çift yönlü'],
+      badge: 'Gerçek Zamanlı (<10ms)',
+      description: 'WebSocketsClient kütüphanesi kullanarak sunucuya kalıcı WS soketi açar. Dashboard üzerinden butona veya kaydırıcıya basıldığında sunucu anında cihaza (command:downlink) iletir. Cihaz generic setOutput(outputId, value) ile röle, dijital, analog veya PWM çıkışını sürer ve 2 aşamalı ACK döner.',
+      tags: ['esp32', 'websocket', 'realtime', 'generic output', 'downlink', 'relay', 'digital', 'analog', 'pwm', 'ack'],
       endpoint: 'WS ws://SERVER_HOST:3000/ws',
       code: `// =========================================================================
-// NEXUSNODE IoT - ESP32 CANLI WEBSOCKET ÇİFT YÖNLÜ İLETİŞİM
+// NEXUSNODE IoT - ESP32 CANLI WEBSOCKET & GENERIC OUTPUT YÖNETİMİ
 // Kütüphane: Arduino WebSockets by Markus Sattler (Library Manager'dan ekleyin)
+// Desteklenen Çıkış Tipleri: relay, digital, analog (DAC), PWM
 // =========================================================================
 #include <WiFi.h>
 #include <WebSocketsClient.h>
@@ -595,31 +745,214 @@ const char* WIFI_PASS     = "WIFI_SIFRENIZ";
 const char* WS_HOST       = "${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}";
 const int   WS_PORT       = 3000;
 const char* WS_PATH       = "/ws";
-const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY";
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihaz Token
+
+// -------------------------------------------------------------------------
+// 1. GENERIC OUTPUT & CAPABILITY YAPILANDIRMASI
+// -------------------------------------------------------------------------
+enum OutputType {
+  TYPE_RELAY,    // Röle (ON/OFF)
+  TYPE_DIGITAL,  // Dijital Çıkış (HIGH/LOW)
+  TYPE_ANALOG,   // Analog DAC Gerilim (0-255)
+  TYPE_PWM       // Donanımsal PWM Sinyali (0-255)
+};
+
+struct OutputDef {
+  const char* id;          // "relay_1", "relay_2", "digital_1", "analog_1", "pwm_1"
+  OutputType  type;        // Çıkış Tipi
+  uint8_t     pin;         // ESP32 GPIO Numarası
+  bool        activeLow;   // Active-Low röleler için true
+  uint8_t     safeInitial; // Güvenli başlangıç durumu
+  uint8_t     pwmChannel;  // LEDC Kanal No (0-15)
+  uint32_t    pwmFreq;     // PWM Frekansı (Hz)
+  uint8_t     pwmResolution;// PWM Çözünürlüğü (8 bit)
+  float       currentValue;
+};
+
+OutputDef outputs[] = {
+  { "relay_1",   TYPE_RELAY,   26, false, 0, 0, 0,     0, 0.0 }, // GPIO 26 -> Röle 1
+  { "relay_2",   TYPE_RELAY,   27, false, 0, 0, 0,     0, 0.0 }, // GPIO 27 -> Röle 2
+  { "digital_1", TYPE_DIGITAL, 32, false, 0, 0, 0,     0, 0.0 }, // GPIO 32 -> Dijital Çıkış
+  { "analog_1",  TYPE_ANALOG,  25, false, 0, 0, 0,     0, 0.0 }, // GPIO 25 -> DAC1 (0-3.3V)
+  { "pwm_1",     TYPE_PWM,     18, false, 0, 0, 5000,  8, 0.0 }  // GPIO 18 -> PWM Hız/Dimmer
+};
+const size_t OUTPUT_COUNT = sizeof(outputs) / sizeof(outputs[0]);
+
+// -------------------------------------------------------------------------
+// 2. GÜVENLİ BAŞLANGIÇ DURUMU (SAFE REBOOT INITIALIZATION)
+// -------------------------------------------------------------------------
+void initOutputs() {
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    switch (outputs[i].type) {
+      case TYPE_RELAY:
+      case TYPE_DIGITAL:
+        pinMode(outputs[i].pin, OUTPUT);
+        if (outputs[i].activeLow) {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? LOW : HIGH);
+        } else {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? HIGH : LOW);
+        }
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_ANALOG:
+        #if defined(ESP32)
+          dacWrite(outputs[i].pin, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_PWM:
+        #if defined(ESP32)
+          ledcSetup(outputs[i].pwmChannel, outputs[i].pwmFreq, outputs[i].pwmResolution);
+          ledcAttachPin(outputs[i].pin, outputs[i].pwmChannel);
+          ledcWrite(outputs[i].pwmChannel, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+    }
+  }
+  Serial.println(F("[INIT] Tüm GPIO çıkışları güvenli başlangıç durumunda (Safe-State) başlatıldı."));
+}
+
+// -------------------------------------------------------------------------
+// 3. GENERIC OUTPUT SÜRÜCÜ: setOutput(outputId, value)
+// -------------------------------------------------------------------------
+bool setOutput(const String& outputId, const String& value, String& outErrMsg) {
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    if (outputId.equalsIgnoreCase(outputs[i].id) || 
+        outputId.equalsIgnoreCase(String("OUT_") + String(i + 1))) {
+      
+      switch (outputs[i].type) {
+        case TYPE_RELAY:
+        case TYPE_DIGITAL: {
+          bool turnOn = (value.equalsIgnoreCase("ON") || value.equalsIgnoreCase("1") || 
+                         value.equalsIgnoreCase("HIGH") || value.equalsIgnoreCase("TRUE"));
+          bool physicalPin = outputs[i].activeLow ? !turnOn : turnOn;
+          digitalWrite(outputs[i].pin, physicalPin ? HIGH : LOW);
+          outputs[i].currentValue = turnOn ? 1.0 : 0.0;
+          Serial.printf("[OUTPUT OK] %s -> %s (Pin %d)\\n", outputs[i].id, turnOn ? "ON" : "OFF", outputs[i].pin);
+          return true;
+        }
+
+        case TYPE_ANALOG: {
+          int dacVal = value.toInt();
+          if (dacVal < 0) dacVal = 0;
+          if (dacVal > 255) dacVal = 255;
+          #if defined(ESP32)
+            dacWrite(outputs[i].pin, dacVal);
+          #else
+            analogWrite(outputs[i].pin, dacVal);
+          #endif
+          outputs[i].currentValue = dacVal;
+          Serial.printf("[OUTPUT OK] %s -> DAC %d / 255\\n", outputs[i].id, dacVal);
+          return true;
+        }
+
+        case TYPE_PWM: {
+          int pwmVal = value.toInt();
+          if (pwmVal < 0) pwmVal = 0;
+          if (pwmVal > 255) pwmVal = 255;
+          #if defined(ESP32)
+            ledcWrite(outputs[i].pwmChannel, pwmVal);
+          #else
+            analogWrite(outputs[i].pin, pwmVal);
+          #endif
+          outputs[i].currentValue = pwmVal;
+          Serial.printf("[OUTPUT OK] %s -> PWM Duty %d / 255\\n", outputs[i].id, pwmVal);
+          return true;
+        }
+      }
+    }
+  }
+
+  outErrMsg = "Tanımsız çıkış (outputId): " + outputId;
+  return false;
+}
 
 WebSocketsClient webSocket;
 unsigned long lastSend = 0;
 
+void handleIncomingCommand(JsonObject cmd) {
+  String cmdId       = cmd["commandId"] | cmd["id"] | "";
+  String targetOut   = cmd["outputId"] | cmd["commandType"] | cmd["command"] | "";
+  String val         = cmd["value"] | cmd["payload"] | "";
+  
+  Serial.printf(">>> [DOWNLINK KOMUT] ID: %s | Hedef Çıkış: %s | Değer: %s\\n", 
+                cmdId.c_str(), targetOut.c_str(), val.c_str());
+
+  // 1. Aşama ACK: Komut Cihaza Ulaştı (received)
+  if (cmdId.length() > 0) {
+    DynamicJsonDocument ackDoc(256);
+    ackDoc["event"] = "command:ack";
+    ackDoc["commandId"] = cmdId;
+    ackDoc["status"] = "received";
+    String ackMsg;
+    serializeJson(ackDoc, ackMsg);
+    webSocket.sendTXT(ackMsg);
+    Serial.println("[WS ACK 1/2] Cihaza ulaştı (received): " + cmdId);
+  }
+
+  // 2. Aşama: Generic setOutput(outputId, value) Çağrısı
+  String errorMsg = "";
+  bool success = setOutput(targetOut, val, errorMsg);
+
+  // 3. Aşama ACK: Komut İcra Edildi (executed) veya Başarısız (failed)
+  if (cmdId.length() > 0) {
+    DynamicJsonDocument ackDoc(512);
+    ackDoc["event"] = "command:ack";
+    ackDoc["commandId"] = cmdId;
+    ackDoc["status"] = success ? "executed" : "failed";
+    if (success) {
+      JsonObject res = ackDoc.createNestedObject("result");
+      res["outputId"] = targetOut;
+      res["currentValue"] = val;
+      res["executedAt"] = millis();
+    } else {
+      ackDoc["error"] = errorMsg;
+    }
+    String ackMsg;
+    serializeJson(ackDoc, ackMsg);
+    webSocket.sendTXT(ackMsg);
+    Serial.printf("[WS ACK 2/2] Komut sonucu iletildi (%s): %s\\n", success ? "executed" : "failed", cmdId.c_str());
+  }
+}
+
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
-      Serial.println("[WS] Baglanti Kesildi!");
+      Serial.println("[WS] Bağlantı Kesildi!");
       break;
     case WStype_CONNECTED:
-      Serial.printf("[WS] Sunucuya Baglandi! URL: %s\\n", payload);
-      // Sunucuya kimlik tanıtımı yap
-      webSocket.sendTXT("{\\"type\\":\\"register\\",\\"apiKey\\":\\"" + String(API_KEY) + "\\"}");
+      Serial.printf("[WS] Sunucuya Bağlandı! URL: %s\\n", payload);
+      // Sunucuya cihaz API anahtarı ile kimlik tanıtımı yap
+      webSocket.sendTXT("{\\"event\\":\\"auth\\",\\"apiKey\\":\\"" + String(API_KEY) + "\\"}");
       break;
     case WStype_TEXT: {
       Serial.printf("[WS GELEN VERİ]: %s\\n", payload);
-      DynamicJsonDocument doc(512);
-      deserializeJson(doc, payload);
-      String typeStr = doc["type"] | "";
-      if (typeStr == "CONTROL_COMMAND") {
-        String cmd = doc["command"] | "";
-        String val = doc["value"] | "";
-        Serial.println(">>> ANLIK KOMUT ALINDI: " + cmd + " -> " + val);
-        // Röle veya PWM pinini burada anında sürün!
+      DynamicJsonDocument doc(1024);
+      DeserializationError err = deserializeJson(doc, payload);
+      if (err) return;
+
+      String event = doc["event"] | "";
+      
+      // Tekil veya toplu downlink komut yakalama
+      if (event == "command:downlink") {
+        if (doc.containsKey("command")) {
+          JsonObject cmd = doc["command"];
+          handleIncomingCommand(cmd);
+        } else if (doc.containsKey("commands")) {
+          JsonArray cmds = doc["commands"];
+          for (JsonObject cmd : cmds) {
+            handleIncomingCommand(cmd);
+          }
+        }
       }
       break;
     }
@@ -630,14 +963,18 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
 void setup() {
   Serial.begin(115200);
+  
+  // Çıkışları güvenli başlat
+  initOutputs();
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\\nWiFi Baglandi!");
+  Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
 
-  // WebSocket Baslat
+  // WebSocket Başlat
   webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
@@ -646,15 +983,229 @@ void setup() {
 void loop() {
   webSocket.loop();
 
-  // 5 Saniyede bir canli telemetri paketi yayinla
+  // 5 Saniyede bir canlı telemetri paketi yayınla
   if (millis() - lastSend > 5000) {
     lastSend = millis();
     if (WiFi.status() == WL_CONNECTED) {
-      String json = "{\\"type\\":\\"TELEMETRY_PACKET\\",\\"deviceId\\":\\"dev_esp32_ws\\",\\"metrics\\":{\\"temp\\":27.3,\\"voltage\\":12.2}}";
-      webSocket.sendTXT(json);
+      float temp = 24.5 + (random(0, 100) / 20.0);
+      float hum = 55.0 + (random(0, 100) / 10.0);
+
+      // JSON Telemetri İletimi
+      DynamicJsonDocument doc(512);
+      doc["event"] = "telemetry:ingest";
+      JsonObject p = doc.createNestedObject("payload");
+      p["token"] = API_KEY;
+      p["deviceName"] = "ESP32_WS_Node";
+      p["data"] = "sıcaklık:" + String(temp, 2) + ",nem:" + String(hum, 1) + ",rssi:" + String(WiFi.RSSI());
+
+      String out;
+      serializeJson(doc, out);
+      webSocket.sendTXT(out);
       Serial.println("[WS GÖNDERİLDİ] Canlı Telemetri Paketi");
     }
   }
+}`,
+    },
+    {
+      id: 'code_esp32_generic_output_driver',
+      title: 'ESP32 - Generic Output Sürücüsü (Relay, Digital, Analog, PWM & Safe Boot)',
+      category: 'control',
+      categoryLabel: 'GPIO / Output Sürücüsü',
+      badge: 'Donanım Güvenliği (Safe-Boot)',
+      description: 'Cihazın capability tablosundaki tüm çıkış tanımlarını (relay_1, relay_2, digital_1, analog_1, pwm_1) generic setOutput(outputId, value) API ile yöneten, yeniden başlatma anında güvenli başlangıç durumlarını (Safe-State) kuran modüler C++ sürücüsü.',
+      tags: ['esp32', 'gpio', 'output', 'relay', 'digital', 'analog', 'pwm', 'dac', 'safe-boot', 'capability'],
+      endpoint: 'C++ Modül: OutputManager.h / setOutput(outputId, value)',
+      code: `// =========================================================================
+// NEXUSNODE IoT - ESP32 GENERIC OUTPUT & GPIO SÜRÜCÜSÜ (STANDALONE / MODÜLER)
+// Desteklenen Çıkış Tipleri:
+//   - relay   : Aç/Kapa Röle Çıkışları (Active-High veya Active-Low)
+//   - digital : Standart GPIO Dijital Çıkışlar (0 / 1)
+//   - analog  : ESP32 Dahili DAC Gerilim Çıkışı (0-255 / 0-3.3V)
+//   - PWM     : Donanımsal LEDC Zamanlayıcı Kanalı (0-255 Duty / Motor / Dimmer)
+// =========================================================================
+#include <Arduino.h>
+
+// -------------------------------------------------------------------------
+// 1. ÇIKIŞ TİPLERİ VE DONANIM CAPABILITY TANIMLARI
+// -------------------------------------------------------------------------
+enum OutputType {
+  TYPE_RELAY,    // Röle (ON/OFF, 1/0, HIGH/LOW)
+  TYPE_DIGITAL,  // Dijital GPIO (1/0)
+  TYPE_ANALOG,   // Analog / DAC Gerilim (0-255)
+  TYPE_PWM       // Donanımsal PWM Sinyali (0-255)
+};
+
+struct OutputDef {
+  const char* id;          // Çıkış Kimliği ("relay_1", "relay_2", "digital_1", "analog_1", "pwm_1")
+  OutputType  type;        // Çıkış Tipi (relay, digital, analog, pwm)
+  uint8_t     pin;         // ESP32 GPIO Numarası
+  bool        activeLow;   // Active-Low röle kartları için true
+  uint8_t     safeInitial; // Güvenli başlangıç değeri (Reboot safe-state)
+  uint8_t     pwmChannel;  // ESP32 LEDC Kanalı (0-15)
+  uint32_t    pwmFreq;     // PWM Frekansı (Hz)
+  uint8_t     pwmResolution;// PWM Çözünürlüğü (8-bit: 0-255)
+  float       currentValue;// Çalışma anındaki aktif değer
+};
+
+// Cihazın Donanım Yetenek (Capability) Tablosu:
+OutputDef outputs[] = {
+  { "relay_1",   TYPE_RELAY,   26, false, 0, 0, 0,     0, 0.0 }, // GPIO 26 -> Ana Güç Rölesi
+  { "relay_2",   TYPE_RELAY,   27, false, 0, 0, 0,     0, 0.0 }, // GPIO 27 -> Valf / Pompa Rölesi
+  { "digital_1", TYPE_DIGITAL, 32, false, 0, 0, 0,     0, 0.0 }, // GPIO 32 -> Durum LED / Siren
+  { "analog_1",  TYPE_ANALOG,  25, false, 0, 0, 0,     0, 0.0 }, // GPIO 25 -> ESP32 DAC1 (0-3.3V Gerilim)
+  { "pwm_1",     TYPE_PWM,     18, false, 0, 0, 5000,  8, 0.0 }  // GPIO 18 -> Fan Hızı / Dimmer (5kHz PWM)
+};
+const size_t OUTPUT_COUNT = sizeof(outputs) / sizeof(outputs[0]);
+
+// -------------------------------------------------------------------------
+// 2. GÜVENLİ BAŞLANGIÇ FONKSİYONU (SAFE REBOOT INITIALIZATION)
+// ESP yeniden başladığında donanımların istenmeyen şekilde tetiklenmesini önler.
+// -------------------------------------------------------------------------
+void initOutputs() {
+  Serial.println(F("[OUTPUT INIT] Çıkışlar güvenli başlangıç durumuna (Safe-State) getiriliyor..."));
+
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    switch (outputs[i].type) {
+      case TYPE_RELAY:
+      case TYPE_DIGITAL:
+        pinMode(outputs[i].pin, OUTPUT);
+        // Active-low mantığına göre güvenli kapalı durumunu yaz:
+        if (outputs[i].activeLow) {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? LOW : HIGH);
+        } else {
+          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? HIGH : LOW);
+        }
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_ANALOG:
+        #if defined(ESP32)
+          dacWrite(outputs[i].pin, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+
+      case TYPE_PWM:
+        #if defined(ESP32)
+          ledcSetup(outputs[i].pwmChannel, outputs[i].pwmFreq, outputs[i].pwmResolution);
+          ledcAttachPin(outputs[i].pin, outputs[i].pwmChannel);
+          ledcWrite(outputs[i].pwmChannel, outputs[i].safeInitial);
+        #else
+          pinMode(outputs[i].pin, OUTPUT);
+          analogWrite(outputs[i].pin, outputs[i].safeInitial);
+        #endif
+        outputs[i].currentValue = outputs[i].safeInitial;
+        break;
+    }
+
+    Serial.printf("  ✓ [%s] Tip: %d | Pin: GPIO %d | Güvenli Durum: %d\\n", 
+                  outputs[i].id, outputs[i].type, outputs[i].pin, outputs[i].safeInitial);
+  }
+  Serial.println(F("[OUTPUT INIT] Tüm çıkışlar başarıyla güvenceye alındı."));
+}
+
+// -------------------------------------------------------------------------
+// 3. GENERIC ÇIKIŞ KONTROL APİ: setOutput(outputId, value)
+// -------------------------------------------------------------------------
+bool setOutput(const String& outputId, const String& value, String& outErrMsg) {
+  for (size_t i = 0; i < OUTPUT_COUNT; i++) {
+    // ID eşleşmesi (büyük/küçük harf duyarsız)
+    if (outputId.equalsIgnoreCase(outputs[i].id) || 
+        outputId.equalsIgnoreCase(String("OUT_") + String(i + 1))) {
+      
+      switch (outputs[i].type) {
+        // A) RÖLE VE DİJİTAL ÇIKIŞLAR
+        case TYPE_RELAY:
+        case TYPE_DIGITAL: {
+          bool turnOn = (value.equalsIgnoreCase("ON") || value.equalsIgnoreCase("1") || 
+                         value.equalsIgnoreCase("HIGH") || value.equalsIgnoreCase("TRUE"));
+          bool physicalPinState = outputs[i].activeLow ? !turnOn : turnOn;
+          digitalWrite(outputs[i].pin, physicalPinState ? HIGH : LOW);
+          outputs[i].currentValue = turnOn ? 1.0 : 0.0;
+          Serial.printf("[OUTPUT SÜRÜLDÜ] %s -> %s (Pin %d, Fiziksel: %d)\\n", 
+                        outputs[i].id, turnOn ? "AÇIK (HIGH)" : "KAPALI (LOW)", 
+                        outputs[i].pin, physicalPinState);
+          return true;
+        }
+
+        // B) ANALOG / DAC ÇIKIŞLAR (0-255 / 0-3.3V)
+        case TYPE_ANALOG: {
+          int dacVal = value.toInt();
+          if (dacVal < 0) dacVal = 0;
+          if (dacVal > 255) dacVal = 255;
+          #if defined(ESP32)
+            dacWrite(outputs[i].pin, dacVal);
+          #else
+            analogWrite(outputs[i].pin, dacVal);
+          #endif
+          outputs[i].currentValue = dacVal;
+          float voltage = (dacVal / 255.0) * 3.3;
+          Serial.printf("[OUTPUT SÜRÜLDÜ] %s -> DAC Değeri: %d / 255 (~%.2f Volt)\\n", 
+                        outputs[i].id, dacVal, voltage);
+          return true;
+        }
+
+        // C) PWM ÇIKIŞLARI (0-255 Duty)
+        case TYPE_PWM: {
+          int pwmVal = value.toInt();
+          if (pwmVal < 0) pwmVal = 0;
+          if (pwmVal > 255) pwmVal = 255;
+          #if defined(ESP32)
+            ledcWrite(outputs[i].pwmChannel, pwmVal);
+          #else
+            analogWrite(outputs[i].pin, pwmVal);
+          #endif
+          outputs[i].currentValue = pwmVal;
+          float dutyPercent = (pwmVal / 255.0) * 100.0;
+          Serial.printf("[OUTPUT SÜRÜLDÜ] %s -> PWM Duty: %d / 255 (%%%.1f Hız/Parlaklık)\\n", 
+                        outputs[i].id, pwmVal, dutyPercent);
+          return true;
+        }
+      }
+    }
+  }
+
+  outErrMsg = "Desteklenmeyen veya tanımlanmamış outputId: " + outputId;
+  Serial.println("[OUTPUT HATA] " + outErrMsg);
+  return false;
+}
+
+// -------------------------------------------------------------------------
+// 4. TEST VE KULLANIM ÖRNEĞİ
+// -------------------------------------------------------------------------
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // 1. Çıkışları güvenli başlat
+  initOutputs();
+
+  // 2. Generic API Testleri
+  String errMsg = "";
+  
+  // Röle 1 Aç:
+  setOutput("relay_1", "ON", errMsg);
+  delay(1000);
+
+  // PWM Fan Hızını %50 (128) yap:
+  setOutput("pwm_1", "128", errMsg);
+  delay(1000);
+
+  // Analog DAC Çıkışını 2.0V (~155) yap:
+  setOutput("analog_1", "155", errMsg);
+  delay(1000);
+
+  // Röle 2 Aç:
+  setOutput("relay_2", "1", errMsg);
+  delay(1000);
+}
+
+void loop() {
+  // Saha telemetri ve komut alma döngüsü
+  delay(10000);
 }`,
     },
     {
@@ -747,13 +1298,35 @@ curl -X POST "${originUrl}/api/telemetry" \\
 # 4. RÖLE / PWM ÇIKIŞI TETİKLEME (Kontrol API)
 curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
   -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
   -d '{
     "command": "RELAY_1",
     "outputPin": "OUT_1",
     "value": "HIGH"
   }'
 
-# 5. SAHA CİHAZI KOMUT İNFAK ONAYI (Command Execution ACK)
+# 5. KULLANICI -> CİHAZ YENİ KOMUT GÖNDERME (PostgreSQL Multi-Tenant Command API)
+# 5 Aşamalı Doğrulama: Oturum + Tenant İzolasyonu + Cihaz Sahipliği + Rol Kontrolü + Çıkış Pini Desteği
+curl -X POST "${originUrl}/api/devices/dev_esp32_01/commands" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
+  -d '{
+    "command": "RELAY_1",
+    "commandType": "SET_OUTPUT",
+    "outputId": "RELAY_1",
+    "value": "1",
+    "source": "manual"
+  }'
+
+# 6. CİHAZ KOMUT LİSTESİ SORGULAMA (GET /api/devices/:id/commands)
+curl -X GET "${originUrl}/api/devices/dev_esp32_01/commands" \\
+  -H "Authorization: Bearer YOUR_USER_JWT_TOKEN"
+
+# 7. BEKLEYEN KOMUTU İPTAL ETME (POST /api/commands/:id/cancel)
+curl -X POST "${originUrl}/api/commands/cmd_123456/cancel" \\
+  -H "Authorization: Bearer YOUR_USER_JWT_TOKEN"
+
+# 8. SAHA CİHAZI KOMUT İNFAK ONAYI (Command Execution ACK)
 curl -X POST "${originUrl}/api/device/commands/ack" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: YOUR_API_KEY" \\
@@ -761,6 +1334,114 @@ curl -X POST "${originUrl}/api/device/commands/ack" \\
     "commandId": "cmd_123456",
     "status": "acknowledged"
   }'
+`,
+    },
+    {
+      id: 'code_postgresql_commands_api',
+      title: 'Çift Yönlü Komut & Kontrol API (PostgreSQL Multi-Tenant Yetkili)',
+      category: 'curl',
+      categoryLabel: 'Komut & Kontrol API',
+      badge: 'Multi-Tenant & PostgreSQL',
+      description: 'Kullanıcıdan cihaza 5 aşamalı güvenlik ve çıkış pini doğrulama kontrolü ile komut gönderme, kuyruk sorgulama ve iptal etme uç noktaları.',
+      tags: ['command', 'komut', 'postgresql', 'multi-tenant', '403', 'güvenlik', 'röle', 'pwm', 'iptal'],
+      endpoint: 'POST /api/devices/:deviceId/commands & GET /api/devices/:deviceId/commands',
+      code: `// =========================================================================
+// NEXUSNODE IoT - ÇİFT YÖNLÜ POSTGRESQL KOMUT GÖNDERME VE YÖNETİMİ
+// 5 Aşamalı Doğrulama:
+//   1. Oturum Kontrolü (Authentication)
+//   2. Organizasyon / Tenant Erişimi (Multi-Tenant Isolation)
+//   3. Cihaz Sahipliği Denetimi (Device Ownership)
+//   4. Komut İletim İzni (Role & Permission Check - Viewer 403 Forbidden)
+//   5. Çıkış / Pin Donanım Desteği Doğrulaması (Supported Output Check)
+// =========================================================================
+
+// 1. Cihaza Yeni Çıkış / Röle / PWM Komutu Gönderme:
+POST ${originUrl}/api/devices/dev_esp32_01/commands
+Headers: {
+  "Content-Type": "application/json",
+  "Authorization": "Bearer YOUR_USER_JWT_TOKEN"
+}
+Body:
+{
+  "command": "RELAY_1",
+  "commandType": "SET_OUTPUT",
+  "outputId": "RELAY_1",
+  "value": "1",
+  "source": "manual"
+}
+
+// Başarılı Yanıt (HTTP 201 Created):
+{
+  "status": "success",
+  "message": "Komut başarıyla doğrulandı ve PostgreSQL kuyruğuna eklendi.",
+  "command": {
+    "id": "cmd_1725100000000_abc1",
+    "commandId": "cmd_1725100000000_abc1",
+    "tenantId": "usr_customer_01",
+    "deviceId": "dev_esp32_01",
+    "userId": "usr_customer_01",
+    "commandType": "SET_OUTPUT",
+    "command": "RELAY_1",
+    "outputId": "RELAY_1",
+    "value": "1",
+    "source": "manual",
+    "status": "pending",
+    "createdAt": "2026-08-31T15:30:00.000Z"
+  }
+}
+
+// Yetkisiz veya Başka Müşteri Cihazı İstek Yanıtı (HTTP 403 Forbidden):
+{
+  "error": "Yetkisiz erişim (403): 'ESP32 Pompa İstasyonu' (dev_esp32_01) cihazı hesabınıza veya bağlı olduğunuz organizasyona ait değildir."
+}
+
+// Desteklenmeyen Çıkış Pini Yanıtı (HTTP 400 Bad Request):
+{
+  "error": "Geçersiz Çıkış / Pin (400): 'UNKNOWN_PIN_999' çıkışı bu cihaz (ESP32 Pompa İstasyonu) tarafından desteklenmemektedir."
+}
+
+// 2. Cihazın Komut Kuyruğunu ve Geçmişini Listeleme:
+GET ${originUrl}/api/devices/dev_esp32_01/commands?limit=50
+Headers: {
+  "Authorization": "Bearer YOUR_USER_JWT_TOKEN"
+}
+
+// 3. Bekleyen Bir Komutu İptal Etme:
+POST ${originUrl}/api/commands/cmd_1725100000000_abc1/cancel
+Headers: {
+  "Authorization": "Bearer YOUR_USER_JWT_TOKEN"
+}
+Response:
+{
+  "success": true,
+  "message": "Komut [cmd_1725100000000_abc1] başarıyla iptal edildi."
+}
+
+// =========================================================================
+// 4. GERÇEK ZAMANLI WEBSOCKET COMMAND EVENT AKIŞI (Dashboard & Client)
+// Multi-tenant izolasyonu ile yetkili dashboard ve istemcilere anlık aktarılır:
+// =========================================================================
+//
+// 1. 'command:created'     -> Komut oluşturulduğunda yayınlanır (status: 'pending')
+// 2. 'command:sent'        -> Cihaz komutu çektiğinde/teslim edildiğinde yayınlanır (status: 'sent'/'claimed')
+// 3. 'command:acknowledged'-> Cihaz komut alındı/işleme başladı onayı verdiğinde yayınlanır
+// 4. 'command:executed'    -> Cihaz komutun başarıyla icra edildiğini onayladığında yayınlanır
+// 5. 'command:failed'      -> Komut hata aldığında veya kullanıcı tarafından iptal edildiğinde
+// 6. 'command:expired'     -> TTL süresi dolup zaman aşımına uğradığında otomatik tetiklenir
+//
+// JavaScript / WebSocket Dinleyici Örneği:
+// const ws = new WebSocket("ws://${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}/ws?token=YOUR_TOKEN");
+// ws.onmessage = (event) => {
+//   const msg = JSON.parse(event.data);
+//   switch(msg.event) {
+//     case 'command:created':      console.log('Yeni komut kuyrukta:', msg.payload); break;
+//     case 'command:sent':         console.log('Cihaza iletildi:', msg.payload); break;
+//     case 'command:acknowledged': console.log('Cihaz teslim aldı:', msg.payload); break;
+//     case 'command:executed':     console.log('Komut başarıyla çalıştı:', msg.payload); break;
+//     case 'command:failed':       console.error('Komut başarısız:', msg.payload); break;
+//     case 'command:expired':      console.warn('Komut zaman aşımına uğradı:', msg.payload); break;
+//   }
+// };
 `,
     },
     {

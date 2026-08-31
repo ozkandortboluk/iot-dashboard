@@ -39,6 +39,8 @@ import type {
   AuditLog,
   DiscoveredNetworkDevice,
   DeviceCommand,
+  DeviceCommandInputOptions,
+  DeviceCommandStatus,
   ActiveAlarm,
   AlarmState,
   NotificationQueueItem,
@@ -996,19 +998,23 @@ class LocalDatabase {
   // ==========================================
   // Device Downlink Commands (State Machine: Pending -> Claimed -> Acknowledged/Failed)
   // ==========================================
-  public async getCommands(deviceId?: string): Promise<DeviceCommand[]> {
+  public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
     if (this.isPostgresProductionMode()) {
       if (deviceId && deviceId !== 'all') {
-         return await this.postgresRepo.getCommands(deviceId);
+         return await this.postgresRepo.getCommands(deviceId, tenantId, limit);
       } else {
          return [];
       }
     }
     if (!this.data.commands) this.data.commands = [];
+    let cmds = this.data.commands;
     if (deviceId && deviceId !== 'all') {
-      return this.data.commands.filter((c) => c.deviceId === deviceId);
+      cmds = cmds.filter((c) => c.deviceId === deviceId);
     }
-    return this.data.commands.slice(-100).reverse();
+    if (tenantId && tenantId !== 'all') {
+      cmds = cmds.filter((c) => c.tenantId === tenantId || c.customerId === tenantId);
+    }
+    return cmds.slice(-limit).reverse();
   }
 
   public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
@@ -1016,37 +1022,121 @@ class LocalDatabase {
        return await this.postgresRepo.getPendingCommands(deviceId);
     }
     if (!this.data.commands) this.data.commands = [];
-    return this.data.commands.filter((c) => c.deviceId === deviceId && c.status === 'pending');
+    return this.data.commands.filter((c) => c.deviceId === deviceId && (c.status === 'pending' || c.status === 'sent'));
   }
 
-  public async addCommand(deviceId: string, commandStr: string, payloadStr: string | number, source: string = 'user_ui'): Promise<DeviceCommand> {
-    if (!this.data.commands) this.data.commands = [];
-    const dev = this.data.devices.find((d) => d.id === deviceId);
-    const cmd: DeviceCommand = {
-      id: `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      deviceId,
-      deviceName: dev ? dev.name : deviceId,
-      command: commandStr,
-      payload: payloadStr,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      source,
-    };
-    this.data.commands.push(cmd);
+  public async addCommand(
+    deviceIdOrOptions: string | (Partial<DeviceCommandInputOptions> & { deviceId: string }),
+    commandStr?: string,
+    payloadStr?: string | number,
+    sourceStr: string = 'manual'
+  ): Promise<DeviceCommand> {
+    let opts: Partial<DeviceCommandInputOptions> & { deviceId: string };
     
-    // RAM cache limit (keep last 500 commands)
-    if (this.data.commands.length > 500) {
-       this.data.commands = this.data.commands.slice(-500);
+    if (typeof deviceIdOrOptions === 'string') {
+      opts = {
+        deviceId: deviceIdOrOptions,
+        command: commandStr,
+        commandType: commandStr,
+        payload: payloadStr,
+        value: payloadStr,
+        source: sourceStr || 'manual',
+      };
+    } else {
+      opts = deviceIdOrOptions;
     }
 
-    if (this.isPostgresProductionMode()) {
-       await this.postgresRepo.saveCommand(cmd).catch((err) => {
-         console.warn(`[Command Sync Catch] Postgres komut kaydetme hatası: ${err?.message || err}`);
-       });
-    } else {
-       this.saveData(this.data);
+    const dev = this.data.devices?.find((d) => d.id === opts.deviceId);
+    if (!dev) {
+      throw new Error(`Cihaz bulunamadı (${opts.deviceId})`);
     }
-    return cmd;
+
+    // Strict Multi-Tenant Security Check:
+    // If tenantId/customerId is specified and not admin, verify ownership of device
+    const targetTenant = opts.tenantId || opts.customerId;
+    if (targetTenant && targetTenant !== 'usr_admin' && dev.tenantId && dev.tenantId !== targetTenant) {
+      throw new Error(`[Multi-Tenant Error] Bu cihaza (${opts.deviceId}) komut gönderme yetkiniz yok.`);
+    }
+
+    const id = opts.commandId || opts.id || `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const nowIso = new Date().toISOString();
+
+    const cmd: DeviceCommand = {
+      id,
+      commandId: opts.commandId || id,
+      tenantId: opts.tenantId || opts.customerId || dev.tenantId || undefined,
+      customerId: opts.customerId || opts.tenantId || dev.tenantId || undefined,
+      deviceId: opts.deviceId,
+      deviceName: opts.deviceName || dev.name,
+      userId: opts.userId || undefined,
+      commandType: opts.commandType || opts.command || 'GENERAL_COMMAND',
+      command: opts.command || opts.commandType || 'GENERAL_COMMAND',
+      outputId: opts.outputId || undefined,
+      value: opts.value !== undefined ? opts.value : opts.payload,
+      payload: opts.payload !== undefined ? opts.payload : (opts.value ?? ''),
+      source: opts.source || 'manual',
+      status: opts.status || 'pending',
+      createdAt: opts.createdAt || opts.created_at || nowIso,
+      created_at: opts.createdAt || opts.created_at || nowIso,
+      sentAt: opts.sentAt || opts.sent_at,
+      sent_at: opts.sentAt || opts.sent_at,
+      acknowledgedAt: opts.acknowledgedAt || opts.acknowledged_at,
+      acknowledged_at: opts.acknowledgedAt || opts.acknowledged_at,
+      executedAt: opts.executedAt || opts.executed_at,
+      executed_at: opts.executedAt || opts.executed_at,
+      errorMessage: opts.errorMessage || opts.error_message,
+      error_message: opts.errorMessage || opts.error_message,
+      parameters: opts.parameters,
+      result: opts.result,
+    };
+
+    if (this.isPostgresProductionMode()) {
+      return await this.postgresRepo.saveCommand(cmd);
+    } else {
+      if (!this.data.commands) this.data.commands = [];
+
+      // 1. Output Superseding Protection: If a new command targets an outputId, cancel older pending/sent commands for that same output
+      if (cmd.outputId && cmd.status === 'pending') {
+        for (const c of this.data.commands) {
+          if (
+            c.deviceId === cmd.deviceId &&
+            c.outputId === cmd.outputId &&
+            (c.status === 'pending' || c.status === 'sent' || (c.status as any) === 'claimed')
+          ) {
+            c.status = 'cancelled';
+            c.errorMessage = 'Yeni çıkış komutu ile geçersiz kılındı (Superseded)';
+            c.executedAt = nowIso;
+          }
+        }
+      }
+
+      // 2. Queue Limit Protection: Limit pending commands per device to max 30
+      const devicePending = this.data.commands.filter(
+        (c) => c.deviceId === cmd.deviceId && (c.status === 'pending' || c.status === 'sent')
+      );
+      if (devicePending.length >= 30) {
+        // Cancel the oldest pending commands
+        const toCancelCount = devicePending.length - 29;
+        let cancelledSoFar = 0;
+        for (const c of this.data.commands) {
+          if (c.deviceId === cmd.deviceId && (c.status === 'pending' || c.status === 'sent')) {
+            c.status = 'cancelled';
+            c.errorMessage = 'Kuyruk sınırını aştığı için iptal edildi (Maks. 30 komut)';
+            c.executedAt = nowIso;
+            cancelledSoFar++;
+            if (cancelledSoFar >= toCancelCount) break;
+          }
+        }
+      }
+
+      this.data.commands.push(cmd);
+      // Keep RAM memory footprint minimal (max 200 recent commands)
+      if (this.data.commands.length > 200) {
+        this.data.commands = this.data.commands.slice(-200);
+      }
+      this.saveData(this.data);
+      return cmd;
+    }
   }
 
   /**
@@ -1100,7 +1190,7 @@ class LocalDatabase {
 
   /**
    * Acknowledges command execution by device ID and command ID(s).
-   * Transitions status to 'acknowledged' (or 'failed') and persists to PostgreSQL.
+   * Transitions status to 'acknowledged', 'executed', or 'failed' and persists to PostgreSQL.
    * Mandates strict deviceId matching to prevent cross-device ACK authorization attacks.
    */
   public async acknowledgeCommands(
@@ -1108,16 +1198,20 @@ class LocalDatabase {
     commandIds: string | string[],
     status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
     result?: any
-  ): Promise<number> {
+  ): Promise<{ count: number; commands: DeviceCommand[] }> {
     const ids = Array.isArray(commandIds) ? commandIds : [commandIds];
-    if (ids.length === 0 || !deviceId) return 0;
+    if (ids.length === 0 || !deviceId) return { count: 0, commands: [] };
     const now = new Date().toISOString();
     let count = 0;
+    const updatedCommands: DeviceCommand[] = [];
 
     if (this.isPostgresProductionMode()) {
       for (const id of ids) {
-        const ok = await this.postgresRepo.acknowledgeCommand(deviceId, id, status, result);
-        if (ok) count++;
+        const cmd = await this.postgresRepo.acknowledgeCommand(deviceId, id, status, result);
+        if (cmd) {
+          count++;
+          updatedCommands.push(cmd);
+        }
       }
     }
 
@@ -1128,7 +1222,10 @@ class LocalDatabase {
         cmd.executed_at = now;
         cmd.acknowledged_at = now;
         if (result !== undefined) cmd.result = result;
-        if (!this.isPostgresProductionMode()) count++;
+        if (!this.isPostgresProductionMode()) {
+          count++;
+          updatedCommands.push({ ...cmd });
+        }
       }
     }
 
@@ -1136,7 +1233,32 @@ class LocalDatabase {
       this.saveData(this.data);
     }
 
-    return count;
+    return { count, commands: updatedCommands };
+  }
+
+  public async expireStaleCommands(timeoutSeconds = 600): Promise<DeviceCommand[]> {
+    if (this.isPostgresProductionMode()) {
+      return await this.postgresRepo.expireStaleCommands(timeoutSeconds);
+    } else {
+      const cutoff = Date.now() - timeoutSeconds * 1000;
+      const expired: DeviceCommand[] = [];
+      if (!this.data.commands) this.data.commands = [];
+      for (const c of this.data.commands) {
+        if (
+          (c.status === 'pending' || c.status === 'sent' || (c.status as any) === 'claimed') &&
+          new Date(c.createdAt || c.created_at || 0).getTime() < cutoff
+        ) {
+          c.status = 'expired';
+          c.executedAt = new Date().toISOString();
+          c.errorMessage = 'Komut zaman aşımına uğradı (cihaz yanıt vermedi / süresi doldu)';
+          expired.push({ ...c });
+        }
+      }
+      if (expired.length > 0) {
+        this.saveData(this.data);
+      }
+      return expired;
+    }
   }
 
   public async markCommandsDelivered(commandIds: string[]): Promise<void> {
@@ -1163,6 +1285,43 @@ class LocalDatabase {
     if (updated && !this.isPostgresProductionMode()) {
       this.saveData(this.data);
     }
+  }
+
+  public async getCommandById(commandId: string, tenantId?: string): Promise<DeviceCommand | null> {
+    if (this.isPostgresProductionMode()) {
+      return await this.postgresRepo.getCommandById(commandId, tenantId);
+    }
+    if (!this.data.commands) return null;
+    const cmd = this.data.commands.find((c) => c.id === commandId || c.commandId === commandId);
+    if (!cmd) return null;
+    if (tenantId && tenantId !== 'all' && cmd.tenantId && cmd.tenantId !== tenantId && cmd.customerId !== tenantId) {
+      return null;
+    }
+    return cmd;
+  }
+
+  public async cancelCommand(commandId: string, tenantId?: string): Promise<boolean> {
+    let cancelled = false;
+    if (this.isPostgresProductionMode()) {
+      const res = await this.postgresRepo.cancelCommand(commandId, tenantId);
+      cancelled = res !== null;
+    }
+
+    if (!this.data.commands) this.data.commands = [];
+    const cmd = this.data.commands.find((c) => c.id === commandId || c.commandId === commandId);
+    if (cmd && (cmd.status === 'pending' || cmd.status === 'sent' || cmd.status === 'claimed')) {
+      if (!tenantId || tenantId === 'all' || cmd.tenantId === tenantId || cmd.customerId === tenantId) {
+        cmd.status = 'cancelled';
+        cmd.error_message = 'Kullanıcı tarafından iptal edildi';
+        cmd.executed_at = new Date().toISOString();
+        cancelled = true;
+        if (!this.isPostgresProductionMode()) {
+          this.saveData(this.data);
+        }
+      }
+    }
+
+    return cancelled;
   }
 
   public async testAndResetFirestoreQuota(): Promise<{ success: boolean; message: string }> {

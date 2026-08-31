@@ -1,7 +1,7 @@
 import type http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { db } from '../db.js';
-import type { User, TelemetryReading, Device, DashboardLayout } from '../../types.js';
+import type { User, TelemetryReading, Device, DashboardLayout, DeviceCommand } from '../../types.js';
 import { deviceAuthService } from './deviceAuth.service.js';
 import { telemetryService } from './telemetry.service.js';
 import { commandService } from './command.service.js';
@@ -9,6 +9,7 @@ import { commandService } from './command.service.js';
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
   user?: User;
+  device?: Device;
   isAlive?: boolean;
   messageCount?: number;
   lastRateReset?: number;
@@ -30,7 +31,7 @@ export function safeSend(client: AuthenticatedWebSocket, message: string): boole
 
   // Hard limit: Terminate client if buffer exceeds 2MB
   if (client.bufferedAmount > TERMINATE_BUFFERED_AMOUNT) {
-    console.warn(`[WebSocket] Tampon sınırı aşıldı, bağlantı kesiliyor (${client.user?.name || 'Anonim'}) - bufferedAmount: ${client.bufferedAmount} bytes`);
+    console.warn(`[WebSocket] Tampon sınırı aşıldı, bağlantı kesiliyor (${client.user?.name || client.device?.name || 'Anonim'}) - bufferedAmount: ${client.bufferedAmount} bytes`);
     try {
       client.terminate();
     } catch {
@@ -41,7 +42,7 @@ export function safeSend(client: AuthenticatedWebSocket, message: string): boole
 
   // Soft limit: Skip non-critical payload if buffer exceeds 512KB
   if (client.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-    console.warn(`[WebSocket] Geri basınç (Backpressure) algılandı (${client.user?.name || 'Anonim'}) - bufferedAmount: ${client.bufferedAmount} bytes. Paket atlanıyor.`);
+    console.warn(`[WebSocket] Geri basınç (Backpressure) algılandı (${client.user?.name || client.device?.name || 'Anonim'}) - bufferedAmount: ${client.bufferedAmount} bytes. Paket atlanıyor.`);
     return false;
   }
 
@@ -64,6 +65,22 @@ function resolveUser(token?: string | null): User | null {
   if (session?.user) {
     return session.user;
   }
+
+  return null;
+}
+
+// Physical device API key / Token verification helper for WebSocket connections
+function resolveDevice(token?: string | null): Device | null {
+  if (!token || typeof token !== 'string' || token.trim() === '') {
+    return null;
+  }
+
+  const cleanToken = token.trim();
+  const dev = db.getDeviceByApiKey(cleanToken);
+  if (dev) return dev;
+
+  const devById = db.getDevices().find((d) => (d.id === cleanToken || d.apiKey === cleanToken) && d.apiKey);
+  if (devById) return devById;
 
   return null;
 }
@@ -120,14 +137,49 @@ export function broadcast(event: string, payload: unknown) {
     if (client.readyState !== WebSocket.OPEN) return;
 
     // Unauthenticated clients receive NO protected data broadcasts
-    if (!client.isAuth || !client.user) {
+    if (!client.isAuth || (!client.user && !client.device)) {
       if (['simulator:updated', 'system:connected', 'ping'].includes(event)) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       }
       return;
     }
 
-    const clientUser = client.user;
+    // Direct Downlink Push to Connected Hardware Devices (ESP32/ESP8266/Python IoT Agents)
+    if (client.device) {
+      if (
+        event === 'command:created' ||
+        event === 'command:sent' ||
+        event === 'command:downlink'
+      ) {
+        const cmd = (payload && typeof payload === 'object' && (payload as any).command
+          ? (payload as any).command
+          : payload) as DeviceCommand;
+
+        if (cmd && (cmd.deviceId === client.device.id || cmd.deviceId === client.device.apiKey)) {
+          safeSend(
+            client,
+            JSON.stringify({
+              event: 'command:downlink',
+              command: {
+                id: cmd.id,
+                commandId: cmd.commandId || cmd.id,
+                command: cmd.command || cmd.commandType,
+                commandType: cmd.commandType || cmd.command,
+                outputId: cmd.outputId,
+                value: cmd.value !== undefined ? cmd.value : cmd.payload,
+                payload: cmd.payload,
+                parameters: cmd.parameters,
+                createdAt: cmd.createdAt || cmd.created_at,
+              },
+              timestamp: new Date().toISOString(),
+            })
+          );
+        }
+      }
+      return;
+    }
+
+    const clientUser = client.user!;
     const isAdmin = clientUser.role === 'admin';
     const subChannels = client.subscribedChannels || new Set(['physical']);
 
@@ -277,18 +329,68 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // 5. Commands update broadcast
-    if (event === 'commands:updated') {
-      if (!isAdmin) {
-        const cmdList = Array.isArray(payload) ? payload : [];
-        if (cmdList.length > 0) {
-          const dev = allDevices.find((d) => d.id === cmdList[0].deviceId);
-          if (!dev || dev.tenantId !== clientUser.id) {
-            return;
-          }
-        }
+    // 5. Commands lifecycle events broadcast (Tenant-isolated for multi-tenant security)
+    if (
+      event === 'commands:updated' ||
+      event === 'command:created' ||
+      event === 'command:sent' ||
+      event === 'command:acknowledged' ||
+      event === 'command:executed' ||
+      event === 'command:failed' ||
+      event === 'command:expired' ||
+      event.startsWith('command:')
+    ) {
+      if (isAdmin) {
+        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+        return;
       }
-      safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+
+      // Non-admin customer / tenant user: verify device ownership and tenant authorization
+      const membershipTenants = (db.data?.tenantMemberships || [])
+        .filter((m: any) => m.userId === clientUser.id)
+        .map((m: any) => m.tenantId);
+      const userTenants = new Set([clientUser.id, ...membershipTenants]);
+
+      const cmdList: any[] = Array.isArray(payload)
+        ? payload
+        : payload && typeof payload === 'object' && (payload as any).command
+        ? [(payload as any).command]
+        : payload && typeof payload === 'object'
+        ? [payload]
+        : [];
+
+      if (cmdList.length === 0) {
+        return;
+      }
+
+      // Check if command(s) belong to user's authorized tenants or devices
+      const authorizedCmds = cmdList.filter((cmd) => {
+        if (!cmd) return false;
+        if (cmd.tenantId && userTenants.has(cmd.tenantId)) return true;
+        if (cmd.customerId && userTenants.has(cmd.customerId)) return true;
+        if (cmd.userId && cmd.userId === clientUser.id) return true;
+
+        if (cmd.deviceId) {
+          const dev = allDevices.find((d) => d.id === cmd.deviceId || d.apiKey === cmd.deviceId);
+          if (dev && dev.tenantId && userTenants.has(dev.tenantId)) return true;
+        }
+        return false;
+      });
+
+      if (authorizedCmds.length === 0) {
+        // Not authorized for any command in this payload - drop silently to prevent cross-tenant leak
+        return;
+      }
+
+      const outgoingPayload = Array.isArray(payload)
+        ? authorizedCmds
+        : (authorizedCmds.length === 1
+            ? (payload && typeof payload === 'object' && (payload as any).command
+                ? { ...payload, command: authorizedCmds[0] }
+                : authorizedCmds[0])
+            : authorizedCmds);
+
+      safeSend(client, JSON.stringify({ event, payload: outgoingPayload, timestamp: new Date().toISOString() }));
       return;
     }
 
@@ -440,14 +542,35 @@ export function initWebSocketServer(server: http.Server) {
       ws.isAlive = true;
     });
 
-    // Check if token exists in Sec-WebSocket-Protocol or Authorization header (URL query tokens removed for security)
+    // Check if token exists in Authorization header, Sec-WebSocket-Protocol, or Query parameter (for microcontrollers)
+    let connectionToken: string | null = null;
     if (req?.headers?.authorization) {
       const authHeader = req.headers.authorization;
-      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-      const verifiedUser = resolveUser(token);
+      connectionToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+    } else if (req?.headers?.['x-api-key']) {
+      connectionToken = String(req.headers['x-api-key']).trim();
+    } else if (req?.headers?.['sec-websocket-protocol']) {
+      connectionToken = String(req.headers['sec-websocket-protocol']).split(',')[0].trim();
+    } else if (req?.url) {
+      try {
+        const parsedUrl = new URL(req.url, 'http://127.0.0.1');
+        connectionToken = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('apiKey') || parsedUrl.searchParams.get('api_key');
+      } catch {
+        // ignore
+      }
+    }
+
+    if (connectionToken) {
+      const verifiedUser = resolveUser(connectionToken);
       if (verifiedUser) {
         ws.isAuth = true;
         ws.user = verifiedUser;
+      } else {
+        const verifiedDevice = resolveDevice(connectionToken);
+        if (verifiedDevice) {
+          ws.isAuth = true;
+          ws.device = verifiedDevice;
+        }
       }
     }
 
@@ -461,6 +584,7 @@ export function initWebSocketServer(server: http.Server) {
           serverTime: new Date().toISOString(),
           authenticated: ws.isAuth,
           user: ws.user ? { id: ws.user.id, name: ws.user.name, role: ws.user.role } : null,
+          device: ws.device ? { id: ws.device.id, name: ws.device.name } : null,
         },
       })
     );
@@ -468,6 +592,19 @@ export function initWebSocketServer(server: http.Server) {
     // Push initial bootstrap data ONLY if user is authenticated
     if (ws.isAuth && ws.user) {
       sendBootstrapData(ws, ws.user);
+    } else if (ws.isAuth && ws.device) {
+      commandService.getAndDeliverPendingCommands(ws.device.id).then((pendingCmds) => {
+        if (pendingCmds.length > 0) {
+          safeSend(
+            ws,
+            JSON.stringify({
+              event: 'command:downlink',
+              commands: pendingCmds,
+              timestamp: new Date().toISOString(),
+            })
+          );
+        }
+      });
     }
 
     ws.on('message', async (data) => {
@@ -482,7 +619,7 @@ export function initWebSocketServer(server: http.Server) {
       ws.messageCount = (ws.messageCount || 0) + 1;
 
       if (ws.messageCount > WS_MAX_MESSAGES_PER_WINDOW) {
-        console.warn(`[WebSocket] Hız sınırı aşıldı: ${ws.user?.name || 'Anonim'}`);
+        console.warn(`[WebSocket] Hız sınırı aşıldı: ${ws.user?.name || ws.device?.name || 'Anonim'}`);
         safeSend(ws, JSON.stringify({ event: 'error', error: 'Mesaj sınırı aşıldı.' }));
         return;
       }
@@ -490,15 +627,16 @@ export function initWebSocketServer(server: http.Server) {
       try {
         const parsed = JSON.parse(data.toString());
 
-        // Authentication message from client (REQUIRES VALID SESSION TOKEN ONLY)
+        // Authentication message from client (supports User Session Token or Device API Key)
         if (parsed.event === 'auth' || parsed.type === 'auth') {
-          const token = parsed.token || parsed.sessionToken;
+          const token = parsed.token || parsed.sessionToken || parsed.apiKey;
           const verifiedUser = resolveUser(token);
 
           if (verifiedUser) {
             ws.isAuth = true;
             ws.user = verifiedUser;
-            console.log(`[WebSocket] Kimlik başarıyla doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
+            ws.device = undefined;
+            console.log(`[WebSocket] Kullanıcı oturumu doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
             safeSend(
               ws,
               JSON.stringify({
@@ -509,19 +647,139 @@ export function initWebSocketServer(server: http.Server) {
 
             // Bootstrap fresh data for this authenticated user
             sendBootstrapData(ws, verifiedUser);
-          } else {
-            ws.isAuth = false;
+            return;
+          }
+
+          const verifiedDevice = resolveDevice(token);
+          if (verifiedDevice) {
+            ws.isAuth = true;
+            ws.device = verifiedDevice;
             ws.user = undefined;
-            console.warn(`[WebSocket] Doğrulama başarısız: Geçersiz veya süresi dolmuş oturum anahtarı.`);
+            console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
             safeSend(
               ws,
               JSON.stringify({
-                event: 'auth:failed',
-                error: 'Geçersiz veya süresi dolmuş oturum anahtarı.',
+                event: 'auth:success',
+                payload: {
+                  type: 'device',
+                  deviceId: verifiedDevice.id,
+                  deviceName: verifiedDevice.name,
+                  status: 'online',
+                },
               })
             );
+
+            // Claim and deliver any queued pending commands immediately to this connected device
+            commandService.getAndDeliverPendingCommands(verifiedDevice.id).then((pendingCmds) => {
+              if (pendingCmds.length > 0) {
+                safeSend(
+                  ws,
+                  JSON.stringify({
+                    event: 'command:downlink',
+                    commands: pendingCmds,
+                    timestamp: new Date().toISOString(),
+                  })
+                );
+              }
+            });
+            return;
           }
+
+          ws.isAuth = false;
+          ws.user = undefined;
+          ws.device = undefined;
+          console.warn(`[WebSocket] Doğrulama başarısız: Geçersiz veya süresi dolmuş oturum anahtarı/cihaz token'ı.`);
+          safeSend(
+            ws,
+            JSON.stringify({
+              event: 'auth:failed',
+              error: 'Geçersiz veya süresi dolmuş anahtar/token.',
+            })
+          );
           return;
+        }
+
+        // Hardware Device Command ACK Handler: { event: "command:ack", commandId: "...", status: "received"|"executed"|"failed", result?: ..., error?: ... }
+        if (
+          parsed.event === 'command:ack' ||
+          parsed.event === 'command:status' ||
+          parsed.event === 'device:command_ack' ||
+          parsed.type === 'command:ack'
+        ) {
+          let verifiedDevId: string | null = null;
+
+          if (ws.device) {
+            verifiedDevId = ws.device.id;
+          } else if (parsed.token || parsed.apiKey) {
+            const dev = resolveDevice(parsed.token || parsed.apiKey);
+            if (dev) verifiedDevId = dev.id;
+          } else if (ws.user) {
+            // If sender is an authenticated web user (e.g. admin or device owner acknowledging on behalf of simulator)
+            const targetDevId = parsed.deviceId;
+            if (targetDevId) {
+              const dev = db.getDevices().find((d) => d.id === targetDevId);
+              if (dev && (ws.user.role === 'admin' || dev.tenantId === ws.user.id)) {
+                verifiedDevId = dev.id;
+              }
+            }
+          }
+
+          if (!verifiedDevId) {
+            safeSend(
+              ws,
+              JSON.stringify({
+                event: 'error',
+                error: 'Yetkisiz erişim: Komut onayı (ACK) için geçerli cihaz kimlik doğrulaması gereklidir.',
+              })
+            );
+            return;
+          }
+
+          const cmdId = parsed.commandId || parsed.id || parsed.commandIds;
+          const status = parsed.status || 'acknowledged'; // 'received' | 'executed' | 'failed'
+          const result = parsed.result;
+          const error = parsed.error || parsed.errorMessage;
+          const finalRes = result !== undefined ? result : (error ? { error } : undefined);
+
+          const updatedCount = await commandService.handleCommandAck(
+            verifiedDevId,
+            cmdId,
+            status,
+            finalRes
+          );
+
+          safeSend(
+            ws,
+            JSON.stringify({
+              event: 'command:ack_confirmed',
+              commandId: cmdId,
+              status,
+              acknowledgedCount: updatedCount,
+              timestamp: new Date().toISOString(),
+            })
+          );
+          return;
+        }
+
+        // Hardware Device Command Polling Handler: { event: "command:poll" }
+        if (
+          parsed.event === 'command:poll' ||
+          parsed.event === 'device:commands:get' ||
+          parsed.type === 'command:poll'
+        ) {
+          const targetDevice = ws.device || (parsed.token ? resolveDevice(parsed.token) : null);
+          if (targetDevice) {
+            const pendingCmds = await commandService.getAndDeliverPendingCommands(targetDevice.id);
+            safeSend(
+              ws,
+              JSON.stringify({
+                event: 'command:downlink',
+                commands: pendingCmds,
+                timestamp: new Date().toISOString(),
+              })
+            );
+            return;
+          }
         }
 
         // Ping handler

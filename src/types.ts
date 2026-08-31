@@ -75,6 +75,33 @@ export interface UserSession {
 export type DeviceStatus = 'online' | 'offline' | 'warning' | 'maintenance';
 export type OtaStatus = 'IDLE' | 'PENDING' | 'DOWNLOADING' | 'FLASHING' | 'VERIFYING' | 'REBOOTING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'ROLLED_BACK';
 
+export type OutputType = 'relay' | 'digital' | 'analog' | 'pwm';
+
+export interface DeviceOutputDefinition {
+  id: string; // e.g. "relay_1", "relay_2", "digital_1", "analog_1", "pwm_1"
+  name: string; // e.g. "Ana Röle", "Durum LED'i", "Analog Çıkış (DAC)", "PWM Fan Hızı"
+  type: OutputType; // 'relay' | 'digital' | 'analog' | 'pwm'
+  pin?: number; // GPIO pin (e.g. 26, 27, 25, 18)
+  initialState?: string | number; // Safe state on reboot (e.g. 0, "LOW")
+  activeLow?: boolean; // True for active-low relays/modules
+  minValue?: number; // e.g. 0
+  maxValue?: number; // e.g. 100 or 255
+  pwmChannel?: number; // For ESP32 ledc channel (0-15)
+  pwmFreq?: number; // e.g. 5000 Hz
+  pwmResolution?: number; // e.g. 8 bits
+  unit?: string; // "%", "V", "RPM"
+  currentValue?: string | number;
+  description?: string;
+}
+
+export interface DeviceCapabilities {
+  outputs?: DeviceOutputDefinition[];
+  sensors?: string[];
+  features?: string[];
+  maxPwmChannels?: number;
+  [key: string]: any;
+}
+
 export interface Device {
   id: string;
   tenantId: string; // Tenant (Company) ID
@@ -104,6 +131,10 @@ export interface Device {
   isSimulated?: boolean;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
+  supportedOutputs?: string[];
+  supportedCommands?: string[];
+  outputDefinitions?: DeviceOutputDefinition[];
+  capabilities?: DeviceCapabilities;
   metrics: {
     cpu?: number;
     memory?: number;
@@ -218,19 +249,84 @@ export interface TelemetryReading {
   simulationRunId?: string;
 }
 
-export interface DeviceCommand {
-  id: string;
+export type DeviceCommandStatus = 
+  | 'pending'
+  | 'sent'
+  | 'claimed'
+  | 'delivered'
+  | 'acknowledged'
+  | 'executed'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export type DeviceCommandSource = 
+  | 'manual'
+  | 'automation'
+  | 'alarm'
+  | 'schedule'
+  | 'api'
+  | 'user_ui'
+  | 'user_control'
+  | string;
+
+export interface DeviceCommandInputOptions {
+  id?: string;
+  commandId?: string;
+  tenantId?: string;
+  customerId?: string;
   deviceId: string;
   deviceName?: string;
+  userId?: string;
+  commandType?: string;
+  command?: string;
+  outputId?: string;
+  value?: string | number | any;
+  payload?: string | number | any;
+  source?: DeviceCommandSource;
+  status?: DeviceCommandStatus;
+  createdAt?: string;
+  created_at?: string;
+  sentAt?: string;
+  sent_at?: string;
+  acknowledgedAt?: string;
+  acknowledged_at?: string;
+  executedAt?: string;
+  executed_at?: string;
+  errorMessage?: string;
+  error_message?: string;
+  parameters?: any;
+  result?: any;
+}
+
+export interface DeviceCommand {
+  id: string;
+  commandId: string;
+  tenantId?: string;
+  customerId?: string;
+  deviceId: string;
+  deviceName?: string;
+  userId?: string;
+  commandType: string;
   command: string;
-  payload: string | number;
-  status: 'pending' | 'claimed' | 'delivered' | 'acknowledged' | 'executed' | 'failed';
+  outputId?: string;
+  value?: string | number | any;
+  payload: string | number | any;
+  source: DeviceCommandSource;
+  status: DeviceCommandStatus;
+  createdAt: string;
   created_at: string;
+  sentAt?: string;
+  sent_at?: string;
   claimed_at?: string;
   delivered_at?: string;
+  acknowledgedAt?: string;
   acknowledged_at?: string;
+  executedAt?: string;
   executed_at?: string;
-  source?: string;
+  errorMessage?: string;
+  error_message?: string;
+  parameters?: any;
   result?: any;
 }
 

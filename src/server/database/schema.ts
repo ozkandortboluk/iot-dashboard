@@ -456,14 +456,42 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS device_commands (
     id VARCHAR(64) PRIMARY KEY,
+    command_id VARCHAR(64),
+    tenant_id VARCHAR(64),
+    customer_id VARCHAR(64),
     device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
-    command_name VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64),
+    command_type VARCHAR(64) NOT NULL,
+    command_name VARCHAR(64),
+    output_id VARCHAR(64),
+    value_payload TEXT,
     parameters JSONB DEFAULT '{}'::jsonb,
-    status VARCHAR(32) DEFAULT 'queued',
+    source VARCHAR(32) DEFAULT 'manual',
+    status VARCHAR(32) DEFAULT 'pending',
     sent_by VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    executed_at TIMESTAMP WITH TIME ZONE
+    sent_at TIMESTAMP WITH TIME ZONE,
+    acknowledged_at TIMESTAMP WITH TIME ZONE,
+    executed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT
 );
+
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_id VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_type VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS output_id VARCHAR(64);
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS value_payload TEXT;
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'manual';
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS error_message TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_device_commands_device_time ON device_commands(device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_device_commands_tenant_time ON device_commands(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_device_commands_customer_time ON device_commands(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_device_commands_status ON device_commands(status);
 
 CREATE TABLE IF NOT EXISTS dispatch_logs (
     id VARCHAR(64) PRIMARY KEY,

@@ -295,6 +295,10 @@ export class DeviceRepository {
     if (updates.otaProgress !== undefined) dev.otaProgress = updates.otaProgress;
     if (updates.otaErrorMessage !== undefined) dev.otaErrorMessage = updates.otaErrorMessage;
     if (updates.otaLastCheckAt !== undefined) dev.otaLastCheckAt = updates.otaLastCheckAt;
+    if (updates.outputDefinitions !== undefined) dev.outputDefinitions = updates.outputDefinitions;
+    if (updates.capabilities !== undefined) dev.capabilities = updates.capabilities;
+    if (updates.supportedOutputs !== undefined) dev.supportedOutputs = updates.supportedOutputs;
+    if (updates.supportedCommands !== undefined) dev.supportedCommands = updates.supportedCommands;
     if (updates.location !== undefined) dev.location = updates.location;
     if (updates.ipAddress !== undefined) dev.ipAddress = updates.ipAddress;
     if (updates.macAddress !== undefined) dev.macAddress = updates.macAddress;

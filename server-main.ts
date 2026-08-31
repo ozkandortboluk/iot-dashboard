@@ -8,12 +8,14 @@ import { initWebSocketServer } from './src/server/services/websocket.js';
 import { initSimulator } from './src/server/services/simulator.js';
 import { startOtaWorker } from './src/server/services/otaWorker.js';
 import { startNoDataWorker } from './src/server/services/noDataWorker.js';
+import { startCommandExpiryWorker } from './src/server/services/command.service.js';
 
 
 // Route Handlers
 import { authRouter, profileRouter } from './src/server/routes/auth.js';
 import { adminTenantsRouter } from './src/server/routes/admin/tenants.js';
 import { devicesRouter, deviceCommandsRouter } from './src/server/routes/devices.js';
+import { commandsRouter } from './src/server/routes/commands.js';
 import { networkRouter } from './src/server/routes/network.js';
 import { telemetryRouter } from './src/server/routes/telemetry.js';
 import {
@@ -68,6 +70,8 @@ app.use('/api/profile', profileRouter);
   app.use('/api/admin/tenants', adminTenantsRouter);
 app.use('/api/devices', devicesRouter);
 app.use('/api/network', networkRouter);
+app.use('/api', commandsRouter);
+app.use('/api/v1', commandsRouter);
 app.use('/api/v1', deviceCommandsRouter);
 app.use('/api/telemetry', telemetryRouter);
 app.use('/api/v1/telemetry', telemetryRouter);
@@ -98,6 +102,7 @@ initWebSocketServer(server);
 initSimulator();
 startOtaWorker();
 startNoDataWorker();
+startCommandExpiryWorker();
 
 
 // Serve Vite in dev mode or static bundled files in production

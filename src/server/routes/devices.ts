@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { runSimulationStep } from '../services/simulator.js';
 import { telemetryController } from '../controllers/telemetry.controller.js';
+import { commandController } from '../controllers/command.controller.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -205,72 +206,10 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/control', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const deviceId = req.params.id;
-
-  const devices = db.getDevices();
-  const device = devices.find((d) => d.id === deviceId);
-  if (!device) {
-    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
-  }
-
-  if (currentUser.role !== 'admin' && device.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazlarınıza kontrol komutu gönderebilirsiniz.' });
-  }
-
-  try {
-    const { command, value, outputPin, unit } = req.body;
-
-    const pinOrMetric = outputPin || command || 'OUT_1';
-    const numericValue = typeof value === 'number' ? value : (value === 'ON' || value === 'HIGH' || value === true ? 1 : 0);
-    const displayValue = value !== undefined ? String(value) : 'COMMAND';
-
-    // Update metrics on device
-    const updatedMetrics = { ...device.metrics, [pinOrMetric]: numericValue };
-    db.updateDevice(deviceId, { metrics: updatedMetrics, lastSeen: new Date().toISOString() });
-
-    // Record Telemetry Reading for control signal feedback
-    const reading = db.addTelemetryReading({
-      deviceId: device.id,
-      deviceName: device.name,
-      metric: pinOrMetric,
-      value: numericValue,
-      unit: unit || (typeof value === 'number' ? '%' : 'STATE'),
-      status: 'normal',
-      rawPayload: `[CONTROL_OUT] Pin:${pinOrMetric} | Cmd:${command || 'SET'} | Val:${displayValue}`,
-      source: device.isSimulated ? 'simulator' : 'manual_test',
-      environment: device.isSimulated ? 'sandbox' : 'production',
-    });
-
-    broadcast('telemetry:new', reading);
-    broadcast('device:control', {
-      deviceId: device.id,
-      deviceName: device.name,
-      outputPin: pinOrMetric,
-      command,
-      value: displayValue,
-      timestamp: new Date().toISOString(),
-    });
-
-    db.addAuditLog(currentUser.id, currentUser.name, `Cihaz Çıkış Sinyali Gönderildi: [${device.name}] -> ${pinOrMetric} = ${displayValue}`, 'medium');
-
-    // Queue downlink command for physical ESP devices
-    const queuedCmd = await db.addCommand(deviceId, command || pinOrMetric, displayValue, 'user_control');
-    broadcast('commands:updated', await db.getCommands(deviceId));
-
-    res.json({
-      success: true,
-      message: `Çıkış komutu (${pinOrMetric}: ${displayValue}) başarıyla cihaza iletildi ve kuyruğa alındı.`,
-      command: queuedCmd,
-      reading,
-    });
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'Kontrol sinyali iletilemedi.';
-    res.status(400).json({ error: msg });
-  }
-});
+router.post('/:id/control', authenticateUser, (req, res) => commandController.controlDeviceOutput(req, res));
+router.post('/:deviceId/commands', authenticateUser, (req, res) => commandController.createCommand(req, res));
+router.post('/:deviceId/command', authenticateUser, (req, res) => commandController.createCommand(req, res));
+router.get('/:deviceId/commands', authenticateUser, (req, res) => commandController.getDeviceCommands(req, res));
 
 router.delete('/:id', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
@@ -299,111 +238,14 @@ export const devicesRouter = router;
 // Device Commands Router (v1 API)
 const deviceCommandsRouter = Router();
 
-deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const { deviceId } = req.params;
-  const { command, payload, source } = req.body;
-
-  const dev = db.getDevices().find((d) => d.id === deviceId);
-  if (!dev) {
-    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
-  }
-
-  if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihaza komut gönderme yetkiniz yok.' });
-  }
-
-  if (!command) {
-    return res.status(400).json({ error: 'Komut adı gereklidir (ör. RELAY_1, FAN, REBOOT)' });
-  }
-
-  const newCmd = await db.addCommand(deviceId, command, payload ?? '1', source || 'user_ui');
-  broadcast('commands:updated', await db.getCommands(deviceId));
-
-  res.status(201).json({
-    status: 'success',
-    message: 'Komut cihaza iletilmek üzere kuyruğa eklendi.',
-    command: newCmd,
-  });
-});
-
-deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const { deviceId } = req.params;
-
-  const dev = db.getDevices().find((d) => d.id === deviceId);
-  if (!dev) {
-    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
-  }
-
-  if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihazın komutlarını görüntüleyemezsiniz.' });
-  }
-
-  const cmds = await db.getCommands(deviceId);
-  res.json(cmds);
-});
+deviceCommandsRouter.post('/devices/:deviceId/commands', authenticateUser, (req, res) => commandController.createCommand(req, res));
+deviceCommandsRouter.post('/devices/:deviceId/command', authenticateUser, (req, res) => commandController.createCommand(req, res));
+deviceCommandsRouter.get('/devices/:deviceId/commands', authenticateUser, (req, res) => commandController.getDeviceCommands(req, res));
 
 // Endpoint for ESP devices to poll commands directly (Atomic Claim)
-deviceCommandsRouter.get('/device/commands', async (req, res) => {
-  const token = (req.query.token as string) || (req.headers['x-api-key'] as string);
-  if (!token) {
-    return res.status(401).json({ error: 'Token eksik' });
-  }
-  const device = db.getDeviceByApiKey(token);
-  if (!device) {
-    return res.status(403).json({ error: 'Geçersiz Token' });
-  }
-
-  // Strict tenant check: Device must belong to a tenant
-  if (!device.tenantId) {
-    return res.status(403).json({ error: 'Cihaza ait geçerli bir tenantId bulunamadı.' });
-  }
-
-  const { commandService } = await import('../services/command.service.js');
-  const claimedCommands = await commandService.getAndDeliverPendingCommands(device.id);
-
-  res.json({
-    deviceId: device.id,
-    deviceName: device.name,
-    commands: claimedCommands,
-  });
-});
+deviceCommandsRouter.get('/device/commands', (req, res) => commandController.pollDeviceCommands(req, res));
 
 // Endpoint for field devices (ESP32 / Python) to acknowledge command execution
-deviceCommandsRouter.post('/device/commands/ack', async (req, res) => {
-  const token = (req.query.token as string) || (req.headers['x-api-key'] as string) || req.body?.token;
-  if (!token) {
-    return res.status(401).json({ error: 'Token eksik' });
-  }
-  const device = db.getDeviceByApiKey(token);
-  if (!device) {
-    return res.status(403).json({ error: 'Geçersiz Token' });
-  }
-
-  const { commandId, commandIds, id, status, result } = req.body;
-  const targetIds = commandIds || commandId || id;
-
-  if (!targetIds) {
-    return res.status(400).json({ error: 'commandId veya commandIds parametresi gereklidir.' });
-  }
-
-  const { commandService } = await import('../services/command.service.js');
-  const updatedCount = await commandService.handleCommandAck(
-    device.id,
-    targetIds,
-    status === 'failed' ? 'failed' : 'acknowledged',
-    result
-  );
-
-  res.json({
-    success: true,
-    deviceId: device.id,
-    acknowledgedCount: updatedCount,
-    message: `${updatedCount} komut başarıyla onaylandı (status: ${status || 'acknowledged'}).`,
-  });
-});
+deviceCommandsRouter.post('/device/commands/ack', (req, res) => commandController.acknowledgeDeviceCommand(req, res));
 
 export { deviceCommandsRouter };

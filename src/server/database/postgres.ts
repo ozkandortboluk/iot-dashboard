@@ -9,6 +9,7 @@ import type {
   DashboardLayout,
   AuditLog,
   DeviceCommand,
+  DeviceCommandStatus,
   UserSession,
   DispatchLogItem,
   Firmware,
@@ -1054,105 +1055,203 @@ export class PostgresRepository {
   }
 
   // ==========================================
-  // DEVICE COMMANDS (Pending -> Claimed -> Acknowledged/Failed)
+  // DEVICE COMMANDS (Full PostgreSQL Command Engine)
   // ==========================================
-  public async saveCommand(cmd: DeviceCommand): Promise<void> {
-    if (!this.pool) return;
-    const sql = `
-      INSERT INTO device_commands (id, device_id, command_name, parameters, status, sent_by, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (id) DO UPDATE SET
-        status = EXCLUDED.status,
-        executed_at = CASE WHEN EXCLUDED.status IN ('acknowledged', 'executed', 'failed', 'delivered') THEN CURRENT_TIMESTAMP ELSE device_commands.executed_at END;
-    `;
-    await this.query(sql, [
-      cmd.id,
-      cmd.deviceId,
-      cmd.command,
-      JSON.stringify(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
-      cmd.status || 'pending',
-      cmd.source || 'api',
-      cmd.created_at || new Date().toISOString(),
-    ]);
+  private mapDeviceCommandRow(r: any): DeviceCommand {
+    const cmdId = r.command_id || r.id;
+    const createdAtIso = r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString();
+    const sentAtIso = r.sent_at ? new Date(r.sent_at).toISOString() : (r.status === 'sent' || r.status === 'claimed' ? (r.executed_at ? new Date(r.executed_at).toISOString() : undefined) : undefined);
+    const ackAtIso = r.acknowledged_at ? new Date(r.acknowledged_at).toISOString() : ((r.status === 'acknowledged' || r.status === 'executed') ? (r.executed_at ? new Date(r.executed_at).toISOString() : undefined) : undefined);
+    const execAtIso = r.executed_at ? new Date(r.executed_at).toISOString() : undefined;
+    const val = r.value_payload !== null && r.value_payload !== undefined ? r.value_payload : (r.parameters?.value ?? r.parameters?.payload ?? '');
+
+    return {
+      id: r.id,
+      commandId: cmdId,
+      tenantId: r.tenant_id || undefined,
+      customerId: r.customer_id || r.tenant_id || undefined,
+      deviceId: r.device_id,
+      deviceName: r.device_name || undefined,
+      userId: r.user_id || r.sent_by || undefined,
+      commandType: r.command_type || r.command_name || 'GENERAL_COMMAND',
+      command: r.command_name || r.command_type || 'GENERAL_COMMAND',
+      outputId: r.output_id || r.parameters?.outputId || undefined,
+      value: val,
+      payload: r.parameters?.payload ?? val,
+      source: r.source || r.sent_by || 'manual',
+      status: r.status || 'pending',
+      createdAt: createdAtIso,
+      created_at: createdAtIso,
+      sentAt: sentAtIso,
+      sent_at: sentAtIso,
+      claimed_at: (r.status === 'claimed' || r.status === 'sent') ? execAtIso : undefined,
+      delivered_at: execAtIso,
+      acknowledgedAt: ackAtIso,
+      acknowledged_at: ackAtIso,
+      executedAt: execAtIso,
+      executed_at: execAtIso,
+      errorMessage: r.error_message || r.parameters?.errorMessage || undefined,
+      error_message: r.error_message || r.parameters?.errorMessage || undefined,
+      parameters: r.parameters,
+      result: r.parameters?.result,
+    };
   }
 
-  public async getCommands(deviceId: string, limit: number = 100): Promise<DeviceCommand[]> {
+  public async saveCommand(cmd: Partial<DeviceCommand> & { deviceId: string }): Promise<DeviceCommand> {
+    if (!this.pool) {
+      throw new Error('PostgreSQL pool not initialized');
+    }
+
+    const id = cmd.id || cmd.commandId || `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const commandId = cmd.commandId || id;
+    const tenantId = cmd.tenantId || cmd.customerId || null;
+    const customerId = cmd.customerId || cmd.tenantId || null;
+    const userId = cmd.userId || null;
+    const commandType = cmd.commandType || cmd.command || 'GENERAL_COMMAND';
+    const commandName = cmd.command || cmd.commandType || 'GENERAL_COMMAND';
+    const outputId = cmd.outputId || (cmd.parameters?.outputId ? String(cmd.parameters.outputId) : null);
+    const valPayload = cmd.value !== undefined ? String(cmd.value) : (cmd.payload !== undefined ? String(cmd.payload) : null);
+    const source = cmd.source || 'manual';
+    const status = cmd.status || 'pending';
+    const createdAt = cmd.createdAt || cmd.created_at || new Date().toISOString();
+    const sentAt = cmd.sentAt || cmd.sent_at || (status === 'sent' || status === 'claimed' ? new Date().toISOString() : null);
+    const acknowledgedAt = cmd.acknowledgedAt || cmd.acknowledged_at || (status === 'acknowledged' ? new Date().toISOString() : null);
+    const executedAt = cmd.executedAt || cmd.executed_at || (status === 'executed' ? new Date().toISOString() : null);
+    const errorMessage = cmd.errorMessage || cmd.error_message || null;
+
+    // 1. Output Superseding Protection: If a new command targets an outputId, cancel older pending/sent commands for that same output
+    if (outputId && status === 'pending') {
+      try {
+        await this.query(
+          `UPDATE device_commands 
+           SET status = 'cancelled', executed_at = CURRENT_TIMESTAMP, error_message = 'Yeni çıkış komutu ile geçersiz kılındı (Superseded)'
+           WHERE device_id = $1 AND output_id = $2 AND status IN ('pending', 'sent', 'claimed');`,
+          [cmd.deviceId, outputId]
+        );
+      } catch (err: any) {
+        console.warn('[PostgreSQL] Output command superseding warning:', err?.message || err);
+      }
+    }
+
+    // 2. Queue Limit Protection: Cap pending commands per device to max 30
+    try {
+      await this.query(
+        `UPDATE device_commands 
+         SET status = 'cancelled', executed_at = CURRENT_TIMESTAMP, error_message = 'Kuyruk sınırını aştığı için iptal edildi (Maks. 30 komut)'
+         WHERE id IN (
+           SELECT id FROM device_commands
+           WHERE device_id = $1 AND status IN ('pending', 'sent')
+           ORDER BY created_at ASC
+           OFFSET 29
+         );`,
+        [cmd.deviceId]
+      );
+    } catch {
+      // Ignore queue limit cleanup errors
+    }
+
+    const paramsObj = {
+      payload: cmd.payload !== undefined ? cmd.payload : valPayload,
+      value: cmd.value !== undefined ? cmd.value : valPayload,
+      outputId: outputId,
+      result: cmd.result,
+      errorMessage: errorMessage,
+      ...(typeof cmd.parameters === 'object' && cmd.parameters !== null ? cmd.parameters : {}),
+    };
+
+    const sql = `
+      INSERT INTO device_commands (
+        id, command_id, tenant_id, customer_id, device_id, user_id,
+        command_type, command_name, output_id, value_payload, parameters,
+        source, status, sent_by, created_at, sent_at, acknowledged_at, executed_at, error_message
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ON CONFLICT (id) DO UPDATE SET
+        tenant_id = COALESCE(EXCLUDED.tenant_id, device_commands.tenant_id),
+        customer_id = COALESCE(EXCLUDED.customer_id, device_commands.customer_id),
+        user_id = COALESCE(EXCLUDED.user_id, device_commands.user_id),
+        command_type = EXCLUDED.command_type,
+        command_name = EXCLUDED.command_name,
+        output_id = COALESCE(EXCLUDED.output_id, device_commands.output_id),
+        value_payload = COALESCE(EXCLUDED.value_payload, device_commands.value_payload),
+        parameters = EXCLUDED.parameters,
+        source = EXCLUDED.source,
+        status = EXCLUDED.status,
+        sent_at = COALESCE(EXCLUDED.sent_at, device_commands.sent_at),
+        acknowledged_at = COALESCE(EXCLUDED.acknowledged_at, device_commands.acknowledged_at),
+        executed_at = COALESCE(EXCLUDED.executed_at, device_commands.executed_at),
+        error_message = COALESCE(EXCLUDED.error_message, device_commands.error_message)
+      RETURNING *;
+    `;
+
+    const res = await this.query(sql, [
+      id, commandId, tenantId, customerId, cmd.deviceId, userId,
+      commandType, commandName, outputId, valPayload, JSON.stringify(paramsObj),
+      source, status, userId || source, createdAt, sentAt, acknowledgedAt, executedAt, errorMessage
+    ]);
+
+    return this.mapDeviceCommandRow(res.rows[0]);
+  }
+
+  public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
     if (!this.pool) return [];
-    const res = await this.query(
-      `SELECT * FROM device_commands WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2`,
-      [deviceId, limit]
-    );
-    return res.rows.map(r => ({
-      id: r.id,
-      deviceId: r.device_id,
-      command: r.command_name,
-      payload: r.parameters?.payload ?? '',
-      status: r.status,
-      created_at: r.created_at,
-      claimed_at: r.status === 'claimed' ? r.executed_at : undefined,
-      delivered_at: r.executed_at,
-      acknowledged_at: (r.status === 'acknowledged' || r.status === 'executed') ? r.executed_at : undefined,
-      executed_at: r.executed_at,
-      source: r.sent_by,
-      result: r.parameters?.result
-    }));
+    let sql = `SELECT * FROM device_commands WHERE device_id = $1`;
+    const params: any[] = [deviceId];
+
+    if (tenantId && tenantId !== 'all') {
+      sql += ` AND (tenant_id = $2 OR customer_id = $2)`;
+      params.push(tenantId);
+      sql += ` ORDER BY created_at DESC LIMIT $3`;
+      params.push(limit);
+    } else {
+      sql += ` ORDER BY created_at DESC LIMIT $2`;
+      params.push(limit);
+    }
+
+    const res = await this.query(sql, params);
+    return res.rows.map(r => this.mapDeviceCommandRow(r));
   }
 
   public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
     if (!this.pool) return [];
     const res = await this.query(
-      `SELECT * FROM device_commands WHERE device_id = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT 20`,
+      `SELECT * FROM device_commands WHERE device_id = $1 AND status IN ('pending', 'sent') ORDER BY created_at ASC LIMIT 20`,
       [deviceId]
     );
-    return res.rows.map(r => ({
-      id: r.id,
-      deviceId: r.device_id,
-      command: r.command_name,
-      payload: r.parameters?.payload ?? '',
-      status: r.status,
-      created_at: r.created_at,
-      executed_at: r.executed_at,
-      source: r.sent_by
-    }));
+    return res.rows.map(r => this.mapDeviceCommandRow(r));
   }
 
   /**
    * Atomically claims pending commands in PostgreSQL to prevent duplicate execution across polling threads.
-   * Transitions status from 'pending' -> 'claimed'.
-   * Reclaims any previously 'claimed' command whose lease expired (>60s) without an ACK.
+   * Transitions status from 'pending' -> 'sent' (and 'claimed').
+   * Reclaims any previously 'sent'/'claimed' command whose lease expired (>60s) without an ACK.
    */
   public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
     if (!this.pool || !deviceId) return [];
     const sql = `
       UPDATE device_commands
-      SET status = 'claimed',
+      SET status = 'sent',
+          sent_at = CURRENT_TIMESTAMP,
           executed_at = CURRENT_TIMESTAMP
       WHERE id IN (
         SELECT id FROM device_commands
         WHERE device_id = $1 
           AND (
             status = 'pending' 
-            OR (status = 'claimed' AND executed_at < CURRENT_TIMESTAMP - ($3 || ' seconds')::INTERVAL)
+            OR status = 'sent'
+            OR status = 'claimed'
+            OR ((status = 'sent' OR status = 'claimed') AND executed_at < CURRENT_TIMESTAMP - ($3 || ' seconds')::INTERVAL)
           )
+          AND status NOT IN ('acknowledged', 'executed', 'failed', 'expired', 'cancelled')
         ORDER BY created_at ASC
         LIMIT $2
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING id, device_id, command_name, parameters, status, sent_by, created_at, executed_at;
+      RETURNING *;
     `;
     try {
       const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
-      return res.rows.map(r => ({
-        id: r.id,
-        deviceId: r.device_id,
-        command: r.command_name,
-        payload: r.parameters?.payload ?? '',
-        status: 'claimed',
-        created_at: r.created_at,
-        claimed_at: r.executed_at,
-        delivered_at: r.executed_at,
-        source: r.sent_by
-      }));
+      return res.rows.map(r => this.mapDeviceCommandRow(r));
     } catch (err: any) {
       console.error('[PostgreSQL] claimPendingCommands error:', err.message || err);
       return [];
@@ -1160,37 +1259,92 @@ export class PostgresRepository {
   }
 
   /**
-   * Transitions a claimed or pending command to 'acknowledged' (or 'failed') when the device confirms execution.
+   * Transitions a claimed or pending command to 'acknowledged', 'executed' or 'failed' when the device confirms execution.
    * Mandates matching both commandId AND deviceId for strict device security isolation.
    */
   public async acknowledgeCommand(
     deviceId: string,
     commandId: string,
-    status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
-    result?: any
-  ): Promise<boolean> {
-    if (!this.pool || !commandId || !deviceId) return false;
+    status: 'acknowledged' | 'failed' | 'executed' | 'cancelled' | 'expired' = 'acknowledged',
+    result?: any,
+    errorMessage?: string
+  ): Promise<DeviceCommand | null> {
+    if (!this.pool || !commandId || !deviceId) return null;
     const sql = `
       UPDATE device_commands
       SET status = $3,
+          acknowledged_at = CASE WHEN $3 IN ('acknowledged', 'executed') THEN CURRENT_TIMESTAMP ELSE acknowledged_at END,
           executed_at = CURRENT_TIMESTAMP,
+          error_message = COALESCE($5, error_message),
           parameters = CASE 
             WHEN $4::text IS NOT NULL THEN jsonb_set(COALESCE(parameters, '{}'::jsonb), '{result}', $4::jsonb)
             ELSE parameters
           END
-      WHERE id = $1 AND device_id = $2;
+      WHERE (id = $1 OR command_id = $1) AND device_id = $2
+      RETURNING *;
     `;
     try {
       const res = await this.query(sql, [
         commandId,
         deviceId,
         status,
-        result !== undefined ? JSON.stringify(result) : null
+        result !== undefined ? JSON.stringify(result) : null,
+        errorMessage || null
       ]);
-      return (res?.rowCount || 0) > 0;
+      if (res && res.rows && res.rows.length > 0) {
+        return this.mapDeviceCommandRow(res.rows[0]);
+      }
+      return null;
     } catch (err: any) {
       console.error('[PostgreSQL] acknowledgeCommand error:', err.message || err);
-      return false;
+      return null;
+    }
+  }
+
+  public async updateCommandStatus(
+    deviceId: string,
+    commandId: string,
+    status: DeviceCommandStatus,
+    errorMessage?: string
+  ): Promise<DeviceCommand | null> {
+    if (!this.pool || !commandId || !deviceId) return null;
+    const sql = `
+      UPDATE device_commands
+      SET status = $3,
+          error_message = COALESCE($4, error_message),
+          executed_at = CASE WHEN $3 IN ('executed', 'failed', 'cancelled', 'expired') THEN CURRENT_TIMESTAMP ELSE executed_at END
+      WHERE (id = $1 OR command_id = $1) AND device_id = $2
+      RETURNING *;
+    `;
+    try {
+      const res = await this.query(sql, [commandId, deviceId, status, errorMessage || null]);
+      if (res && res.rows && res.rows.length > 0) {
+        return this.mapDeviceCommandRow(res.rows[0]);
+      }
+      return null;
+    } catch (err: any) {
+      console.error('[PostgreSQL] updateCommandStatus error:', err.message || err);
+      return null;
+    }
+  }
+
+  public async expireStaleCommands(timeoutSeconds = 600): Promise<DeviceCommand[]> {
+    if (!this.pool) return [];
+    const sql = `
+      UPDATE device_commands
+      SET status = 'expired',
+          executed_at = CURRENT_TIMESTAMP,
+          error_message = 'Komut zaman aşımına uğradı (cihaz yanıt vermedi / süresi doldu)'
+      WHERE status IN ('pending', 'sent', 'claimed')
+        AND created_at < CURRENT_TIMESTAMP - ($1 || ' seconds')::INTERVAL
+      RETURNING *;
+    `;
+    try {
+      const res = await this.query(sql, [timeoutSeconds]);
+      return (res?.rows || []).map((r: any) => this.mapDeviceCommandRow(r));
+    } catch (err: any) {
+      console.error('[PostgreSQL] expireStaleCommands error:', err.message || err);
+      return [];
     }
   }
 
@@ -1200,6 +1354,46 @@ export class PostgresRepository {
       `UPDATE device_commands SET status = 'claimed', executed_at = CURRENT_TIMESTAMP WHERE id = ANY($1::text[]) AND status = 'pending';`,
       [commandIds]
     );
+  }
+
+  public async getCommandById(commandId: string, tenantId?: string): Promise<DeviceCommand | null> {
+    if (!this.pool || !commandId) return null;
+    let sql = `SELECT * FROM device_commands WHERE (id = $1 OR command_id = $1)`;
+    const params: any[] = [commandId];
+
+    if (tenantId && tenantId !== 'all') {
+      sql += ` AND (tenant_id = $2 OR customer_id = $2)`;
+      params.push(tenantId);
+    }
+    sql += ` LIMIT 1`;
+
+    const res = await this.query(sql, params);
+    if (!res.rows.length) return null;
+    return this.mapDeviceCommandRow(res.rows[0]);
+  }
+
+  public async cancelCommand(commandId: string, tenantId?: string): Promise<DeviceCommand | null> {
+    if (!this.pool || !commandId) return null;
+    let sql = `
+      UPDATE device_commands 
+      SET status = 'cancelled', 
+          executed_at = CURRENT_TIMESTAMP, 
+          error_message = 'Kullanıcı tarafından iptal edildi'
+      WHERE (id = $1 OR command_id = $1) AND status IN ('pending', 'sent', 'claimed')
+    `;
+    const params: any[] = [commandId];
+
+    if (tenantId && tenantId !== 'all') {
+      sql += ` AND (tenant_id = $2 OR customer_id = $2)`;
+      params.push(tenantId);
+    }
+    sql += ` RETURNING *;`;
+
+    const res = await this.query(sql, params);
+    if (res && res.rows && res.rows.length > 0) {
+      return this.mapDeviceCommandRow(res.rows[0]);
+    }
+    return null;
   }
 
   // ==========================================
