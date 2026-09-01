@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { automationEngine } from '../services/automation.engine.js';
 import type {
   TelemetryReading,
   ActiveAlarm,
@@ -798,6 +799,9 @@ public async flushPhysicalRetryQueue(): Promise<{
         } else {
           this.evaluateSimulationRules(r, device);
         }
+        
+        // Evaluate Automations for both physical and simulated telemetry
+        automationEngine.evaluateAutomations(r);
       }
 
       device.updatedAt = timestamp;
@@ -870,6 +874,8 @@ public async flushPhysicalRetryQueue(): Promise<{
     } else {
       this.evaluateSimulationRules(fullReading, device);
     }
+
+    automationEngine.evaluateAutomations(fullReading);
 
     if (!this.db.isPostgresProductionMode()) {
       if (!this.db.isPostgresProductionMode()) this.db.scheduleSave();

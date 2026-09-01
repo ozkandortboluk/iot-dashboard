@@ -420,6 +420,29 @@ export type NotificationSeverity = 'info' | 'warning' | 'critical';
 
 export type AlarmState = 'NORMAL' | 'BREACH_PENDING' | 'ACTIVE' | 'SILENCED' | 'RESOLVED';
 
+export interface AutomationTrigger {
+  deviceId: string;
+  metric: string;
+  condition: 'GREATER_THAN' | 'LESS_THAN' | 'EQUALS' | 'NOT_EQUALS';
+  value: string | number;
+}
+
+export interface AutomationAction {
+  deviceId: string;
+  commandPayload: Record<string, any>; // e.g., { "role1": 1 } or similar
+}
+
+export interface Automation {
+  id: string;
+  name: string;
+  tenantId: string; // To ensure isolation
+  enabled: boolean;
+  trigger: AutomationTrigger;
+  action: AutomationAction;
+  lastTriggered?: string;
+  createdAt: string;
+}
+
 export interface ActiveAlarm {
   id: string; // ruleId_deviceId_metric
   incidentId?: string; // Unique ID per alarm lifecycle

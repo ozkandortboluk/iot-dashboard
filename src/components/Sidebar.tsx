@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard,
+  Activity,
   Cpu,
   BarChart3,
   Bell,
@@ -46,6 +47,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       icon: Cpu,
     },
     {
+      id: 'automations',
+      label: 'Otomasyon & Senaryolar',
+      icon: Activity,
+    },
+    {
       id: 'device_health',
       label: 'Cihaz Sağlığı',
       icon: ShieldCheck,
@@ -85,6 +91,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'devices',
           label: 'Saha Cihazları & Kontrol',
           icon: Cpu,
+        },
+        {
+          id: 'automations',
+          label: 'Otomasyon & Senaryolar',
+          icon: Activity,
         },
         {
           id: 'device_health',
@@ -150,6 +161,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           icon: Cpu,
         },
         {
+          id: 'automations',
+          label: 'Otomasyon & Senaryolar',
+          icon: Activity,
+        },
+        {
           id: 'device_health',
           label: 'Cihaz Sağlığı',
           icon: ShieldCheck,
@@ -201,6 +217,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           id: 'devices',
           label: 'Tüm Saha Cihazları',
           icon: Cpu,
+        },
+        {
+          id: 'automations',
+          label: 'Otomasyon & Senaryolar',
+          icon: Activity,
         },
         {
           id: 'device_health',

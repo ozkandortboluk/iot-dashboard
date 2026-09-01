@@ -28,6 +28,7 @@ import {
   auditLogsRouter,
   dashboardRouter,
 } from './src/server/routes/alarms.js';
+import { automationsRouter } from './src/server/routes/automations.js';
 import {
   systemRouter,
   adminRouter,
@@ -77,6 +78,7 @@ app.use('/api/telemetry', telemetryRouter);
 app.use('/api/v1/telemetry', telemetryRouter);
 app.use('/api/alarms', alarmsRouter);
 app.use('/api/rules', rulesRouter);
+app.use('/api/automations', automationsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/notification-queue', notificationQueueRouter);
 app.use('/api/dispatch-logs', dispatchLogsRouter);

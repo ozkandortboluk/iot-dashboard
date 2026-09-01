@@ -73,6 +73,7 @@ interface DatabaseSchema {
   devices: Device[];
   archivedDevices?: Device[];
   unregisteredDevices?: DiscoveredNetworkDevice[];
+  automations?: import('../types.js').Automation[];
   commands?: DeviceCommand[];
   telemetry?: TelemetryReading[]; // Optional transport array
   dashboards: DashboardLayout[];
@@ -975,6 +976,40 @@ class LocalDatabase {
   public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
   public deleteRule(id: string, requestingUser?: any): boolean { return this.alarmRepository.deleteRule(id, requestingUser); }
   
+  // Automations
+  public getAutomations(tenantId?: string): import('../types.js').Automation[] {
+    const all = this.data.automations || [];
+    if (!tenantId || tenantId === 'usr_admin') return all;
+    return all.filter(a => a.tenantId === tenantId);
+  }
+
+  public createAutomation(data: Omit<import('../types.js').Automation, 'id' | 'createdAt'>): import('../types.js').Automation {
+    if (!this.data.automations) this.data.automations = [];
+    const newAuth: import('../types.js').Automation = {
+      ...data,
+      id: `auto_${Date.now()}_${Math.random().toString(36).substr(2,5)}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.data.automations.push(newAuth);
+    this.saveData(this.data);
+    return newAuth;
+  }
+
+  public updateAutomation(id: string, updates: Partial<import('../types.js').Automation>): import('../types.js').Automation {
+    if (!this.data.automations) this.data.automations = [];
+    const idx = this.data.automations.findIndex(a => a.id === id);
+    if (idx === -1) throw new Error('Automation not found');
+    this.data.automations[idx] = { ...this.data.automations[idx], ...updates };
+    this.saveData(this.data);
+    return this.data.automations[idx];
+  }
+
+  public deleteAutomation(id: string): void {
+    if (!this.data.automations) return;
+    this.data.automations = this.data.automations.filter(a => a.id !== id);
+    this.saveData(this.data);
+  }
+
   public async getAlarmEvents(requestingUserId?: string, targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
     if (!requestingUserId) return [];
     if (this.isPostgresProductionMode()) {

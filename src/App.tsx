@@ -18,6 +18,7 @@ import { NetworkDiscoveryView } from './components/NetworkDiscoveryView';
 import { AddWidgetModal } from './components/AddWidgetModal';
 import { LoginView } from './components/LoginView';
 import { HelpView } from './components/HelpView';
+import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
@@ -70,6 +71,7 @@ function DashboardContent() {
     deployment: 'Sunucu & DB Kurulum Rehberi',
     account_settings: 'Hesap & Şifre Ayarları',
     help: 'Yardım & Bilgi Merkezi',
+    automations: 'Otomasyon & Senaryolar',
   };
 
   const getBreadcrumbContext = () => {
@@ -144,6 +146,7 @@ function DashboardContent() {
           {safeActiveTab === 'devices' && (
             <DevicesView onNavigateToHelp={() => setActiveTab('help')} />
           )}
+          {safeActiveTab === 'automations' && <AutomationsView />}
           {safeActiveTab === 'device_health' && (
             <DeviceHealthView />
           )}
