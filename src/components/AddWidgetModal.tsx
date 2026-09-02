@@ -4,6 +4,7 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { X, Plus, Layers, Tag, Activity, Trash2, Grid, Bell, ArrowUpRight, CheckCircle2 } from 'lucide-react';
 import { getMetricUnit, COMMON_UNITS, isInternalOrControlMetric } from '../lib/utils';
+import { WIDGET_SIZE_RULES, getWidgetEffectiveHeight } from '../lib/widgetSizeRules';
 import { AlarmRuleWizard } from './notifications/AlarmRuleWizard';
 import { apiFetch, safeJson } from '../lib/apiFetch';
 
@@ -225,20 +226,23 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const defaultRule = WIDGET_SIZE_RULES[type];
     const newWidget: WidgetConfig = {
       id: `w_custom_${Date.now()}`,
-      title: title || (type === 'quick_access' ? 'Hızlı Erişim & Sağlık / Alarm Merkezi' : type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
+      title: title || (type === 'custom_panel' ? 'Özel Kontrol Paneli' : type === 'quick_access' ? 'Hızlı Erişim & Sağlık / Alarm Merkezi' : type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
       type,
       metricKey,
       unit: customUnit.trim() || undefined,
       deviceId: deviceId === 'all' ? undefined : deviceId,
       span,
+      height: defaultRule?.defaultHeight || 'H2',
       colorScheme,
       displayStyle,
       timeRange,
       buttonCount,
       multiMetricCount,
       matrixSlots: type === 'metric_matrix' ? (matrixSlots.length > 0 ? matrixSlots : generateDefaultMatrixSlots()) : undefined,
+      customPanelItems: type === 'custom_panel' ? [] : undefined,
       sliderMin,
       sliderMax,
       sliderStep,
@@ -304,7 +308,14 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
               </label>
               <select
                 value={type}
-                onChange={(e) => setType(e.target.value as WidgetType)}
+                onChange={(e) => {
+                  const newType = e.target.value as WidgetType;
+                  setType(newType);
+                  const rule = WIDGET_SIZE_RULES[newType];
+                  if (rule?.defaultSpan) {
+                    setSpan(rule.defaultSpan as WidgetSpan);
+                  }
+                }}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
               >
                 <option value="area_chart">📈 Alan Grafiği (Area Chart)</option>
@@ -324,6 +335,7 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
                 <option value="slider_control">🎚️ Analog Slider / PWM Çıkış Kontrolü</option>
                 <option value="switch_control">⚡ Röle & Anahtar (Switch) Paneli</option>
                 <option value="device_control">🕹️ Genel Cihaz Kontrol Masası</option>
+                <option value="custom_panel">🎛️ Özel Kontrol Paneli (Mini Widgetlar)</option>
                 <option value="data_table">📋 Canlı Veri Tablosu (CSV)</option>
                 <option value="log_stream">💻 Ingestion Terminal Konsolu</option>
                 <option value="notifications">🔔 Sistem Bildirim Akışı</option>

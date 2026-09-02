@@ -155,9 +155,7 @@ export const MetricMatrixWidget: React.FC<MetricMatrixWidgetProps> = ({ config, 
   });
 
   return (
-    <div className={`h-full flex flex-col justify-between p-3.5 bg-white dark:bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md relative overflow-hidden ${
-      displaySlots.length > 32 ? 'min-h-[280px]' : displaySlots.length > 16 ? 'min-h-[220px]' : 'min-h-[140px]'
-    }`}>
+    <div className="h-full w-full min-h-0 flex flex-col justify-between p-3.5 bg-white dark:bg-[#0f172a] rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-md relative overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800/80 shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -194,7 +192,7 @@ export const MetricMatrixWidget: React.FC<MetricMatrixWidgetProps> = ({ config, 
       </div>
 
       {/* Dynamic Grid Layout */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar pr-0.5 max-h-[360px]">
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-0.5">
         <div className={`grid gap-1.5 text-[11px] ${
           displaySlots.length > 20
             ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6'

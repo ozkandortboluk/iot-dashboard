@@ -84,13 +84,81 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
     }
   };
 
+  const isCompact = (config.height || 'H1') === 'H1';
+
+  if (isCompact) {
+    return (
+      <div className="h-full w-full min-h-0 bg-white dark:bg-[#0f172a] rounded-2xl sm:rounded-3xl px-3.5 py-2 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all flex items-center justify-between gap-3 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="p-1.5 rounded-xl text-white font-bold shadow-sm shrink-0"
+            style={{ backgroundColor: config.colorScheme || '#3b82f6' }}
+          >
+            <Power className="w-4 h-4" />
+          </div>
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDevice} />
+          <div className="min-w-0">
+            <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+              {config.title || 'Buton Paneli'}
+            </h3>
+            <p className="text-[10px] text-slate-400 truncate">
+              {targetDevice ? targetDevice.name : isMissingDevice ? '⚠️ Cihaz Yok' : 'Cihaz Yok'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {activeButtons.map((btn, idx) => {
+            const isActive = !!buttonStates[btn.id];
+            const isSending = sendingBtnId === btn.id;
+            const btnColor = btn.color || ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'][idx % 4];
+
+            return (
+              <button
+                key={btn.id || idx}
+                onClick={() => handleButtonClick(btn)}
+                disabled={isSending || !targetDevice}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-40 ${
+                  isActive
+                    ? 'text-white shadow-md'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+                style={{
+                  backgroundColor: isActive ? btnColor : undefined,
+                }}
+                title={`Komut: ${btn.command}`}
+              >
+                {isSending ? (
+                  <Radio className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Zap className="w-3.5 h-3.5" />
+                )}
+                <span className="truncate max-w-[80px]">{btn.label || `B${idx + 1}`}</span>
+              </button>
+            );
+          })}
+
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+              title="Widget Özelleştir"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl flex flex-col justify-between transition-all">
+    <div className="h-full w-full min-h-0 bg-white dark:bg-[#0f172a] rounded-3xl p-4 border border-slate-200 dark:border-slate-800 shadow-xl flex flex-col justify-between transition-all overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2 shrink-0">
         <div className="flex items-center gap-2">
           <div
-            className="p-2.5 rounded-xl text-white font-bold shadow-md"
+            className="p-2 rounded-xl text-white font-bold shadow-md"
             style={{ backgroundColor: config.colorScheme || '#3b82f6' }}
           >
             <Power className="w-4 h-4" />
@@ -98,18 +166,18 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
           <DeviceStatusDot deviceId={config.deviceId} device={targetDevice} />
           <div>
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                {config.title || `${buttonCount}'li Buton Kontrol Paneli`}
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[160px]">
+                {config.title || `${buttonCount}'li Buton Paneli`}
               </h3>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                {buttonCount}'li Buton
+              <span className="px-1.5 py-0.2 rounded-md text-[9px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                {buttonCount} B
               </span>
             </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
               {targetDevice
-                ? `${targetDevice.name} (${targetDevice.location})`
+                ? `${targetDevice.name}`
                 : isMissingDevice
-                ? `⚠️ Cihaz Bulunamadı / Silinmiş (${config.deviceId})`
+                ? `⚠️ Cihaz Bulunamadı`
                 : 'Cihaz Seçilmedi'}
             </p>
           </div>
@@ -118,34 +186,16 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
         {onEdit && (
           <button
             onClick={onEdit}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"
+            className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
             title="Widget Özelleştir"
           >
-            <Sliders className="w-4 h-4" />
+            <Sliders className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
 
-      {(!targetDevice || isMissingDevice) && (
-        <div className="mb-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[11px] flex items-center justify-between gap-2">
-          <span>
-            {isMissingDevice
-              ? `Seçili cihaz (${config.deviceId}) bulunamadı veya silinmiş. Güvenlik için komut gönderimi kilitlendi.`
-              : 'Kontrol paneli için henüz bir donanım cihazı seçilmedi.'}
-          </span>
-          {onEdit && (
-            <button
-              onClick={onEdit}
-              className="px-2 py-0.5 rounded-lg bg-amber-500 text-white font-bold text-[10px] shrink-0 hover:bg-amber-600 transition-colors"
-            >
-              Cihaz Ata
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Buttons Grid */}
-      <div className={`grid gap-3 my-2 ${getGridClass()}`}>
+      <div className={`grid gap-2 my-1 ${getGridClass()} flex-1 min-h-0 overflow-y-auto custom-scrollbar`}>
         {activeButtons.map((btn, idx) => {
           const isActive = !!buttonStates[btn.id];
           const isSending = sendingBtnId === btn.id;
@@ -156,64 +206,56 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
               key={btn.id || idx}
               onClick={() => handleButtonClick(btn)}
               disabled={isSending || !targetDevice}
-              className={`relative overflow-hidden p-4 rounded-2xl border transition-all duration-200 text-left cursor-pointer flex flex-col justify-between ${
-                buttonCount === 1 ? 'min-h-[110px]' : 'min-h-[90px]'
-              } ${
+              className={`relative overflow-hidden p-2.5 rounded-xl border transition-all duration-200 text-left cursor-pointer flex flex-col justify-between ${
                 isActive
-                  ? 'bg-slate-900 dark:bg-slate-900 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
+                  ? 'bg-slate-900 dark:bg-slate-900 border-emerald-500/50 shadow-md shadow-emerald-500/10'
                   : 'bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800'
               }`}
             >
-              {/* Top Row: Pin Name & LED Status */}
               <div className="flex items-center justify-between w-full">
-                <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400 tracking-wider">
+                <span className="text-[9px] font-mono font-bold text-slate-500 dark:text-slate-400 tracking-wider">
                   [{btn.outputPin || btn.command || `OUT_${idx + 1}`}]
                 </span>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <span
-                    className={`w-2.5 h-2.5 rounded-full transition-all ${
-                      isActive ? 'animate-pulse shadow-md' : 'opacity-40'
+                    className={`w-2 h-2 rounded-full transition-all ${
+                      isActive ? 'animate-pulse shadow-sm' : 'opacity-40'
                     }`}
                     style={{ backgroundColor: isActive ? btnColor : '#64748b' }}
                   />
-                  <span className={`text-[10px] font-bold ${isActive ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {isActive ? 'AKTİF (ON)' : 'PASİF (OFF)'}
+                  <span className={`text-[9px] font-bold ${isActive ? 'text-emerald-400' : 'text-slate-500'}`}>
+                    {isActive ? 'ON' : 'OFF'}
                   </span>
                 </div>
               </div>
 
-              {/* Middle: Button Title */}
-              <div className="my-1">
-                <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white block line-clamp-1">
+              <div className="my-0.5">
+                <span className="text-xs font-bold text-slate-900 dark:text-white block line-clamp-1">
                   {btn.label || `Buton ${idx + 1}`}
-                </span>
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                  Sinyal: {btn.command} = {isActive ? (btn.value || 'HIGH') : 'LOW'}
                 </span>
               </div>
 
-              {/* Action Trigger Bar */}
               <div
-                className="w-full py-1.5 rounded-xl font-bold text-[10px] flex items-center justify-center gap-1.5 transition-all mt-1"
+                className="w-full py-1 rounded-lg font-bold text-[9px] flex items-center justify-center gap-1 transition-all mt-1"
                 style={{
                   backgroundColor: isActive ? btnColor : 'rgba(100, 116, 139, 0.15)',
                   color: isActive ? '#ffffff' : '#94a3b8',
                 }}
               >
                 {isSending ? (
-                  <Radio className="w-3.5 h-3.5 animate-spin" />
+                  <Radio className="w-3 h-3 animate-spin" />
                 ) : (
-                  <Zap className="w-3.5 h-3.5" />
+                  <Zap className="w-3 h-3" />
                 )}
                 <span>
                   {isSending
                     ? 'Gönderiliyor...'
                     : btn.mode === 'pulse'
-                    ? 'Darbe / Pulse Gönder'
+                    ? 'Pulse'
                     : isActive
-                    ? 'Çıkışı Kapat'
-                    : 'Çıkışı Aç'}
+                    ? 'Kapat'
+                    : 'Aç'}
                 </span>
               </div>
             </button>
@@ -221,15 +263,15 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
         })}
       </div>
 
-      {/* Footer Feedback Message */}
-      <div className="mt-1 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px]">
+      {/* Footer Feedback */}
+      <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400 shrink-0">
         {feedbackMsg ? (
-          <span className="text-emerald-500 dark:text-emerald-400 font-semibold flex items-center gap-1 animate-fade-in">
-            <CheckCircle2 className="w-3 h-3" /> {feedbackMsg}
+          <span className="text-emerald-500 dark:text-emerald-400 font-semibold flex items-center gap-1 animate-fade-in truncate">
+            <CheckCircle2 className="w-3 h-3 shrink-0" /> {feedbackMsg}
           </span>
         ) : (
           <span className="text-slate-400 flex items-center gap-1">
-            <CircleDot className="w-3 h-3 text-cyan-400" /> Cihaz Dijital Çıkış (GPIO / Röle) Komut Paneli
+            <CircleDot className="w-3 h-3 text-cyan-400" /> GPIO Komut Paneli
           </span>
         )}
       </div>

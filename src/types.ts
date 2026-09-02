@@ -351,9 +351,11 @@ export type WidgetType =
   | 'switch_control'
   | 'progress_bar'
   | 'data_table'
+  | 'custom_panel'
   | 'quick_access';
 
 export type WidgetSpan = 1 | 2 | 3 | 4;
+export type WidgetHeight = 'H1' | 'H2' | 'H3';
 
 export interface MatrixSlotConfig {
   id: string;
@@ -362,6 +364,36 @@ export interface MatrixSlotConfig {
   metricKey: string;
   thresholdWarning?: number;
   thresholdCritical?: number;
+}
+
+
+export type CustomPanelItemType = 'button' | 'slider' | 'label' | 'switch' | 'indicator' | 'color_picker';
+export type CustomPanelColSpan = 1 | 2 | 3 | 4; // 1 (1x1 = 25%), 2 (1x2 = 50%), 3 (1x3 = 75%), 4 (1x4 = 100%)
+
+export interface CustomPanelItem {
+  id: string;
+  type: CustomPanelItemType;
+  deviceId: string;
+  metricKey: string; // The metric/pin it controls or reads
+  label: string;
+  colSpan?: CustomPanelColSpan; // 1x1, 1x2, 1x3, 1x4
+  color?: string;
+  // Slider / Number specific
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  // Button & Switch specific
+  valueOn?: string | number;
+  valueOff?: string | number;
+  buttonMode?: 'toggle' | 'pulse' | 'instant';
+  command?: string;
+  // Indicator / Lamba specific
+  activeMatchValue?: string | number;
+  inactiveColor?: string;
+  // Label / Display specific
+  prefix?: string;
+  suffix?: string;
 }
 
 export interface WidgetButtonConfig {
@@ -382,6 +414,7 @@ export interface WidgetConfig {
   metricKey?: string; // 'cpu', 'temperature', 'power', etc.
   unit?: string; // Custom metric unit
   span: WidgetSpan;
+  height?: WidgetHeight;
   colorScheme: string; // hex or tailwind class
   thresholdWarning?: number;
   thresholdCritical?: number;
@@ -400,6 +433,7 @@ export interface WidgetConfig {
   metricMappings?: Record<string, string>;
   multiMetricCount?: 2 | 4;
   matrixSlots?: MatrixSlotConfig[];
+  customPanelItems?: CustomPanelItem[];
   thresholdRi?: number;
   thresholdRc?: number;
   lastRiIndex?: number;

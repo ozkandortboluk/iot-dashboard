@@ -18,6 +18,7 @@ import { SliderControlWidget } from './widgets/SliderControlWidget';
 import { SwitchControlWidget } from './widgets/SwitchControlWidget';
 import { ProgressBarWidget } from './widgets/ProgressBarWidget';
 import { DataTableWidget } from './widgets/DataTableWidget';
+import { CustomPanelWidget } from './widgets/CustomPanelWidget';
 import { PowerAnalyzerWidget } from './widgets/PowerAnalyzerWidget';
 import { QuickAccessWidget } from './widgets/QuickAccessWidget';
 import { EditWidgetModal } from './EditWidgetModal';
@@ -136,7 +137,9 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
         return <SwitchControlWidget config={widget} onEdit={handleEdit} />;
       case 'progress_bar':
         return <ProgressBarWidget config={widget} onEdit={handleEdit} />;
-      case 'data_table':
+      case 'custom_panel':
+          return <CustomPanelWidget config={widget} onEdit={handleEdit} />;
+        case 'data_table':
         return <DataTableWidget config={widget} onEdit={handleEdit} />;
       case 'log_stream':
         return <LogStreamWidget config={widget} />;

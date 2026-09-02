@@ -1,8 +1,33 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { Device, WidgetConfig, WidgetSpan, WidgetType, MatrixSlotConfig, ThresholdRule } from '../types';
+import type { Device, WidgetConfig, WidgetSpan, WidgetType, MatrixSlotConfig, ThresholdRule, CustomPanelItem, CustomPanelItemType, CustomPanelColSpan } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
-import { X, Sliders, Save, Trash2, Palette, Activity, Cpu, Layers, Tag, Grid, Bell, ArrowUpRight, CheckCircle2 } from 'lucide-react';
+import { 
+  X, 
+  Sliders, 
+  Save, 
+  Trash2, 
+  Palette, 
+  Activity, 
+  Cpu, 
+  Layers, 
+  Tag, 
+  Grid, 
+  Bell, 
+  ArrowUpRight, 
+  CheckCircle2, 
+  Plus,
+  ChevronUp,
+  ChevronDown,
+  Copy,
+  Lightbulb,
+  Zap,
+  Power,
+  ToggleLeft,
+  Radio,
+  Eye,
+  RotateCw
+} from 'lucide-react';
 import { getMetricUnit, COMMON_UNITS, isInternalOrControlMetric } from '../lib/utils';
 import { AlarmRuleWizard } from './notifications/AlarmRuleWizard';
 import { apiFetch, safeJson } from '../lib/apiFetch';
@@ -48,6 +73,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
   const [lastRcIndex, setLastRcIndex] = useState<number | undefined>(undefined);
   const [lastTpIndex, setLastTpIndex] = useState<number | undefined>(undefined);
   const [matrixSlots, setMatrixSlots] = useState<MatrixSlotConfig[]>([]);
+  const [customPanelItems, setCustomPanelItems] = useState<CustomPanelItem[]>([]);
 
   const generateSmartActiveMatrixSlots = () => {
     const pairs: { deviceId: string; deviceName: string; metricKey: string }[] = [];
@@ -220,6 +246,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
       setLastRiIndex(widget.lastRiIndex);
       setLastRcIndex(widget.lastRcIndex);
       setLastTpIndex(widget.lastTpIndex);
+      setCustomPanelItems(widget.customPanelItems ? [...widget.customPanelItems] : []);
       if (widget.matrixSlots && widget.matrixSlots.length > 0) {
         const existing = widget.matrixSlots.map((s, i) => ({
           ...s,
@@ -266,7 +293,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
       if (w.id === widget.id) {
         return {
           ...w,
-          title: title || (type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
+          title: title || (type === 'custom_panel' ? 'Özel Kontrol Paneli' : type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
           type,
           metricKey,
           unit: customUnit.trim() || undefined,
@@ -278,6 +305,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
           buttonCount,
           multiMetricCount,
           matrixSlots: type === 'metric_matrix' ? (matrixSlots.length > 0 ? matrixSlots : generateDefaultMatrixSlots()) : undefined,
+          customPanelItems: type === 'custom_panel' ? customPanelItems : undefined,
           sliderMin,
           sliderMax,
           sliderStep,
@@ -372,6 +400,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
                 <option value="slider_control">🎚️ Analog Slider / PWM Çıkış Kontrolü</option>
                 <option value="switch_control">⚡ Röle & Anahtar (Switch) Paneli</option>
                 <option value="device_control">🕹️ Genel Cihaz Kontrol Masası</option>
+                <option value="custom_panel">🎛️ Özel Kontrol Paneli (Mini Widgetlar)</option>
                 <option value="data_table">📋 Canlı Veri Tablosu (CSV)</option>
                 <option value="log_stream">💻 Ingestion Terminal Konsolu</option>
                 <option value="notifications">🔔 Sistem Bildirim Akışı</option>
@@ -583,6 +612,607 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          
+          {type === 'custom_panel' && (
+            <div className="space-y-4">
+              {/* Header & Quick Add Presets */}
+              <div className="p-4 bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                      <Sliders className="w-4 h-4 text-indigo-500" /> Mini Widget Listesi & Düzen
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Farklı ESP cihazları için buton, sürgü, lamba ve etiket ekleyin. 1x1, 1x2, 1x3, 1x4 boyutlarıyla sıralayın.
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono font-bold bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800/80 text-indigo-600 dark:text-indigo-400 self-start sm:self-auto">
+                    {customPanelItems.length} Mini Kontrol
+                  </span>
+                </div>
+
+                {/* Fast Preset Add Buttons */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-indigo-100 dark:border-indigo-900/40">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">Hızlı Ekle:</span>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'button',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'relay_1',
+                          label: 'Tetik Butonu',
+                          colSpan: 1,
+                          buttonMode: 'pulse',
+                          valueOn: 1,
+                          color: '#3b82f6',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <Zap className="w-3 h-3 text-blue-500" /> + Buton
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'switch',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'relay_1',
+                          label: 'Röle Anahtarı',
+                          colSpan: 1,
+                          valueOn: 1,
+                          valueOff: 0,
+                          color: '#10b981',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <ToggleLeft className="w-3 h-3 text-emerald-500" /> + Switch
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'slider',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'pwm_1',
+                          label: 'PWM Sürgüsü',
+                          colSpan: 2,
+                          min: 0,
+                          max: 100,
+                          step: 1,
+                          unit: '%',
+                          color: '#6366f1',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <Sliders className="w-3 h-3 text-indigo-500" /> + Slider
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'indicator',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'status_led',
+                          label: 'Durum Lambası',
+                          colSpan: 1,
+                          color: '#10b981',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <Lightbulb className="w-3 h-3 text-amber-500" /> + Lamba
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'label',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'temperature',
+                          label: 'Sensör Okuma',
+                          colSpan: 2,
+                          unit: '°C',
+                          color: '#0f172a',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <Eye className="w-3 h-3 text-cyan-500" /> + Etiket / Oku
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPanelItems([
+                        ...customPanelItems,
+                        {
+                          id: 'item_' + Date.now(),
+                          type: 'color_picker',
+                          deviceId: devices[0]?.id || '',
+                          metricKey: 'rgb_color',
+                          label: 'RGB Paleti',
+                          colSpan: 2,
+                          color: '#3b82f6',
+                        },
+                      ]);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 rounded-lg shadow-sm active:scale-95 transition"
+                  >
+                    <Palette className="w-3 h-3 text-pink-500" /> + Renk Paleti
+                  </button>
+                </div>
+              </div>
+
+              {/* Items List */}
+              {customPanelItems.length === 0 ? (
+                <div className="p-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/30 space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                    <Sliders className="w-5 h-5" />
+                  </div>
+                  <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Henüz mini widget eklenmedi
+                  </h5>
+                  <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                    Yukarıdaki hızlı ekle butonlarına tıklayarak buton, switch, slider veya sensör etiketleri ekleyin.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customPanelItems.map((item, index) => {
+                    const selectedDev = devices.find((d) => d.id === item.deviceId);
+                    const devMetrics = selectedDev?.metrics ? Object.keys(selectedDev.metrics) : [];
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-3 relative group transition hover:border-slate-300 dark:hover:border-slate-600"
+                      >
+                        {/* Item Action Bar */}
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-700/60">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-center font-mono">
+                              {index + 1}
+                            </span>
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              {item.label || 'İsimsiz Kontrol'}
+                            </span>
+                            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700/70 text-slate-600 dark:text-slate-300 font-bold">
+                              {item.type} • {item.colSpan ? `1x${item.colSpan}` : '1x1'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {/* Move Up */}
+                            <button
+                              type="button"
+                              disabled={index === 0}
+                              onClick={() => {
+                                if (index > 0) {
+                                  const newItems = [...customPanelItems];
+                                  const temp = newItems[index - 1];
+                                  newItems[index - 1] = newItems[index];
+                                  newItems[index] = temp;
+                                  setCustomPanelItems(newItems);
+                                }
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 disabled:opacity-30"
+                              title="Yukarı Taşı"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Move Down */}
+                            <button
+                              type="button"
+                              disabled={index === customPanelItems.length - 1}
+                              onClick={() => {
+                                if (index < customPanelItems.length - 1) {
+                                  const newItems = [...customPanelItems];
+                                  const temp = newItems[index + 1];
+                                  newItems[index + 1] = newItems[index];
+                                  newItems[index] = temp;
+                                  setCustomPanelItems(newItems);
+                                }
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 disabled:opacity-30"
+                              title="Aşağı Taşı"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Duplicate */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newItems = [...customPanelItems];
+                                newItems.splice(index + 1, 0, {
+                                  ...item,
+                                  id: 'item_' + Date.now() + Math.random().toString(36).slice(2, 6),
+                                  label: `${item.label} (Kopya)`,
+                                });
+                                setCustomPanelItems(newItems);
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+                              title="Kopyala"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Delete */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newItems = [...customPanelItems];
+                                newItems.splice(index, 1);
+                                setCustomPanelItems(newItems);
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-rose-500"
+                              title="Sil"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Grid Form Fields */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
+                          {/* 1. TİP */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              TİP
+                            </label>
+                            <select
+                              value={item.type}
+                              onChange={(e) => {
+                                const newItems = [...customPanelItems];
+                                newItems[index] = { ...newItems[index], type: e.target.value as CustomPanelItemType };
+                                setCustomPanelItems(newItems);
+                              }}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-medium"
+                            >
+                              <option value="button">🔘 Buton (Tetik/Toggle)</option>
+                              <option value="switch">⚡ Switch (Aç/Kapat)</option>
+                              <option value="slider">🎚️ Slider (Analog Sürgü)</option>
+                              <option value="indicator">💡 Lamba (LED Gösterge)</option>
+                              <option value="label">🏷️ Etiket (Sensör Oku)</option>
+                              <option value="color_picker">🎨 Renk Paleti (RGB)</option>
+                            </select>
+                          </div>
+
+                          {/* 2. BOYUT (1x1, 1x2, 1x3, 1x4) */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              IZGARA BOYUTU
+                            </label>
+                            <select
+                              value={item.colSpan || 1}
+                              onChange={(e) => {
+                                const newItems = [...customPanelItems];
+                                newItems[index] = { ...newItems[index], colSpan: Number(e.target.value) as CustomPanelColSpan };
+                                setCustomPanelItems(newItems);
+                              }}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-medium"
+                            >
+                              <option value="1">1x1 (1/4 Sütun - 25% Kompakt)</option>
+                              <option value="2">1x2 (1/2 Sütun - 50% Orta)</option>
+                              <option value="3">1x3 (3/4 Sütun - 75% Geniş)</option>
+                              <option value="4">1x4 (Tam Boy - 100% Satır)</option>
+                            </select>
+                          </div>
+
+                          {/* 3. CİHAZ SEÇİMİ */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              HEDEF CİHAZ
+                            </label>
+                            <select
+                              value={item.deviceId}
+                              onChange={(e) => {
+                                const newItems = [...customPanelItems];
+                                newItems[index] = { ...newItems[index], deviceId: e.target.value };
+                                setCustomPanelItems(newItems);
+                              }}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-medium"
+                            >
+                              {devices.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.name} {d.isSimulated ? '(Sanal)' : '(ESP32)'}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* 4. METRİK / PİN */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              METRİK / PİN ADI
+                            </label>
+                            <input
+                              type="text"
+                              value={item.metricKey}
+                              onChange={(e) => {
+                                const newItems = [...customPanelItems];
+                                newItems[index] = { ...newItems[index], metricKey: e.target.value };
+                                setCustomPanelItems(newItems);
+                              }}
+                              placeholder="relay_1, pwm_1, temp..."
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                            />
+                          </div>
+
+                          {/* 5. ETİKET / BAŞLIK */}
+                          <div className="sm:col-span-2">
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              BAŞLIK / ETİKET
+                            </label>
+                            <input
+                              type="text"
+                              value={item.label}
+                              onChange={(e) => {
+                                const newItems = [...customPanelItems];
+                                newItems[index] = { ...newItems[index], label: e.target.value };
+                                setCustomPanelItems(newItems);
+                              }}
+                              placeholder="Örn: Mutfak Lambası, Fan Hızı..."
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white"
+                            />
+                          </div>
+
+                          {/* 6. RENK SEÇİMİ */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                              VURGU RENGİ
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={item.color || '#3b82f6'}
+                                onChange={(e) => {
+                                  const newItems = [...customPanelItems];
+                                  newItems[index] = { ...newItems[index], color: e.target.value };
+                                  setCustomPanelItems(newItems);
+                                }}
+                                className="w-8 h-8 rounded-lg border-0 cursor-pointer p-0 bg-transparent flex-shrink-0"
+                              />
+                              <input
+                                type="text"
+                                value={item.color || '#3b82f6'}
+                                onChange={(e) => {
+                                  const newItems = [...customPanelItems];
+                                  newItems[index] = { ...newItems[index], color: e.target.value };
+                                  setCustomPanelItems(newItems);
+                                }}
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-xs font-mono dark:text-white"
+                              />
+                            </div>
+                          </div>
+
+                          {/* 7. TYPE-SPECIFIC CONTROLS */}
+                          {item.type === 'button' && (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  ÇALIŞMA MODU
+                                </label>
+                                <select
+                                  value={item.buttonMode || 'pulse'}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], buttonMode: e.target.value as any };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-medium"
+                                >
+                                  <option value="pulse">Anlık Tetik (Pulse / 700ms)</option>
+                                  <option value="toggle">Aç / Kapat (Toggle)</option>
+                                  <option value="instant">Değer Gönder (Tek Sefer)</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  GÖNDERİLECEK DEĞER (ON)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.valueOn ?? 1}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], valueOn: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="Örn: 1, HIGH, START"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+
+                              {item.buttonMode === 'toggle' && (
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                    KAPALI DEĞERİ (OFF)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.valueOff ?? 0}
+                                    onChange={(e) => {
+                                      const newItems = [...customPanelItems];
+                                      newItems[index] = { ...newItems[index], valueOff: e.target.value };
+                                      setCustomPanelItems(newItems);
+                                    }}
+                                    placeholder="Örn: 0, LOW, STOP"
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                  />
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {item.type === 'switch' && (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  AÇIK DEĞERİ (1 / HIGH)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.valueOn ?? 1}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], valueOn: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="1 veya HIGH"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  KAPALI DEĞERİ (0 / LOW)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.valueOff ?? 0}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], valueOff: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="0 veya LOW"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {item.type === 'slider' && (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  MIN DEĞER
+                                </label>
+                                <input
+                                  type="number"
+                                  value={item.min ?? 0}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], min: Number(e.target.value) };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  MAX DEĞER
+                                </label>
+                                <input
+                                  type="number"
+                                  value={item.max ?? 100}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], max: Number(e.target.value) };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  BİRİM (ÖRN: %, V, PWM)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.unit || '%'}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], unit: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="%, PWM, V, RPM"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {item.type === 'label' && (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  BİRİM / SON EK
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.unit || ''}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], unit: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="°C, bar, kW, %"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                                  ÖN EK
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.prefix || ''}
+                                  onChange={(e) => {
+                                    const newItems = [...customPanelItems];
+                                    newItems[index] = { ...newItems[index], prefix: e.target.value };
+                                    setCustomPanelItems(newItems);
+                                  }}
+                                  placeholder="Örn: Sensör:"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-xs dark:text-white font-mono"
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

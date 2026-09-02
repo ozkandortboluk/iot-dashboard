@@ -131,10 +131,10 @@ export const QuickAccessWidget: React.FC<QuickAccessWidgetProps> = ({
   };
 
   return (
-    <div className="h-full bg-white dark:bg-[#0f172a] rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl transition-all flex flex-col justify-between">
+    <div className="h-full w-full min-h-0 bg-white dark:bg-[#0f172a] rounded-3xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xl hover:shadow-2xl transition-all flex flex-col justify-between overflow-y-auto custom-scrollbar">
       {/* Top Header */}
       <div>
-        <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/20 shrink-0">
               <Zap className="w-4 h-4" />
@@ -144,8 +144,8 @@ export const QuickAccessWidget: React.FC<QuickAccessWidgetProps> = ({
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
                 {config.title || 'Hızlı Erişim & Sağlık / Alarm Merkezi'}
               </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                En sık kullanılan sağlık raporları ve anlık kritik alarmlar
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                Sağlık raporları ve anlık kritik alarmlar
               </p>
             </div>
           </div>

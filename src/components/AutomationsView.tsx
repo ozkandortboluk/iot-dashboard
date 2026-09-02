@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Play, Activity, Power, Settings2, Save, X, Cpu } from 'lucide-react';
-import type { Device, Automation } from '../types.js';
+import type { Device, Automation } from '../types';
+import { apiFetch as fetch } from '../lib/apiFetch';
 
 export const AutomationsView: React.FC = () => {
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -30,10 +31,10 @@ export const AutomationsView: React.FC = () => {
     try {
       const [autoRes, devRes] = await Promise.all([
         fetch('/api/automations', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          headers: {}
         }),
         fetch('/api/devices', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          headers: {}
         })
       ]);
       
@@ -56,7 +57,7 @@ export const AutomationsView: React.FC = () => {
       try {
         parsedPayload = JSON.parse(formData.actionCommandPayload);
       } catch (err) {
-        throw new Error('Komut formatı geçerli bir JSON olmalıdır. Örn: {"roley1": 1}');
+        throw err;
       }
 
       const payload = {
@@ -81,12 +82,12 @@ export const AutomationsView: React.FC = () => {
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          
         },
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw err;
 
       setIsFormOpen(false);
       setEditingId(null);
@@ -101,7 +102,7 @@ export const AutomationsView: React.FC = () => {
     try {
       await fetch(`/api/automations/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        headers: {}
       });
       fetchData();
     } catch (e) {
@@ -144,12 +145,12 @@ export const AutomationsView: React.FC = () => {
             setFormData({
               name: '',
               enabled: true,
-              triggerDeviceId: devices[0]?.id || '',
+              triggerDeviceId: '',
               triggerMetric: 'temperature',
               triggerCondition: 'GREATER_THAN',
               triggerValue: '30',
-              actionDeviceId: devices[0]?.id || '',
-              actionCommandPayload: '{"role_1": 1}',
+              actionDeviceId: '',
+              actionCommandPayload: '{"relay_1": 1}',
             });
             setIsFormOpen(true);
           }}

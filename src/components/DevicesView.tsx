@@ -4,7 +4,6 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch } from '../lib/apiFetch';
-import { DeviceOutputsSection } from './devices/DeviceOutputsSection';
 import {
   Cpu,
   Plus,
@@ -1160,17 +1159,7 @@ void sendHeartbeat() {
           {/* 3. Selected Device Outputs & Live Terminal */}
           {activeDevice && (
             <div className="space-y-6">
-              {/* 3.1 Device Outputs & Actuator Control Section */}
-              <DeviceOutputsSection
-                device={activeDevice}
-                currentUserRole={user?.role}
-                currentUserId={user?.id}
-                onDeviceUpdated={(updated) => {
-                  if (activeDevice.id === updated.id) {
-                    setSelectedDeviceId(updated.id);
-                  }
-                }}
-              />
+              
 
               {/* Live Terminal & Telemetry Ingestion Console */}
               <div className="bg-[#020617] text-slate-200 rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-4">
