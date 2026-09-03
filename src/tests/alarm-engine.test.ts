@@ -237,7 +237,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
 
       // Only Customer A alarm must be generated
       const alarmsForA = await db.getAlarms(customerA.id);
-      const alarmsForB = db.getAlarms(customerB.id);
+      const alarmsForB = await db.getAlarms(customerB.id);
 
       expect(alarmsForA).toHaveLength(1);
       expect(alarmsForA[0].tenantId).toBe(customerA.id);
@@ -669,12 +669,12 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       );
 
       // Customer A receives 1 OPEN notification
-      const custANotifs = db.getNotifications(customerA.id);
+      const custANotifs = await db.getNotifications(customerA.id);
       expect(custANotifs).toHaveLength(1);
       expect(custANotifs[0].alarmState).toBe('OPEN');
 
       // 2. User acknowledges the alarm
-      const ackSuccess = alarmEngine.acknowledge(alarmKey, customerA);
+      const ackSuccess = await alarmEngine.acknowledge(alarmKey, customerA);
       expect(ackSuccess).toBe(true);
 
       const alarm = db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmKey);
@@ -977,7 +977,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
         deviceA
       );
 
-      const notifsA1 = db.getNotifications(customerA.id);
+      const notifsA1 = await db.getNotifications(customerA.id);
       expect(notifsA1).toHaveLength(1);
       expect(notifsA1[0].currentValue).toBe(12);
 
@@ -997,7 +997,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       }
 
       // Should still be only 1 notification row for Customer A, updated in place with latest count and value!
-      const notifsAAfter = db.getNotifications(customerA.id);
+      const notifsAAfter = await db.getNotifications(customerA.id);
       expect(notifsAAfter).toHaveLength(1);
       expect(notifsAAfter[0].currentValue).toBe(15);
       expect(notifsAAfter[0].repeatCount).toBe(4);
@@ -1083,25 +1083,19 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       db.telemetryRepository.upsertActiveAlarm(alarmB);
 
       // Customer A attempts to acknowledge Customer B's alarm -> MUST FAIL (throws error)
-      expect(() => {
-        alarmEngine.acknowledge(alarmB.id, customerA);
-      }).toThrow(/erişim yetkiniz yok/);
+      await expect(alarmEngine.acknowledge(alarmB.id, customerA)).rejects.toThrow(/erişim yetkiniz yok/);
       expect(db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmB.id)?.acknowledged).toBe(false);
 
       // Customer A attempts to silence Customer B's alarm -> MUST FAIL
-      expect(() => {
-        alarmEngine.silence(alarmB.id, 30, customerA);
-      }).toThrow(/erişim yetkiniz yok/);
+      await expect(alarmEngine.silence(alarmB.id, 30, customerA)).rejects.toThrow(/erişim yetkiniz yok/);
       expect(db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmB.id)?.state).toBe('ACTIVE');
 
       // Customer A attempts to resolve Customer B's alarm -> MUST FAIL
-      expect(() => {
-        alarmEngine.resolve(alarmB.id, customerA);
-      }).toThrow(/erişim yetkiniz yok/);
+      await expect(alarmEngine.resolve(alarmB.id, customerA)).rejects.toThrow(/erişim yetkiniz yok/);
       expect(db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmB.id)?.state).toBe('ACTIVE');
 
       // But Admin can resolve or acknowledge Customer B's alarm
-      const adminAckRes = alarmEngine.acknowledge(alarmB.id, adminUser);
+      const adminAckRes = await alarmEngine.acknowledge(alarmB.id, adminUser);
       expect(adminAckRes).toBe(true);
       expect(db.data.activeAlarms.find((a: ActiveAlarm) => a.id === alarmB.id)?.acknowledged).toBe(true);
     });

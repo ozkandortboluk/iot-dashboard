@@ -131,6 +131,7 @@ export interface Device {
   intervalMode?: 'auto' | 'manual'; // 'auto' (sistem dinamik belirler) veya 'manual' (kullanıcı sabitler)
   customIntervalSeconds?: number; // Kullanıcının belirlediği özel sıklık
   autoDetectedIntervalSeconds?: number; // Sistemin peş peşe gelen paketlerden ölçtüğü sıklık
+  recentIntervals?: number[]; // Son N ardışık paket aralıkları (aykırı değer ve burst filtrelemesi için)
   isSimulated?: boolean;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];

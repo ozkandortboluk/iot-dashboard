@@ -68,6 +68,12 @@ CREATE TABLE IF NOT EXISTS devices (
     is_simulated BOOLEAN DEFAULT FALSE,
     save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
     simulated_metrics JSONB DEFAULT '[]'::jsonb,
+    expected_interval_seconds INT DEFAULT 30,
+    auto_detected_interval_seconds INT DEFAULT 30,
+    heartbeat_timeout_seconds INT DEFAULT 60,
+    interval_mode VARCHAR(16) DEFAULT 'auto',
+    custom_interval_seconds INT,
+    recent_intervals JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -79,6 +85,12 @@ BEGIN
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS expected_interval_seconds INT DEFAULT 30;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_detected_interval_seconds INT DEFAULT 30;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS heartbeat_timeout_seconds INT DEFAULT 60;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS interval_mode VARCHAR(16) DEFAULT 'auto';
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS custom_interval_seconds INT;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS recent_intervals JSONB DEFAULT '[]'::jsonb;
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'devices table alter notice: %', SQLERRM;

@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import type { Device, DiscoveredNetworkDevice, TelemetryReading } from '../../types.js';
+import { smartIntervalService } from '../services/smartInterval.service.js';
+import { tenantSecurityService } from '../services/tenantSecurity.service.js';
 
 export function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key.trim()).digest('hex');
@@ -23,98 +25,49 @@ export class DeviceRepository {
     const now = Date.now();
     let hasChanges = false;
     this.db.data.devices.forEach((dev: Device) => {
-      if (dev.status === 'maintenance') return;
+      const prevStatus = dev.status;
+      const evalResult = smartIntervalService.evaluateDeviceWatchdog(dev, now);
+      if (evalResult.changed) {
+        hasChanges = true;
+        if (evalResult.newStatus === 'offline' && prevStatus !== 'offline') {
+          const timeoutSec = evalResult.timeoutSeconds;
+          const timeFormatted = timeoutSec >= 3600 
+            ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} saattir` 
+            : timeoutSec >= 60 
+              ? `${Math.round(timeoutSec / 60)} dakikadır`
+              : `${timeoutSec} saniyedir`;
 
-      // 1. Virtual / Simulated Devices:
-      // If user opened the device (dataFlowActive !== false), KEEP IT ONLINE permanently.
-      if (dev.isSimulated) {
-        if (dev.dataFlowActive !== false) {
-          if (dev.status !== 'online') {
-            dev.status = 'online';
-            dev.lastSeen = new Date().toISOString();
-            hasChanges = true;
-          }
-        } else {
-          if (dev.status !== 'offline') {
-            dev.status = 'offline';
-            hasChanges = true;
-          }
-        }
-        return;
-      }
+          this.db.addAuditLog(
+            dev.tenantId || 'system',
+            'Sistem Sinyal Takibi',
+            `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri gönderim sıklığının 2 katı (${timeFormatted}) sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
+            'high'
+          );
 
-      // 2. Real Physical IoT Hardware Devices:
-      if (!dev.lastSeen) {
-        if (dev.status !== 'offline') {
-          dev.status = 'offline';
-          hasChanges = true;
-        }
-      } else {
-        const elapsedMs = now - new Date(dev.lastSeen).getTime();
-        // Akıllı IoT Watchdog: Veri gönderim sıklığının 2 katı sürede veri gelmezse cihaz otomatik offline moduna geçer!
-        const intervalSec = dev.expectedIntervalSeconds && dev.expectedIntervalSeconds > 0
-          ? dev.expectedIntervalSeconds
-          : (dev.autoDetectedIntervalSeconds || dev.customIntervalSeconds || 5);
-        const timeoutSec = Math.max(intervalSec * 2, 4); // 2x sıklık kuralı (En az 4 sn ağ toleransı)
-        const offlineTimeoutMs = timeoutSec * 1000;
-        const warningTimeoutMs = offlineTimeoutMs * 0.85;
-
-        // If user manually switched device off (dataFlowActive === false), keep it offline
-        if (dev.dataFlowActive === false) {
-          if (dev.status !== 'offline') {
-            dev.status = 'offline';
-            hasChanges = true;
-          }
-        } else if (elapsedMs > offlineTimeoutMs) {
-          if (dev.status !== 'offline') {
-            dev.status = 'offline';
-            hasChanges = true;
-
-            const timeFormatted = timeoutSec >= 3600 
-              ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} saattir` 
-              : timeoutSec >= 60 
-                ? `${Math.round(timeoutSec / 60)} dakikadır`
-                : `${timeoutSec} saniyedir`;
-
-            this.db.addAuditLog(
-              dev.tenantId || 'system',
-              'Sistem Sinyal Takibi',
-              `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri gönderim sıklığının 2 katı (${timeFormatted}) sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
-              'high'
-            );
-
-            this.db.addNotification({
-              tenantId: dev.tenantId || 'usr_admin',
-              title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
-              message: `${dev.name} cihazından veri gönderim sıklığının 2 katı sürede (${timeFormatted}) sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
-              severity: 'critical',
-              deviceId: dev.id,
-              deviceName: dev.name,
-            });
-          }
-        } else if (elapsedMs > warningTimeoutMs) {
-          if (dev.status === 'online') {
-            dev.status = 'warning';
-            hasChanges = true;
-          }
-        } else {
-          if (dev.status !== 'online') {
-            dev.status = 'online';
-            hasChanges = true;
-          }
+          this.db.addNotification({
+            tenantId: dev.tenantId || 'usr_admin',
+            title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
+            message: `${dev.name} cihazından veri gönderim sıklığının 2 katı sürede (${timeFormatted}) sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
+            severity: 'critical',
+            deviceId: dev.id,
+            deviceName: dev.name,
+          });
         }
       }
     });
 
     if (hasChanges) {
       this.db.saveData(this.db.data);
+      this.db.data.devices.forEach((dev: Device) => {
+        this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+      });
     }
     return hasChanges;
   }
 
   public getUserTenants(userId: string): string[] {
     return (this.db.data.tenantMemberships || [])
-      .filter((m: any) => m.tenantId === userId)
+      .filter((m: any) => m.tenantId === userId || m.userId === userId || m.memberId === userId)
       .map((m: any) => m.tenantId);
   }
 
@@ -124,7 +77,7 @@ export class DeviceRepository {
     const users = this.db.data.users || [];
     const reqUser = users.find((u: any) => u.id === requestingUserId);
 
-    if (reqUser && reqUser.role === 'admin') {
+    if (reqUser && (reqUser.role === 'admin' || reqUser.id === 'usr_admin' || reqUser.id === 'admin')) {
       if (targetCustomerId && targetCustomerId !== 'all') {
         const targetUser = users.find((u: any) => u.id === targetCustomerId);
         const isTargetAdmin = targetCustomerId === 'usr_admin' || targetCustomerId === 'admin' || (targetUser && targetUser.role === 'admin') || targetCustomerId === reqUser.id;
@@ -140,15 +93,15 @@ export class DeviceRepository {
 
           list = list.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
         } else {
-          list = list.filter((d) => d.tenantId === targetCustomerId);
+          list = list.filter((d) => d.tenantId === targetCustomerId || (d as any).customerId === targetCustomerId);
         }
       }
     } else if (requestingUserId) {
-      const allowedTenants = this.getUserTenants(requestingUserId);
-      if (!allowedTenants.includes(requestingUserId)) {
-        allowedTenants.push(requestingUserId);
-      }
-      list = list.filter((d) => allowedTenants.includes(d.tenantId));
+      list = tenantSecurityService.filterDevicesForUser(
+        reqUser || { id: requestingUserId, role: 'operator' },
+        list,
+        this.db.data.tenantMemberships || []
+      );
     }
 
     return list;
@@ -203,6 +156,15 @@ export class DeviceRepository {
       name = `[Sanal] ${name}`;
     }
 
+    const expInterval = deviceData.expectedIntervalSeconds && deviceData.expectedIntervalSeconds > 0
+      ? deviceData.expectedIntervalSeconds
+      : (deviceData.customIntervalSeconds && deviceData.customIntervalSeconds > 0 ? deviceData.customIntervalSeconds : 30);
+    const calculated = smartIntervalService.calculateDeviceTimeouts({
+      expectedIntervalSeconds: expInterval,
+      customIntervalSeconds: deviceData.customIntervalSeconds,
+      intervalMode: deviceData.intervalMode || 'auto',
+    });
+
     const newDevice: Device = {
       ...deviceData,
       name,
@@ -212,7 +174,12 @@ export class DeviceRepository {
       apiKey: keyDetails.rawKey,
       apiKeyPrefix: keyDetails.prefix,
       apiKeyHash: keyDetails.hash,
-      heartbeatTimeoutSeconds: deviceData.heartbeatTimeoutSeconds || 300,
+      expectedIntervalSeconds: calculated.expectedIntervalSeconds,
+      autoDetectedIntervalSeconds: calculated.expectedIntervalSeconds,
+      heartbeatTimeoutSeconds: calculated.heartbeatTimeoutSeconds,
+      intervalMode: calculated.intervalMode,
+      customIntervalSeconds: deviceData.customIntervalSeconds,
+      recentIntervals: [],
       dataFlowActive: deviceData.dataFlowActive !== false,
       lastSeen: new Date().toISOString(),
     };
@@ -344,8 +311,11 @@ export class DeviceRepository {
         dev.customIntervalSeconds = updates.expectedIntervalSeconds;
         dev.intervalMode = 'manual';
       }
-      dev.heartbeatTimeoutSeconds = Math.max(updates.expectedIntervalSeconds * 2, 4);
     }
+    // Calculate and enforce consistent 2x timeouts
+    const timeouts = smartIntervalService.calculateDeviceTimeouts(dev);
+    dev.expectedIntervalSeconds = timeouts.expectedIntervalSeconds;
+    dev.heartbeatTimeoutSeconds = timeouts.heartbeatTimeoutSeconds;
     const wasSimulated = dev.isSimulated;
     if (updates.isSimulated !== undefined) dev.isSimulated = updates.isSimulated;
     if (updates.saveSimulatedDataToDb !== undefined) dev.saveSimulatedDataToDb = updates.saveSimulatedDataToDb;
@@ -639,42 +609,10 @@ export class DeviceRepository {
     if (!dev) return null;
 
     const now = Date.now();
-    const previousLastSeen = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
-    const wasOffline = dev.status === 'offline';
+    smartIntervalService.processDeviceTelemetryArrival(dev, now);
 
-    // 1. Cihaz veri göndermeye başladı -> Tekrar online duruma geçsin
-    dev.status = 'online';
-    dev.lastSeen = new Date(now).toISOString();
-
-    // 2. Akıllı kural: Offline kalınan süreyi frekans hesabına KATMA!
-    const effectiveInterval = dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || dev.customIntervalSeconds || 5;
-    // Eğer cihaz daha önce offline ise veya son paketten beri aşırı uzun bir süre (aralığın 3 katı veya > 60sn) geçtiyse bu uyanma paketidir
-    const isWakeupAfterOffline = wasOffline || (previousLastSeen > 0 && (now - previousLastSeen) > ((effectiveInterval * 3) * 1000 + 4000));
-
-    if (!isWakeupAfterOffline && previousLastSeen > 0) {
-      // Cihaz zaten aktifti ve peş peşe ardışık paket geldi -> Sıklığı ölç
-      const deltaSec = Math.max(1, Math.round((now - previousLastSeen) / 1000));
-      if (deltaSec >= 1 && deltaSec <= 3600) {
-        dev.autoDetectedIntervalSeconds = deltaSec;
-
-        // Kullanıcı manuel sabitlemediyse sistem otomatik olarak sıklığı günceller
-        if (dev.intervalMode !== 'manual') {
-          dev.expectedIntervalSeconds = deltaSec;
-        }
-      }
-    } else {
-      // Cihaz offline'dan yeni uyandı (uzun süre sonra ilk paket)
-      // Kullanıcının son ayarı şartı:
-      if (dev.intervalMode === 'manual' && dev.customIntervalSeconds && dev.customIntervalSeconds > 0) {
-        dev.expectedIntervalSeconds = dev.customIntervalSeconds;
-      } else if (!dev.expectedIntervalSeconds) {
-        dev.expectedIntervalSeconds = dev.autoDetectedIntervalSeconds || 5;
-      }
-    }
-
-    // Heartbeat timeout'u da 2 katı kuralına göre senkronize et
-    const activeInterval = dev.expectedIntervalSeconds || 5;
-    dev.heartbeatTimeoutSeconds = Math.max(activeInterval * 2, 4);
+    this.db.saveData(this.db.data);
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
 
     return dev;
   }

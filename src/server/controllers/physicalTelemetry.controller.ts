@@ -5,6 +5,7 @@ import { physicalTelemetryService } from '../services/physicalTelemetry.service.
 import { commandService } from '../services/command.service.js';
 import { db } from '../db.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
+import { tenantSecurityService } from '../services/tenantSecurity.service.js';
 
 export class PhysicalTelemetryController {
   /**
@@ -24,14 +25,12 @@ export class PhysicalTelemetryController {
 
   /**
    * Lightweight Physical ESP Ping / Heartbeat Handler: /api/v1/telemetry/ping & /api/telemetry/ping
+   * Strictly secured via deviceAuthService (per-device API key/token and rate limiting).
+   * Insecure wildcard CORS is removed to prevent cross-site probing.
    */
   public async ping(req: express.Request, res: express.Response) {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'X-API-Key, Authorization, Content-Type, X-Token, X-Device-Id, X-MAC-Address, X-Ping-Ms, X-RSSI');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-
     if (req.method === 'OPTIONS') {
-      return res.status(200).send('OK');
+      return res.status(204).end();
     }
 
     const parsedPayload = parseProductionTelemetryPayload(req);
@@ -93,6 +92,9 @@ export class PhysicalTelemetryController {
 
     const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
+    const effInterval = updatedDev.expectedIntervalSeconds || 30;
+    const timeoutSec = updatedDev.heartbeatTimeoutSeconds || Math.max(effInterval * 2, 10);
+
     return res.status(200).json({
       status: 'ok',
       type: 'heartbeat_ack',
@@ -100,10 +102,10 @@ export class PhysicalTelemetryController {
       deviceName: updatedDev.name,
       deviceStatus: updatedDev.status,
       lastSeen: updatedDev.lastSeen,
-      expectedIntervalSeconds: updatedDev.expectedIntervalSeconds || 5,
+      expectedIntervalSeconds: effInterval,
       intervalMode: updatedDev.intervalMode || 'auto',
-      heartbeatTimeoutSeconds: updatedDev.heartbeatTimeoutSeconds || 10,
-      offlineTimeoutSeconds: (updatedDev.expectedIntervalSeconds || 5) * 2,
+      heartbeatTimeoutSeconds: timeoutSec,
+      offlineTimeoutSeconds: timeoutSec,
       commands,
       serverTime: new Date().toISOString(),
       message: 'ESP Ping / Heartbeat sinyali başarıyla alındı ve cihaz ÇEVRİMİÇİ olarak onaylandı.',
@@ -206,6 +208,9 @@ export class PhysicalTelemetryController {
         });
         const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
+        const effInterval = effectiveDev.expectedIntervalSeconds || 30;
+        const timeoutSec = effectiveDev.heartbeatTimeoutSeconds || Math.max(effInterval * 2, 10);
+
         return res.status(200).json({
           status: 'ok',
           type: 'heartbeat_ack',
@@ -213,10 +218,10 @@ export class PhysicalTelemetryController {
           deviceName: effectiveDev.name,
           deviceStatus: effectiveDev.status,
           lastSeen: effectiveDev.lastSeen,
-          expectedIntervalSeconds: effectiveDev.expectedIntervalSeconds || 5,
+          expectedIntervalSeconds: effInterval,
           intervalMode: effectiveDev.intervalMode || 'auto',
-          heartbeatTimeoutSeconds: effectiveDev.heartbeatTimeoutSeconds || 10,
-          offlineTimeoutSeconds: (effectiveDev.expectedIntervalSeconds || 5) * 2,
+          heartbeatTimeoutSeconds: timeoutSec,
+          offlineTimeoutSeconds: timeoutSec,
           commands,
           serverTime: new Date().toISOString(),
           message: 'ESP Heartbeat / Ping sinyali işlendi. Cihaz çevrimiçi.',
@@ -302,10 +307,10 @@ export class PhysicalTelemetryController {
       if (!dev) {
         return res.status(404).json({ error: 'Cihaz bulunamadı.' });
       }
-      if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
+      if (!tenantSecurityService.canUserAccessDevice(currentUser, dev, db.data.tenantMemberships || [])) {
         return res
           .status(403)
-          .json({ error: 'Yetkisiz erişim! Başka bir kullanıcının cihaz verisini görüntüleyemezsiniz.' });
+          .json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihaz verisini görüntüleyebilirsiniz.' });
       }
     }
 
@@ -342,10 +347,10 @@ export class PhysicalTelemetryController {
     if (!dev) {
       return res.status(404).json({ error: 'Cihaz bulunamadı.' });
     }
-    if (currentUser.role !== 'admin' && dev.tenantId !== currentUser.id) {
+    if (!tenantSecurityService.canUserAccessDevice(currentUser, dev, db.data.tenantMemberships || [])) {
       return res
         .status(403)
-        .json({ error: 'Yetkisiz erişim! Başka bir kullanıcının cihaz verisini görüntüleyemezsiniz.' });
+        .json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihaz verisini görüntüleyebilirsiniz.' });
     }
 
     try {

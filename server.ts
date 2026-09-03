@@ -3,8 +3,8 @@
 
 if (process.env.NODE_ENV === 'production') {
   // In production, run the pre-bundled server
-  // @ts-expect-error - dist/server.cjs is generated during build
-  import('./dist/server.cjs').catch(err => {
+  const prodPath = './dist/server.cjs';
+  import(prodPath).catch(err => {
     console.error("Failed to start production server:", err);
     process.exit(1);
   });

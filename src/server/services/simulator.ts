@@ -166,9 +166,8 @@ export function runSimulationStep() {
   for (const dev of devices) {
     if (!dev.isSimulated) continue;
 
-    // Keep device online and refresh lastSeen on every simulation tick
-    dev.status = 'online';
-    dev.lastSeen = new Date().toISOString();
+    // Process simulated telemetry arrival through standard device telemetry pipeline
+    db.processDeviceTelemetryArrival(dev.id);
 
     let metricsToGenerate: string[] = [];
 

@@ -572,8 +572,10 @@ export class PostgresRepository {
         ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
         save_simulated_data_to_db, simulated_metrics, role_key, hardware_model, firmware_version,
-        ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+        ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at,
+        expected_interval_seconds, auto_detected_interval_seconds, heartbeat_timeout_seconds,
+        interval_mode, custom_interval_seconds, recent_intervals, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
@@ -600,7 +602,13 @@ export class PostgresRepository {
         ota_target_firmware_id = EXCLUDED.ota_target_firmware_id,
         ota_progress = EXCLUDED.ota_progress,
         ota_error_message = EXCLUDED.ota_error_message,
-        ota_last_check_at = EXCLUDED.ota_last_check_at;
+        ota_last_check_at = EXCLUDED.ota_last_check_at,
+        expected_interval_seconds = EXCLUDED.expected_interval_seconds,
+        auto_detected_interval_seconds = EXCLUDED.auto_detected_interval_seconds,
+        heartbeat_timeout_seconds = EXCLUDED.heartbeat_timeout_seconds,
+        interval_mode = EXCLUDED.interval_mode,
+        custom_interval_seconds = EXCLUDED.custom_interval_seconds,
+        recent_intervals = EXCLUDED.recent_intervals;
     `;
     await this.query(sql, [
       dev.id,
@@ -630,6 +638,12 @@ export class PostgresRepository {
       dev.otaProgress || 0,
       dev.otaErrorMessage || null,
       dev.otaLastCheckAt || null,
+      dev.expectedIntervalSeconds || 30,
+      dev.autoDetectedIntervalSeconds || 30,
+      dev.heartbeatTimeoutSeconds || 60,
+      dev.intervalMode || 'auto',
+      dev.customIntervalSeconds || null,
+      JSON.stringify(dev.recentIntervals || []),
       new Date().toISOString(),
     ]);
   }
@@ -1701,6 +1715,12 @@ export class PostgresRepository {
             otaProgress: r.ota_progress || 0,
             otaErrorMessage: r.ota_error_message || undefined,
             otaLastCheckAt: r.ota_last_check_at ? new Date(r.ota_last_check_at).toISOString() : undefined,
+            expectedIntervalSeconds: r.expected_interval_seconds ? Number(r.expected_interval_seconds) : 30,
+            autoDetectedIntervalSeconds: r.auto_detected_interval_seconds ? Number(r.auto_detected_interval_seconds) : 30,
+            heartbeatTimeoutSeconds: r.heartbeat_timeout_seconds ? Number(r.heartbeat_timeout_seconds) : 60,
+            intervalMode: r.interval_mode || 'auto',
+            customIntervalSeconds: r.custom_interval_seconds ? Number(r.custom_interval_seconds) : undefined,
+            recentIntervals: Array.isArray(r.recent_intervals) ? r.recent_intervals : (typeof r.recent_intervals === 'string' ? JSON.parse(r.recent_intervals) : []),
           });
         });
       }

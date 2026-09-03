@@ -5,6 +5,8 @@ import { runSimulationStep } from '../services/simulator.js';
 import { telemetryController } from '../controllers/telemetry.controller.js';
 import { commandController } from '../controllers/command.controller.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { tenantSecurityService } from '../services/tenantSecurity.service.js';
+import { smartIntervalService } from '../services/smartInterval.service.js';
 
 const router = Router();
 
@@ -65,8 +67,8 @@ router.post('/', authenticateUser, (req, res) => {
     rateLimitPerMin: rateLimitPerMin || 120,
     encryptionMethod: encryptionMethod || 'AES-256-GCM',
     apiKey: finalApiKey,
-    heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 300,
-    expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : undefined,
+    heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 60,
+    expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : 30,
     isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
     saveSimulatedDataToDb: allowSimulated && saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
     simulatedMetrics: allowSimulated && Array.isArray(simulatedMetrics) ? simulatedMetrics : undefined,
@@ -168,8 +170,8 @@ router.post('/:id/regen-key', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızın API anahtarını yenileyebilirsiniz.' });
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın API anahtarını yenileyebilirsiniz.' });
   }
 
   try {
@@ -192,39 +194,29 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim!' });
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın metrik önbelleğini temizleyebilirsiniz.' });
   }
 
   const isStaleOnly = req.body?.staleOnly === true || req.query.staleOnly === 'true';
 
   try {
-    const interval = existingDev.expectedIntervalSeconds || existingDev.autoDetectedIntervalSeconds || existingDev.customIntervalSeconds || 5;
-    const thresholdSec = Math.max(interval * 2, 4);
-
-    let updatedMetrics: Record<string, any> = {};
-    if (isStaleOnly) {
-      const now = Date.now();
-      const lastSeenMs = existingDev.lastSeen ? new Date(existingDev.lastSeen).getTime() : 0;
-      const elapsedSec = (now - lastSeenMs) / 1000;
-      if (elapsedSec > thresholdSec || existingDev.status === 'offline') {
-        // Cihaz veri sıklığının 2 katı süredir veri göndermemiş -> metrikler temizlenir
-        updatedMetrics = {};
-      } else {
-        updatedMetrics = existingDev.metrics || {};
-      }
-    }
-
-    const updated = db.updateDevice(deviceId, { metrics: updatedMetrics });
+    const result = smartIntervalService.filterLiveMetricsCache(existingDev, isStaleOnly);
+    const updated = db.updateDevice(deviceId, { metrics: existingDev.metrics });
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     res.json({
       success: true,
+      scope: 'live_cache_only',
+      historicalDatabasePreserved: true,
+      databaseEngine: 'TimescaleDB / PostgreSQL',
       message: isStaleOnly
-        ? `Veri gönderim sıklığının 2 katını (${thresholdSec} sn) aşan geçmiş metrikler temizlendi.`
-        : 'Cihaz metrik önbelleği temizlendi.',
+        ? `Veri gönderim sıklığının 2 katını (${result.thresholdSeconds} sn) aşan anlık gösterge metrik önbelleği temizlendi. TimescaleDB/PostgreSQL kalıcı telemetri geçmişi ve analiz kayıtları KESİNLİKLE korunmaktadır.`
+        : 'Cihazın anlık pano metrik önbelleği temizlendi. TimescaleDB/PostgreSQL kalıcı telemetri geçmişi ve analiz kayıtları KESİNLİKLE korunmaktadır.',
       device: updated,
-      thresholdSeconds: thresholdSec,
+      thresholdSeconds: result.thresholdSeconds,
+      cleanedCount: result.cleanedCount,
+      remainingCount: result.remainingCount,
     });
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'Metrikler temizlenemedi.' });
@@ -244,8 +236,8 @@ router.post('/:id/replace', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Değiştirilecek cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızı değiştirebilirsiniz.' });
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazı değiştirebilirsiniz.' });
   }
 
   if (!pairingCode) {
@@ -302,8 +294,8 @@ router.delete('/:id', authenticateUser, (req, res) => {
     return res.status(404).json({ error: 'Cihaz bulunamadı.' });
   }
 
-  if (currentUser.role !== 'admin' && existingDev.tenantId !== currentUser.id) {
-    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca kendi cihazınızı silebilirsiniz.' });
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazı silebilirsiniz.' });
   }
 
   db.deleteDevice(deviceId);
