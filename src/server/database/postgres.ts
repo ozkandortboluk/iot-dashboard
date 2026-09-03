@@ -41,6 +41,9 @@ export class PostgresRepository {
     if (connected) {
       this.connectionErrorNotified = false;
       this.lastTestedAt = new Date().toISOString();
+      this.ensureTelemetrySchema(true).catch((err) => {
+        console.warn('[PostgreSQL Auto Schema Ensure Warning]:', err?.message || err);
+      });
     }
   }
 
@@ -53,6 +56,7 @@ export class PostgresRepository {
   }
 
   private isSchemaEnsured = false;
+  private isRecoveringSchema = false;
 
   public async ensureTelemetrySchema(force = false): Promise<void> {
     if (!this.pool || (this.isSchemaEnsured && !force)) return;
@@ -107,6 +111,20 @@ export class PostgresRepository {
           is_simulated BOOLEAN DEFAULT FALSE,
           save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
           simulated_metrics JSONB DEFAULT '[]'::jsonb,
+          role_key VARCHAR(64),
+          hardware_model VARCHAR(64),
+          firmware_version VARCHAR(32),
+          ota_status VARCHAR(32) DEFAULT 'IDLE',
+          ota_target_firmware_id VARCHAR(64),
+          ota_progress INT DEFAULT 0,
+          ota_error_message TEXT,
+          ota_last_check_at TIMESTAMP WITH TIME ZONE,
+          expected_interval_seconds INT DEFAULT 30,
+          auto_detected_interval_seconds INT DEFAULT 30,
+          heartbeat_timeout_seconds INT DEFAULT 60,
+          interval_mode VARCHAR(16) DEFAULT 'auto',
+          custom_interval_seconds INT,
+          recent_intervals JSONB DEFAULT '[]'::jsonb,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
@@ -118,6 +136,17 @@ export class PostgresRepository {
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_status VARCHAR(32) DEFAULT 'IDLE';`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_firmware_id VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_progress INT DEFAULT 0;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_error_message TEXT;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_last_check_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS expected_interval_seconds INT DEFAULT 30;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_detected_interval_seconds INT DEFAULT 30;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS heartbeat_timeout_seconds INT DEFAULT 60;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS interval_mode VARCHAR(16) DEFAULT 'auto';`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS custom_interval_seconds INT;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS recent_intervals JSONB DEFAULT '[]'::jsonb;`,
 
         // 3. Telemetry Packets & Readings
         `CREATE TABLE IF NOT EXISTS telemetry_packets (
@@ -466,6 +495,24 @@ export class PostgresRepository {
       return await this.pool.query(text, params);
     } catch (err: any) {
       const errMsg = err?.message || String(err);
+      const isMissingColumnOrTable =
+        err?.code === '42703' || // undefined_column
+        err?.code === '42P01' || // undefined_table
+        errMsg.includes('does not exist');
+
+      if (isMissingColumnOrTable && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: Eksik kolon/tablo tespit edildi (${errMsg}), şema eşitlenip sorgu tekrarlanıyor...`);
+          await this.ensureTelemetrySchema(true);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL Otomatik Onarım Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
       const isConnectionIssue =
         errMsg.includes('timeout') ||
         errMsg.includes('Connection terminated') ||
@@ -566,6 +613,7 @@ export class PostgresRepository {
   // ==========================================
   public async saveDevice(dev: Device): Promise<void> {
     if (!this.pool) return;
+    await this.ensureTelemetrySchema();
     const sql = `
       INSERT INTO devices (
         id, user_id, name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
@@ -850,6 +898,7 @@ export class PostgresRepository {
   // ==========================================
   public async saveRule(rule: ThresholdRule): Promise<void> {
     if (!this.pool) return;
+    await this.ensureTelemetrySchema();
     const sql = `
       INSERT INTO threshold_rules (
         id, user_id, user_name, device_id, metric_key, operator, threshold_value,

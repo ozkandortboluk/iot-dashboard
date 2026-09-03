@@ -32,12 +32,14 @@ import {
   Home,
   Users,
   LogOut,
+  Menu,
 } from 'lucide-react';
 
 function DashboardContent() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
   const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
@@ -95,8 +97,13 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 dark:bg-[#020617] dark:text-slate-200 font-sans transition-colors duration-200 flex flex-col md:flex-row">
-      {/* Sidebar for Desktop */}
-      <Sidebar activeTab={safeActiveTab} setActiveTab={setActiveTab} />
+      {/* Sidebar for Desktop & Slide-out Drawer for Mobile */}
+      <Sidebar
+        activeTab={safeActiveTab}
+        setActiveTab={setActiveTab}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
+      />
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 pb-16 md:pb-0">
@@ -109,6 +116,8 @@ function DashboardContent() {
           onOpenAddWidgetModal={() => setIsAddWidgetOpen(true)}
           editMode={editMode}
           onToggleEditMode={() => setEditMode((prev) => !prev)}
+          isMobileMenuOpen={isMobileMenuOpen}
+          onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         />
 
         {/* Navigation Breadcrumb Bar */}
@@ -233,6 +242,17 @@ function DashboardContent() {
         >
           <Bell className="w-4 h-4" />
           <span>Bildirimler</span>
+        </button>
+        <button
+          id="mobile-bottom-menu-btn"
+          onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+          className={`flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            isMobileMenuOpen ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Tüm Menüyü Aç / Kapat"
+        >
+          <Menu className="w-4 h-4" />
+          <span>Menü</span>
         </button>
         <button
           onClick={logout}

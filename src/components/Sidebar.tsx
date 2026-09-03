@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   LayoutDashboard,
   Activity,
@@ -16,6 +16,7 @@ import {
   ExternalLink,
   UserCog,
   HardDrive,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getRoleBadgeInfo } from '../lib/permissions';
@@ -24,9 +25,16 @@ import { NexusNodeLogo } from './NexusNodeLogo';
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  isMobileOpen = false,
+  onCloseMobile,
+}) => {
   const { user } = useAuth();
 
   const role = user?.role || 'customer';
@@ -304,6 +312,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const avatarInfo = getBrandAvatar();
   const brandTitle = getBrandTitle();
 
+  const handleSelectTab = (tabId: string) => {
+    setActiveTab(tabId);
+    if (onCloseMobile) {
+      onCloseMobile();
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMobileOpen && onCloseMobile) {
+        onCloseMobile();
+      }
+    };
+    if (isMobileOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+    };
+  }, [isMobileOpen, onCloseMobile]);
+
   const renderNavGroup = (groups: typeof adminMenuGroups, activeThemeClass: string, iconActiveColor: string) => {
     return groups.map((group, idx) => (
       <div key={idx} className="space-y-1">
@@ -316,7 +349,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => handleSelectTab(item.id)}
               className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl transition-all text-xs font-medium cursor-pointer ${
                 isActive
                   ? activeThemeClass
@@ -334,8 +367,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     ));
   };
 
-  return (
-    <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 h-screen sticky top-0 z-30 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors overflow-y-auto">
+  const renderContent = (isMobileView = false) => (
+    <div className="flex flex-col justify-between h-full min-h-full">
       {/* Brand & Logo Header */}
       <div>
         <div className="h-14 sm:h-16 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
@@ -344,9 +377,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
             size="sm"
             showDomain={true}
             animated={true}
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              if (isMobileView && onCloseMobile) onCloseMobile();
+              window.location.reload();
+            }}
             className="hover:opacity-85 transition-opacity"
           />
+          {isMobileView && (
+            <button
+              type="button"
+              id="mobile-drawer-close-btn"
+              onClick={onCloseMobile}
+              aria-label="Menüyü Kapat"
+              className="p-1.5 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Navigation Links */}
@@ -362,7 +409,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveTab(item.id)}
+                    onClick={() => handleSelectTab(item.id)}
                     className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all text-xs font-medium cursor-pointer ${
                       isActive
                         ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20 font-bold shadow-sm'
@@ -400,7 +447,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       </div>
 
       {/* Footer / Version & GitHub Release Notes */}
-      <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#0b1120]">
+      <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#0b1120] shrink-0">
         <a
           href="https://github.com/ozkan-1403/iot-telemetry-platform/releases"
           target="_blank"
@@ -428,6 +475,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           </div>
         </a>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="w-64 shrink-0 bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 h-screen sticky top-0 z-30 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between hidden md:flex transition-colors overflow-y-auto">
+        {renderContent(false)}
+      </aside>
+
+      {/* Mobile Drawer (Controlled via Top Header Button) */}
+      <div
+        id="mobile-sidebar-drawer-container"
+        className={`fixed inset-0 z-50 md:hidden transition-all duration-300 ${
+          isMobileOpen ? 'visible pointer-events-auto' : 'invisible pointer-events-none'
+        }`}
+      >
+        {/* Backdrop overlay */}
+        <div
+          className={`absolute inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity duration-300 ${
+            isMobileOpen ? 'opacity-100' : 'opacity-0'
+          }`}
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+
+        {/* Sliding Drawer */}
+        <aside
+          className={`absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white dark:bg-[#0f172a] text-slate-700 dark:text-slate-300 shadow-2xl z-10 transition-transform duration-300 ease-in-out overflow-y-auto ${
+            isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+          aria-label="Mobil Yan Menü"
+        >
+          {renderContent(true)}
+        </aside>
+      </div>
+    </>
   );
 };

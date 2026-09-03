@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS devices (
     is_simulated BOOLEAN DEFAULT FALSE,
     save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
     simulated_metrics JSONB DEFAULT '[]'::jsonb,
+    role_key VARCHAR(64),
+    hardware_model VARCHAR(64),
+    firmware_version VARCHAR(32),
+    ota_status VARCHAR(32) DEFAULT 'IDLE',
+    ota_target_firmware_id VARCHAR(64),
+    ota_progress INT DEFAULT 0,
+    ota_error_message TEXT,
+    ota_last_check_at TIMESTAMP WITH TIME ZONE,
     expected_interval_seconds INT DEFAULT 30,
     auto_detected_interval_seconds INT DEFAULT 30,
     heartbeat_timeout_seconds INT DEFAULT 60,
@@ -80,11 +88,20 @@ CREATE TABLE IF NOT EXISTS devices (
 -- Ensure columns exist for existing databases
 DO $$
 BEGIN
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_status VARCHAR(32) DEFAULT 'IDLE';
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_firmware_id VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_progress INT DEFAULT 0;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_error_message TEXT;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_last_check_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS expected_interval_seconds INT DEFAULT 30;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_detected_interval_seconds INT DEFAULT 30;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS heartbeat_timeout_seconds INT DEFAULT 60;

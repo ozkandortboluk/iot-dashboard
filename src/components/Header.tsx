@@ -23,6 +23,8 @@ import {
   RefreshCw,
   Sliders,
   UserCog,
+  Menu,
+  X,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
@@ -40,6 +42,8 @@ interface HeaderProps {
   onOpenAddWidgetModal: () => void;
   editMode?: boolean;
   onToggleEditMode?: () => void;
+  isMobileMenuOpen?: boolean;
+  onToggleMobileMenu?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,6 +53,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAddWidgetModal,
   editMode = false,
   onToggleEditMode,
+  isMobileMenuOpen = false,
+  onToggleMobileMenu,
 }) => {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
@@ -126,8 +132,25 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-30 h-14 sm:h-16 bg-white/95 dark:bg-[#020617]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex items-center shadow-sm dark:shadow-none">
       <div className="w-full px-2.5 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
-        {/* Left Section: Optional Customer Title, Connection Badge & Admin Customer Switcher */}
+        {/* Left Section: Mobile Menu Toggle, Brand Logo, Customer Title, Connection Badge & Admin Customer Switcher */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+          {/* Mobile Sidebar Menu Toggle Button */}
+          <button
+            type="button"
+            id="mobile-sidebar-toggle-btn"
+            onClick={onToggleMobileMenu}
+            aria-label={isMobileMenuOpen ? 'Yan Menüyü Kapat' : 'Yan Menüyü Aç'}
+            aria-expanded={isMobileMenuOpen}
+            title={isMobileMenuOpen ? 'Yan Menüyü Gizle' : 'Yan Menüyü Aç'}
+            className="md:hidden p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer active:scale-95"
+          >
+            {isMobileMenuOpen ? (
+              <X className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            ) : (
+              <Menu className="w-4 h-4" />
+            )}
+          </button>
+
           {/* Mobile/Compact Brand Logo */}
           <div className="md:hidden shrink-0">
             <NexusNodeLogo
