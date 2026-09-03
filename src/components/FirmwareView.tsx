@@ -23,9 +23,11 @@ import {
   Filter,
   HardDrive,
   Info,
+  Code,
 } from 'lucide-react';
 import type { Firmware, OtaDeploymentJob, Device, User } from '../types';
 import { hasPermission, canAccessTab } from '../lib/permissions';
+import { WebCompilerStudio } from './WebCompilerStudio';
 
 interface FirmwareViewProps {
   currentUser: User;
@@ -55,7 +57,7 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
     );
   }
 
-  const [activeTab, setActiveTab] = useState<'library' | 'deploy' | 'jobs'>('library');
+  const [activeTab, setActiveTab] = useState<'compiler' | 'library' | 'deploy' | 'jobs'>('compiler');
 
   const [firmwares, setFirmwares] = useState<Firmware[]>([]);
   const [otaJobs, setOtaJobs] = useState<OtaDeploymentJob[]>([]);
@@ -365,6 +367,22 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
       {/* Tabs Bar */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2">
         <button
+          id="tab-web-compiler"
+          onClick={() => setActiveTab('compiler')}
+          className={`px-5 py-3 font-medium text-sm border-b-2 transition-all flex items-center gap-2 ${
+            activeTab === 'compiler'
+              ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
+              : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Code className="w-4 h-4 text-cyan-500" />
+          Web Kod Derleyici & .bin Stüdyosu
+          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+            YENİ
+          </span>
+        </button>
+
+        <button
           id="tab-firmware-library"
           onClick={() => setActiveTab('library')}
           className={`px-5 py-3 font-medium text-sm border-b-2 transition-all flex items-center gap-2 ${
@@ -410,6 +428,20 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
           )}
         </button>
       </div>
+
+      {/* TAB 0: WEB COMPILER STUDIO */}
+      {activeTab === 'compiler' && (
+        <WebCompilerStudio
+          devices={devices}
+          onFirmwareCompiled={(newFw) => {
+            fetchFirmwares();
+            setActionMessage({
+              type: 'success',
+              text: `${newFw.name} (${newFw.version}) başarıyla derlendi ve kütüphaneye eklendi!`,
+            });
+          }}
+        />
+      )}
 
       {/* TAB 1: FIRMWARE LIBRARY */}
       {activeTab === 'library' && (

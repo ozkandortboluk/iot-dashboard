@@ -766,59 +766,197 @@ void loop() {
 }`,
     },
     {
-      id: 'code_nodemcu_esp8266_http',
-      title: 'NodeMCU (ESP8266) - Standart JSON Telemetri Gönderimi',
+      id: 'code_nodemcu_esp8266_ota_ws',
+      title: 'NodeMCU (ESP8266) - Canlı Çift Yönlü WebSocket + Web OTA Güncelleme Kodu',
       category: 'nodemcu',
       categoryLabel: 'NodeMCU ESP8266',
-      badge: 'Kararlı',
-      description: 'NodeMCU ESP8266 kartınızdan `/api/telemetry` endpointine standart JSON telemetri paketi iletme kodu.',
-      tags: ['nodemcu', 'esp8266', 'json', 'telemetri', 'arduino'],
-      endpoint: 'POST /api/telemetry',
+      badge: 'İlk Kurulum & Canlı OTA Destekli',
+      description: 'NodeMCU cihazınıza bu kodu ilk kez USB kablosuyla yüklediğinizde, cihaz sunucuya canlı WebSocket ile bağlanır. Artık cihazınıza bir daha kablo takmanıza gerek kalmaz; web panelindeki Kod Derleyici veya Firmware sayfasından tek tıkla kablosuz OTA yazılım yüklemesi yapabilirsiniz.',
+      tags: ['nodemcu', 'esp8266', 'ota', 'websocket', 'çift yönlü', 'uzaktan güncelleme', 'httpupdate'],
+      endpoint: 'WS /ws/device & POST /api/ota/download',
       code: `// =========================================================================
-// NEXUSNODE IoT - NODEMCU (ESP8266) STANDART JSON TELEMETRİ GÖNDERİMİ
+// NEXUSNODE IoT - NODEMCU (ESP8266) CANLI WEBSOCKET & WEB OTA DESTEKLİ İLK KOD
+// Bu kodu 1 kez USB kablosuyla yükleyin; sonrasında tüm güncellemeleri Web'den yapın!
+// Gerekli Kütüphaneler: ESP8266WiFi, ESP8266httpUpdate, WebSocketsClient, ArduinoJson
 // =========================================================================
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
-#include <WiFiClient.h>
+#include <ESP8266httpUpdate.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
 
-const char* WIFI_SSID  = "WIFI_AG_ADINIZ";
-const char* WIFI_PASS  = "WIFI_SIFRENIZ";
-const char* SERVER_URL = "${originUrl}/api/telemetry";
-const char* API_KEY    = "nkn_live_YOUR_DEVICE_API_KEY";
+// --- WiFi ve Sunucu Bilgileri ---
+const char* WIFI_SSID     = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRENIZ";
+const char* WS_HOST       = "${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}";
+const int   WS_PORT       = 443; // HTTPS/WSS için 443, Yerel HTTP için 3000
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihaz Tokenı
+
+// --- Cihaz Kimlik & Sürüm Bilgileri ---
+const char* FIRMWARE_VERSION  = "v1.0.0";
+const char* HARDWARE_MODEL    = "ESP8266_NODEMCU";
+const char* ROLE_KEY          = "NODEMCU_MAIN";
+
+// --- Donanım Pin Tanımları ---
+const int RELAY_PIN       = D1;  // GPIO5 -> Röle Modülü (Active-Low)
+const int STATUS_LED      = D4;  // GPIO2 -> Dahili Mavi LED
+const bool ACTIVE_LOW     = true;
+
+WebSocketsClient webSocket;
+unsigned long lastTelemetryTime = 0;
+bool relayState = false;
+
+// Röleyi güvenli ayarla
+void setRelay(bool state) {
+  relayState = state;
+  digitalWrite(RELAY_PIN, (ACTIVE_LOW ? !state : state) ? HIGH : LOW);
+  Serial.printf("[RÖLE] Durum Değişti -> %s\\n", state ? "AÇIK (ON)" : "KAPALI (OFF)");
+}
+
+// =========================================================================
+// KABLOSUZ OTA GÜNCELLEME MOTORU (Web Panelinden Gelen Emri Çalıştırır)
+// =========================================================================
+void performOTAUpdate(const String& downloadUrl, const String& version, const String& token) {
+  Serial.println("\\n>>> [OTA] KABLOSUZ YAZILIM GÜNCELLEMESİ BAŞLATILIYOR...");
+  Serial.printf(">>> Hedef Sürüm: %s | URL: %s\\n", version.c_str(), downloadUrl.c_str());
+
+  digitalWrite(STATUS_LED, LOW);
+
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure(); // SSL sertifika doğrulamasını atla
+
+  String fullUrl = downloadUrl;
+  if (!fullUrl.startsWith("http")) {
+    fullUrl = "https://" + String(WS_HOST) + downloadUrl;
+  }
+
+  // ESP8266 HTTPUpdate Motorunu Başlat
+  ESPhttpUpdate.setLedPin(STATUS_LED, LOW);
+  ESPhttpUpdate.rebootOnUpdate(true); // Güncelleme bitince cihazı otomatik yeniden başlat
+
+  t_httpUpdate_return ret = ESPhttpUpdate.update(secureClient, fullUrl);
+
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("[OTA HATA] Güncelleme Başarısız! Hata Kodu (%d): %s\\n", 
+                    ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+      break;
+
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("[OTA] Cihaz yazılımı zaten güncel.");
+      break;
+
+    case HTTP_UPDATE_OK:
+      Serial.println("[OTA BAŞARILI] Yazılım yüklendi! Cihaz yeniden başlatılıyor...");
+      break;
+  }
+}
+
+// =========================================================================
+// WEBSOCKET OLAY DİNLEYİCİSİ (Anlık Komutlar ve Canlı OTA Tetikleyici)
+// =========================================================================
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.println("\\n[WS] CANLI BAĞLANTI KURULDU! Panelden anlık komut ve OTA almaya hazır.");
+      break;
+
+    case WStype_DISCONNECTED:
+      Serial.println("[WS] Bağlantı kesildi, yeniden bağlanılıyor...");
+      break;
+
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+      Serial.println("[WS GELEN]: " + msg);
+
+      StaticJsonDocument<1024> doc;
+      DeserializationError err = deserializeJson(doc, payload);
+      if (!err) {
+        String msgType = doc["type"] | "";
+
+        // 1. CANLI OTA GÜNCELLEME EMRİ
+        if (msgType == "ota_trigger" || msgType == "ota") {
+          String url     = doc["data"]["url"] | doc["data"]["downloadUrl"] | "";
+          String fwVer   = doc["data"]["version"] | "v_latest";
+          String dlToken = doc["data"]["downloadToken"] | "";
+
+          if (url.length() > 0) {
+            performOTAUpdate(url, fwVer, dlToken);
+          }
+        }
+        // 2. CANLI RÖLE & GPIO KONTROL EMRİ (0ms Gecikme)
+        else if (msgType == "command") {
+          String msgId    = doc["messageId"] | "";
+          String targetOut = doc["data"]["outputId"] | "";
+          String val       = doc["data"]["value"] | "";
+
+          Serial.printf(">>> [KOMUT] Hedef: %s | Değer: %s\\n", targetOut.c_str(), val.c_str());
+
+          bool turnOn = (val.equalsIgnoreCase("ON") || val == "1" || val.equalsIgnoreCase("TRUE"));
+          setRelay(turnOn);
+
+          // İcra Onayı (ACK) Gönder
+          String ackPayload = "{\\"type\\":\\"ack\\",\\"deviceId\\":\\"" + String(API_KEY) + 
+                             "\\",\\"messageId\\":\\"ack_" + String(millis()) + 
+                             "\\",\\"data\\":{\\"forMessageId\\":\\"" + msgId + 
+                             "\\",\\"status\\":\\"executed\\",\\"result\\":{\\"outputId\\":\\"" + targetOut + 
+                             "\\",\\"value\\":\\"" + val + "\\"}}}";
+          webSocket.sendTXT(ackPayload);
+        }
+      }
+      break;
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(STATUS_LED, OUTPUT);
+  setRelay(false);
+  digitalWrite(STATUS_LED, HIGH);
+
+  Serial.println("\\n>>> NexusNode NodeMCU (ESP8266) OTA & WS Başlatılıyor...");
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(400);
     Serial.print(".");
   }
-  Serial.println("\\nNodeMCU WiFi Ağına Başarıyla Bağlandı!");
+  Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
+
+  String wsUrl = "/ws/device?token=" + String(API_KEY) + 
+                 "&hardware=" + String(HARDWARE_MODEL) + 
+                 "&firmware=" + String(FIRMWARE_VERSION) + 
+                 "&role=" + String(ROLE_KEY);
+                 
+  webSocket.beginSSL(WS_HOST, WS_PORT, wsUrl.c_str());
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(4000);
 }
 
 void loop() {
-  if (WiFi.status() == WL_CONNECTED) {
-    WiFiClient client;
-    HTTPClient http;
+  webSocket.loop();
 
-    http.begin(client, SERVER_URL);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-API-Key", API_KEY);
+  if (millis() - lastTelemetryTime > 10000) {
+    lastTelemetryTime = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      float sicaklik = 24.0 + (random(-10, 10) / 10.0);
+      float nem = 50.0 + (random(-15, 15) / 10.0);
+      int analogVal = analogRead(A0);
+      int rssi = WiFi.RSSI();
 
-    // Çoklu Metrik Gönderimi (Array veya Tekil JSON)
-    String jsonBody = "{\\"deviceId\\":\\"dev_nodemcu_01\\",\\"metric\\":\\"temperature\\",\\"value\\":26.8,\\"unit\\":\\"°C\\"}";
-
-    int httpCode = http.POST(jsonBody);
-    Serial.print("HTTP Yanıt Kodu: ");
-    Serial.println(httpCode);
-
-    if (httpCode > 0) {
-      String response = http.getString();
-      Serial.println("Sunucu Yanıtı: " + response);
+      String telPayload = "{\\"type\\":\\"telemetry\\",\\"deviceId\\":\\"" + String(API_KEY) + 
+                          "\\",\\"messageId\\":\\"tel_" + String(millis()) + 
+                          "\\",\\"data\\":{\\"sicaklik\\":" + String(sicaklik, 1) + 
+                          ",\\"nem\\":" + String(nem, 1) + 
+                          ",\\"analog_a0\\":" + String(analogVal) + 
+                          ",\\"relay_1\\":" + String(relayState ? 1 : 0) + 
+                          ",\\"rssi\\":" + String(rssi) + 
+                          ",\\"firmware\\":\\"" + String(FIRMWARE_VERSION) + "\\"}}}";
+                          
+      webSocket.sendTXT(telPayload);
+      Serial.println("[WS TELEMETRİ] Gönderildi -> " + telPayload);
     }
-    http.end();
   }
-  delay(10000); // 10 saniyede bir ölçüm ilet
 }`,
     },
     {
