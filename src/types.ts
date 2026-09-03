@@ -159,6 +159,10 @@ export interface Device {
   otaUpdatedAt?: string;
   otaDownloadToken?: string;
 
+  // Real-time Unified WebSocket State
+  websocketConnected?: boolean;
+  lastMessageAt?: string;
+
   updatedAt?: string;
   version?: number;
 }
@@ -332,6 +336,102 @@ export interface DeviceCommand {
   error_message?: string;
   parameters?: any;
   result?: any;
+}
+
+// ==========================================
+// UNIFIED IOT DEVICE WEBSOCKET PROTOCOL
+// ==========================================
+
+export type UnifiedMessageType =
+  | 'hello'
+  | 'telemetry'
+  | 'command'
+  | 'ack'
+  | 'event'
+  | 'ping'
+  | 'pong';
+
+export interface UnifiedWsMessage<T = any> {
+  type: UnifiedMessageType;
+  deviceId: string;
+  messageId: string;
+  timestamp: number; // Unix timestamp in seconds
+  data: T;
+}
+
+export interface DeviceHelloData {
+  firmwareVersion?: string;
+  hardware?: string; // 'ESP8266' | 'ESP32' | 'PYTHON' | string
+  ip?: string;
+  mac?: string;
+  uptimeSeconds?: number;
+  freeHeap?: number;
+  apiKey?: string;
+  [key: string]: any;
+}
+
+export interface DeviceTelemetryMetricValue {
+  value: number;
+  unit?: string;
+}
+
+export type DeviceTelemetryData = {
+  [metricKey: string]: number | DeviceTelemetryMetricValue | any;
+};
+
+export interface DeviceCommandData {
+  command: string; // e.g. 'relay', 'digital', 'analog', 'pwm', 'ota', 'reboot'
+  output?: number | string; // e.g. 1 or 'relay_1'
+  outputId?: string; // e.g. 'relay_1'
+  value?: boolean | number | string | any;
+  commandId?: string;
+  parameters?: Record<string, any>;
+  version?: string; // For OTA
+  url?: string; // For OTA
+  checksum?: string; // For OTA
+  [key: string]: any;
+}
+
+export type DeviceAckStatus = 'received' | 'executed' | 'failed';
+
+export interface DeviceAckData {
+  forMessageId: string;
+  status: DeviceAckStatus;
+  error?: string;
+  result?: any;
+  output?: number | string;
+  value?: any;
+}
+
+export type DeviceEventType =
+  | 'boot'
+  | 'relay_changed'
+  | 'output_changed'
+  | 'sensor_error'
+  | 'wifi_connected'
+  | 'wifi_disconnected'
+  | 'ota_started'
+  | 'ota_completed'
+  | 'ota_failed'
+  | 'alarm'
+  | string;
+
+export interface DeviceEventData {
+  event: DeviceEventType;
+  output?: number | string;
+  outputId?: string;
+  value?: any;
+  error?: string;
+  details?: any;
+  [key: string]: any;
+}
+
+export interface DevicePingData {
+  [key: string]: any;
+}
+
+export interface DevicePongData {
+  [key: string]: any;
 }
 
 export type WidgetType = 

@@ -5,6 +5,7 @@ import type { User, TelemetryReading, Device, DashboardLayout, DeviceCommand } f
 import { deviceAuthService } from './deviceAuth.service.js';
 import { telemetryService } from './telemetry.service.js';
 import { commandService } from './command.service.js';
+import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -156,6 +157,10 @@ export function broadcast(event: string, payload: unknown) {
           : payload) as DeviceCommand;
 
         if (cmd && (cmd.deviceId === client.device.id || cmd.deviceId === client.device.apiKey)) {
+          // 1. Unified WebSocket Protocol Envelope Delivery
+          deviceWsProtocolService.sendDeviceCommand(client.device.id, cmd);
+
+          // 2. Legacy Downlink Delivery for backward compatibility
           safeSend(
             client,
             JSON.stringify({
@@ -570,6 +575,7 @@ export function initWebSocketServer(server: http.Server) {
         if (verifiedDevice) {
           ws.isAuth = true;
           ws.device = verifiedDevice;
+          deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
         }
       }
     }
@@ -627,6 +633,23 @@ export function initWebSocketServer(server: http.Server) {
       try {
         const parsed = JSON.parse(data.toString());
 
+        // =========================================================================
+        // UNIFIED IOT DEVICE WEBSOCKET PROTOCOL DISPATCHER
+        // Handles { type, deviceId, messageId, timestamp, data } for ESP8266/ESP32/Python
+        // =========================================================================
+        const UNIFIED_MESSAGE_TYPES = ['hello', 'telemetry', 'command', 'ack', 'event', 'ping', 'pong'];
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          typeof parsed.type === 'string' &&
+          UNIFIED_MESSAGE_TYPES.includes(parsed.type) &&
+          parsed.deviceId &&
+          parsed.messageId
+        ) {
+          await deviceWsProtocolService.handleDeviceMessage(ws, parsed);
+          return;
+        }
+
         // Authentication message from client (supports User Session Token or Device API Key)
         if (parsed.event === 'auth' || parsed.type === 'auth') {
           const token = parsed.token || parsed.sessionToken || parsed.apiKey;
@@ -655,6 +678,7 @@ export function initWebSocketServer(server: http.Server) {
             ws.isAuth = true;
             ws.device = verifiedDevice;
             ws.user = undefined;
+            deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
             console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
             safeSend(
               ws,
@@ -951,9 +975,37 @@ export function initWebSocketServer(server: http.Server) {
     });
 
     ws.on('close', () => {
-      // Clean disconnect
+      if (ws.device) {
+        deviceWsProtocolService.unregisterDeviceSocket(ws.device.id, ws);
+      }
     });
   });
 
   return wss;
+}
+
+/**
+ * Sends a command to a connected device via the Unified WebSocket Protocol.
+ */
+export function sendDeviceCommandViaWs(deviceId: string, command: DeviceCommand | any): boolean {
+  return deviceWsProtocolService.sendDeviceCommand(deviceId, command);
+}
+
+/**
+ * Checks if a device is currently connected via WebSocket.
+ */
+export function isDeviceConnectedViaWs(deviceId: string): boolean {
+  return deviceWsProtocolService.isDeviceConnected(deviceId);
+}
+
+/**
+ * Sends an OTA command to a connected device via WebSocket.
+ */
+export function sendOtaCommandViaWs(
+  deviceId: string,
+  version: string,
+  downloadUrl: string,
+  checksum?: string
+): boolean {
+  return deviceWsProtocolService.sendOtaCommand(deviceId, version, downloadUrl, checksum);
 }

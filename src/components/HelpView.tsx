@@ -823,17 +823,17 @@ void loop() {
     },
     {
       id: 'code_esp32_websocket_client',
-      title: 'ESP32 - Canlı Çift Yönlü WebSocket & Generic Output İcrası',
+      title: 'ESP32 - Canlı Çift Yönlü WebSocket & Birleşik Protokol (Unified WS)',
       category: 'esp32',
       categoryLabel: 'ESP32 WebSocket',
-      badge: 'Gerçek Zamanlı (<10ms)',
-      description: 'WebSocketsClient kütüphanesi kullanarak sunucuya kalıcı WS soketi açar. Dashboard üzerinden butona veya kaydırıcıya basıldığında sunucu anında cihaza (command:downlink) iletir. Cihaz generic setOutput(outputId, value) ile röle, dijital, analog veya PWM çıkışını sürer ve 2 aşamalı ACK döner.',
-      tags: ['esp32', 'websocket', 'realtime', 'generic output', 'downlink', 'relay', 'digital', 'analog', 'pwm', 'ack'],
+      badge: 'Birleşik Protokol (<10ms)',
+      description: 'WebSocketsClient kütüphanesi kullanarak sunucuya kalıcı çift yönlü WS soketi açar. Birleşik Protokol Zarfı ({ type, deviceId, messageId, timestamp, data }) ile hello, telemetry, command, ack, ping ve event mesajlarını 100% standart şekilde yönetir.',
+      tags: ['esp32', 'websocket', 'unified protocol', 'realtime', 'hello', 'telemetry', 'command', 'ack', 'ping', 'relay'],
       endpoint: 'WS ws://SERVER_HOST:3000/ws',
       code: `// =========================================================================
-// NEXUSNODE IoT - ESP32 CANLI WEBSOCKET & GENERIC OUTPUT YÖNETİMİ
-// Kütüphane: Arduino WebSockets by Markus Sattler (Library Manager'dan ekleyin)
-// Desteklenen Çıkış Tipleri: relay, digital, analog (DAC), PWM
+// NEXUSNODE IoT - ESP32 BİRLEŞİK WEBSOCKET PROTOKOLÜ (UNIFIED WS PROTOCOL)
+// Kütüphane: WebSocketsClient (Arduino WebSockets by Markus Sattler) & ArduinoJson
+// Format: { "type": "...", "deviceId": "...", "messageId": "...", "timestamp": ..., "data": { ... } }
 // =========================================================================
 #include <WiFi.h>
 #include <WebSocketsClient.h>
@@ -844,10 +844,11 @@ const char* WIFI_PASS     = "WIFI_SIFRENIZ";
 const char* WS_HOST       = "${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}";
 const int   WS_PORT       = 3000;
 const char* WS_PATH       = "/ws";
+const char* DEVICE_ID     = "dev_esp32_saloon_01"; // Cihaz ID veya API Key
 const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihaz Token
 
 // -------------------------------------------------------------------------
-// 1. GENERIC OUTPUT & CAPABILITY YAPILANDIRMASI
+// 1. GENERIC OUTPUT & DONANIM KONTROL TANIMLARI
 // -------------------------------------------------------------------------
 enum OutputType {
   TYPE_RELAY,    // Röle (ON/OFF)
@@ -857,204 +858,224 @@ enum OutputType {
 };
 
 struct OutputDef {
-  const char* id;          // "relay_1", "relay_2", "digital_1", "analog_1", "pwm_1"
-  OutputType  type;        // Çıkış Tipi
-  uint8_t     pin;         // ESP32 GPIO Numarası
-  bool        activeLow;   // Active-Low röleler için true
-  uint8_t     safeInitial; // Güvenli başlangıç durumu
-  uint8_t     pwmChannel;  // LEDC Kanal No (0-15)
-  uint32_t    pwmFreq;     // PWM Frekansı (Hz)
-  uint8_t     pwmResolution;// PWM Çözünürlüğü (8 bit)
+  const char* id;          // "relay_1", "relay_2", "digital_1", "pwm_1"
+  OutputType  type;
+  uint8_t     pin;         // ESP32 GPIO
+  bool        activeLow;
+  uint8_t     safeInitial;
+  uint8_t     pwmChannel;
+  uint32_t    pwmFreq;
+  uint8_t     pwmResolution;
   float       currentValue;
 };
 
 OutputDef outputs[] = {
-  { "relay_1",   TYPE_RELAY,   26, false, 0, 0, 0,     0, 0.0 }, // GPIO 26 -> Röle 1
-  { "relay_2",   TYPE_RELAY,   27, false, 0, 0, 0,     0, 0.0 }, // GPIO 27 -> Röle 2
-  { "digital_1", TYPE_DIGITAL, 32, false, 0, 0, 0,     0, 0.0 }, // GPIO 32 -> Dijital Çıkış
-  { "analog_1",  TYPE_ANALOG,  25, false, 0, 0, 0,     0, 0.0 }, // GPIO 25 -> DAC1 (0-3.3V)
-  { "pwm_1",     TYPE_PWM,     18, false, 0, 0, 5000,  8, 0.0 }  // GPIO 18 -> PWM Hız/Dimmer
+  { "relay_1",   TYPE_RELAY,   26, false, 0, 0, 0,     0, 0.0 },
+  { "relay_2",   TYPE_RELAY,   27, false, 0, 0, 0,     0, 0.0 },
+  { "digital_1", TYPE_DIGITAL, 32, false, 0, 0, 0,     0, 0.0 },
+  { "pwm_1",     TYPE_PWM,     18, false, 0, 0, 5000,  8, 0.0 }
 };
 const size_t OUTPUT_COUNT = sizeof(outputs) / sizeof(outputs[0]);
 
-// -------------------------------------------------------------------------
-// 2. GÜVENLİ BAŞLANGIÇ DURUMU (SAFE REBOOT INITIALIZATION)
-// -------------------------------------------------------------------------
 void initOutputs() {
   for (size_t i = 0; i < OUTPUT_COUNT; i++) {
-    switch (outputs[i].type) {
-      case TYPE_RELAY:
-      case TYPE_DIGITAL:
-        pinMode(outputs[i].pin, OUTPUT);
-        if (outputs[i].activeLow) {
-          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? LOW : HIGH);
-        } else {
-          digitalWrite(outputs[i].pin, outputs[i].safeInitial ? HIGH : LOW);
-        }
-        outputs[i].currentValue = outputs[i].safeInitial;
-        break;
-
-      case TYPE_ANALOG:
-        #if defined(ESP32)
-          dacWrite(outputs[i].pin, outputs[i].safeInitial);
-        #else
-          pinMode(outputs[i].pin, OUTPUT);
-          analogWrite(outputs[i].pin, outputs[i].safeInitial);
-        #endif
-        outputs[i].currentValue = outputs[i].safeInitial;
-        break;
-
-      case TYPE_PWM:
-        #if defined(ESP32)
-          ledcSetup(outputs[i].pwmChannel, outputs[i].pwmFreq, outputs[i].pwmResolution);
-          ledcAttachPin(outputs[i].pin, outputs[i].pwmChannel);
-          ledcWrite(outputs[i].pwmChannel, outputs[i].safeInitial);
-        #else
-          pinMode(outputs[i].pin, OUTPUT);
-          analogWrite(outputs[i].pin, outputs[i].safeInitial);
-        #endif
-        outputs[i].currentValue = outputs[i].safeInitial;
-        break;
+    if (outputs[i].type == TYPE_RELAY || outputs[i].type == TYPE_DIGITAL) {
+      pinMode(outputs[i].pin, OUTPUT);
+      digitalWrite(outputs[i].pin, outputs[i].activeLow ? HIGH : LOW);
+    } else if (outputs[i].type == TYPE_PWM) {
+      ledcSetup(outputs[i].pwmChannel, outputs[i].pwmFreq, outputs[i].pwmResolution);
+      ledcAttachPin(outputs[i].pin, outputs[i].pwmChannel);
+      ledcWrite(outputs[i].pwmChannel, outputs[i].safeInitial);
     }
   }
-  Serial.println(F("[INIT] Tüm GPIO çıkışları güvenli başlangıç durumunda (Safe-State) başlatıldı."));
 }
 
-// -------------------------------------------------------------------------
-// 3. GENERIC OUTPUT SÜRÜCÜ: setOutput(outputId, value)
-// -------------------------------------------------------------------------
 bool setOutput(const String& outputId, const String& value, String& outErrMsg) {
   for (size_t i = 0; i < OUTPUT_COUNT; i++) {
-    if (outputId.equalsIgnoreCase(outputs[i].id) || 
-        outputId.equalsIgnoreCase(String("OUT_") + String(i + 1))) {
-      
-      switch (outputs[i].type) {
-        case TYPE_RELAY:
-        case TYPE_DIGITAL: {
-          bool turnOn = (value.equalsIgnoreCase("ON") || value.equalsIgnoreCase("1") || 
-                         value.equalsIgnoreCase("HIGH") || value.equalsIgnoreCase("TRUE"));
-          bool physicalPin = outputs[i].activeLow ? !turnOn : turnOn;
-          digitalWrite(outputs[i].pin, physicalPin ? HIGH : LOW);
-          outputs[i].currentValue = turnOn ? 1.0 : 0.0;
-          Serial.printf("[OUTPUT OK] %s -> %s (Pin %d)\\n", outputs[i].id, turnOn ? "ON" : "OFF", outputs[i].pin);
-          return true;
-        }
-
-        case TYPE_ANALOG: {
-          int dacVal = value.toInt();
-          if (dacVal < 0) dacVal = 0;
-          if (dacVal > 255) dacVal = 255;
-          #if defined(ESP32)
-            dacWrite(outputs[i].pin, dacVal);
-          #else
-            analogWrite(outputs[i].pin, dacVal);
-          #endif
-          outputs[i].currentValue = dacVal;
-          Serial.printf("[OUTPUT OK] %s -> DAC %d / 255\\n", outputs[i].id, dacVal);
-          return true;
-        }
-
-        case TYPE_PWM: {
-          int pwmVal = value.toInt();
-          if (pwmVal < 0) pwmVal = 0;
-          if (pwmVal > 255) pwmVal = 255;
-          #if defined(ESP32)
-            ledcWrite(outputs[i].pwmChannel, pwmVal);
-          #else
-            analogWrite(outputs[i].pin, pwmVal);
-          #endif
-          outputs[i].currentValue = pwmVal;
-          Serial.printf("[OUTPUT OK] %s -> PWM Duty %d / 255\\n", outputs[i].id, pwmVal);
-          return true;
-        }
+    if (outputId.equalsIgnoreCase(outputs[i].id) || outputId.equalsIgnoreCase(String("OUT_") + String(i + 1))) {
+      if (outputs[i].type == TYPE_RELAY || outputs[i].type == TYPE_DIGITAL) {
+        bool turnOn = (value.equalsIgnoreCase("ON") || value.equalsIgnoreCase("1") || 
+                       value.equalsIgnoreCase("HIGH") || value.equalsIgnoreCase("TRUE"));
+        digitalWrite(outputs[i].pin, (outputs[i].activeLow ? !turnOn : turnOn) ? HIGH : LOW);
+        outputs[i].currentValue = turnOn ? 1.0 : 0.0;
+        return true;
+      } else if (outputs[i].type == TYPE_PWM) {
+        int pwmVal = constrain(value.toInt(), 0, 255);
+        ledcWrite(outputs[i].pwmChannel, pwmVal);
+        outputs[i].currentValue = pwmVal;
+        return true;
       }
     }
   }
-
-  outErrMsg = "Tanımsız çıkış (outputId): " + outputId;
+  outErrMsg = "Tanımsız çıkış: " + outputId;
   return false;
 }
 
 WebSocketsClient webSocket;
-unsigned long lastSend = 0;
+unsigned long lastTelemetry = 0;
+unsigned long lastPing = 0;
+unsigned long msgCounter = 1000;
 
-void handleIncomingCommand(JsonObject cmd) {
-  String cmdId       = cmd["commandId"] | cmd["id"] | "";
-  String targetOut   = cmd["outputId"] | cmd["commandType"] | cmd["command"] | "";
-  String val         = cmd["value"] | cmd["payload"] | "";
+// Mesaj ID Üretici
+String generateMessageId(const String& prefix) {
+  return prefix + "_" + String(millis()) + "_" + String(++msgCounter);
+}
+
+// -------------------------------------------------------------------------
+// 2. UNIFIED WEBSOCKET PROTOKOL MESAJ GÖNDERİCİLERİ
+// -------------------------------------------------------------------------
+
+// Hello Mesajı (Bağlantı Anında El Sıkışma & Kimlik Tanıtma)
+void sendHello() {
+  DynamicJsonDocument doc(512);
+  doc["type"] = "hello";
+  doc["deviceId"] = DEVICE_ID;
+  doc["messageId"] = generateMessageId("hello");
+  doc["timestamp"] = (uint32_t)(millis() / 1000);
   
-  Serial.printf(">>> [DOWNLINK KOMUT] ID: %s | Hedef Çıkış: %s | Değer: %s\\n", 
-                cmdId.c_str(), targetOut.c_str(), val.c_str());
+  JsonObject data = doc.createNestedObject("data");
+  data["hardware"] = "ESP32";
+  data["firmwareVersion"] = "1.2.0";
+  data["mac"] = WiFi.macAddress();
+  data["ip"] = WiFi.localIP().toString();
+  data["apiKey"] = API_KEY; // Güvenlik doğrulaması
 
-  // 1. Aşama ACK: Komut Cihaza Ulaştı (received)
-  if (cmdId.length() > 0) {
-    DynamicJsonDocument ackDoc(256);
-    ackDoc["event"] = "command:ack";
-    ackDoc["commandId"] = cmdId;
-    ackDoc["status"] = "received";
-    String ackMsg;
-    serializeJson(ackDoc, ackMsg);
-    webSocket.sendTXT(ackMsg);
-    Serial.println("[WS ACK 1/2] Cihaza ulaştı (received): " + cmdId);
+  String msg;
+  serializeJson(doc, msg);
+  webSocket.sendTXT(msg);
+  Serial.println("[UNIFIED WS] 'hello' el sıkışma paketi gönderildi.");
+}
+
+// Telemetri Mesajı (Periyodik Sensör & Durum Gönderimi)
+void sendTelemetry() {
+  float temp = 24.5 + (random(0, 100) / 20.0);
+  float hum = 52.0 + (random(0, 100) / 10.0);
+
+  DynamicJsonDocument doc(512);
+  doc["type"] = "telemetry";
+  doc["deviceId"] = DEVICE_ID;
+  doc["messageId"] = generateMessageId("tel");
+  doc["timestamp"] = (uint32_t)(millis() / 1000);
+
+  JsonObject data = doc.createNestedObject("data");
+  data["sicaklik"] = temp;
+  data["nem"] = hum;
+  data["rssi"] = WiFi.RSSI();
+  data["relay_1"] = (int)outputs[0].currentValue;
+  data["relay_2"] = (int)outputs[1].currentValue;
+
+  String msg;
+  serializeJson(doc, msg);
+  webSocket.sendTXT(msg);
+  Serial.printf("[UNIFIED WS] Telemetri gönderildi (Sıcaklık: %.1f, Nem: %.1f)\\n", temp, hum);
+}
+
+// ACK Mesajı (Sunucudan Gelen Komutun İcra Onayı)
+void sendAck(const String& forMessageId, const String& status, const String& outputId, const String& value, const String& error = "") {
+  DynamicJsonDocument doc(512);
+  doc["type"] = "ack";
+  doc["deviceId"] = DEVICE_ID;
+  doc["messageId"] = generateMessageId("ack");
+  doc["timestamp"] = (uint32_t)(millis() / 1000);
+
+  JsonObject data = doc.createNestedObject("data");
+  data["forMessageId"] = forMessageId;
+  data["status"] = status; // "executed" veya "failed"
+  
+  if (status == "executed") {
+    JsonObject res = data.createNestedObject("result");
+    res["output"] = outputId;
+    res["value"] = value;
+  } else if (error.length() > 0) {
+    data["error"] = error;
   }
 
-  // 2. Aşama: Generic setOutput(outputId, value) Çağrısı
-  String errorMsg = "";
-  bool success = setOutput(targetOut, val, errorMsg);
+  String msg;
+  serializeJson(doc, msg);
+  webSocket.sendTXT(msg);
+  Serial.printf("[UNIFIED WS] ACK gönderildi: %s (%s)\\n", forMessageId.c_str(), status.c_str());
+}
 
-  // 3. Aşama ACK: Komut İcra Edildi (executed) veya Başarısız (failed)
-  if (cmdId.length() > 0) {
-    DynamicJsonDocument ackDoc(512);
-    ackDoc["event"] = "command:ack";
-    ackDoc["commandId"] = cmdId;
-    ackDoc["status"] = success ? "executed" : "failed";
-    if (success) {
-      JsonObject res = ackDoc.createNestedObject("result");
-      res["outputId"] = targetOut;
-      res["currentValue"] = val;
-      res["executedAt"] = millis();
-    } else {
-      ackDoc["error"] = errorMsg;
+// Ping Mesajı (Canlılık Bildirimi / Keep-Alive)
+void sendPing() {
+  DynamicJsonDocument doc(256);
+  doc["type"] = "ping";
+  doc["deviceId"] = DEVICE_ID;
+  doc["messageId"] = generateMessageId("ping");
+  doc["timestamp"] = (uint32_t)(millis() / 1000);
+  doc.createNestedObject("data");
+
+  String msg;
+  serializeJson(doc, msg);
+  webSocket.sendTXT(msg);
+}
+
+// -------------------------------------------------------------------------
+// 3. GELEN UNIFIED MESAJLARIN PARSE EDİLMESİ (DISPATCHER)
+// -------------------------------------------------------------------------
+void handleIncomingUnifiedMessage(uint8_t * payload) {
+  DynamicJsonDocument doc(1024);
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) return;
+
+  // 1. Unified Format Kontrolü: { "type": "...", "deviceId": "...", "data": { ... } }
+  String msgType = doc["type"] | "";
+  String msgId   = doc["messageId"] | "";
+
+  if (msgType == "command") {
+    JsonObject data = doc["data"];
+    String cmd = data["command"] | data["commandType"] | "relay";
+    String targetOut = data["output"] | data["outputId"] | "relay_1";
+    String val = data["value"] | data["payload"] | "";
+
+    Serial.printf(">>> [UNIFIED KOMUT] ID: %s | Komut: %s | Çıkış: %s | Değer: %s\\n",
+                  msgId.c_str(), cmd.c_str(), targetOut.c_str(), val.c_str());
+
+    String errMsg = "";
+    bool success = setOutput(targetOut, val, errMsg);
+    sendAck(msgId, success ? "executed" : "failed", targetOut, val, errMsg);
+  }
+  else if (msgType == "ack") {
+    JsonObject data = doc["data"];
+    String forMsg = data["forMessageId"] | "";
+    String status = data["status"] | "";
+    Serial.printf("[SUNUCU ACK] Mesaj: %s, Durum: %s\\n", forMsg.c_str(), status.c_str());
+  }
+  else if (msgType == "pong") {
+    Serial.println("[SUNUCU PONG] Canlılık doğrulandı.");
+  }
+  // 2. Geriye Dönük Uyumluluk (Legacy Event Downlink)
+  else if (doc.containsKey("event")) {
+    String event = doc["event"] | "";
+    if (event == "command:downlink") {
+      JsonObject cmd = doc["command"];
+      String cmdId = cmd["commandId"] | cmd["id"] | "";
+      String out = cmd["outputId"] | "relay_1";
+      String val = cmd["value"] | "";
+      String errMsg = "";
+      bool ok = setOutput(out, val, errMsg);
+      sendAck(cmdId, ok ? "executed" : "failed", out, val, errMsg);
     }
-    String ackMsg;
-    serializeJson(ackDoc, ackMsg);
-    webSocket.sendTXT(ackMsg);
-    Serial.printf("[WS ACK 2/2] Komut sonucu iletildi (%s): %s\\n", success ? "executed" : "failed", cmdId.c_str());
   }
 }
 
+// -------------------------------------------------------------------------
+// 4. WEBSOCKET OLAY YÖNETİMİ & DÖNGÜSÜ
+// -------------------------------------------------------------------------
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
-      Serial.println("[WS] Bağlantı Kesildi!");
+      Serial.println("[WS] Bağlantı Kesildi! Yeniden bağlanılıyor...");
       break;
     case WStype_CONNECTED:
       Serial.printf("[WS] Sunucuya Bağlandı! URL: %s\\n", payload);
-      // Sunucuya cihaz API anahtarı ile kimlik tanıtımı yap
-      webSocket.sendTXT("{\\"event\\":\\"auth\\",\\"apiKey\\":\\"" + String(API_KEY) + "\\"}");
+      // Bağlantı kurulduğu anda Unified 'hello' el sıkışması gönder
+      sendHello();
       break;
-    case WStype_TEXT: {
-      Serial.printf("[WS GELEN VERİ]: %s\\n", payload);
-      DynamicJsonDocument doc(1024);
-      DeserializationError err = deserializeJson(doc, payload);
-      if (err) return;
-
-      String event = doc["event"] | "";
-      
-      // Tekil veya toplu downlink komut yakalama
-      if (event == "command:downlink") {
-        if (doc.containsKey("command")) {
-          JsonObject cmd = doc["command"];
-          handleIncomingCommand(cmd);
-        } else if (doc.containsKey("commands")) {
-          JsonArray cmds = doc["commands"];
-          for (JsonObject cmd : cmds) {
-            handleIncomingCommand(cmd);
-          }
-        }
-      }
+    case WStype_TEXT:
+      Serial.printf("[WS GELEN]: %s\\n", payload);
+      handleIncomingUnifiedMessage(payload);
       break;
-    }
     default:
       break;
   }
@@ -1062,8 +1083,6 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
 void setup() {
   Serial.begin(115200);
-  
-  // Çıkışları güvenli başlat
   initOutputs();
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -1073,7 +1092,7 @@ void setup() {
   }
   Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
 
-  // WebSocket Başlat
+  // WebSocket Başlat (Kalıcı bağlantı)
   webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
@@ -1082,25 +1101,19 @@ void setup() {
 void loop() {
   webSocket.loop();
 
-  // 5 Saniyede bir canlı telemetri paketi yayınla
-  if (millis() - lastSend > 5000) {
-    lastSend = millis();
+  // 5 Saniyede bir Telemetri gönderimi
+  if (millis() - lastTelemetry > 5000) {
+    lastTelemetry = millis();
     if (WiFi.status() == WL_CONNECTED) {
-      float temp = 24.5 + (random(0, 100) / 20.0);
-      float hum = 55.0 + (random(0, 100) / 10.0);
+      sendTelemetry();
+    }
+  }
 
-      // JSON Telemetri İletimi
-      DynamicJsonDocument doc(512);
-      doc["event"] = "telemetry:ingest";
-      JsonObject p = doc.createNestedObject("payload");
-      p["token"] = API_KEY;
-      p["deviceName"] = "ESP32_WS_Node";
-      p["data"] = "sıcaklık:" + String(temp, 2) + ",nem:" + String(hum, 1) + ",rssi:" + String(WiFi.RSSI());
-
-      String out;
-      serializeJson(doc, out);
-      webSocket.sendTXT(out);
-      Serial.println("[WS GÖNDERİLDİ] Canlı Telemetri Paketi");
+  // 30 Saniyede bir Keep-Alive Ping gönderimi
+  if (millis() - lastPing > 30000) {
+    lastPing = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      sendPing();
     }
   }
 }`,
@@ -1356,6 +1369,164 @@ while True:
         print(f"[BAĞLANTI HATASI] {e}. 5 saniye sonra tekrar denenecek...")
 
     time.sleep(5) # 5 Saniye aralıkla veri gönder
+`,
+    },
+    {
+      id: 'code_python_unified_websocket',
+      title: 'Python - Birleşik WebSocket İstemcisi (Unified WS Protocol)',
+      category: 'python',
+      categoryLabel: 'Python WebSocket',
+      badge: 'Birleşik Protokol',
+      description: 'Linux, Raspberry Pi veya endüstriyel gateway sistemlerinde websocket-client kütüphanesi ile sunucuya kalıcı çift yönlü WS bağlantısı kurar. Hello, Telemetry, Command, Ack ve Ping mesajlarını Birleşik Protokol Zarfı ile yönetir.',
+      tags: ['python', 'websocket', 'unified protocol', 'raspberry pi', 'linux', 'realtime', 'telemetry', 'command', 'ack'],
+      endpoint: 'WS ws://SERVER_HOST:3000/ws',
+      code: `# =========================================================================
+# NEXUSNODE IoT - PYTHON BİRLEŞİK WEBSOCKET İSTEMCİSİ (UNIFIED WS PROTOCOL)
+# Gereksinim: pip install websocket-client psutil
+# =========================================================================
+import json
+import time
+import uuid
+import threading
+import psutil
+import websocket
+
+SERVER_WS = "ws://${typeof window !== 'undefined' ? window.location.host : 'localhost:3000'}/ws"
+DEVICE_ID = "dev_rpi_gateway_01"
+API_KEY   = "nkn_live_YOUR_DEVICE_API_KEY"
+
+def generate_msg_id(prefix="msg"):
+    return f"{prefix}_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+
+def on_open(ws):
+    print(">>> [WS BAĞLANDI] Sunucu ile kalıcı bağlantı kuruldu.")
+    # 1. El Sıkışma: Hello Mesajı
+    hello_msg = {
+        "type": "hello",
+        "deviceId": DEVICE_ID,
+        "messageId": generate_msg_id("hello"),
+        "timestamp": int(time.time()),
+        "data": {
+            "hardware": "Raspberry Pi 4",
+            "firmwareVersion": "2.1.0",
+            "os": "Linux ARM64",
+            "apiKey": API_KEY
+        }
+    }
+    ws.send(json.dumps(hello_msg))
+    print("[UNIFIED WS] 'hello' paketi gönderildi.")
+
+    # Telemetri ve Ping gönderecek iş parçacığını başlat
+    threading.Thread(target=periodic_tasks, args=(ws,), daemon=True).start()
+
+def on_message(ws, message):
+    try:
+        data = json.loads(message)
+        msg_type = data.get("type")
+        msg_id   = data.get("messageId")
+
+        # Gelen Komut İcrası
+        if msg_type == "command":
+            cmd_data = data.get("data", {})
+            cmd = cmd_data.get("command", "relay")
+            out = cmd_data.get("output", "relay_1")
+            val = cmd_data.get("value")
+
+            print(f">>> [UNIFIED KOMUT ALINDI] ID: {msg_id} | Komut: {cmd} | Çıkış: {out} | Değer: {val}")
+
+            # Donanım sürüş işlemi (örnek: GPIO)
+            # RPi.GPIO.output(pin, GPIO.HIGH if val else GPIO.LOW)
+            time.sleep(0.05) # İşlem süresi
+
+            # İcra Onayı (ACK) Gönder
+            ack_msg = {
+                "type": "ack",
+                "deviceId": DEVICE_ID,
+                "messageId": generate_msg_id("ack"),
+                "timestamp": int(time.time()),
+                "data": {
+                    "forMessageId": msg_id,
+                    "status": "executed",
+                    "result": {
+                        "output": out,
+                        "value": val,
+                        "executedAt": time.time()
+                    }
+                }
+            }
+            ws.send(json.dumps(ack_msg))
+            print(f"[UNIFIED WS] Komut icra edildi ve ACK iletildi: {msg_id}")
+
+        elif msg_type == "ack":
+            print(f"[SUNUCU ACK] {data.get('data')}")
+
+        elif msg_type == "pong":
+            pass # Keep-Alive canlı
+
+    except Exception as e:
+        print(f"[HATA] Mesaj parse edilemedi: {e}")
+
+def on_error(ws, error):
+    print(f"[WS HATA] {error}")
+
+def on_close(ws, close_status_code, close_msg):
+    print(f"[WS KAPANDI] Kod: {close_status_code}, Mesaj: {close_msg}")
+
+def periodic_tasks(ws):
+    last_ping = time.time()
+    while True:
+        try:
+            # Her 5 saniyede telemetri gönder
+            cpu = psutil.cpu_percent(interval=1)
+            ram = psutil.virtual_memory().percent
+            disk = psutil.disk_usage('/').percent
+
+            telemetry_msg = {
+                "type": "telemetry",
+                "deviceId": DEVICE_ID,
+                "messageId": generate_msg_id("tel"),
+                "timestamp": int(time.time()),
+                "data": {
+                    "cpu_kullanım": cpu,
+                    "ram_kullanım": ram,
+                    "disk_doluluk": disk
+                }
+            }
+            ws.send(json.dumps(telemetry_msg))
+            print(f"[UNIFIED WS] Telemetri gönderildi -> CPU: %{cpu}, RAM: %{ram}")
+
+            # Her 30 saniyede bir Keep-Alive Ping gönder
+            if time.time() - last_ping > 30:
+                ping_msg = {
+                    "type": "ping",
+                    "deviceId": DEVICE_ID,
+                    "messageId": generate_msg_id("ping"),
+                    "timestamp": int(time.time()),
+                    "data": {}
+                }
+                ws.send(json.dumps(ping_msg))
+                last_ping = time.time()
+
+            time.sleep(4)
+        except Exception as e:
+            print(f"[TASK HATASI] {e}")
+            break
+
+if __name__ == "__main__":
+    while True:
+        try:
+            print(f">>> NexusNode WebSocket Ajanı Bağlanıyor: {SERVER_WS}")
+            ws_app = websocket.WebSocketApp(
+                SERVER_WS,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close
+            )
+            ws_app.run_forever(ping_interval=25, ping_timeout=10)
+        except Exception as e:
+            print(f"[BAĞLANTI KESİLDİ] {e}. 5 saniye sonra tekrar denenecek...")
+        time.sleep(5)
 `,
     },
     {

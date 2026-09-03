@@ -7,6 +7,7 @@ interface NexusNodeLogoProps {
   animated?: boolean;
   className?: string;
   theme?: 'dark' | 'light' | 'auto';
+  responsiveHideText?: boolean;
   onClick?: () => void;
 }
 
@@ -17,6 +18,7 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
   animated = true,
   className = '',
   theme = 'auto',
+  responsiveHideText = false,
   onClick,
 }) => {
   // Dimensions
@@ -215,10 +217,11 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
   return (
     <div
       onClick={onClick}
-      className={`inline-flex items-center gap-3 select-none ${onClick ? 'cursor-pointer transition-opacity hover:opacity-90' : ''} ${className}`}
+      title="Nexus Node IoT - Endüstriyel Telemetri Bulutu"
+      className={`inline-flex items-center gap-2.5 select-none ${onClick ? 'cursor-pointer transition-opacity hover:opacity-90' : ''} ${className}`}
     >
       {MarkIcon}
-      <div className="flex flex-col justify-center min-w-0">
+      <div className={`flex-col justify-center min-w-0 ${responsiveHideText || variant === 'compact' ? 'hidden sm:flex' : 'flex'}`}>
         <div className={`flex items-center gap-1.5 font-black tracking-tight leading-none ${getTitleSize()}`}>
           <span className={textColor}>Nexus</span>
           <span className="bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">
@@ -233,7 +236,7 @@ export const NexusNodeLogo: React.FC<NexusNodeLogoProps> = ({
             nexusnodeiot.com.tr
           </span>
         ) : (
-          <span className={`text-[10px] font-medium tracking-wider uppercase mt-1 truncate ${subtextColor}`}>
+          <span className={`text-[10px] font-medium tracking-wider uppercase mt-1 truncate ${subtextColor} ${variant === 'compact' ? 'hidden md:inline' : ''}`}>
             Endüstriyel Telemetri Bulutu
           </span>
         )}

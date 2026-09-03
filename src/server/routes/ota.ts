@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../db.js';
-import { broadcast } from '../services/websocket.js';
+import { broadcast, sendOtaCommandViaWs, isDeviceConnectedViaWs } from '../services/websocket.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import type { OtaDeploymentJob, Device, Firmware } from '../../types.js';
 import {
@@ -231,6 +231,12 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
 
     db.saveOtaJob(job);
     createdJobs.push(job);
+
+    // If device is actively connected via WebSocket, send OTA trigger immediately
+    if (isDeviceConnectedViaWs(dev.id)) {
+      const downloadUrl = `/api/ota/download/${downloadToken}`;
+      sendOtaCommandViaWs(dev.id, fw.version, downloadUrl, fw.sha256);
+    }
   });
 
   db.addAuditLog(

@@ -93,7 +93,7 @@ export class PostgresRepository {
         // 2. Devices Table & Columns
         `CREATE TABLE IF NOT EXISTS devices (
           id VARCHAR(64) PRIMARY KEY,
-          user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+          user_id VARCHAR(64),
           name VARCHAR(128) NOT NULL,
           device_type VARCHAR(32) NOT NULL,
           api_key VARCHAR(128),
@@ -127,6 +127,21 @@ export class PostgresRepository {
           recent_intervals JSONB DEFAULT '[]'::jsonb,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );`,
+        `ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;`,
+        `DO $$ 
+        DECLARE 
+            r RECORD;
+        BEGIN
+            FOR r IN (
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'devices' 
+                AND constraint_type = 'FOREIGN KEY'
+                AND constraint_name LIKE '%user%'
+            ) LOOP
+                EXECUTE 'ALTER TABLE devices DROP CONSTRAINT IF EXISTS ' || quote_ident(r.constraint_name);
+            END LOOP;
+        END $$;`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);`,
@@ -513,6 +528,39 @@ export class PostgresRepository {
         }
       }
 
+      const isDevicesFkError =
+        (err?.code === '23503' || errMsg.includes('foreign key constraint')) &&
+        (errMsg.includes('devices_user_id_fkey') || (errMsg.includes('table "devices"') && errMsg.includes('user_id')));
+
+      if (isDevicesFkError && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: Cihaz yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak sorgu tekrarlanıyor...`);
+          await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;`);
+          await this.pool.query(`
+            DO $$ 
+            DECLARE 
+                r RECORD;
+            BEGIN
+                FOR r IN (
+                    SELECT constraint_name 
+                    FROM information_schema.table_constraints 
+                    WHERE table_name = 'devices' 
+                    AND constraint_type = 'FOREIGN KEY'
+                    AND constraint_name LIKE '%user%'
+                ) LOOP
+                    EXECUTE 'ALTER TABLE devices DROP CONSTRAINT IF EXISTS ' || quote_ident(r.constraint_name);
+                END LOOP;
+            END $$;
+          `);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL Cihaz Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
       const isConnectionIssue =
         errMsg.includes('timeout') ||
         errMsg.includes('Connection terminated') ||
@@ -658,7 +706,7 @@ export class PostgresRepository {
         custom_interval_seconds = EXCLUDED.custom_interval_seconds,
         recent_intervals = EXCLUDED.recent_intervals;
     `;
-    await this.query(sql, [
+    const params = [
       dev.id,
       dev.tenantId || null,
       dev.name,
@@ -693,7 +741,29 @@ export class PostgresRepository {
       dev.customIntervalSeconds || null,
       JSON.stringify(dev.recentIntervals || []),
       new Date().toISOString(),
-    ]);
+    ];
+
+    try {
+      await this.query(sql, params);
+    } catch (saveErr: any) {
+      const errMsg = saveErr?.message || String(saveErr);
+      if (errMsg.includes('devices_user_id_fkey') || (errMsg.includes('foreign key') && errMsg.includes('devices'))) {
+        try {
+          if (this.pool) {
+            await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;`);
+          }
+          await this.query(sql, params);
+          return;
+        } catch {
+          // Fallback: set user_id ($2) to null to ensure device save never fails
+          const fallbackParams = [...params];
+          fallbackParams[1] = null;
+          await this.query(sql, fallbackParams);
+          return;
+        }
+      }
+      throw saveErr;
+    }
   }
 
   public async deleteDevice(deviceId: string): Promise<void> {

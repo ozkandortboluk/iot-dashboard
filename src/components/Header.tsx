@@ -151,13 +151,14 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Mobile/Compact Brand Logo */}
+          {/* Mobile/Compact Brand Logo - sığmadığında otomatik küçülür, sadece logo ikonu kalır */}
           <div className="md:hidden shrink-0">
             <NexusNodeLogo
               variant="compact"
               size="xs"
               showDomain={false}
               animated={true}
+              responsiveHideText={true}
               onClick={() => window.location.reload()}
             />
           </div>
@@ -226,70 +227,82 @@ export const Header: React.FC<HeaderProps> = ({
             />
           )}
 
-          {/* Simulator Toggle Button - Compact (Admin Only) */}
+          {/* Simulator Toggle Button (Admin Only) - Doğrudan üst barda görünür */}
           {user?.role === 'admin' && (
             <button
+              type="button"
+              id="header-simulator-toggle-btn"
               onClick={toggleSimulator}
-              title={simulatorActive ? 'Sanal Veri Simülatörü Açık' : 'Sanal Veri Simülatörü Kapalı'}
-              className={`flex items-center gap-1.5 p-1.5 xs:p-2 2xl:px-2.5 2xl:py-1 rounded-full text-xs font-medium transition-all shrink-0 cursor-pointer ${
+              title={simulatorActive ? 'Sanal Veri Simülatörü Açık (Durdurmak için tıklayın)' : 'Sanal Veri Simülatörü Kapalı (Başlatmak için tıklayın)'}
+              className={`flex items-center gap-1.5 p-1.5 xs:p-2 xl:px-2.5 xl:py-1 rounded-full text-xs font-medium transition-all shrink-0 cursor-pointer ${
                 simulatorActive
                   ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
                   : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
               }`}
             >
               {simulatorActive ? <Pause className="w-3.5 h-3.5 shrink-0" /> : <Play className="w-3.5 h-3.5 shrink-0" />}
-              <span className="hidden 2xl:inline">{simulatorActive ? 'Simülatör Açık' : 'Simülatör Kapalı'}</span>
+              <span className="hidden xl:inline">{simulatorActive ? 'Simülatör Açık' : 'Simülatör Kapalı'}</span>
             </button>
           )}
         </div>
 
         {/* Right Section: Actions, Notifications & User Profile */}
         <div className="flex items-center gap-1 xs:gap-1.5 shrink-0">
-          {/* Add Widget & Edit Mode Buttons (if on dashboard tab) */}
+          {/* Add Widget & Edit Mode Buttons - Doğrudan üst barda görünür */}
           {activeTab === 'dashboard' && (
             <>
               <button
+                type="button"
+                id="header-add-widget-btn"
                 onClick={onOpenAddWidgetModal}
                 title="Yeni Widget Ekle"
-                className="p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+                className="flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
               >
-                <Layers className="w-4 h-4 2xl:w-3.5 2xl:h-3.5 shrink-0" />
-                <span className="hidden 2xl:inline">Widget Ekle</span>
+                <Layers className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+                <span className="hidden xl:inline">Widget Ekle</span>
               </button>
 
-              <button
-                onClick={onToggleEditMode}
-                title={editMode ? 'Düzenlemeyi Tamamla' : 'Dashboard Düzenleme Modu'}
-                className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 ${
-                  editMode
-                    ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20'
-                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
-                }`}
-              >
-                <Sliders className="w-4 h-4 2xl:w-3.5 2xl:h-3.5 shrink-0" />
-                <span className="hidden 2xl:inline">{editMode ? 'Düzenlemeyi Bitir' : 'Düzenleme Modu'}</span>
-              </button>
+              {onToggleEditMode && (
+                <button
+                  type="button"
+                  id="header-toggle-edit-mode-btn"
+                  onClick={onToggleEditMode}
+                  title={editMode ? 'Düzenlemeyi Tamamla' : 'Dashboard Düzenleme Modu'}
+                  className={`flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 rounded-xl text-xs font-semibold transition-all items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 ${
+                    editMode
+                      ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+                  }`}
+                >
+                  <Sliders className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+                  <span className="hidden xl:inline">{editMode ? 'Düzenlemeyi Bitir' : 'Düzenleme Modu'}</span>
+                </button>
+              )}
             </>
           )}
 
-          {/* Help & Glossary Button */}
+          {/* Help & Glossary Button - Doğrudan üst barda görünür */}
           <button
+            type="button"
+            id="header-help-btn"
             onClick={() => setActiveTab('help')}
             title="Yardım, SSS & Sözlük"
-            className={`p-1.5 xs:p-2 2xl:px-3 2xl:py-1.5 rounded-xl text-xs font-medium border transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 rounded-xl text-xs font-medium border transition-colors items-center gap-1.5 shrink-0 cursor-pointer ${
               activeTab === 'help'
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
                 : 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border-indigo-200 dark:border-indigo-500/30'
             }`}
           >
-            <HelpCircle className="w-4 h-4 2xl:w-3.5 2xl:h-3.5 shrink-0" />
-            <span className="hidden 2xl:inline">Yardım & SSS</span>
+            <HelpCircle className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+            <span className="hidden xl:inline">Yardım & SSS</span>
           </button>
 
-          {/* Dark / Light Mode Toggle */}
+          {/* Dark / Light Mode Toggle - Doğrudan üst barda görünür */}
           <button
+            type="button"
+            id="header-theme-toggle-btn"
             onClick={toggleTheme}
-            className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
+            className="flex p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
             title={theme === 'dark' ? 'Açık Moda Geç' : 'Karanlık Moda Geç'}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}

@@ -92,12 +92,14 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
   };
 
   return (
-    <div ref={containerRef} className="relative inline-block text-left">
+    <div ref={containerRef} className="relative inline-block text-left shrink-0">
       {/* Trigger Button */}
       <button
         type="button"
+        id="header-customer-selector-btn"
+        aria-label={selectedCustomer ? `Seçili Müşteri: ${selectedCustomer.companyName || selectedCustomer.name}` : 'Tüm Müşteriler'}
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`flex items-center gap-1.5 xs:gap-2 px-2 py-1.5 xs:px-2.5 xs:py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-sm ${
+        className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-sm shrink-0 active:scale-95 ${
           isOpen
             ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-500 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/20'
             : selectedCustomerId !== 'all'
@@ -111,24 +113,29 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
         }
       >
         {/* Avatar */}
-        {selectedCustomer ? (
-          <CustomerAvatar
-            companyName={selectedCustomer.companyName}
-            name={selectedCustomer.name}
-            size="xs"
-          />
-        ) : (
-          <CustomerAvatar isGlobal size="xs" />
-        )}
+        <div className="relative shrink-0 flex items-center justify-center">
+          {selectedCustomer ? (
+            <CustomerAvatar
+              companyName={selectedCustomer.companyName}
+              name={selectedCustomer.name}
+              size="xs"
+            />
+          ) : (
+            <CustomerAvatar isGlobal size="xs" />
+          )}
+          {selectedCustomerId !== 'all' && (
+            <span className="lg:hidden absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-indigo-600 ring-1 ring-white dark:ring-slate-900" />
+          )}
+        </div>
 
         {/* Selected Label */}
-        <span className="truncate max-w-[85px] xs:max-w-[115px] sm:max-w-[150px] md:max-w-[180px] font-bold">
+        <span className="hidden lg:inline truncate max-w-[110px] xl:max-w-[150px] 2xl:max-w-[180px] font-bold">
           {selectedCustomer ? selectedCustomer.companyName || selectedCustomer.name : 'Tüm Müşteriler'}
         </span>
 
         {/* Chevron */}
         <ChevronDown
-          className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+          className={`hidden lg:inline w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
             isOpen ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''
           }`}
         />
@@ -142,7 +149,7 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute left-0 mt-1.5 w-72 sm:w-80 rounded-2xl bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden flex flex-col max-h-[420px]"
+            className="absolute left-0 mt-1.5 w-72 sm:w-80 max-w-[calc(100vw-1.5rem)] rounded-2xl bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden flex flex-col max-h-[420px]"
           >
             {/* Popover Header with Search */}
             <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">

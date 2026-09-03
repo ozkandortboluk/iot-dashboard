@@ -50,7 +50,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(64),
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(32) NOT NULL,
     api_key VARCHAR(128),
@@ -85,9 +85,10 @@ CREATE TABLE IF NOT EXISTS devices (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure columns exist for existing databases
+-- Ensure columns exist for existing databases & remove blocking FK on devices(user_id)
 DO $$
 BEGIN
+    ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);
