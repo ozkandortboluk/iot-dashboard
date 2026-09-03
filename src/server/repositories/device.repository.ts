@@ -51,10 +51,13 @@ export class DeviceRepository {
         }
       } else {
         const elapsedMs = now - new Date(dev.lastSeen).getTime();
-        // Configurable IoT Watchdog: Uses device.heartbeatTimeoutSeconds (default 300s / 5 mins)
-        const timeoutSec = dev.heartbeatTimeoutSeconds && dev.heartbeatTimeoutSeconds > 0 ? dev.heartbeatTimeoutSeconds : 300;
+        // Akıllı IoT Watchdog: Veri gönderim sıklığının 2 katı sürede veri gelmezse cihaz otomatik offline moduna geçer!
+        const intervalSec = dev.expectedIntervalSeconds && dev.expectedIntervalSeconds > 0
+          ? dev.expectedIntervalSeconds
+          : (dev.autoDetectedIntervalSeconds || dev.customIntervalSeconds || 5);
+        const timeoutSec = Math.max(intervalSec * 2, 4); // 2x sıklık kuralı (En az 4 sn ağ toleransı)
         const offlineTimeoutMs = timeoutSec * 1000;
-        const warningTimeoutMs = offlineTimeoutMs * 0.75;
+        const warningTimeoutMs = offlineTimeoutMs * 0.85;
 
         // If user manually switched device off (dataFlowActive === false), keep it offline
         if (dev.dataFlowActive === false) {
@@ -69,19 +72,21 @@ export class DeviceRepository {
 
             const timeFormatted = timeoutSec >= 3600 
               ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} saattir` 
-              : `${Math.round(timeoutSec / 60)} dakikadır`;
+              : timeoutSec >= 60 
+                ? `${Math.round(timeoutSec / 60)} dakikadır`
+                : `${timeoutSec} saniyedir`;
 
             this.db.addAuditLog(
               dev.tenantId || 'system',
               'Sistem Sinyal Takibi',
-              `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) ${timeFormatted} sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
+              `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri gönderim sıklığının 2 katı (${timeFormatted}) sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
               'high'
             );
 
             this.db.addNotification({
               tenantId: dev.tenantId || 'usr_admin',
               title: `Cihaz Çevrimdışı (Sinyal Kesintisi)`,
-              message: `${dev.name} cihazından ${timeFormatted} sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
+              message: `${dev.name} cihazından veri gönderim sıklığının 2 katı sürede (${timeFormatted}) sinyal/veri alınamadı. Otomatik olarak ÇEVRİMDİŞİ durumuna geçti. Yeni veri/ping geldiğinde otomatik çevrimiçi olacaktır.`,
               severity: 'critical',
               deviceId: dev.id,
               deviceName: dev.name,
@@ -293,6 +298,9 @@ export class DeviceRepository {
       'encryptionMethod',
       'heartbeatTimeoutSeconds',
       'expectedIntervalSeconds',
+      'intervalMode',
+      'customIntervalSeconds',
+      'autoDetectedIntervalSeconds',
       'isSimulated',
       'saveSimulatedDataToDb',
       'simulatedMetrics',
@@ -327,7 +335,17 @@ export class DeviceRepository {
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
     if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
-    if (updates.expectedIntervalSeconds !== undefined) dev.expectedIntervalSeconds = updates.expectedIntervalSeconds;
+    if (updates.intervalMode !== undefined) dev.intervalMode = updates.intervalMode;
+    if (updates.customIntervalSeconds !== undefined) dev.customIntervalSeconds = updates.customIntervalSeconds;
+    if (updates.autoDetectedIntervalSeconds !== undefined) dev.autoDetectedIntervalSeconds = updates.autoDetectedIntervalSeconds;
+    if (updates.expectedIntervalSeconds !== undefined) {
+      dev.expectedIntervalSeconds = updates.expectedIntervalSeconds;
+      if (updates.intervalMode === 'manual' || updates.intervalMode === undefined) {
+        dev.customIntervalSeconds = updates.expectedIntervalSeconds;
+        dev.intervalMode = 'manual';
+      }
+      dev.heartbeatTimeoutSeconds = Math.max(updates.expectedIntervalSeconds * 2, 4);
+    }
     const wasSimulated = dev.isSimulated;
     if (updates.isSimulated !== undefined) dev.isSimulated = updates.isSimulated;
     if (updates.saveSimulatedDataToDb !== undefined) dev.saveSimulatedDataToDb = updates.saveSimulatedDataToDb;
@@ -607,5 +625,57 @@ export class DeviceRepository {
     updateBucket(history.hourly, hourKey, 168); // keep last 168 hours (7 days)
     updateBucket(history.daily, dayKey, 365); // keep last 365 days (1 year)
     updateBucket(history.monthly, monthKey, 60); // keep last 60 months (5 years)
+  }
+
+  /**
+   * Akıllı Cihaz Telemetri ve Frekans Takip Yöneticisi:
+   * 1. Cihaz veri göndermeye başladığında tekrar ONLINE duruma geçer.
+   * 2. AKILLI KURAL: Cihazın offline kaldığı süre (uyku/kesinti) veri gönderim sıklığına DAHİL EDİLMEMELİDİR.
+   * 3. İki aktif paket arasındaki gerçek süre ölçülerek sistem veri gönderim sıklığını (expectedIntervalSeconds) otomatik belirler.
+   * 4. Kullanıcı cihaz ayarlarından sıklığı manuel sabitlediyse, kullanıcının son ayarı KESİNLİKLE KORUNUR.
+   */
+  public processDeviceTelemetryArrival(deviceId: string): Device | null {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) return null;
+
+    const now = Date.now();
+    const previousLastSeen = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
+    const wasOffline = dev.status === 'offline';
+
+    // 1. Cihaz veri göndermeye başladı -> Tekrar online duruma geçsin
+    dev.status = 'online';
+    dev.lastSeen = new Date(now).toISOString();
+
+    // 2. Akıllı kural: Offline kalınan süreyi frekans hesabına KATMA!
+    const effectiveInterval = dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || dev.customIntervalSeconds || 5;
+    // Eğer cihaz daha önce offline ise veya son paketten beri aşırı uzun bir süre (aralığın 3 katı veya > 60sn) geçtiyse bu uyanma paketidir
+    const isWakeupAfterOffline = wasOffline || (previousLastSeen > 0 && (now - previousLastSeen) > ((effectiveInterval * 3) * 1000 + 4000));
+
+    if (!isWakeupAfterOffline && previousLastSeen > 0) {
+      // Cihaz zaten aktifti ve peş peşe ardışık paket geldi -> Sıklığı ölç
+      const deltaSec = Math.max(1, Math.round((now - previousLastSeen) / 1000));
+      if (deltaSec >= 1 && deltaSec <= 3600) {
+        dev.autoDetectedIntervalSeconds = deltaSec;
+
+        // Kullanıcı manuel sabitlemediyse sistem otomatik olarak sıklığı günceller
+        if (dev.intervalMode !== 'manual') {
+          dev.expectedIntervalSeconds = deltaSec;
+        }
+      }
+    } else {
+      // Cihaz offline'dan yeni uyandı (uzun süre sonra ilk paket)
+      // Kullanıcının son ayarı şartı:
+      if (dev.intervalMode === 'manual' && dev.customIntervalSeconds && dev.customIntervalSeconds > 0) {
+        dev.expectedIntervalSeconds = dev.customIntervalSeconds;
+      } else if (!dev.expectedIntervalSeconds) {
+        dev.expectedIntervalSeconds = dev.autoDetectedIntervalSeconds || 5;
+      }
+    }
+
+    // Heartbeat timeout'u da 2 katı kuralına göre senkronize et
+    const activeInterval = dev.expectedIntervalSeconds || 5;
+    dev.heartbeatTimeoutSeconds = Math.max(activeInterval * 2, 4);
+
+    return dev;
   }
 }

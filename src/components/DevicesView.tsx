@@ -37,6 +37,7 @@ import {
   ArrowRight,
   Power,
   Database,
+  Filter,
 } from 'lucide-react';
 
 export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNavigateToHelp }) => {
@@ -81,7 +82,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [ipAddress, setIpAddress] = useState('192.168.1.150');
   const [targetOwnerId, setTargetOwnerId] = useState<string>('usr_admin');
   const [manualApiKey, setManualApiKey] = useState('');
-  const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(300);
+  const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(10);
+  const [addExpectedInterval, setAddExpectedInterval] = useState<number>(5);
+  const [addIntervalMode, setAddIntervalMode] = useState<'auto' | 'manual'>('auto');
   const [isSimulated, setIsSimulated] = useState<boolean>(false);
   const [saveSimulatedDataToDb, setSaveSimulatedDataToDb] = useState<boolean>(false);
   const [addSimMetrics, setAddSimMetrics] = useState<string[]>(['l1', 'l2', 'l3', 'ri', 'rc', 'p']);
@@ -98,7 +101,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editEncryption, setEditEncryption] = useState('AES-256-GCM');
   const [editStatus, setEditStatus] = useState<Device['status']>('online');
   const [editApiKey, setEditApiKey] = useState('');
-  const [editHeartbeatTimeout, setEditHeartbeatTimeout] = useState<number>(300);
+  const [editExpectedInterval, setEditExpectedInterval] = useState<number>(5);
+  const [editIntervalMode, setEditIntervalMode] = useState<'auto' | 'manual'>('auto');
+  const [editAutoDetectedInterval, setEditAutoDetectedInterval] = useState<number | undefined>(undefined);
+  const [editHeartbeatTimeout, setEditHeartbeatTimeout] = useState<number>(10);
+  const [filterStaleMetrics, setFilterStaleMetrics] = useState<boolean>(false);
   const [editIsSimulated, setEditIsSimulated] = useState<boolean>(false);
   const [editSaveSimulatedDataToDb, setEditSaveSimulatedDataToDb] = useState<boolean>(false);
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
@@ -143,6 +150,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     }>();
 
     const now = Date.now();
+    const devInterval = activeDevice
+      ? (activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5)
+      : 5;
+    // Kullanıcı Kuralı: Veri gönderim sıklığının 2 katı süresi (Offline & Stale eşiği)
+    const devThresholdSec = Math.max(devInterval * 2, 4);
     const RECENCY_WINDOW_MS = 10 * 60 * 1000; // 10 minutes window
 
     if (metricsScope === 'selected' && activeDevice) {
@@ -164,6 +176,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
           const unit = getMetricUnit(mKey);
           const lastTs = activeDevice.lastSeen || new Date().toISOString();
           const ageSec = Math.max(0, Math.floor((now - new Date(lastTs).getTime()) / 1000));
+          const isFresh = ageSec <= devThresholdSec;
+          if (filterStaleMetrics && !isFresh) continue;
+
           const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
 
           metricMap.set(lowerKey, {
@@ -173,7 +188,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             lastTimestamp: lastTs,
             ageText,
             deviceNames: new Set([targetName || targetDevId]),
-            isFresh: ageSec < 180,
+            isFresh,
             isFromTelemetryStream: false,
           });
         }
@@ -195,6 +210,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
 
         const lowerKey = t.metric.toLowerCase();
         const ageSec = Math.max(0, Math.floor((now - ts) / 1000));
+        const isFresh = ageSec <= devThresholdSec;
+        if (filterStaleMetrics && !isFresh) continue;
+
         const ageText = ageSec < 60 ? `${ageSec} sn önce` : `${Math.floor(ageSec / 60)} dk önce`;
 
         const existing = metricMap.get(lowerKey);
@@ -206,7 +224,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             lastTimestamp: t.timestamp,
             ageText,
             deviceNames: new Set([targetName || targetDevId]),
-            isFresh: ageSec < 180,
+            isFresh,
             isFromTelemetryStream: true,
           });
         } else {
@@ -217,7 +235,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
             if (t.unit) existing.unit = t.unit;
             existing.lastTimestamp = t.timestamp;
             existing.ageText = ageText;
-            existing.isFresh = ageSec < 180;
+            existing.isFresh = isFresh;
           }
         }
       }
@@ -427,7 +445,10 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         ipAddress,
         userId: ownerId,
         apiKey: manualApiKey.trim() || undefined,
-        heartbeatTimeoutSeconds: addHeartbeatTimeout,
+        expectedIntervalSeconds: addExpectedInterval,
+        intervalMode: addIntervalMode,
+        customIntervalSeconds: addIntervalMode === 'manual' ? addExpectedInterval : undefined,
+        heartbeatTimeoutSeconds: Math.max(addExpectedInterval * 2, 4),
         isSimulated,
         saveSimulatedDataToDb: isSimulated ? saveSimulatedDataToDb : false,
         simulatedMetrics: isSimulated ? addSimMetrics : [],
@@ -435,7 +456,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       setShowAddModal(false);
       setName('');
       setManualApiKey('');
-      setAddHeartbeatTimeout(300);
+      setAddExpectedInterval(5);
+      setAddIntervalMode('auto');
+      setAddHeartbeatTimeout(10);
       setIsSimulated(false);
       setSaveSimulatedDataToDb(false);
       setSelectedDeviceId(dev.id);
@@ -455,7 +478,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
     setEditStatus(dev.status || 'online');
     setEditApiKey(dev.apiKey || '');
-    setEditHeartbeatTimeout(dev.heartbeatTimeoutSeconds || 300);
+    const effInterval = dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || dev.customIntervalSeconds || 5;
+    setEditExpectedInterval(effInterval);
+    setEditIntervalMode(dev.intervalMode || 'auto');
+    setEditAutoDetectedInterval(dev.autoDetectedIntervalSeconds);
+    setEditHeartbeatTimeout(dev.heartbeatTimeoutSeconds || Math.max(effInterval * 2, 4));
     setEditIsSimulated(dev.isSimulated ?? false);
     setEditSaveSimulatedDataToDb(dev.saveSimulatedDataToDb ?? false);
     setEditSimMetrics(dev.simulatedMetrics || (dev.isSimulated ? ['l1', 'l2', 'l3', 'ri', 'rc', 'p'] : ['l1', 'l2', 'l3', 'ri', 'rc', 'p']));
@@ -477,7 +504,10 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         encryptionMethod: editEncryption,
         status: editStatus,
         apiKey: editApiKey.trim() || undefined,
-        heartbeatTimeoutSeconds: editHeartbeatTimeout,
+        expectedIntervalSeconds: editExpectedInterval,
+        intervalMode: editIntervalMode,
+        customIntervalSeconds: editIntervalMode === 'manual' ? editExpectedInterval : undefined,
+        heartbeatTimeoutSeconds: Math.max(editExpectedInterval * 2, 4),
         isSimulated: editIsSimulated,
         saveSimulatedDataToDb: editIsSimulated ? editSaveSimulatedDataToDb : false,
         simulatedMetrics: editIsSimulated ? editSimMetrics : [],
@@ -509,16 +539,20 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   };
 
   const [clearingMetrics, setClearingMetrics] = useState(false);
-  const handleClearDeviceMetrics = async (deviceId: string) => {
-    if (!window.confirm('Bu cihazın kayıtlı metrik önbelleği temizlensin mi?')) return;
+  const handleClearDeviceMetrics = async (deviceId: string, staleOnly = false) => {
+    const promptMsg = staleOnly
+      ? 'Veri gönderim sıklığının 2 katı süresi geçmiş (bayatlamış) metrikler temizlensin mi?'
+      : 'Bu cihazın tüm kayıtlı metrik önbelleği sıfırlansın mı?';
+    if (!window.confirm(promptMsg)) return;
     setClearingMetrics(true);
     try {
-      const res = await fetch(`/api/devices/${deviceId}/clear-metrics`, {
+      const res = await fetch(`/api/devices/${deviceId}/clear-metrics?staleOnly=${staleOnly ? 'true' : 'false'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
         },
+        body: JSON.stringify({ staleOnly }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -746,78 +780,149 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     );
   };
 
-  const renderHeartbeatSelector = (
-    timeoutSec: number,
-    setTimeoutSec: (val: number) => void
+  const renderIntervalAndHeartbeatSelector = (
+    expectedInterval: number,
+    setExpectedInterval: (val: number) => void,
+    intervalMode: 'auto' | 'manual',
+    setIntervalMode: (mode: 'auto' | 'manual') => void,
+    autoDetectedInterval?: number
   ) => {
-    const presets = [
-      { label: '⚡ 30 Saniye', sub: 'Hızlı Test', val: 30 },
-      { label: '⏱️ 1 Dakika', sub: 'Sık Veri', val: 60 },
-      { label: '🛡️ 5 Dakika', sub: 'Standart IoT', val: 300 },
-      { label: '📡 15 Dakika', sub: 'Güneş / Sayaç', val: 900 },
-      { label: '🔋 1 Saat', sub: 'Düşük Güç', val: 3600 },
-      { label: '⏳ 6 Saat', sub: 'Geniş Aralık', val: 21600 },
-      { label: '📅 24 Saat', sub: 'Günde 1 Kez', val: 86400 },
-    ];
+    const offlineThreshold = Math.max(expectedInterval * 2, 4);
 
     return (
-      <div className="p-4 bg-indigo-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 text-xs">
-            <Radio className="w-4 h-4" />
-            <span>Sinyal & Heartbeat Toleransı (Çevrimdışı Olma Süresi)</span>
-          </label>
-          <span className="text-[10px] px-2.5 py-0.5 font-mono font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 rounded-full border border-indigo-500/30">
-            {timeoutSec >= 3600
-              ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} Saat`
-              : `${Math.round(timeoutSec / 60)} Dk (${timeoutSec} sn)`}
-          </span>
+      <div className="p-4 bg-indigo-50/40 dark:bg-slate-800/40 rounded-2xl border border-indigo-200/70 dark:border-slate-700/80 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <h4 className="font-bold text-indigo-700 dark:text-indigo-300 text-xs uppercase tracking-wider">
+              Akıllı Veri Gönderim Sıklığı & Watchdog
+            </h4>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {intervalMode === 'auto' ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Otomatik Tespit Edildi (Sistem)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <span>🔒</span>
+                Kullanıcı Tarafından Sabitlendi (Manuel)
+              </span>
+            )}
+          </div>
         </div>
 
         <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-          Cihazınızın veri gönderme periyoduna göre tolerans belirleyin (Örn: Saatte 1 gönderen pilli cihazlar için <strong>1 Saat</strong>). Cihaz zaman aşımına uğrayıp Çevrimdışı olsa bile, yeni veri veya <code>/api/telemetry/ping</code> sinyali geldiğinde <strong>otomatik olarak Çevrimiçi</strong> olur.
+          Cihaz çalıştığında veri gönderim sıklığı sistem tarafından dinamik olarak ölçülür veya kullanıcı tarafından kutucuktan güncellenebilir.
+          <strong className="text-rose-600 dark:text-rose-400"> 2 Katı Kuralı:</strong> Cihazdan veri gönderim sıklığının 2 katı (<strong>{offlineThreshold} saniye</strong>) boyunca veri gelmezse cihaz otomatik <strong>Çevrimdışı (Offline)</strong> moduna geçer. Cihaz tekrar veri göndermeye başlarsa anında <strong>Çevrimiçi (Online)</strong> olur (kullanıcının son ayarı korunur, çevrimdışı kalınan süre sıklık hesabına dahil edilmez).
         </p>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {presets.map((p) => {
-            const isSelected = timeoutSec === p.val;
-            return (
-              <button
-                key={p.val}
-                type="button"
-                onClick={() => setTimeoutSec(p.val)}
-                className={`p-2 rounded-xl text-left border transition cursor-pointer ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/20 ring-2 ring-indigo-500/30'
-                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
-                }`}
-              >
-                <div className="text-xs font-bold">{p.label}</div>
-                <div className={`text-[10px] ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
-                  {p.sub}
-                </div>
-              </button>
-            );
-          })}
+        {/* Ayar Kutucuğu */}
+        <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+                Veri Gönderim Sıklığı (Saniye):
+              </label>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Mevcut aktif sıklık değeri. Bu kutucuktaki değeri değiştirdiğinizde ayar kullanıcının son ayarı olarak kilitlenir.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <input
+                  type="number"
+                  min={1}
+                  max={86400}
+                  value={expectedInterval}
+                  onChange={(e) => {
+                    const val = Math.max(1, Number(e.target.value));
+                    setExpectedInterval(val);
+                    setIntervalMode('manual');
+                  }}
+                  className="w-32 px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-indigo-500/60 dark:border-indigo-500/60 rounded-xl font-mono text-sm font-bold text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
+              </div>
+
+              {intervalMode === 'manual' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIntervalMode('auto');
+                    if (autoDetectedInterval && autoDetectedInterval > 0) {
+                      setExpectedInterval(autoDetectedInterval);
+                    }
+                  }}
+                  className="px-3 py-2 text-[11px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 cursor-pointer"
+                  title="Sistemin cihaz sinyallerinden otomatik ölçmesine izin ver"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Otomatik Moda Al</span>
+                </button>
+              ) : (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-2 rounded-xl border border-emerald-500/20">
+                  {autoDetectedInterval ? `Son Ölçüm: ${autoDetectedInterval} sn` : 'Canlı Dinleniyor'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 2X Watchdog Bilgilendirme Çubuğu */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
+              <span className="text-slate-500 dark:text-slate-400">⏱️ Veri Gönderim Periyodu:</span>
+              <strong className="font-mono text-slate-900 dark:text-white">{expectedInterval} saniye</strong>
+            </div>
+            <div className="flex items-center justify-between p-2 rounded-lg bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/60 dark:border-rose-900/40">
+              <span className="text-rose-700 dark:text-rose-300 font-semibold">⚠️ Çevrimdışı Eşiği (2x):</span>
+              <strong className="font-mono text-rose-600 dark:text-rose-400">{offlineThreshold} saniye sonra offline</strong>
+            </div>
+          </div>
         </div>
 
-        <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 flex items-center gap-2">
-          <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
-            Özel Süre (Saniye):
-          </label>
-          <input
-            type="number"
-            min={10}
-            max={604800}
-            value={timeoutSec}
-            onChange={(e) => setTimeoutSec(Math.max(10, Number(e.target.value)))}
-            className="w-32 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs font-bold dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-          />
-          <span className="text-[10px] text-slate-400">
-            {timeoutSec >= 3600
-              ? `≈ ${(timeoutSec / 3600).toFixed(2)} saat`
-              : `≈ ${(timeoutSec / 60).toFixed(1)} dakika`}
-          </span>
+        {/* Hızlı Seçim Şablonları */}
+        <div className="space-y-1.5">
+          <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Hızlı Şablonlar:
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { label: '⚡ 5 Saniye', sub: 'Hızlı Canlı Akış', val: 5 },
+              { label: '⏱️ 10 Saniye', sub: 'Standart Sensör', val: 10 },
+              { label: '🛡️ 30 Saniye', sub: 'Dengeli IoT', val: 30 },
+              { label: '📡 60 Saniye', sub: '1 Dakika Periyot', val: 60 },
+              { label: '☀️ 300 Saniye', sub: '5 Dk (Sayaç/İklim)', val: 300 },
+              { label: '🔋 900 Saniye', sub: '15 Dk (Düşük Güç)', val: 900 },
+              { label: '⏳ 3600 Saniye', sub: '1 Saat (Pilli Düğüm)', val: 3600 },
+              { label: '📅 86400 Saniye', sub: 'Günde 1 Kez', val: 86400 },
+            ].map((p) => {
+              const isSelected = expectedInterval === p.val;
+              return (
+                <button
+                  key={p.val}
+                  type="button"
+                  onClick={() => {
+                    setExpectedInterval(p.val);
+                    setIntervalMode('manual');
+                  }}
+                  className={`p-2 rounded-xl text-left border transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-500/30'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{p.label}</div>
+                  <div className={`text-[10px] ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                    {p.sub}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -943,10 +1048,14 @@ void sendHeartbeat() {
                             <span>{getOwnerName(dev.tenantId)}</span>
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 flex-wrap">
                           <span>{dev.location}</span>
                           <span>•</span>
                           <span className="font-mono text-[10px]">IP: {dev.ipAddress}</span>
+                          <span>•</span>
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40" title={`Aktif Sıklık: ${dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5} sn | 2x Çevrimdışı Eşiği: ${Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)} sn`}>
+                            ⏱️ {dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5}s (2x: {Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)}s)
+                          </span>
                           <span>•</span>
                           <span className="text-[10px] text-slate-400">
                             Son Sinyal: <strong className={dev.status === 'online' ? 'text-emerald-500 font-semibold' : dev.status === 'offline' ? 'text-rose-500 font-semibold' : 'text-amber-500'}>{formatRelativeTime(dev.lastSeen)}</strong>
@@ -1041,29 +1150,68 @@ void sendHeartbeat() {
 
           {/* Active System Metrics Card */}
           <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 gap-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Activity className="w-4 h-4 text-cyan-500" />
                 <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                   {metricsScope === 'selected' && activeDevice
                     ? `${activeDevice.name} Aktif Metrikleri (${activeSystemMetrics.length})`
                     : `Sistemden Gelen Aktif Metrikler (${activeSystemMetrics.length})`}
                 </h3>
+
+                {metricsScope === 'selected' && activeDevice && (
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
+                    <span>⏱️ Sıklık:</span>
+                    <strong>{activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5}s</strong>
+                    <span className="text-slate-300 dark:text-slate-600">|</span>
+                    <span className="text-rose-600 dark:text-rose-400 font-bold">2x Eşik: {Math.max((activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5) * 2, 4)}s</span>
+                  </span>
+                )}
               </div>
 
-              {/* Controls: Clear Metrics & Scope Switcher */}
-              <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+              {/* Controls: Stale Filter, 2x Cleanup, Reset & Scope Switcher */}
+              <div className="flex items-center gap-2 self-start lg:self-auto flex-wrap">
                 {metricsScope === 'selected' && activeDevice && (
-                  <button
-                    type="button"
-                    disabled={clearingMetrics}
-                    onClick={() => handleClearDeviceMetrics(activeDevice.id)}
-                    className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 disabled:opacity-50"
-                    title="Cihazın kayıtlı eski metrik önbelleğini sıfırlar"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>{clearingMetrics ? 'Temizleniyor...' : 'Önbelleği Sıfırla'}</span>
-                  </button>
+                  <>
+                    {/* Toggle Stale Filter */}
+                    <button
+                      type="button"
+                      onClick={() => setFilterStaleMetrics(!filterStaleMetrics)}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 border cursor-pointer ${
+                        filterStaleMetrics
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-500'
+                      }`}
+                      title="Veri gönderim sıklığının 2 katından eski olan metrikleri listede gizler"
+                    >
+                      <Filter className="w-3 h-3" />
+                      <span>{filterStaleMetrics ? 'Sadece Canlı (≤2x)' : 'Tümünü Göster'}</span>
+                    </button>
+
+                    {/* Prune Stale Metrics (>2x frequency) */}
+                    <button
+                      type="button"
+                      disabled={clearingMetrics}
+                      onClick={() => handleClearDeviceMetrics(activeDevice.id, true)}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 disabled:opacity-50 cursor-pointer"
+                      title="Veri sıklığının 2 katından eski olan bayatlamış metrikleri temizler"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${clearingMetrics ? 'animate-spin' : ''}`} />
+                      <span>Süresi Dolanları Temizle (2x)</span>
+                    </button>
+
+                    {/* Reset All Device Metrics */}
+                    <button
+                      type="button"
+                      disabled={clearingMetrics}
+                      onClick={() => handleClearDeviceMetrics(activeDevice.id, false)}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 disabled:opacity-50 cursor-pointer"
+                      title="Cihazın kayıtlı tüm metrik önbelleğini sıfırlar"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Önbelleği Sıfırla</span>
+                    </button>
+                  </>
                 )}
 
                 {/* Scope Switcher: Selected Device vs All Devices */}
@@ -1071,7 +1219,7 @@ void sendHeartbeat() {
                   <button
                     type="button"
                     onClick={() => setMetricsScope('selected')}
-                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
                       metricsScope === 'selected'
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1084,7 +1232,7 @@ void sendHeartbeat() {
                   <button
                     type="button"
                     onClick={() => setMetricsScope('all')}
-                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
                       metricsScope === 'all'
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -1104,10 +1252,18 @@ void sendHeartbeat() {
                   <>
                     <strong className="text-slate-800 dark:text-slate-200">{activeDevice.name}</strong> (
                     {activeDevice.isSimulated ? 'Sanal Simülasyon Cihazı' : 'Fiziksel Saha Donanımı'}
-                    ) tarafından son 10 dakikada iletilen canlı parametreler
+                    ) tarafından iletilen parametreler. Veri gönderim sıklığı:{' '}
+                    <strong className="font-mono text-indigo-600 dark:text-indigo-400">
+                      {activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5} sn
+                    </strong>
+                    , canlılık eşiği (2 katı):{' '}
+                    <strong className="font-mono text-rose-600 dark:text-rose-400">
+                      {Math.max((activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5) * 2, 4)} sn
+                    </strong>
+                    . Bu süreyi aşan geçmiş metrikler temizlenebilir.
                   </>
                 ) : (
-                  'Çevrim içi cihazlardan son 10 dakikada algılanan canlı parametreler'
+                  'Çevrim içi cihazlardan algılanan aktif parametreler'
                 )}
               </span>
             </div>
@@ -1120,12 +1276,12 @@ void sendHeartbeat() {
                     className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-mono shadow-xs transition-colors ${
                       m.isFresh
                         ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30 text-slate-800 dark:text-slate-100'
-                        : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                        : 'bg-amber-500/5 dark:bg-amber-950/20 border-amber-500/30 text-slate-700 dark:text-slate-300 opacity-80'
                     }`}
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        m.isFresh ? 'bg-emerald-500 animate-pulse' : 'bg-cyan-500'
+                        m.isFresh ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                       }`}
                     />
                     <span className="font-bold text-indigo-600 dark:text-indigo-400">{m.name}</span>
@@ -1135,8 +1291,8 @@ void sendHeartbeat() {
                       </span>
                     )}
                     {m.ageText && (
-                      <span className="text-[9px] text-slate-400 dark:text-slate-500 pl-1">
-                        ({m.ageText})
+                      <span className={`text-[9px] pl-1 ${m.isFresh ? 'text-slate-400 dark:text-slate-500' : 'text-amber-600 dark:text-amber-400 font-semibold'}`}>
+                        ({m.ageText} {!m.isFresh ? '• >2x Bayat' : ''})
                       </span>
                     )}
                     {metricsScope === 'all' && m.deviceNames.size > 0 && (
@@ -1731,8 +1887,13 @@ void sendHeartbeat() {
                 </div>
               </div>
 
-              {/* Section 5: Sinyal & Heartbeat Toleransı */}
-              {renderHeartbeatSelector(addHeartbeatTimeout, setAddHeartbeatTimeout)}
+              {/* Section 5: Akıllı Veri Gönderim Sıklığı & Watchdog */}
+              {renderIntervalAndHeartbeatSelector(
+                addExpectedInterval,
+                setAddExpectedInterval,
+                addIntervalMode,
+                setAddIntervalMode
+              )}
 
               {/* Section 6: Admin Customer Assignment */}
               {user?.role === 'admin' && (
@@ -2045,8 +2206,14 @@ void sendHeartbeat() {
                 </div>
               </div>
 
-              {/* Section 4: Sinyal & Heartbeat Toleransı */}
-              {renderHeartbeatSelector(editHeartbeatTimeout, setEditHeartbeatTimeout)}
+              {/* Section 4: Akıllı Veri Gönderim Sıklığı & Watchdog */}
+              {renderIntervalAndHeartbeatSelector(
+                editExpectedInterval,
+                setEditExpectedInterval,
+                editIntervalMode,
+                setEditIntervalMode,
+                editAutoDetectedInterval
+              )}
 
               {/* Section 5: Müşteri / Firma Sorumlusu (Admin Only) */}
               {user?.role === 'admin' && (

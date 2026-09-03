@@ -915,7 +915,8 @@ class LocalDatabase {
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
   public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
-    public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
+  public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
+  public processDeviceTelemetryArrival(deviceId: string): Device | null { return this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
   public getDevices(tenantId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(tenantId, customerId); }
   public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
   public assignDeviceOwner(deviceId: string, targetTenantId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }

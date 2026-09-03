@@ -79,18 +79,28 @@ export class PhysicalTelemetryService {
       }
     }
 
-    // 5. Update Physical Device Status & Metrics
+    // 5. Update Physical Device Status & Metrics via Intelligent Arrival Processor
+    const processedDev = db.processDeviceTelemetryArrival(device.id);
+    if (processedDev) {
+      device.status = processedDev.status;
+      device.lastSeen = processedDev.lastSeen;
+      device.expectedIntervalSeconds = processedDev.expectedIntervalSeconds;
+      device.autoDetectedIntervalSeconds = processedDev.autoDetectedIntervalSeconds;
+      device.heartbeatTimeoutSeconds = processedDev.heartbeatTimeoutSeconds;
+    }
+
     db.updateDevice(device.id, {
       metrics: device.metrics,
       lastSeen: device.lastSeen,
       status: device.status,
+      expectedIntervalSeconds: device.expectedIntervalSeconds,
+      autoDetectedIntervalSeconds: device.autoDetectedIntervalSeconds,
+      heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds,
       ipAddress: device.ipAddress,
       macAddress: device.macAddress,
     });
 
-    if (devInfoUpdated) {
-      broadcast('device:updated', device);
-    }
+    broadcast('device:updated', device);
 
     const writeAck = {
       persisted: batchRes.persisted,

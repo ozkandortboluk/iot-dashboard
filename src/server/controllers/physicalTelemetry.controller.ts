@@ -72,10 +72,7 @@ export class PhysicalTelemetryController {
     const hardwareModel = req.headers['x-hardware-model'] || req.body?.hardwareModel || req.body?.hardware_model || req.query.hardwareModel || req.query.hardware_model;
     const firmwareVersion = req.headers['x-firmware-version'] || req.body?.firmwareVersion || req.body?.firmware_version || req.query.firmwareVersion || req.query.firmware_version;
 
-    const devUpdates: Partial<import('../../types.js').Device> = {
-      lastSeen: new Date().toISOString(),
-      status: 'online',
-    };
+    const devUpdates: Partial<import('../../types.js').Device> = {};
     if (clientPing !== undefined && !isNaN(clientPing)) devUpdates.pingMs = clientPing;
     if (clientRssi !== undefined && !isNaN(clientRssi)) devUpdates.rssi = clientRssi;
     if (roleKey) devUpdates.roleKey = roleKey.toString();
@@ -83,18 +80,30 @@ export class PhysicalTelemetryController {
     if (hardwareModel) devUpdates.hardwareModel = hardwareModel.toString();
     if (firmwareVersion) devUpdates.firmwareVersion = firmwareVersion.toString();
 
-    db.updateDevice(device.id, devUpdates);
+    const processedDev = db.processDeviceTelemetryArrival(device.id);
+    if (processedDev) {
+      devUpdates.status = processedDev.status;
+      devUpdates.lastSeen = processedDev.lastSeen;
+      devUpdates.expectedIntervalSeconds = processedDev.expectedIntervalSeconds;
+      devUpdates.autoDetectedIntervalSeconds = processedDev.autoDetectedIntervalSeconds;
+      devUpdates.heartbeatTimeoutSeconds = processedDev.heartbeatTimeoutSeconds;
+    }
+
+    const updatedDev = db.updateDevice(device.id, devUpdates);
 
     const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
     return res.status(200).json({
       status: 'ok',
       type: 'heartbeat_ack',
-      deviceId: device.id,
-      deviceName: device.name,
-      deviceStatus: device.status,
-      lastSeen: device.lastSeen,
-      heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds || 300,
+      deviceId: updatedDev.id,
+      deviceName: updatedDev.name,
+      deviceStatus: updatedDev.status,
+      lastSeen: updatedDev.lastSeen,
+      expectedIntervalSeconds: updatedDev.expectedIntervalSeconds || 5,
+      intervalMode: updatedDev.intervalMode || 'auto',
+      heartbeatTimeoutSeconds: updatedDev.heartbeatTimeoutSeconds || 10,
+      offlineTimeoutSeconds: (updatedDev.expectedIntervalSeconds || 5) * 2,
       commands,
       serverTime: new Date().toISOString(),
       message: 'ESP Ping / Heartbeat sinyali başarıyla alındı ve cihaz ÇEVRİMİÇİ olarak onaylandı.',
@@ -185,11 +194,14 @@ export class PhysicalTelemetryController {
       const isPing = rawText.includes('ping') || rawText.includes('heartbeat') || rawText.includes('nabiz');
 
       if (isPing) {
-        device.lastSeen = new Date().toISOString();
-        if (device.status !== 'online') device.status = 'online';
+        const processedDev = db.processDeviceTelemetryArrival(device.id);
+        const effectiveDev = processedDev || device;
         db.updateDevice(device.id, {
-          lastSeen: device.lastSeen,
-          status: device.status,
+          lastSeen: effectiveDev.lastSeen,
+          status: effectiveDev.status,
+          expectedIntervalSeconds: effectiveDev.expectedIntervalSeconds,
+          autoDetectedIntervalSeconds: effectiveDev.autoDetectedIntervalSeconds,
+          heartbeatTimeoutSeconds: effectiveDev.heartbeatTimeoutSeconds,
           ipAddress: device.ipAddress,
         });
         const commands = await commandService.getAndDeliverPendingCommands(device.id);
@@ -197,11 +209,14 @@ export class PhysicalTelemetryController {
         return res.status(200).json({
           status: 'ok',
           type: 'heartbeat_ack',
-          deviceId: device.id,
-          deviceName: device.name,
-          deviceStatus: device.status,
-          lastSeen: device.lastSeen,
-          heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds || 300,
+          deviceId: effectiveDev.id,
+          deviceName: effectiveDev.name,
+          deviceStatus: effectiveDev.status,
+          lastSeen: effectiveDev.lastSeen,
+          expectedIntervalSeconds: effectiveDev.expectedIntervalSeconds || 5,
+          intervalMode: effectiveDev.intervalMode || 'auto',
+          heartbeatTimeoutSeconds: effectiveDev.heartbeatTimeoutSeconds || 10,
+          offlineTimeoutSeconds: (effectiveDev.expectedIntervalSeconds || 5) * 2,
           commands,
           serverTime: new Date().toISOString(),
           message: 'ESP Heartbeat / Ping sinyali işlendi. Cihaz çevrimiçi.',

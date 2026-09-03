@@ -196,11 +196,36 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
     return res.status(403).json({ error: 'Yetkisiz erişim!' });
   }
 
+  const isStaleOnly = req.body?.staleOnly === true || req.query.staleOnly === 'true';
+
   try {
-    const updated = db.updateDevice(deviceId, { metrics: {} });
+    const interval = existingDev.expectedIntervalSeconds || existingDev.autoDetectedIntervalSeconds || existingDev.customIntervalSeconds || 5;
+    const thresholdSec = Math.max(interval * 2, 4);
+
+    let updatedMetrics: Record<string, any> = {};
+    if (isStaleOnly) {
+      const now = Date.now();
+      const lastSeenMs = existingDev.lastSeen ? new Date(existingDev.lastSeen).getTime() : 0;
+      const elapsedSec = (now - lastSeenMs) / 1000;
+      if (elapsedSec > thresholdSec || existingDev.status === 'offline') {
+        // Cihaz veri sıklığının 2 katı süredir veri göndermemiş -> metrikler temizlenir
+        updatedMetrics = {};
+      } else {
+        updatedMetrics = existingDev.metrics || {};
+      }
+    }
+
+    const updated = db.updateDevice(deviceId, { metrics: updatedMetrics });
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
-    res.json({ success: true, message: 'Cihaz metrik önbelleği temizlendi.', device: updated });
+    res.json({
+      success: true,
+      message: isStaleOnly
+        ? `Veri gönderim sıklığının 2 katını (${thresholdSec} sn) aşan geçmiş metrikler temizlendi.`
+        : 'Cihaz metrik önbelleği temizlendi.',
+      device: updated,
+      thresholdSeconds: thresholdSec,
+    });
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'Metrikler temizlenemedi.' });
   }

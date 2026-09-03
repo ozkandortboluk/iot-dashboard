@@ -128,6 +128,9 @@ export interface Device {
   dataFlowActive?: boolean;
   heartbeatTimeoutSeconds?: number;
   expectedIntervalSeconds?: number;
+  intervalMode?: 'auto' | 'manual'; // 'auto' (sistem dinamik belirler) veya 'manual' (kullanıcı sabitler)
+  customIntervalSeconds?: number; // Kullanıcının belirlediği özel sıklık
+  autoDetectedIntervalSeconds?: number; // Sistemin peş peşe gelen paketlerden ölçtüğü sıklık
   isSimulated?: boolean;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];

@@ -10,8 +10,9 @@ export class AutomationEngine {
     const activeAutomations = automations.filter(a => a.enabled && a.trigger.deviceId === reading.deviceId);
 
     for (const auto of activeAutomations) {
-      if (!reading.data) continue;
-      const val = reading.data[auto.trigger.metric];
+      const val = reading.metric === auto.trigger.metric
+        ? reading.value
+        : ((reading as Record<string, any>).data?.[auto.trigger.metric]);
       if (val === undefined || val === null) continue;
 
       let triggered = false;

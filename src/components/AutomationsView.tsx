@@ -87,7 +87,10 @@ export const AutomationsView: React.FC = () => {
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) throw err;
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Otomasyon kaydedilemedi');
+      }
 
       setIsFormOpen(false);
       setEditingId(null);

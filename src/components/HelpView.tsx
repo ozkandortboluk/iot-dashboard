@@ -490,6 +490,105 @@ void loop() {
 }`,
     },
     {
+      id: 'code_esp32_smart_interval',
+      title: 'ESP32 - Akıllı Dinamik Veri Sıklığı & 2x Watchdog Toleransı',
+      category: 'esp32',
+      categoryLabel: 'ESP32 Akıllı Sıklık',
+      badge: 'Akıllı 2x Watchdog & Dinamik Frekans',
+      description: 'Sistem cihazın veri gönderme sıklığını otomatik öğrenir. 2 katı süre veri gelmezse cihaz otomatik Çevrimdışı olur. Veri geldiğinde tekrar Çevrimiçi olur ve kullanıcı panelden sıklığı istediği zaman değiştirebilir.',
+      tags: ['esp32', 'akıllı sıklık', '2x watchdog', 'offline', 'online', 'dinamik frekans', 'piggybacking'],
+      endpoint: 'POST /api/telemetry & POST /api/telemetry/ping',
+      code: `// =========================================================================
+// NEXUSNODE IoT - AKILLI DİNAMİK VERİ SIKLIĞI & 2X WATCHDOG KODU (ESP32)
+//
+// 1. Sistem cihazın veri gönderim sıklığını (interval) otomatik tespit eder.
+// 2. Eğer (2 * Sıklık) süresince cihazdan veri gelmezse, sistem cihazı OFFLINE yapar.
+// 3. Cihaz tekrar veri gönderdiğinde anında ONLINE durumuna geçer.
+// 4. Kullanıcı cihaz ayarlarından sıklığı manuel değiştirebilir; cihaz son ayarda kalır.
+// 5. Cihazın çevrimdışı kaldığı süre sıklık hesaplamasını bozmaz (filtrelenir).
+// =========================================================================
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+const char* WIFI_SSID     = "WIFI_SSID_GIRINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRE_GIRINIZ";
+const char* SERVER_URL    = "${originUrl}/api/telemetry";
+const char* API_KEY       = "nkn_live_YOUR_DEVICE_API_KEY"; // Cihaz Token
+const char* DEVICE_ID     = "dev_esp32_01";
+
+// Cihazın varsayılan veri gönderme sıklığı (Saniye)
+// Sistem bu sıklığı otomatik öğrenir veya sunucu yanıtından dinamik günceller
+unsigned long sendIntervalSeconds = 5; 
+unsigned long lastSendMillis = 0;
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println("\\n[NEXUSNODE] WiFi Baglantisi Basarili!");
+}
+
+void sendSmartTelemetry() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin(SERVER_URL);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-API-Key", API_KEY);
+
+  // Örnek sensör telemetri verileri
+  StaticJsonDocument<256> doc;
+  doc["deviceId"] = DEVICE_ID;
+  doc["temperature"] = 24.5 + (random(-10, 10) / 10.0);
+  doc["humidity"] = 55.0 + (random(-20, 20) / 10.0);
+  doc["rssi"] = WiFi.RSSI();
+
+  String payload;
+  serializeJson(doc, payload);
+
+  Serial.printf("[NEXUSNODE] Telemetri gönderiliyor (%lu sn aralıkla)...\\n", sendIntervalSeconds);
+  int httpCode = http.POST(payload);
+
+  if (httpCode == 200) {
+    String response = http.getString();
+    Serial.println("[OK] Sunucu Yaniti: " + response);
+
+    // Sunucu yanıtından bekleyen komutları veya sistemin belirlediği sıklığı oku:
+    StaticJsonDocument<512> resDoc;
+    DeserializationError err = deserializeJson(resDoc, response);
+    if (!err) {
+      // Eğer kullanıcı panelden veri gönderim sıklığını güncellemişse cihaz otomatik uyum sağlar:
+      if (resDoc.containsKey("expectedIntervalSeconds")) {
+        unsigned long serverInterval = resDoc["expectedIntervalSeconds"];
+        if (serverInterval >= 1 && serverInterval != sendIntervalSeconds) {
+          sendIntervalSeconds = serverInterval;
+          Serial.printf(">>> Veri sıklığı panel ayarıyla güncellendi: %lu saniye\\n", sendIntervalSeconds);
+        }
+      }
+    }
+  } else {
+    Serial.printf("[HATA] Telemetri iletilemedi! HTTP Kod: %d\\n", httpCode);
+  }
+  http.end();
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+  
+  // Belirlenen sıklıkta (sendIntervalSeconds) telemetri ilet:
+  if (currentMillis - lastSendMillis >= (sendIntervalSeconds * 1000)) {
+    lastSendMillis = currentMillis;
+    sendSmartTelemetry();
+  }
+  
+  delay(100);
+}`,
+    },
+    {
       id: 'code_esp32_ota_update',
       title: 'ESP32 / ESP8266 - Ed25519 İmzalı Güvenli OTA & Post-Boot Onaylı İstemci',
       category: 'esp32',
@@ -1680,6 +1779,21 @@ if (httpResponseCode > 0) {
     digitalWrite(RELAY_PIN, HIGH); // Röleyi aç!
     Serial.println(">>> Röle 1 Açıldı!");
   }
+}`,
+    },
+    {
+      id: 'faq_smart_interval',
+      category: 'Cihaz Entegrasyonu',
+      question: 'Cihazların veri gönderme sıklığı ve çevrimdışı (offline) olma kuralı nasıl çalışır?',
+      answer: 'Sistem akıllı sıklık motoruna sahiptir:\n1. Otomatik Tespit: Cihaz ilk kez veri göndermeye başladığında ardışık paketler arasındaki süre ölçülerek "beklenen veri gönderim sıklığı" (expectedIntervalSeconds) otomatik belirlenir.\n2. Akıllı 2x Watchdog: Eğer veri gönderim sıklığının 2 katı süresince cihazdan yeni veri veya ping gelmezse, sistem cihazı otomatik olarak ÇEVRİMDİŞİ (Offline) durumuna geçirir.\n3. Çevrimdışı Süresinin Yalıtımı: Cihazın çevrimdışı kaldığı süre sıklık hesaplamasına dahil edilmez; böylece cihazın gerçek periyodu bozulmaz.\n4. Otomatik Canlanma: Çevrimdışı olan cihaz yeni veri gönderdiği anda son ayarlarını koruyarak anında ÇEVRİMİÇİ (Online) olur.\n5. Manuel Ayar & Kalıcılık: Kullanıcı cihaz ayarlarından sıklığı manuel değiştirebilir. Cihaz her zaman kullanıcının belirlediği son ayarda kalır.\n6. Geçmiş Metrik Temizliği: Sistemden gelen metrikler ekranında, 2 katı süresini aşan bayatlamış parametreler tek tıkla ("Süresi Dolanları Temizle (2x)") temizlenebilir.',
+      tags: ['akıllı sıklık', '2x kuralı', 'offline', 'online', 'watchdog', 'metrik temizleme', 'tolerans'],
+      codeSnippet: `// Sunucu Yanıtında Dinamik Veri Sıklığı (Piggybacking):
+{
+  "success": true,
+  "status": "online",
+  "expectedIntervalSeconds": 10,
+  "offlineTimeoutSeconds": 20,
+  "commands": []
 }`,
     },
     {
