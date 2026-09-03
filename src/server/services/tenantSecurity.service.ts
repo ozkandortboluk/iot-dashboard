@@ -77,6 +77,41 @@ export class TenantSecurityService {
   ): Device[] {
     return this.filterDevicesForUser(user, devices, tenantMemberships);
   }
+
+  /**
+   * Cihaz sahipliğini ve kanonik tenant_id değerini doğrular.
+   * - Kural 1: Müşteriler başka müşterilere ait cihaz oluşturamaz, değiştiremez veya devredemez.
+   * - Boş veya geçersiz tenantId'leri kanonik olarak 'usr_admin'e yönlendirir.
+   * - Hedef kiracının sistemde kayıtlı olduğunu teyit eder.
+   */
+  public validateAndResolveDeviceOwnership(
+    targetTenantId: string | undefined | null,
+    requestingUser?: { id: string; role?: string } | null,
+    existingUsers: { id: string }[] = []
+  ): { canonicalTenantId: string; error?: string } {
+    const rawTenant = (targetTenantId || '').trim();
+
+    // 1. Yetkisiz müşteri kontrolü (Kural 1)
+    if (requestingUser && requestingUser.role !== 'admin' && requestingUser.id !== 'usr_admin') {
+      // Normal müşteri yalnızca kendi adına cihaz oluşturabilir veya yönetebilir
+      return { canonicalTenantId: requestingUser.id };
+    }
+
+    // 2. Yönetici isteği: Belirtilen kiracının geçerliliği
+    if (!rawTenant || rawTenant === 'usr_admin' || rawTenant === 'admin') {
+      return { canonicalTenantId: 'usr_admin' };
+    }
+
+    const exists = existingUsers.some((u) => u.id === rawTenant);
+    if (!exists) {
+      return {
+        canonicalTenantId: 'usr_admin',
+        error: `Belirtilen müşteri/kiracı kimliği (${rawTenant}) sistemde bulunamadı. Cihaz kanonik olarak Sistem Yöneticisine devredildi.`
+      };
+    }
+
+    return { canonicalTenantId: rawTenant };
+  }
 }
 
 export const tenantSecurityService = new TenantSecurityService();

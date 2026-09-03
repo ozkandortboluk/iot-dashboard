@@ -104,7 +104,11 @@ export interface DeviceCapabilities {
 
 export interface Device {
   id: string;
-  tenantId: string; // Tenant (Company) ID
+  tenantId: string; // Canonical Tenant (Customer/Company) ID
+  userId?: string; // Backwards compatibility alias for tenantId
+  previousTenantId?: string; // Prior owner tenant ID before deletion or reassignment
+  previousTenantName?: string; // Prior owner name before deletion
+  ownershipTransferredAt?: string; // Timestamp of ownership reassignment
   siteId?: string; // Facility/Location ID
   name: string;
   type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway' | string;

@@ -6,6 +6,7 @@ import { deviceAuthService } from './deviceAuth.service.js';
 import { telemetryService } from './telemetry.service.js';
 import { commandService } from './command.service.js';
 import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
+import { tenantSecurityService } from './tenantSecurity.service.js';
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -133,6 +134,7 @@ export function broadcast(event: string, payload: unknown) {
   if (!wss) return;
 
   const allDevices = db.getDevices();
+  const tenantMemberships = db.data?.tenantMemberships || [];
 
   (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
     if (client.readyState !== WebSocket.OPEN) return;
@@ -146,6 +148,7 @@ export function broadcast(event: string, payload: unknown) {
     }
 
     // Direct Downlink Push to Connected Hardware Devices (ESP32/ESP8266/Python IoT Agents)
+    // Send single unified protocol frame only - no duplicate legacy frame to avoid race conditions!
     if (client.device) {
       if (
         event === 'command:created' ||
@@ -157,38 +160,18 @@ export function broadcast(event: string, payload: unknown) {
           : payload) as DeviceCommand;
 
         if (cmd && (cmd.deviceId === client.device.id || cmd.deviceId === client.device.apiKey)) {
-          // 1. Unified WebSocket Protocol Envelope Delivery
+          // Unified WebSocket Protocol Envelope Delivery (Single authoritative downlink)
           deviceWsProtocolService.sendDeviceCommand(client.device.id, cmd);
-
-          // 2. Legacy Downlink Delivery for backward compatibility
-          safeSend(
-            client,
-            JSON.stringify({
-              event: 'command:downlink',
-              command: {
-                id: cmd.id,
-                commandId: cmd.commandId || cmd.id,
-                command: cmd.command || cmd.commandType,
-                commandType: cmd.commandType || cmd.command,
-                outputId: cmd.outputId,
-                value: cmd.value !== undefined ? cmd.value : cmd.payload,
-                payload: cmd.payload,
-                parameters: cmd.parameters,
-                createdAt: cmd.createdAt || cmd.created_at,
-              },
-              timestamp: new Date().toISOString(),
-            })
-          );
         }
       }
       return;
     }
 
     const clientUser = client.user!;
-    const isAdmin = clientUser.role === 'admin';
+    const isAdmin = clientUser.role === 'admin' || clientUser.id === 'usr_admin' || clientUser.id === 'admin';
     const subChannels = client.subscribedChannels || new Set(['physical']);
 
-    // 1. Telemetry broadcasts (Strict Physical vs Simulation Channel Isolation)
+    // 1. Telemetry broadcasts (Strict Physical vs Simulation Channel Isolation + Canonical Tenant Isolation)
     if (
       event === 'telemetry:new' ||
       event === 'telemetry:batch' ||
@@ -228,7 +211,7 @@ export function broadcast(event: string, payload: unknown) {
         if (!isAdmin) {
           allowedPhysical = physicalReadings.filter((r) => {
             const dev = allDevices.find((d) => d.id === r.deviceId);
-            return dev && dev.tenantId === clientUser.id;
+            return dev && tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships);
           });
         }
 
@@ -248,7 +231,7 @@ export function broadcast(event: string, payload: unknown) {
         if (!isAdmin) {
           allowedSim = simulationReadings.filter((r) => {
             const dev = allDevices.find((d) => d.id === r.deviceId);
-            return dev && dev.tenantId === clientUser.id;
+            return dev && tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships);
           });
         }
 
@@ -265,46 +248,55 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // 2. Devices list update broadcast
+    // 2. Devices list update broadcast (Canonical Tenant Filtering)
     if (event === 'devices:updated') {
-      if (isAdmin) {
-        safeSend(client, JSON.stringify({ event, payload: db.getDevices(), timestamp: new Date().toISOString() }));
-      } else {
-        const userDevices = db.getDevices(clientUser.id, clientUser.id);
-        safeSend(client, JSON.stringify({ event, payload: userDevices, timestamp: new Date().toISOString() }));
-      }
+      const filteredDevices = tenantSecurityService.filterDevicesForUser(clientUser, allDevices, tenantMemberships);
+      safeSend(client, JSON.stringify({ event, payload: filteredDevices, timestamp: new Date().toISOString() }));
       return;
     }
 
-    // 3. Single device created/updated/control broadcast
+    // 3. Single device created/updated/control/deleted broadcast (Canonical Tenant Filtering)
     if (event === 'device:created' || event === 'device:updated') {
-      if (!isAdmin) {
-        const dev = payload as Device;
-        if (!dev || dev.tenantId !== clientUser.id) {
-          return;
-        }
+      const dev = payload as Device;
+      if (!isAdmin && !tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships)) {
+        return;
       }
       safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       return;
     }
 
     if (event === 'device:control') {
-      if (!isAdmin) {
-        const devId = (payload as any)?.deviceId;
-        const dev = allDevices.find((d) => d.id === devId);
-        if (!dev || dev.tenantId !== clientUser.id) {
-          return;
-        }
+      const devId = (payload as any)?.deviceId;
+      const dev = allDevices.find((d) => d.id === devId);
+      if (!isAdmin && !tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships)) {
+        return;
       }
       safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       return;
     }
 
     if (event === 'device:deleted') {
-      if (!isAdmin) {
-        const deletedId = (payload as any)?.id;
-        const dev = allDevices.find((d) => d.id === deletedId);
-        if (dev && dev.tenantId !== clientUser.id) {
+      const deletedId = (payload as any)?.id;
+      const dev = allDevices.find((d) => d.id === deletedId);
+      if (!isAdmin && dev && !tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships)) {
+        return;
+      }
+      safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      return;
+    }
+
+    // 3b. Device status, hello, event, output changed broadcasts (Canonical Tenant Filtering)
+    if (
+      event === 'device:status' ||
+      event === 'device:hello' ||
+      event === 'device:event' ||
+      event === 'device:output:changed' ||
+      event.startsWith('device:ota:')
+    ) {
+      const targetDevId = (payload as any)?.deviceId || (payload as any)?.id;
+      if (targetDevId) {
+        const dev = allDevices.find((d) => d.id === targetDevId);
+        if (!isAdmin && !tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships)) {
           return;
         }
       }
@@ -334,7 +326,7 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // 5. Commands lifecycle events broadcast (Tenant-isolated for multi-tenant security)
+    // 5. Commands lifecycle events broadcast (Canonical Tenant-isolated for multi-tenant security)
     if (
       event === 'commands:updated' ||
       event === 'command:created' ||
@@ -343,18 +335,13 @@ export function broadcast(event: string, payload: unknown) {
       event === 'command:executed' ||
       event === 'command:failed' ||
       event === 'command:expired' ||
+      event === 'command:ack_confirmed' ||
       event.startsWith('command:')
     ) {
       if (isAdmin) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
         return;
       }
-
-      // Non-admin customer / tenant user: verify device ownership and tenant authorization
-      const membershipTenants = (db.data?.tenantMemberships || [])
-        .filter((m: any) => m.userId === clientUser.id)
-        .map((m: any) => m.tenantId);
-      const userTenants = new Set([clientUser.id, ...membershipTenants]);
 
       const cmdList: any[] = Array.isArray(payload)
         ? payload
@@ -371,14 +358,11 @@ export function broadcast(event: string, payload: unknown) {
       // Check if command(s) belong to user's authorized tenants or devices
       const authorizedCmds = cmdList.filter((cmd) => {
         if (!cmd) return false;
-        if (cmd.tenantId && userTenants.has(cmd.tenantId)) return true;
-        if (cmd.customerId && userTenants.has(cmd.customerId)) return true;
-        if (cmd.userId && cmd.userId === clientUser.id) return true;
-
         if (cmd.deviceId) {
           const dev = allDevices.find((d) => d.id === cmd.deviceId || d.apiKey === cmd.deviceId);
-          if (dev && dev.tenantId && userTenants.has(dev.tenantId)) return true;
+          if (dev && tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships)) return true;
         }
+        if (cmd.tenantId && cmd.tenantId === clientUser.id) return true;
         return false;
       });
 
@@ -410,10 +394,8 @@ export function broadcast(event: string, payload: unknown) {
     }
 
     if (event === 'network:unregistered_device') {
-      const unreg = payload as any;
+      // Only administrators can discover unregistered physical devices
       if (isAdmin) {
-        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
-      } else if (unreg && unreg.tenantId === clientUser.id) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       }
       return;
@@ -436,6 +418,20 @@ export function broadcast(event: string, payload: unknown) {
     if (event === 'users:updated') {
       if (isAdmin) {
         safeSend(client, JSON.stringify({ event: 'users:updated', payload: db.getUsers(), timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
+
+    // 8b. OTA Updates broadcast (Tenant-filtered for regular users, global for admin)
+    if (event === 'ota:updated') {
+      if (isAdmin) {
+        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      } else {
+        const jobs = ((payload as any)?.jobs || []).filter((j: any) => {
+          const dev = allDevices.find((d) => d.id === j.deviceId);
+          return dev && tenantSecurityService.canUserAccessDevice(clientUser, dev, tenantMemberships);
+        });
+        safeSend(client, JSON.stringify({ event, payload: { jobs }, timestamp: new Date().toISOString() }));
       }
       return;
     }
@@ -1005,7 +1001,8 @@ export function sendOtaCommandViaWs(
   deviceId: string,
   version: string,
   downloadUrl: string,
-  checksum?: string
+  checksum?: string,
+  extraSecurity?: { signature?: string; keyId?: string; bootNonce?: string; downloadToken?: string }
 ): boolean {
-  return deviceWsProtocolService.sendOtaCommand(deviceId, version, downloadUrl, checksum);
+  return deviceWsProtocolService.sendOtaCommand(deviceId, version, downloadUrl, checksum, extraSecurity);
 }

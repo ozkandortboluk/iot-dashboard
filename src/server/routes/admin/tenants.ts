@@ -293,3 +293,25 @@ adminTenantsRouter.post('/:id/reset-password', requireAdmin, async (req, res) =>
     res.status(500).json({ error: err.message || 'Sunucu hatası' });
   }
 });
+
+// DELETE /api/admin/tenants/:id
+adminTenantsRouter.delete('/:id', requireAdmin, async (req, res) => {
+  try {
+    const tenantId = req.params.id;
+    if (tenantId === 'usr_admin') {
+      return res.status(400).json({ error: 'Kanonik sistem yöneticisi hesabı (usr_admin) silinemez.' });
+    }
+    const tenant = db.data.users.find((u: any) => u.id === tenantId);
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
+
+    const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };
+    await db.userRepository.deleteUser(tenantId, adminUser.id, adminUser.name);
+
+    res.json({ 
+      success: true, 
+      message: `Müşteri "${tenant.name}" silindi. Sahip olduğu cihazlar veri bütünlüğü korunarak Sistem Yöneticisine (usr_admin) devredildi.` 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});

@@ -23,9 +23,26 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Canonical Root System Administrator (usr_admin)
+INSERT INTO users (id, name, email, password_hash, role, company_name, created_at)
+VALUES (
+    'usr_admin',
+    'Sistem Yöneticisi',
+    'admin@nexusnode.io',
+    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
+    'admin',
+    'Merkez Yönetim',
+    CURRENT_TIMESTAMP
+)
+ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64),
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
+    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    previous_tenant_id VARCHAR(64),
+    previous_tenant_name VARCHAR(128),
+    ownership_transferred_at TIMESTAMP WITH TIME ZONE,
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(32) NOT NULL,
     api_key VARCHAR(128) UNIQUE NOT NULL,
@@ -38,7 +55,9 @@ CREATE TABLE IF NOT EXISTS devices (
     encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
     metrics JSONB DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_devices_tenant_id FOREIGN KEY (tenant_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT,
+    CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT
 );
 
 -- 3. Telemetry Table (Hypertable Base)

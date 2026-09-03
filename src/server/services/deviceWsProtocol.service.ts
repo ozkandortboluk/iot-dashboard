@@ -66,22 +66,30 @@ export class DeviceWsProtocolService {
     }
     sockets.add(ws);
 
+    const nowIso = new Date().toISOString();
+
     // Update DB & broadcast device online status
     const dev = db.getDeviceById(deviceId);
     if (dev) {
       db.updateDevice(deviceId, {
         websocketConnected: true,
         status: 'online',
-        lastSeen: new Date().toISOString(),
+        lastSeen: nowIso,
+        lastMessageAt: nowIso,
       });
       broadcast('devices:updated', db.getDevices());
       broadcast('device:status', {
         deviceId,
         status: 'online',
         websocketConnected: true,
-        lastSeen: new Date().toISOString(),
+        lastSeen: nowIso,
       });
     }
+
+    // Direct atomic sync to PostgreSQL
+    db.postgresRepo?.updateDeviceWsStatus(deviceId, true, 'online', nowIso, nowIso).catch((err) => {
+      console.warn(`[DeviceWsProtocol] Postgres updateDeviceWsStatus error (${deviceId}):`, err?.message || err);
+    });
   }
 
   /**
@@ -95,6 +103,7 @@ export class DeviceWsProtocolService {
       sockets.delete(ws);
       if (sockets.size === 0) {
         this.activeDeviceSockets.delete(deviceId);
+        const nowIso = new Date().toISOString();
         // Mark as disconnected from WebSocket
         const dev = db.getDeviceById(deviceId);
         if (dev) {
@@ -102,16 +111,21 @@ export class DeviceWsProtocolService {
             websocketConnected: false,
             // If device has no other active connections, update status
             status: 'offline',
-            lastSeen: new Date().toISOString(),
+            lastSeen: nowIso,
           });
           broadcast('devices:updated', db.getDevices());
           broadcast('device:status', {
             deviceId,
             status: 'offline',
             websocketConnected: false,
-            lastSeen: new Date().toISOString(),
+            lastSeen: nowIso,
           });
         }
+
+        // Direct atomic sync to PostgreSQL
+        db.postgresRepo?.updateDeviceWsStatus(deviceId, false, 'offline', nowIso).catch((err) => {
+          console.warn(`[DeviceWsProtocol] Postgres updateDeviceWsStatus disconnect error (${deviceId}):`, err?.message || err);
+        });
       }
     }
   }
@@ -146,7 +160,7 @@ export class DeviceWsProtocolService {
     const { type, deviceId, messageId, timestamp, data } = message;
 
     // 2. Authentication & Tenant Isolation Verification
-    const device = this.verifyDeviceAuthorization(ws, deviceId);
+    const device = await this.verifyDeviceAuthorization(ws, deviceId);
     if (!device) {
       console.warn(`[DeviceWsProtocol] Yetkisiz cihaz mesajı reddedildi: deviceId=${deviceId}`);
       this.sendError(ws, deviceId, messageId, 'Yetkisiz erişim: Cihaz kayıtlı değil veya token geçersiz.');
@@ -162,7 +176,8 @@ export class DeviceWsProtocolService {
 
     // 3. Idempotency & Deduplication Check (Ignore for ping/pong)
     if (type !== 'ping' && type !== 'pong') {
-      if (this.isDuplicateMessage(deviceId, messageId, type)) {
+      const isDupe = await this.isDuplicateMessage(deviceId, messageId, type);
+      if (isDupe) {
         console.warn(`[DeviceWsProtocol] Mükerrer (duplicate) mesaj engellendi: ${deviceId} / ${messageId} (${type})`);
         // Return ACK so the device knows it was already processed, but do not execute logic again
         this.sendAck(ws, deviceId, messageId, 'received', { note: 'duplicate_ignored' });
@@ -240,6 +255,18 @@ export class DeviceWsProtocolService {
     }
 
     db.updateDevice(device.id, updatePayload);
+    db.postgresRepo?.updateDeviceHelloInfo(device.id, {
+      firmwareVersion: data.firmwareVersion,
+      hardwareModel: data.hardware,
+      ipAddress: data.ip,
+      macAddress: data.mac,
+      status: 'online',
+      websocketConnected: true,
+      lastSeen: new Date().toISOString(),
+    }).catch((err) => {
+      console.warn(`[DeviceWsProtocol] Postgres updateDeviceHelloInfo error (${device.id}):`, err?.message || err);
+    });
+
     const updatedDevice = db.getDeviceById(device.id) || device;
 
     // Broadcast device status to dashboard
@@ -267,7 +294,7 @@ export class DeviceWsProtocolService {
   }
 
   /**
-   * Handle 'telemetry' message: Ingestion of sensor metrics.
+   * Handle 'telemetry' message: Ingestion of sensor metrics with strict validation and sanitization.
    */
   private async handleTelemetry(
     ws: AuthenticatedWebSocket,
@@ -276,18 +303,36 @@ export class DeviceWsProtocolService {
     timestamp: number,
     data: DeviceTelemetryData
   ): Promise<boolean> {
-    if (!data || typeof data !== 'object') {
-      this.sendAck(ws, device.id, messageId, 'failed', { error: 'Veri içeriği boş veya geçersiz' });
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      this.sendAck(ws, device.id, messageId, 'failed', { error: 'Veri içeriği boş veya geçersiz nesne yapısında' });
+      return false;
+    }
+
+    const rawPayloadStr = JSON.stringify(data);
+    if (rawPayloadStr.length > 65536) {
+      this.sendAck(ws, device.id, messageId, 'failed', { error: 'Telemetri paketi çok büyük (max 64KB)' });
       return false;
     }
 
     const addedReadings: TelemetryReading[] = [];
-    const rawPayloadStr = JSON.stringify(data);
     const metricsToProcess: ParsedMetric[] = [];
 
-    // Normalize metric values: support either `metric: 24.3` or `metric: { value: 24.3, unit: "C" }`
-    for (const [metricKey, metricRaw] of Object.entries(data)) {
+    // Security: Filter keys to prevent prototype pollution and unbounded keys
+    const entries = Object.entries(data);
+    if (entries.length > 50) {
+      this.sendAck(ws, device.id, messageId, 'failed', { error: 'Telemetri paketinde çok fazla metrik var (max 50)' });
+      return false;
+    }
+
+    const METRIC_KEY_REGEX = /^[a-zA-Z0-9_.:\-]{1,64}$/;
+    const BANNED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+    // Normalize and validate metric values
+    for (const [metricKey, metricRaw] of entries) {
       if (metricRaw === undefined || metricRaw === null) continue;
+      if (BANNED_KEYS.has(metricKey) || !METRIC_KEY_REGEX.test(metricKey)) {
+        continue;
+      }
 
       let val: number;
       let unit = '';
@@ -295,8 +340,8 @@ export class DeviceWsProtocolService {
       if (typeof metricRaw === 'number') {
         val = metricRaw;
       } else if (typeof metricRaw === 'object' && metricRaw !== null && 'value' in metricRaw) {
-        val = Number(metricRaw.value);
-        unit = metricRaw.unit ? String(metricRaw.unit) : '';
+        val = Number((metricRaw as any).value);
+        unit = (metricRaw as any).unit ? String((metricRaw as any).unit).slice(0, 16) : '';
       } else if (typeof metricRaw === 'string' && !isNaN(Number(metricRaw))) {
         val = Number(metricRaw);
       } else if (typeof metricRaw === 'boolean') {
@@ -305,7 +350,8 @@ export class DeviceWsProtocolService {
         continue;
       }
 
-      if (isNaN(val)) continue;
+      // Check numeric bounds
+      if (isNaN(val) || !isFinite(val) || val > 1e12 || val < -1e12) continue;
 
       metricsToProcess.push({
         metric: metricKey,
@@ -351,7 +397,7 @@ export class DeviceWsProtocolService {
   }
 
   /**
-   * Handle 'ack' message: ESP confirms execution of a command.
+   * Handle 'ack' message: ESP confirms execution of a command with physical execution verification.
    */
   private async handleAck(
     ws: AuthenticatedWebSocket,
@@ -365,7 +411,21 @@ export class DeviceWsProtocolService {
     }
 
     const { forMessageId, status, error, result } = data;
-    const cleanStatus = status === 'executed' ? 'executed' : (status === 'failed' ? 'failed' : 'acknowledged');
+
+    // Verify actual physical execution status
+    let cleanStatus: 'executed' | 'failed' | 'acknowledged' = 'acknowledged';
+    if (status === 'executed') {
+      // If error is present or result indicates failure, fail the command
+      if (error || (result && typeof result === 'object' && (result as any).success === false)) {
+        cleanStatus = 'failed';
+      } else {
+        cleanStatus = 'executed';
+      }
+    } else if (status === 'failed') {
+      cleanStatus = 'failed';
+    } else {
+      cleanStatus = 'acknowledged';
+    }
 
     // Extract actual command ID if formatted as "cmd_<id>"
     const actualCommandId = forMessageId.startsWith('cmd_')
@@ -538,6 +598,15 @@ export class DeviceWsProtocolService {
       lastSeen: new Date().toISOString(),
     });
 
+    db.postgresRepo?.updateDeviceOutputsAndMetrics(
+      device.id,
+      updatedMetrics,
+      outputsUpdated ? newDefinitions : device.outputDefinitions,
+      new Date().toISOString()
+    ).catch((err) => {
+      console.warn(`[DeviceWsProtocol] Postgres updateDeviceOutputsAndMetrics error (${device.id}):`, err?.message || err);
+    });
+
     broadcast('devices:updated', db.getDevices());
     broadcast('device:output:changed', {
       deviceId: device.id,
@@ -635,7 +704,8 @@ export class DeviceWsProtocolService {
     deviceId: string,
     version: string,
     downloadUrl: string,
-    checksum?: string
+    checksum?: string,
+    extraSecurity?: { signature?: string; keyId?: string; bootNonce?: string; downloadToken?: string }
   ): boolean {
     const sockets = this.activeDeviceSockets.get(deviceId);
     if (!sockets || sockets.size === 0) return false;
@@ -651,6 +721,11 @@ export class DeviceWsProtocolService {
         version,
         url: downloadUrl,
         checksum: checksum || '',
+        sha256: checksum || '',
+        signature: extraSecurity?.signature || '',
+        keyId: extraSecurity?.keyId || '',
+        bootNonce: extraSecurity?.bootNonce || '',
+        downloadToken: extraSecurity?.downloadToken || '',
       },
     };
 
@@ -744,9 +819,28 @@ export class DeviceWsProtocolService {
    * Multi-tenant security (Rule 1):
    * A device cannot impersonate or modify another device or another customer's data.
    */
-  private verifyDeviceAuthorization(ws: AuthenticatedWebSocket, deviceId: string): Device | null {
+  private async verifyDeviceAuthorization(ws: AuthenticatedWebSocket, deviceId: string): Promise<Device | null> {
     const cleanId = deviceId.trim();
-    const targetDevice = db.getDeviceById(cleanId) || db.getDeviceByApiKey(cleanId);
+    let targetDevice = db.getDeviceById(cleanId) || db.getDeviceByApiKey(cleanId);
+
+    if (!targetDevice && db.postgresRepo) {
+      try {
+        const pgDev = (await db.postgresRepo.getDeviceById(cleanId)) || (await db.postgresRepo.getDeviceByApiKey(cleanId));
+        if (pgDev) {
+          targetDevice = pgDev;
+          if (db.data && Array.isArray(db.data.devices)) {
+            const existingIdx = db.data.devices.findIndex((d: Device) => d.id === pgDev.id);
+            if (existingIdx === -1) {
+              db.data.devices.push(pgDev);
+            } else {
+              db.data.devices[existingIdx] = pgDev;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[DeviceWsProtocol] Postgres verifyDeviceAuthorization error (${cleanId}):`, err?.message || err);
+      }
+    }
 
     if (!targetDevice) {
       // Record unregistered device for discovery
@@ -786,23 +880,33 @@ export class DeviceWsProtocolService {
 
   /**
    * Check if a messageId was already processed within the TTL window.
+   * Multi-instance safe: checks both local in-memory cache and persistent PostgreSQL deduplication store.
    */
-  private isDuplicateMessage(deviceId: string, messageId: string, type: UnifiedMessageType): boolean {
+  private async isDuplicateMessage(deviceId: string, messageId: string, type: UnifiedMessageType): Promise<boolean> {
     const cacheKey = `${deviceId}:${messageId}`;
     const existing = this.processedMessages.get(cacheKey);
-    if (!existing) return false;
-
-    // Check if expired
-    if (Date.now() - existing.timestamp > this.CACHE_TTL_MS) {
-      this.processedMessages.delete(cacheKey);
-      return false;
+    if (existing && (Date.now() - existing.timestamp <= this.CACHE_TTL_MS)) {
+      return true;
     }
 
-    return true;
+    // Check persistent PostgreSQL store for cross-instance deduplication
+    if (db.postgresRepo && db.postgresRepo.isReady()) {
+      try {
+        const isNew = await db.postgresRepo.checkAndRecordWsMessage(deviceId, messageId, type, this.CACHE_TTL_MS);
+        if (!isNew) {
+          // Already recorded in PostgreSQL by another instance or previous request -> duplicate!
+          return true;
+        }
+      } catch (err: any) {
+        console.warn(`[DeviceWsProtocol] Postgres checkAndRecordWsMessage hatası (${deviceId}/${messageId}):`, err?.message || err);
+      }
+    }
+
+    return false;
   }
 
   /**
-   * Record that a messageId has been processed.
+   * Record that a messageId has been processed in local cache.
    */
   private recordMessageProcessed(deviceId: string, messageId: string, type: UnifiedMessageType) {
     // If cache exceeds limit, remove oldest entries
@@ -819,7 +923,7 @@ export class DeviceWsProtocolService {
   }
 
   /**
-   * Remove expired deduplication cache entries.
+   * Remove expired deduplication cache entries (both local memory and PostgreSQL).
    */
   private cleanupExpiredMessages() {
     const now = Date.now();
@@ -827,6 +931,12 @@ export class DeviceWsProtocolService {
       if (now - entry.timestamp > this.CACHE_TTL_MS) {
         this.processedMessages.delete(key);
       }
+    }
+
+    if (db.postgresRepo && db.postgresRepo.isReady()) {
+      db.postgresRepo.cleanupExpiredWsMessages().catch((err) => {
+        console.warn('[DeviceWsProtocol] Postgres cleanupExpiredWsMessages hatası:', err?.message || err);
+      });
     }
   }
 

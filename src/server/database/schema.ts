@@ -48,9 +48,27 @@ EXCEPTION
         RAISE NOTICE 'users table alter notice: %', SQLERRM;
 END $$;
 
+-- 2b. Canonical Root System Administrator & Fallback Tenant (usr_admin)
+INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+VALUES (
+    'usr_admin',
+    'Sistem Yöneticisi',
+    'admin@nexusnode.io',
+    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
+    'admin',
+    'Merkez Yönetim',
+    'active',
+    CURRENT_TIMESTAMP
+)
+ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64),
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
+    user_id VARCHAR(64) DEFAULT 'usr_admin',
+    previous_tenant_id VARCHAR(64),
+    previous_tenant_name VARCHAR(128),
+    ownership_transferred_at TIMESTAMP WITH TIME ZONE,
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(32) NOT NULL,
     api_key VARCHAR(128),
@@ -82,14 +100,24 @@ CREATE TABLE IF NOT EXISTS devices (
     interval_mode VARCHAR(16) DEFAULT 'auto',
     custom_interval_seconds INT,
     recent_intervals JSONB DEFAULT '[]'::jsonb,
+    websocket_connected BOOLEAN DEFAULT FALSE,
+    last_message_at TIMESTAMP WITH TIME ZONE,
+    output_definitions JSONB DEFAULT '[]'::jsonb,
+    capabilities JSONB DEFAULT '[]'::jsonb,
+    supported_outputs JSONB DEFAULT '[]'::jsonb,
+    supported_commands JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure columns exist for existing databases & remove blocking FK on devices(user_id)
+-- Ensure columns exist for existing databases & establish canonical foreign keys
 DO $$
 BEGIN
     ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
-    ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_id VARCHAR(64);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_name VARCHAR(128);
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS ownership_transferred_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);
@@ -109,10 +137,49 @@ BEGIN
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS interval_mode VARCHAR(16) DEFAULT 'auto';
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS custom_interval_seconds INT;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS recent_intervals JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS websocket_connected BOOLEAN DEFAULT FALSE;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS output_definitions JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_outputs JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_commands JSONB DEFAULT '[]'::jsonb;
+
+    -- Canonical data cleanup: resolve any null or orphaned references to usr_admin
+    UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id IS NULL OR tenant_id = '';
+    UPDATE devices SET user_id = tenant_id WHERE user_id IS NULL OR user_id = '';
+    UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id NOT IN (SELECT id FROM users);
+    UPDATE devices SET user_id = tenant_id WHERE user_id NOT IN (SELECT id FROM users);
+
+    -- Enforce foreign keys with ON UPDATE CASCADE ON DELETE SET DEFAULT
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE table_name = 'devices' AND constraint_name = 'fk_devices_tenant_id'
+    ) THEN
+        ALTER TABLE devices ADD CONSTRAINT fk_devices_tenant_id FOREIGN KEY (tenant_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE table_name = 'devices' AND constraint_name = 'fk_devices_user_id'
+    ) THEN
+        ALTER TABLE devices ADD CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
+    END IF;
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'devices table alter notice: %', SQLERRM;
 END $$;
+
+-- 2c. Device WebSocket Messages Deduplication Table (Multi-instance atomic idempotency)
+CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (
+    device_id VARCHAR(64) NOT NULL,
+    message_id VARCHAR(128) NOT NULL,
+    message_type VARCHAR(32) NOT NULL,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (device_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_ws_dedup_expires ON device_ws_messages_dedup(expires_at);
 
 -- 3a. Telemetry Packets Table (Packet-Level Sequence Deduplication Table)
 CREATE TABLE IF NOT EXISTS telemetry_packets (

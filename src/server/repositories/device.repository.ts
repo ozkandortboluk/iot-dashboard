@@ -107,13 +107,41 @@ export class DeviceRepository {
     return list;
   }
 
-  public assignDeviceOwner(deviceId: string, targetTenantId: string): Device | undefined {
+  public assignDeviceOwner(
+    deviceId: string,
+    targetTenantId: string,
+    adminUserId = 'system',
+    adminUserName = 'Yönetici'
+  ): Device | undefined {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
-    if (dev) {
-      dev.tenantId = targetTenantId;
-      this.db.saveData(this.db.data);
-      this.db.postgresRepo?.saveDevice(dev).catch(() => {});
-    }
+    if (!dev) return undefined;
+
+    const resolved = tenantSecurityService.validateAndResolveDeviceOwnership(
+      targetTenantId,
+      { id: adminUserId, role: 'admin' },
+      this.db.data.users || []
+    );
+
+    const oldOwnerId = dev.tenantId || 'usr_admin';
+    const oldOwner = this.db.data.users?.find((u: any) => u.id === oldOwnerId);
+    const newOwner = this.db.data.users?.find((u: any) => u.id === resolved.canonicalTenantId);
+
+    dev.previousTenantId = oldOwnerId;
+    dev.previousTenantName = oldOwner ? oldOwner.name : (oldOwnerId === 'usr_admin' ? 'Merkez Yönetim' : oldOwnerId);
+    dev.ownershipTransferredAt = new Date().toISOString();
+    dev.tenantId = resolved.canonicalTenantId;
+    dev.userId = resolved.canonicalTenantId;
+
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(
+      adminUserId,
+      adminUserName,
+      `Cihaz Sahipliği Devredildi: "${dev.name}" -> ${newOwner ? newOwner.name : 'Sistem Yöneticisi'} (${resolved.canonicalTenantId}) [Önceki Sahip: ${dev.previousTenantName}]`,
+      'medium'
+    );
+    this.db.postgresRepo?.saveDevice(dev).catch((err: any) => {
+      console.warn('[Postgres saveDevice on assignDeviceOwner]:', err?.message || err);
+    });
     return dev;
   }
 
@@ -165,8 +193,18 @@ export class DeviceRepository {
       intervalMode: deviceData.intervalMode || 'auto',
     });
 
+    // Kanonik Tenant / Müşteri Sahipliği Doğrulaması
+    const resolvedOwnership = tenantSecurityService.validateAndResolveDeviceOwnership(
+      deviceData.tenantId,
+      undefined,
+      this.db.data.users || []
+    );
+    const canonicalTenantId = resolvedOwnership.canonicalTenantId;
+
     const newDevice: Device = {
       ...deviceData,
+      tenantId: canonicalTenantId,
+      userId: canonicalTenantId,
       name,
       isSimulated,
       saveSimulatedDataToDb,
@@ -192,9 +230,9 @@ export class DeviceRepository {
     if (newDevice.name) this.removeUnregisteredDevice(newDevice.name);
 
     this.db.addAuditLog(
-      deviceData.tenantId,
+      canonicalTenantId,
       'Sistem',
-      `Yeni Cihaz Eklendi: ${newDevice.name} (IP: ${newDevice.ipAddress})`,
+      `Yeni Cihaz Eklendi: ${newDevice.name} (IP: ${newDevice.ipAddress || 'Bilinmiyor'}) [Sahip: ${canonicalTenantId}]`,
       'medium'
     );
     this.db.saveData(this.db.data);
@@ -289,6 +327,8 @@ export class DeviceRepository {
     if (updates.capabilities !== undefined) dev.capabilities = updates.capabilities;
     if (updates.supportedOutputs !== undefined) dev.supportedOutputs = updates.supportedOutputs;
     if (updates.supportedCommands !== undefined) dev.supportedCommands = updates.supportedCommands;
+    if (updates.websocketConnected !== undefined) dev.websocketConnected = updates.websocketConnected;
+    if (updates.lastMessageAt !== undefined) dev.lastMessageAt = updates.lastMessageAt;
     if (updates.location !== undefined) dev.location = updates.location;
     if (updates.ipAddress !== undefined) dev.ipAddress = updates.ipAddress;
     if (updates.macAddress !== undefined) dev.macAddress = updates.macAddress;

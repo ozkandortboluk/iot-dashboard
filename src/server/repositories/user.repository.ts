@@ -202,15 +202,52 @@ export class UserRepository {
     return user;
   }
 
-  public deleteUser(userId: string) {
+  public deleteUser(userId: string, adminId = 'system', adminName = 'Admin') {
     const index = this.db.data.users.findIndex((u: any) => u.id === userId);
-    if (index !== -1) {
-      const removed = this.db.data.users.splice(index, 1)[0];
-      delete this.db.data.passwords[userId];
-      this.db.addAuditLog('system', 'Admin', `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
-      this.db.saveData(this.db.data);
-      this.db.postgresRepo.deleteUser(userId).catch(() => {});
+    if (index === -1) return;
+
+    const removed = this.db.data.users[index];
+
+    // 1. CİHAZ SAHİPLİĞİNİ KORUMA & KANONİK AKTARIM:
+    // Kullanıcı silindiğinde cihaz korunur; kimsesiz veya sahipsiz kalmaması için
+    // kanonik olarak 'usr_admin' (Merkez Yönetim) hesabına devredilir ve geçmiş kayıtları saklanır.
+    const now = new Date().toISOString();
+    const ownedDevices = (this.db.data.devices || []).filter(
+      (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
+    );
+
+    for (const dev of ownedDevices) {
+      dev.previousTenantId = userId;
+      dev.previousTenantName = removed.name;
+      dev.ownershipTransferredAt = now;
+      dev.tenantId = 'usr_admin';
+      dev.userId = 'usr_admin';
+      if (!dev.location || dev.location === 'Varsayılan') {
+        dev.location = `Merkez Depo (Eski Müşteri: ${removed.name})`;
+      }
     }
+
+    if (ownedDevices.length > 0) {
+      this.db.addAuditLog(
+        adminId,
+        adminName,
+        `Müşteri Silinirken Cihazlar Korundu & Devredildi: "${removed.name}" kullanıcısına ait ${ownedDevices.length} adet cihaz Sistem Yöneticisine devredildi.`,
+        'medium'
+      );
+    }
+
+    // 2. Kullanıcıyı ve oturumları kaldır
+    this.db.data.users.splice(index, 1);
+    delete this.db.data.passwords[userId];
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
+
+    this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
+    this.db.saveData(this.db.data);
+
+    // 3. PostgreSQL Transaction: Cihazları güncelle ve kullanıcıyı sil
+    this.db.postgresRepo?.deleteUser(userId).catch((err: any) => {
+      console.warn('[Postgres deleteUser Error]:', err?.message || err);
+    });
   }
 
   public async terminateUserSessions(userId: string) {

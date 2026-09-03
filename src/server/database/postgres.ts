@@ -90,10 +90,28 @@ export class PostgresRepository {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb;`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'operator';`,
 
-        // 2. Devices Table & Columns
+        // 1b. Seed Canonical Root Admin (usr_admin)
+        `INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+        VALUES (
+          'usr_admin', 
+          'Sistem Yöneticisi', 
+          'admin@nexusnode.io', 
+          '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 
+          'admin', 
+          'Merkez Yönetim', 
+          'active', 
+          CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (id) DO NOTHING;`,
+
+        // 2. Devices Table & Columns (Enforcing Canonical tenant_id & Ownership Audit)
         `CREATE TABLE IF NOT EXISTS devices (
           id VARCHAR(64) PRIMARY KEY,
-          user_id VARCHAR(64),
+          tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
+          user_id VARCHAR(64) DEFAULT 'usr_admin',
+          previous_tenant_id VARCHAR(64),
+          previous_tenant_name VARCHAR(128),
+          ownership_transferred_at TIMESTAMP WITH TIME ZONE,
           name VARCHAR(128) NOT NULL,
           device_type VARCHAR(32) NOT NULL,
           api_key VARCHAR(128),
@@ -125,24 +143,19 @@ export class PostgresRepository {
           interval_mode VARCHAR(16) DEFAULT 'auto',
           custom_interval_seconds INT,
           recent_intervals JSONB DEFAULT '[]'::jsonb,
+          websocket_connected BOOLEAN DEFAULT FALSE,
+          last_message_at TIMESTAMP WITH TIME ZONE,
+          output_definitions JSONB DEFAULT '[]'::jsonb,
+          capabilities JSONB DEFAULT '[]'::jsonb,
+          supported_outputs JSONB DEFAULT '[]'::jsonb,
+          supported_commands JSONB DEFAULT '[]'::jsonb,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );`,
-        `ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;`,
-        `DO $$ 
-        DECLARE 
-            r RECORD;
-        BEGIN
-            FOR r IN (
-                SELECT constraint_name 
-                FROM information_schema.table_constraints 
-                WHERE table_name = 'devices' 
-                AND constraint_type = 'FOREIGN KEY'
-                AND constraint_name LIKE '%user%'
-            ) LOOP
-                EXECUTE 'ALTER TABLE devices DROP CONSTRAINT IF EXISTS ' || quote_ident(r.constraint_name);
-            END LOOP;
-        END $$;`,
-        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_id VARCHAR(64);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_name VARCHAR(128);`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ownership_transferred_at TIMESTAMP WITH TIME ZONE;`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);`,
@@ -162,6 +175,37 @@ export class PostgresRepository {
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS interval_mode VARCHAR(16) DEFAULT 'auto';`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS custom_interval_seconds INT;`,
         `ALTER TABLE devices ADD COLUMN IF NOT EXISTS recent_intervals JSONB DEFAULT '[]'::jsonb;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS websocket_connected BOOLEAN DEFAULT FALSE;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP WITH TIME ZONE;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS output_definitions JSONB DEFAULT '[]'::jsonb;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]'::jsonb;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_outputs JSONB DEFAULT '[]'::jsonb;`,
+        `ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_commands JSONB DEFAULT '[]'::jsonb;`,
+
+        // Canonical Data Hygiene & Foreign Key Attachment with ON DELETE SET DEFAULT
+        `UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id IS NULL OR tenant_id = '';`,
+        `UPDATE devices SET user_id = tenant_id WHERE user_id IS NULL OR user_id = '';`,
+        `UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id NOT IN (SELECT id FROM users);`,
+        `UPDATE devices SET user_id = tenant_id WHERE user_id NOT IN (SELECT id FROM users);`,
+        `DO $$ 
+        BEGIN
+            -- Clean up old direct fk constraints if present
+            ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints 
+                WHERE table_name = 'devices' AND constraint_name = 'fk_devices_tenant_id'
+            ) THEN
+                ALTER TABLE devices ADD CONSTRAINT fk_devices_tenant_id FOREIGN KEY (tenant_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints 
+                WHERE table_name = 'devices' AND constraint_name = 'fk_devices_user_id'
+            ) THEN
+                ALTER TABLE devices ADD CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
+            END IF;
+        END $$;`,
 
         // 3. Telemetry Packets & Readings
         `CREATE TABLE IF NOT EXISTS telemetry_packets (
@@ -173,6 +217,15 @@ export class PostgresRepository {
           metric_count INTEGER DEFAULT 1,
           received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
         );`,
+        `CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (
+          device_id VARCHAR(64) NOT NULL,
+          message_id VARCHAR(128) NOT NULL,
+          message_type VARCHAR(32) NOT NULL,
+          received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          PRIMARY KEY (device_id, message_id)
+        );`,
+        `CREATE INDEX IF NOT EXISTS idx_device_ws_dedup_expires ON device_ws_messages_dedup(expires_at);`,
         `CREATE TABLE IF NOT EXISTS telemetry_readings (
           id VARCHAR(128) NOT NULL,
           packet_id VARCHAR(128),
@@ -637,7 +690,40 @@ export class PostgresRepository {
 
   public async deleteUser(userId: string): Promise<void> {
     if (!this.pool) return;
-    await this.query(`DELETE FROM users WHERE id = $1;`, [userId]);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // 1. Cihaz Sahipliğini Koruma & Kanonik Sistem Yöneticisine Aktarım:
+      // Kullanıcı silindiğinde cihaz korunur, ancak kimsesiz / belirsiz kalmaması için
+      // kanonik olarak 'usr_admin' (Merkez Yönetim) hesabına devredilir ve geçmiş kayıtları saklanır.
+      await client.query(`
+        UPDATE devices
+        SET 
+          previous_tenant_id = $1,
+          previous_tenant_name = COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), 'Eski Müşteri'),
+          ownership_transferred_at = NOW(),
+          tenant_id = 'usr_admin',
+          user_id = 'usr_admin',
+          location = CASE 
+            WHEN location IS NULL OR location = '' OR location = 'Varsayılan' 
+            THEN 'Merkez Depo (Eski Müşteri: ' || COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), $1) || ')'
+            ELSE location 
+          END
+        WHERE tenant_id = $1 OR user_id = $1;
+      `, [userId]);
+
+      // 2. Kullanıcının oturumlarını temizle
+      await client.query(`DELETE FROM user_sessions WHERE user_id = $1;`, [userId]);
+
+      // 3. Kullanıcıyı sil (Artık hiçbir cihaz bu kullanıcıya bağlı olmadığı için FK ihlali oluşmaz)
+      await client.query(`DELETE FROM users WHERE id = $1;`, [userId]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   public async softDeleteUser(userId: string): Promise<void> {
@@ -662,18 +748,33 @@ export class PostgresRepository {
   public async saveDevice(dev: Device): Promise<void> {
     if (!this.pool) return;
     await this.ensureTelemetrySchema();
+
+    // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_admin'e yönlendirilir
+    const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_admin';
+
     const sql = `
       INSERT INTO devices (
-        id, user_id, name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
+        id, tenant_id, user_id, previous_tenant_id, previous_tenant_name, ownership_transferred_at,
+        name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
         ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
         save_simulated_data_to_db, simulated_metrics, role_key, hardware_model, firmware_version,
         ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at,
         expected_interval_seconds, auto_detected_interval_seconds, heartbeat_timeout_seconds,
-        interval_mode, custom_interval_seconds, recent_intervals, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+        interval_mode, custom_interval_seconds, recent_intervals,
+        websocket_connected, last_message_at, output_definitions, capabilities, supported_outputs, supported_commands,
+        created_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
+        $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, 
+        $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44
+      )
       ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id,
         user_id = EXCLUDED.user_id,
+        previous_tenant_id = COALESCE(EXCLUDED.previous_tenant_id, devices.previous_tenant_id),
+        previous_tenant_name = COALESCE(EXCLUDED.previous_tenant_name, devices.previous_tenant_name),
+        ownership_transferred_at = COALESCE(EXCLUDED.ownership_transferred_at, devices.ownership_transferred_at),
         name = EXCLUDED.name,
         device_type = EXCLUDED.device_type,
         api_key = EXCLUDED.api_key,
@@ -704,11 +805,21 @@ export class PostgresRepository {
         heartbeat_timeout_seconds = EXCLUDED.heartbeat_timeout_seconds,
         interval_mode = EXCLUDED.interval_mode,
         custom_interval_seconds = EXCLUDED.custom_interval_seconds,
-        recent_intervals = EXCLUDED.recent_intervals;
+        recent_intervals = EXCLUDED.recent_intervals,
+        websocket_connected = EXCLUDED.websocket_connected,
+        last_message_at = COALESCE(EXCLUDED.last_message_at, devices.last_message_at),
+        output_definitions = EXCLUDED.output_definitions,
+        capabilities = EXCLUDED.capabilities,
+        supported_outputs = EXCLUDED.supported_outputs,
+        supported_commands = EXCLUDED.supported_commands;
     `;
     const params = [
       dev.id,
-      dev.tenantId || null,
+      canonicalTenantId,
+      canonicalTenantId,
+      dev.previousTenantId || null,
+      dev.previousTenantName || null,
+      dev.ownershipTransferredAt || null,
       dev.name,
       dev.deviceType || dev.type || 'sensor',
       dev.apiKey || null,
@@ -740,6 +851,12 @@ export class PostgresRepository {
       dev.intervalMode || 'auto',
       dev.customIntervalSeconds || null,
       JSON.stringify(dev.recentIntervals || []),
+      Boolean(dev.websocketConnected),
+      dev.lastMessageAt || null,
+      JSON.stringify(dev.outputDefinitions || []),
+      JSON.stringify(dev.capabilities || []),
+      JSON.stringify(dev.supportedOutputs || []),
+      JSON.stringify(dev.supportedCommands || []),
       new Date().toISOString(),
     ];
 
@@ -747,19 +864,23 @@ export class PostgresRepository {
       await this.query(sql, params);
     } catch (saveErr: any) {
       const errMsg = saveErr?.message || String(saveErr);
-      if (errMsg.includes('devices_user_id_fkey') || (errMsg.includes('foreign key') && errMsg.includes('devices'))) {
+      if (errMsg.includes('fk_devices_tenant_id') || errMsg.includes('devices_user_id_fkey') || (errMsg.includes('foreign key') && errMsg.includes('devices'))) {
         try {
+          // Fallback: Belirtilen tenant_id veritabanında yoksa, 'usr_admin' garantisi altında 'usr_admin'e yönlendir ve kaydet
           if (this.pool) {
-            await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;`);
+            await this.pool.query(`
+              INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+              VALUES ('usr_admin', 'Sistem Yöneticisi', 'admin@nexusnode.io', '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 'admin', 'Merkez Yönetim', 'active', CURRENT_TIMESTAMP)
+              ON CONFLICT (id) DO NOTHING;
+            `);
           }
-          await this.query(sql, params);
-          return;
-        } catch {
-          // Fallback: set user_id ($2) to null to ensure device save never fails
           const fallbackParams = [...params];
-          fallbackParams[1] = null;
+          fallbackParams[1] = 'usr_admin';
+          fallbackParams[2] = 'usr_admin';
           await this.query(sql, fallbackParams);
           return;
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL saveDevice fallback error]:', retryErr?.message || retryErr);
         }
       }
       throw saveErr;
@@ -769,6 +890,172 @@ export class PostgresRepository {
   public async deleteDevice(deviceId: string): Promise<void> {
     if (!this.pool) return;
     await this.query(`DELETE FROM devices WHERE id = $1;`, [deviceId]);
+  }
+
+  public mapDeviceRow(r: any): Device {
+    return {
+      id: r.id,
+      tenantId: r.tenant_id || r.user_id || 'usr_admin',
+      userId: r.tenant_id || r.user_id || 'usr_admin',
+      previousTenantId: r.previous_tenant_id || undefined,
+      previousTenantName: r.previous_tenant_name || undefined,
+      ownershipTransferredAt: r.ownership_transferred_at ? new Date(r.ownership_transferred_at).toISOString() : undefined,
+      name: r.name,
+      type: r.device_type,
+      deviceType: r.device_type,
+      roleKey: r.role_key || undefined,
+      hardwareModel: r.hardware_model || undefined,
+      firmwareVersion: r.firmware_version || undefined,
+      apiKey: r.api_key || '',
+      apiKeyPrefix: r.api_key_prefix || (r.api_key ? r.api_key.substring(0, 12) : undefined),
+      apiKeyHash: r.api_key_hash,
+      status: r.status || 'online',
+      location: r.location || '',
+      ipAddress: r.ip_address || '',
+      macAddress: r.mac_address || '',
+      lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : new Date().toISOString(),
+      rateLimitPerMin: r.rate_limit_per_min || 120,
+      encryptionMethod: r.encryption_method || 'AES-256-GCM',
+      metrics: typeof r.metrics === 'string' ? JSON.parse(r.metrics) : r.metrics || {},
+      dataFlowActive: r.data_flow_active !== false,
+      isSimulated: r.is_simulated !== undefined && r.is_simulated !== null ? Boolean(r.is_simulated) : (r.name?.includes('[Sanal]') || r.id?.startsWith('dev_0') || r.id?.startsWith('sim_')),
+      saveSimulatedDataToDb: Boolean(r.save_simulated_data_to_db),
+      simulatedMetrics: Array.isArray(r.simulated_metrics) ? r.simulated_metrics : (typeof r.simulated_metrics === 'string' ? JSON.parse(r.simulated_metrics) : undefined),
+      otaStatus: r.ota_status || 'IDLE',
+      otaTargetFirmwareId: r.ota_target_firmware_id || undefined,
+      otaProgress: r.ota_progress || 0,
+      otaErrorMessage: r.ota_error_message || undefined,
+      otaLastCheckAt: r.ota_last_check_at ? new Date(r.ota_last_check_at).toISOString() : undefined,
+      expectedIntervalSeconds: r.expected_interval_seconds ? Number(r.expected_interval_seconds) : 30,
+      autoDetectedIntervalSeconds: r.auto_detected_interval_seconds ? Number(r.auto_detected_interval_seconds) : 30,
+      heartbeatTimeoutSeconds: r.heartbeat_timeout_seconds ? Number(r.heartbeat_timeout_seconds) : 60,
+      intervalMode: r.interval_mode || 'auto',
+      customIntervalSeconds: r.custom_interval_seconds ? Number(r.custom_interval_seconds) : undefined,
+      recentIntervals: Array.isArray(r.recent_intervals) ? r.recent_intervals : (typeof r.recent_intervals === 'string' ? JSON.parse(r.recent_intervals) : []),
+      websocketConnected: Boolean(r.websocket_connected),
+      lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : undefined,
+      outputDefinitions: Array.isArray(r.output_definitions) ? r.output_definitions : (typeof r.output_definitions === 'string' ? JSON.parse(r.output_definitions) : undefined),
+      capabilities: Array.isArray(r.capabilities) ? r.capabilities : (typeof r.capabilities === 'string' ? JSON.parse(r.capabilities) : undefined),
+      supportedOutputs: Array.isArray(r.supported_outputs) ? r.supported_outputs : (typeof r.supported_outputs === 'string' ? JSON.parse(r.supported_outputs) : undefined),
+      supportedCommands: Array.isArray(r.supported_commands) ? r.supported_commands : (typeof r.supported_commands === 'string' ? JSON.parse(r.supported_commands) : undefined),
+    };
+  }
+
+  public async getDeviceById(id: string): Promise<Device | null> {
+    if (!this.pool || !id) return null;
+    try {
+      const res = await this.query(`SELECT * FROM devices WHERE id = $1 LIMIT 1;`, [id]);
+      if (res.rows && res.rows.length > 0) {
+        return this.mapDeviceRow(res.rows[0]);
+      }
+      return null;
+    } catch (err: any) {
+      console.error(`[PostgreSQL] getDeviceById error for ${id}:`, err.message || err);
+      return null;
+    }
+  }
+
+  public async getDeviceByApiKey(apiKey: string): Promise<Device | null> {
+    if (!this.pool || !apiKey) return null;
+    try {
+      const res = await this.query(`SELECT * FROM devices WHERE api_key = $1 OR api_key_hash = $1 LIMIT 1;`, [apiKey]);
+      if (res.rows && res.rows.length > 0) {
+        return this.mapDeviceRow(res.rows[0]);
+      }
+      return null;
+    } catch (err: any) {
+      console.error(`[PostgreSQL] getDeviceByApiKey error:`, err.message || err);
+      return null;
+    }
+  }
+
+  public async updateDeviceWsStatus(
+    deviceId: string,
+    isConnected: boolean,
+    status?: string,
+    lastSeenIso?: string,
+    lastMessageAtIso?: string
+  ): Promise<void> {
+    if (!this.pool || !deviceId) return;
+    const now = new Date().toISOString();
+    const seen = lastSeenIso || now;
+    const msgAt = lastMessageAtIso || (isConnected ? now : null);
+    try {
+      await this.query(
+        `UPDATE devices
+         SET websocket_connected = $2,
+             status = COALESCE($3, status),
+             last_seen = COALESCE($4::timestamptz, last_seen),
+             last_message_at = COALESCE($5::timestamptz, last_message_at)
+         WHERE id = $1;`,
+        [deviceId, isConnected, status || (isConnected ? 'online' : 'offline'), seen, msgAt]
+      );
+    } catch (err: any) {
+      console.error(`[PostgreSQL] updateDeviceWsStatus error for ${deviceId}:`, err.message || err);
+    }
+  }
+
+  public async updateDeviceOutputsAndMetrics(
+    deviceId: string,
+    metrics: Record<string, any>,
+    outputDefinitions?: any[],
+    lastSeenIso?: string
+  ): Promise<void> {
+    if (!this.pool || !deviceId) return;
+    const seen = lastSeenIso || new Date().toISOString();
+    try {
+      await this.query(
+        `UPDATE devices
+         SET metrics = $2::jsonb,
+             output_definitions = COALESCE($3::jsonb, output_definitions),
+             last_seen = COALESCE($4::timestamptz, last_seen)
+         WHERE id = $1;`,
+        [deviceId, JSON.stringify(metrics || {}), outputDefinitions ? JSON.stringify(outputDefinitions) : null, seen]
+      );
+    } catch (err: any) {
+      console.error(`[PostgreSQL] updateDeviceOutputsAndMetrics error for ${deviceId}:`, err.message || err);
+    }
+  }
+
+  public async updateDeviceHelloInfo(
+    deviceId: string,
+    info: {
+      firmwareVersion?: string;
+      hardwareModel?: string;
+      ipAddress?: string;
+      macAddress?: string;
+      status?: string;
+      websocketConnected?: boolean;
+      lastSeen?: string;
+    }
+  ): Promise<void> {
+    if (!this.pool || !deviceId) return;
+    const seen = info.lastSeen || new Date().toISOString();
+    try {
+      await this.query(
+        `UPDATE devices
+         SET firmware_version = COALESCE($2, firmware_version),
+             hardware_model = COALESCE($3, hardware_model),
+             ip_address = COALESCE($4, ip_address),
+             mac_address = COALESCE($5, mac_address),
+             status = COALESCE($6, status),
+             websocket_connected = COALESCE($7, websocket_connected),
+             last_seen = COALESCE($8::timestamptz, last_seen)
+         WHERE id = $1;`,
+        [
+          deviceId,
+          info.firmwareVersion || null,
+          info.hardwareModel || null,
+          info.ipAddress || null,
+          info.macAddress || null,
+          info.status || 'online',
+          info.websocketConnected !== undefined ? info.websocketConnected : true,
+          seen,
+        ]
+      );
+    } catch (err: any) {
+      console.error(`[PostgreSQL] updateDeviceHelloInfo error for ${deviceId}:`, err.message || err);
+    }
   }
 
   // ==========================================
@@ -1805,42 +2092,7 @@ export class PostgresRepository {
       const devices: Device[] = [];
       if (devRes?.rows) {
         devRes.rows.forEach((r: any) => {
-          devices.push({
-            id: r.id,
-            tenantId: r.user_id,
-            name: r.name,
-            type: r.device_type,
-            deviceType: r.device_type,
-            roleKey: r.role_key || undefined,
-            hardwareModel: r.hardware_model || undefined,
-            firmwareVersion: r.firmware_version || undefined,
-            apiKey: r.api_key || '',
-            apiKeyPrefix: r.api_key_prefix || (r.api_key ? r.api_key.substring(0, 12) : undefined),
-            apiKeyHash: r.api_key_hash,
-            status: r.status,
-            location: r.location || '',
-            ipAddress: r.ip_address || '',
-            macAddress: r.mac_address || '',
-            lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : new Date().toISOString(),
-            rateLimitPerMin: r.rate_limit_per_min || 120,
-            encryptionMethod: r.encryption_method || 'AES-256-GCM',
-            metrics: typeof r.metrics === 'string' ? JSON.parse(r.metrics) : r.metrics || {},
-            dataFlowActive: r.data_flow_active !== false,
-            isSimulated: r.is_simulated !== undefined && r.is_simulated !== null ? Boolean(r.is_simulated) : (r.name?.includes('[Sanal]') || r.id?.startsWith('dev_0') || r.id?.startsWith('sim_')),
-            saveSimulatedDataToDb: Boolean(r.save_simulated_data_to_db),
-            simulatedMetrics: Array.isArray(r.simulated_metrics) ? r.simulated_metrics : (typeof r.simulated_metrics === 'string' ? JSON.parse(r.simulated_metrics) : undefined),
-            otaStatus: r.ota_status || 'IDLE',
-            otaTargetFirmwareId: r.ota_target_firmware_id || undefined,
-            otaProgress: r.ota_progress || 0,
-            otaErrorMessage: r.ota_error_message || undefined,
-            otaLastCheckAt: r.ota_last_check_at ? new Date(r.ota_last_check_at).toISOString() : undefined,
-            expectedIntervalSeconds: r.expected_interval_seconds ? Number(r.expected_interval_seconds) : 30,
-            autoDetectedIntervalSeconds: r.auto_detected_interval_seconds ? Number(r.auto_detected_interval_seconds) : 30,
-            heartbeatTimeoutSeconds: r.heartbeat_timeout_seconds ? Number(r.heartbeat_timeout_seconds) : 60,
-            intervalMode: r.interval_mode || 'auto',
-            customIntervalSeconds: r.custom_interval_seconds ? Number(r.custom_interval_seconds) : undefined,
-            recentIntervals: Array.isArray(r.recent_intervals) ? r.recent_intervals : (typeof r.recent_intervals === 'string' ? JSON.parse(r.recent_intervals) : []),
-          });
+          devices.push(this.mapDeviceRow(r));
         });
       }
 
@@ -2319,6 +2571,45 @@ export class PostgresRepository {
       throw err;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Atomically checks and records an incoming WebSocket message for deduplication across multiple instances.
+   * Returns true if message is NEW (successfully recorded), or false if it is a DUPLICATE.
+   */
+  public async checkAndRecordWsMessage(
+    deviceId: string,
+    messageId: string,
+    messageType: string,
+    ttlMs: number = 600000
+  ): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return true;
+    try {
+      const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+      const sql = `
+        INSERT INTO device_ws_messages_dedup (device_id, message_id, message_type, expires_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (device_id, message_id) DO NOTHING
+        RETURNING device_id;
+      `;
+      const res = await this.query(sql, [deviceId, messageId, messageType, expiresAt]);
+      return res.rowCount !== null && res.rowCount > 0;
+    } catch (err: any) {
+      console.warn(`[PostgresRepository] checkAndRecordWsMessage error (${deviceId}/${messageId}):`, err?.message || err);
+      return true; // Fallback to allowing message if DB error
+    }
+  }
+
+  /**
+   * Clean up expired message records from the deduplication table.
+   */
+  public async cleanupExpiredWsMessages(): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    try {
+      await this.query(`DELETE FROM device_ws_messages_dedup WHERE expires_at < NOW()`);
+    } catch (err: any) {
+      console.warn('[PostgresRepository] cleanupExpiredWsMessages error:', err?.message || err);
     }
   }
 }

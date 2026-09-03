@@ -235,7 +235,11 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
     // If device is actively connected via WebSocket, send OTA trigger immediately
     if (isDeviceConnectedViaWs(dev.id)) {
       const downloadUrl = `/api/ota/download/${downloadToken}`;
-      sendOtaCommandViaWs(dev.id, fw.version, downloadUrl, fw.sha256);
+      sendOtaCommandViaWs(dev.id, fw.version, downloadUrl, fw.sha256, {
+        signature: fw.signature,
+        keyId: fw.keyId,
+        downloadToken,
+      });
     }
   });
 
