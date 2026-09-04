@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database } from 'lucide-react';
+import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database, LogIn, UserPlus } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const LoginView: React.FC = () => {
@@ -9,7 +9,7 @@ export const LoginView: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   
   const [needSetup, setNeedSetup] = useState(false);
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'setup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,9 +25,14 @@ export const LoginView: React.FC = () => {
     checkSetupStatus().then((val) => {
       setNeedSetup(val);
       if (val) {
+        setAuthMode('setup');
         setCompanyName('Merkez Yönetim');
+      } else {
+        setAuthMode('login');
       }
-    }).catch(() => {});
+    }).catch(() => {
+      setAuthMode('login');
+    });
   }, [checkSetupStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -35,7 +40,7 @@ export const LoginView: React.FC = () => {
     setError('');
     setSuccessMsg('');
 
-    if (needSetup) {
+    if (authMode === 'setup') {
       if (!name.trim()) {
         setError('Lütfen yönetici adını ve soyadını giriniz.');
         return;
@@ -56,7 +61,7 @@ export const LoginView: React.FC = () => {
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Kurulum tamamlanamadı.');
       }
-    } else if (isRegistering) {
+    } else if (authMode === 'register') {
       if (!name.trim()) {
         setError('Lütfen adınızı ve soyadınızı giriniz.');
         return;
@@ -77,10 +82,15 @@ export const LoginView: React.FC = () => {
         setError(err instanceof Error ? err.message : 'Kayıt oluşturulamadı.');
       }
     } else {
+      // Normal login
+      if (!email.trim() || !password) {
+        setError('Lütfen e-posta adresinizi ve şifrenizi giriniz.');
+        return;
+      }
       try {
         await login(email, password);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Giriş yapılamadı.');
+        setError(err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol ediniz.');
       }
     }
   };
@@ -91,7 +101,7 @@ export const LoginView: React.FC = () => {
       <div className="absolute top-4 right-4 z-20">
         <button
           onClick={toggleTheme}
-          className="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center gap-2 text-xs font-semibold"
+          className="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center gap-2 text-xs font-semibold cursor-pointer"
           title={theme === 'dark' ? 'Açık Moda Geç' : 'Karanlık Moda Geç'}
         >
           {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
@@ -110,19 +120,25 @@ export const LoginView: React.FC = () => {
           
           <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full mt-1">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{needSetup ? 'İlk Sistem Kurulum Sihirbazı' : 'Müşteri & IoT Cihaz Portalı'}</span>
+            <span>
+              {authMode === 'setup'
+                ? 'İlk Sistem Kurulum Sihirbazı'
+                : authMode === 'register'
+                ? 'Müşteri & Operatör Kayıt'
+                : 'Müşteri & IoT Cihaz Portalı'}
+            </span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            {needSetup 
+            {authMode === 'setup'
               ? 'Yönetici Hesabı Oluşturun' 
-              : isRegistering 
+              : authMode === 'register' 
               ? 'Yeni Hesap Oluştur' 
               : 'Giriş Yapın'}
           </h1>
           <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto">
-            {needSetup
+            {authMode === 'setup'
               ? 'Sistemi güvenli üretim modunda ayağa kaldırmak için ilk yönetici hesabını oluşturun.'
-              : isRegistering
+              : authMode === 'register'
               ? 'Müşteri veya operatör hesabı açarak cihazlarınızı uzaktan yönetin.'
               : 'Lütfen kullanıcı adınız (e-posta) ve şifreniz ile oturum açın.'}
           </p>
@@ -130,43 +146,61 @@ export const LoginView: React.FC = () => {
 
         {/* Form Container Card */}
         <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-xl dark:shadow-2xl space-y-6">
-          {/* Mode Switcher Tabs (Only if NOT in setup mode) */}
-          {!needSetup && (
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
+          {/* Mode Switcher Tabs */}
+          <div className={`grid ${needSetup ? 'grid-cols-3' : 'grid-cols-2'} p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold`}>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setError('');
+                setSuccessMsg('');
+              }}
+              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'login'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Giriş Yap</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('register');
+                setError('');
+                setSuccessMsg('');
+              }}
+              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'register'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Yeni Kayıt</span>
+            </button>
+            {needSetup && (
               <button
                 type="button"
                 onClick={() => {
-                  setIsRegistering(false);
+                  setAuthMode('setup');
                   setError('');
                   setSuccessMsg('');
                 }}
-                className={`py-2 rounded-xl transition-all cursor-pointer ${
-                  !isRegistering
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                Giriş Yap
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsRegistering(true);
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer ${
-                  isRegistering
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'setup'
                     ? 'bg-indigo-600 text-white shadow-md'
                     : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
-                Yeni Kayıt
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Kurulum</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
-          {needSetup && (
+          {authMode === 'setup' && (
             <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs rounded-xl flex items-center gap-2 font-medium leading-relaxed">
               <Database className="w-4 h-4 shrink-0 text-indigo-500" />
               <span>
@@ -190,11 +224,11 @@ export const LoginView: React.FC = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-            {(isRegistering || needSetup) && (
+            {(authMode === 'register' || authMode === 'setup') && (
               <>
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                    {needSetup ? 'Sistem Yöneticisi Adı Soyadı' : 'Ad Soyad'}
+                    {authMode === 'setup' ? 'Sistem Yöneticisi Adı Soyadı' : 'Ad Soyad'}
                   </label>
                   <input
                     type="text"
@@ -206,7 +240,7 @@ export const LoginView: React.FC = () => {
                   />
                 </div>
 
-                {!needSetup && (
+                {authMode === 'register' && (
                   <div>
                     <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
                       Hesap Türü / Rol
@@ -222,14 +256,14 @@ export const LoginView: React.FC = () => {
                   </div>
                 )}
 
-                {(needSetup || role === 'customer') && (
+                {(authMode === 'setup' || role === 'customer') && (
                   <div>
                     <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                      {needSetup ? 'Yönetici Kurum / Firma Adı' : 'Şirket / Kurum Adı (Opsiyonel)'}
+                      {authMode === 'setup' ? 'Yönetici Kurum / Firma Adı' : 'Şirket / Kurum Adı (Opsiyonel)'}
                     </label>
                     <input
                       type="text"
-                      placeholder={needSetup ? 'ör. Merkez Yönetim' : 'ör. ABC Lojistik A.Ş.'}
+                      placeholder={authMode === 'setup' ? 'ör. Merkez Yönetim' : 'ör. ABC Lojistik A.Ş.'}
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
@@ -241,7 +275,7 @@ export const LoginView: React.FC = () => {
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                {needSetup ? 'Yönetici E-posta Adresi' : 'E-posta Adresi'}
+                {authMode === 'setup' ? 'Yönetici E-posta Adresi' : 'E-posta Adresi'}
               </label>
               <input
                 type="email"
@@ -255,7 +289,7 @@ export const LoginView: React.FC = () => {
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                {needSetup ? 'Güvenli Şifre' : 'Şifre'}
+                {authMode === 'setup' ? 'Güvenli Şifre' : 'Şifre'}
               </label>
               <input
                 type="password"
@@ -267,7 +301,7 @@ export const LoginView: React.FC = () => {
               />
             </div>
 
-            {(isRegistering || needSetup) && (
+            {(authMode === 'register' || authMode === 'setup') && (
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
                   Şifre Tekrar
@@ -283,7 +317,7 @@ export const LoginView: React.FC = () => {
               </div>
             )}
 
-            {needSetup && (
+            {authMode === 'setup' && (
               <div className="flex items-start gap-2.5 pt-1.5 pb-2">
                 <input
                   id="seedDemo"
@@ -305,14 +339,14 @@ export const LoginView: React.FC = () => {
             >
               <span>
                 {isLoading
-                  ? needSetup
+                  ? authMode === 'setup'
                     ? 'Sistem Kuruluyor...'
-                    : isRegistering
+                    : authMode === 'register'
                     ? 'Kayıt Yapılıyor...'
                     : 'Giriş Yapılıyor...'
-                  : needSetup
+                  : authMode === 'setup'
                   ? 'Sistemi Başlat ve Kurulumu Tamamla'
-                  : isRegistering
+                  : authMode === 'register'
                   ? 'Kayıt Ol ve Giriş Yap'
                   : 'Sisteme Giriş Yap'}
               </span>
@@ -321,23 +355,33 @@ export const LoginView: React.FC = () => {
           </form>
 
           {/* Toggle link below form */}
-          {!needSetup && (
-            <div className="text-center pt-2">
+          <div className="text-center pt-2">
+            {authMode === 'login' ? (
               <button
                 type="button"
                 onClick={() => {
-                  setIsRegistering(!isRegistering);
+                  setAuthMode('register');
                   setError('');
                   setSuccessMsg('');
                 }}
                 className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
               >
-                {isRegistering
-                  ? 'Zaten bir hesabınız var mı? Giriş Yapın'
-                  : 'Hesabınız yok mu? Yeni Müşteri Kaydı Oluşturun'}
+                Hesabınız yok mu? Yeni Müşteri Kaydı Oluşturun
               </button>
-            </div>
-          )}
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+              >
+                Zaten bir hesabınız var mı? Giriş Yapın
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

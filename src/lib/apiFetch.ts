@@ -27,7 +27,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
       if (res.status === 401 && typeof window !== 'undefined') {
         const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request)?.url || '';
-        if (!urlStr.includes('/api/auth/login') && !urlStr.includes('/api/auth/setup') && !urlStr.includes('/api/auth/setup-status')) {
+        // Only trigger global logout event if the primary authentication profile verification explicitly fails
+        if (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me')) {
           window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { url: urlStr } }));
         }
       }
@@ -49,7 +50,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
   if (finalRes.status === 401 && typeof window !== 'undefined') {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request)?.url || '';
-    if (!urlStr.includes('/api/auth/login') && !urlStr.includes('/api/auth/setup') && !urlStr.includes('/api/auth/setup-status')) {
+    if (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me')) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { url: urlStr } }));
     }
   }

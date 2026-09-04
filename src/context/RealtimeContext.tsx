@@ -170,8 +170,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
 
-  // Customers List (for Admin)
+  // Customers List (for Admin/Staff)
   const refreshCustomers = useCallback(async () => {
+    if (!user || user.role === 'customer') return;
     try {
       const res = await fetch('/api/admin/tenants?limit=1000');
       const contentType = res.headers.get('content-type');
@@ -185,7 +186,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (e) {
       console.error('Customers fetch error:', e);
     }
-  }, []);
+  }, [user]);
 
   const createNewCustomer = async (data: {
     name: string;
@@ -277,7 +278,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!user) return;
 
-    refreshCustomers(); 
+    if (user.role === 'admin' || user.role === 'operator' || user.role === 'analyst') {
+      refreshCustomers();
+    }
     fetchDevices();
     fetchNotifications();
   }, [user?.id, user?.role, refreshCustomers, fetchDevices, fetchNotifications]);
