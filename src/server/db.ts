@@ -907,6 +907,7 @@ class LocalDatabase {
   // User Auth & Session Management
   public getUsers(): User[] { return this.userRepository.getUsers(); }
   public createSession(user: User): string { return this.userRepository.createSession(user); }
+  public deleteSession(token: string): boolean { return this.userRepository.deleteSession(token); }
   public verifySession(token: string): { user: User; session?: UserSession } | null { return this.userRepository.verifySession(token); }
   public authenticate(email: string, pass: string): { user: User; token: string } | null { return this.userRepository.authenticate(email, pass); }
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }

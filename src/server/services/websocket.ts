@@ -422,6 +422,15 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
+    // 8a. Scoped User Profile update broadcast (Only to self or admin)
+    if (event === 'user:profile:updated') {
+      const p = payload as any;
+      if (isAdmin || (p && p.userId === clientUser.id)) {
+        safeSend(client, JSON.stringify({ event: 'user:profile:updated', payload, timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
+
     // 8b. OTA Updates broadcast (Tenant-filtered for regular users, global for admin)
     if (event === 'ota:updated') {
       if (isAdmin) {
@@ -543,16 +552,22 @@ export function initWebSocketServer(server: http.Server) {
       ws.isAlive = true;
     });
 
-    // Check if token exists in Authorization header, Sec-WebSocket-Protocol, or Query parameter (for microcontrollers)
+    // Check if token exists in Cookie, Authorization header, Sec-WebSocket-Protocol, or Query parameter
     let connectionToken: string | null = null;
-    if (req?.headers?.authorization) {
+    if (req?.headers?.cookie) {
+      const match = req.headers.cookie.match(/nexus_session_token=([^;]+)/);
+      if (match && match[1]) {
+        connectionToken = decodeURIComponent(match[1]).trim();
+      }
+    }
+    if (!connectionToken && req?.headers?.authorization) {
       const authHeader = req.headers.authorization;
       connectionToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-    } else if (req?.headers?.['x-api-key']) {
+    } else if (!connectionToken && req?.headers?.['x-api-key']) {
       connectionToken = String(req.headers['x-api-key']).trim();
-    } else if (req?.headers?.['sec-websocket-protocol']) {
+    } else if (!connectionToken && req?.headers?.['sec-websocket-protocol']) {
       connectionToken = String(req.headers['sec-websocket-protocol']).split(',')[0].trim();
-    } else if (req?.url) {
+    } else if (!connectionToken && req?.url) {
       try {
         const parsedUrl = new URL(req.url, 'http://127.0.0.1');
         connectionToken = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('apiKey') || parsedUrl.searchParams.get('api_key');

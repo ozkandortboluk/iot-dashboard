@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
 // Services & Database
@@ -46,6 +47,7 @@ const PORT = 3000;
 const server = http.createServer(app);
 
 // Global Middleware & Body Parsers
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.text({ type: ['text/*', 'application/x-www-form-urlencoded', 'application/octet-stream'], limit: '10mb' }));

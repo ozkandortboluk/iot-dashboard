@@ -1,20 +1,55 @@
-import { Router } from 'express';
+import { Router, type Response, type Request } from 'express';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
-import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  validateSetupInput,
+  validateRegistrationInput,
+  validatePassword,
+  validateEmail,
+} from '../utils/validation.js';
 
 const router = Router();
+
+// Atomic in-memory setup lock to prevent concurrent first-admin initialization race conditions
+let isSetupInProgress = false;
+
+// Helper to reliably extract client IP with Express proxy trust support
+function getClientIp(req: Request): string {
+  return req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+}
+
+// Cookie helper: Set secure, HttpOnly, SameSite session cookie
+export function setSessionCookie(res: Response, token: string) {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('nexus_session_token', token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/',
+  });
+}
+
+// Cookie helper: Clear session cookie
+export function clearSessionCookie(res: Response) {
+  res.clearCookie('nexus_session_token', {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+  });
+}
 
 // Setup/Onboarding Endpoints
 router.get('/setup-status', (req, res) => {
   const users = db.getUsers();
   const hasAdmin = users.some((u) => u.role === 'admin');
-  res.json({ needSetup: !hasAdmin });
+  res.json({ needSetup: !hasAdmin, inProgress: isSetupInProgress });
 });
 
 router.post('/setup', async (req, res) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup:${clientIp}`, 10);
   if (!rateLimit.allowed) {
     return res.status(429).json({
@@ -23,40 +58,73 @@ router.post('/setup', async (req, res) => {
     });
   }
 
+  // Pre-check: Ensure admin account does not already exist
   const users = db.getUsers();
   const hasAdmin = users.some((u) => u.role === 'admin');
   if (hasAdmin) {
-    return res.status(400).json({ error: 'Kurulum zaten tamamlanmış.' });
+    return res.status(400).json({ error: 'Kurulum zaten tamamlanmış. Sistemde en az bir yönetici bulunmaktadır.' });
   }
 
-  const { name, email, password, companyName, seedDemoData } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Ad, e-posta ve şifre alanları zorunludur.' });
+  // Optional Setup Secret Verification (if configured in environment)
+  const envSetupSecret = process.env.SETUP_SECRET || process.env.SETUP_ADMIN_TOKEN;
+  if (envSetupSecret) {
+    const providedSecret = req.headers['x-setup-secret'] || req.body?.setupSecret;
+    if (providedSecret !== envSetupSecret) {
+      return res.status(403).json({ error: 'Geçersiz ilk kurulum güvenlik anahtarı (Setup Secret).' });
+    }
   }
+
+  // Atomic mutex lock: Prevent concurrent race conditions
+  if (isSetupInProgress) {
+    return res.status(409).json({
+      error: 'Sistem kurulumu şu anda başka bir işlem tarafından gerçekleştiriliyor. Lütfen birkaç saniye bekleyin.',
+    });
+  }
+
+  // Comprehensive schema & input validation
+  const validation = validateSetupInput(req.body);
+  if (!validation.valid || !validation.data) {
+    return res.status(400).json({ error: validation.error || 'Geçersiz kurulum verisi.' });
+  }
+
+  const { name, email, password, companyName, seedDemoData } = validation.data;
+
+  isSetupInProgress = true;
 
   try {
-    const adminUser = await db.registerUser(name, email, password, 'admin', companyName || 'Merkez Yönetim');
+    // Re-verify inside lock to guarantee mutual exclusion
+    const currentUsers = db.getUsers();
+    if (currentUsers.some((u) => u.role === 'admin')) {
+      throw new Error('Kurulum zaten başka bir oturum tarafından tamamlandı.');
+    }
+
+    const adminUser = await db.registerUser(name, email, password, 'admin', companyName);
 
     if (seedDemoData) {
-      db.seedDemoDataForUser(adminUser.id, name, companyName || 'Merkez Yönetim', email);
+      db.seedDemoDataForUser(adminUser.id, name, companyName, email);
     }
 
     const token = db.createSession(adminUser);
 
+    // Set HttpOnly, Secure cookie
+    setSessionCookie(res, token);
+
     res.json({
       user: adminUser,
       token,
-      message: 'Kurulum başarıyla tamamlandı ve giriş yapıldı.',
+      message: 'Kurulum başarıyla tamamlandı ve güvenli oturum açıldı.',
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kurulum sırasında bir hata oluştu.';
     res.status(400).json({ error: msg });
+  } finally {
+    isSetupInProgress = false;
   }
 });
 
 // Auth Endpoints (Public)
 router.post('/login', (req, res) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`login:${clientIp}`, 20);
   if (!rateLimit.allowed) {
     return res.status(429).json({
@@ -70,10 +138,18 @@ router.post('/login', (req, res) => {
     return res.status(400).json({ error: 'E-posta ve şifre gereklidir.' });
   }
 
-  const result = db.authenticate(email, password);
+  const emailRes = validateEmail(email);
+  if (!emailRes.valid) {
+    return res.status(400).json({ error: emailRes.error || 'Geçersiz e-posta biçimi.' });
+  }
+
+  const result = db.authenticate(emailRes.normalized, String(password));
   if (!result) {
     return res.status(401).json({ error: 'Hatalı e-posta adresi veya şifre.' });
   }
+
+  // Set HttpOnly, Secure session cookie
+  setSessionCookie(res, result.token);
 
   res.json({
     user: result.user,
@@ -83,7 +159,7 @@ router.post('/login', (req, res) => {
 });
 
 router.post('/register', async (req, res) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`reg:${clientIp}`, 10);
   if (!rateLimit.allowed) {
     return res.status(429).json({
@@ -92,18 +168,52 @@ router.post('/register', async (req, res) => {
     });
   }
 
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Tüm alanları doldurunuz.' });
+  // Guard: If system setup is not completed yet, prevent public registration to enforce admin onboarding first
+  const users = db.getUsers();
+  const hasAdmin = users.some((u) => u.role === 'admin');
+  if (!hasAdmin || isSetupInProgress) {
+    return res.status(403).json({
+      error: 'Sistem ilk kurulum aşamasındadır. Önce sistem yöneticisi hesabı oluşturulmalıdır.',
+    });
   }
+
+  const validation = validateRegistrationInput(req.body);
+  if (!validation.valid || !validation.data) {
+    return res.status(400).json({ error: validation.error || 'Geçersiz kayıt bilgileri.' });
+  }
+
+  const { name, email, password, companyName } = validation.data;
 
   try {
     // Public registration ALWAYS assigns 'customer' role. Escalation to 'admin' via public API is forbidden.
-    const user = await db.registerUser(name, email, password, 'customer');
-    res.json({ user, message: 'Hesap başarıyla oluşturuldu.' });
+    const user = await db.registerUser(name, email, password, 'customer', companyName);
+    const token = db.createSession(user);
+    setSessionCookie(res, token);
+    res.json({ user, token, message: 'Hesap başarıyla oluşturuldu.' });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
     res.status(400).json({ error: msg });
+  }
+});
+
+router.post('/logout', (req, res) => {
+  clearSessionCookie(res);
+  const token = (req as any).cookies?.nexus_session_token || req.headers['x-auth-token'];
+  if (token && typeof token === 'string') {
+    db.deleteSession(token.trim());
+  }
+  res.json({ success: true, message: 'Başarıyla çıkış yapıldı ve oturum sunucuda sonlandırıldı.' });
+});
+
+router.post('/revoke-all-sessions', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  try {
+    await db.terminateUserSessions(currentUser.id);
+    clearSessionCookie(res);
+    res.json({ success: true, message: 'Tüm aktif oturumlarınız başarıyla sonlandırıldı.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Oturumlar sonlandırılamadı.' });
   }
 });
 
@@ -130,7 +240,16 @@ profileRouter.put('/', authenticateUser, async (req, res) => {
   const currentUser = authReq.user!;
   try {
     const updatedUser = await db.updateUserProfile(currentUser.id, req.body);
-    broadcast('users:updated', db.getUsers());
+    
+    // Broadcast scoped update instead of broad users list to avoid leaking customer details
+    broadcast('user:profile:updated', {
+      userId: updatedUser.id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      companyName: updatedUser.companyName,
+    });
+
     res.json({ user: updatedUser, message: 'Profil ve hesap ayarları güncellendi.' });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Profil güncellenemedi.' });
@@ -146,8 +265,9 @@ profileRouter.post('/change-password', authenticateUser, async (req, res) => {
     return res.status(400).json({ error: 'Mevcut şifre ve yeni şifre alanları zorunludur.' });
   }
 
-  if (typeof newPassword !== 'string' || newPassword.trim().length < 6) {
-    return res.status(400).json({ error: 'Yeni şifre en az 6 karakter uzunluğunda olmalıdır.' });
+  const passValidation = validatePassword(newPassword);
+  if (!passValidation.valid) {
+    return res.status(400).json({ error: passValidation.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.' });
   }
 
   try {
@@ -159,5 +279,3 @@ profileRouter.post('/change-password', authenticateUser, async (req, res) => {
 });
 
 export { profileRouter };
-
-// Customers Router (Admin only)

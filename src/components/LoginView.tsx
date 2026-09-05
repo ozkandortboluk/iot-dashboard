@@ -147,40 +147,8 @@ export const LoginView: React.FC = () => {
         {/* Form Container Card */}
         <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-xl dark:shadow-2xl space-y-6">
           {/* Mode Switcher Tabs */}
-          <div className={`grid ${needSetup ? 'grid-cols-3' : 'grid-cols-2'} p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold`}>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('login');
-                setError('');
-                setSuccessMsg('');
-              }}
-              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'login'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Giriş Yap</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('register');
-                setError('');
-                setSuccessMsg('');
-              }}
-              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'register'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Yeni Kayıt</span>
-            </button>
-            {needSetup && (
+          {needSetup ? (
+            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
               <button
                 type="button"
                 onClick={() => {
@@ -195,10 +163,61 @@ export const LoginView: React.FC = () => {
                 }`}
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Kurulum</span>
+                <span>İlk Kurulum</span>
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'login'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Mevcut Giriş</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'login'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Giriş Yap</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'register'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Yeni Kayıt</span>
+              </button>
+            </div>
+          )}
 
           {authMode === 'setup' && (
             <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs rounded-xl flex items-center gap-2 font-medium leading-relaxed">
@@ -356,7 +375,33 @@ export const LoginView: React.FC = () => {
 
           {/* Toggle link below form */}
           <div className="text-center pt-2">
-            {authMode === 'login' ? (
+            {needSetup ? (
+              authMode === 'login' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('setup');
+                    setError('');
+                    setSuccessMsg('');
+                  }}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                >
+                  İlk kurulum sihirbazına dönmek için tıklayın
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('login');
+                    setError('');
+                    setSuccessMsg('');
+                  }}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                >
+                  Mevcut bir hesabınız varsa Giriş Yapın
+                </button>
+              )
+            ) : authMode === 'login' ? (
               <button
                 type="button"
                 onClick={() => {

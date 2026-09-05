@@ -7,7 +7,7 @@ export interface AuthenticatedRequest extends express.Request {
   sessionToken?: string;
 }
 
-// Authentication Middleware: Verifies authorization token from headers ONLY (no query-string tokens)
+// Authentication Middleware: Verifies authorization token from cookies (HttpOnly) or headers
 export function authenticateUser(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers['authorization'];
   let token = req.headers['x-auth-token'] as string;
@@ -18,6 +18,11 @@ export function authenticateUser(req: express.Request, res: express.Response, ne
     } else {
       token = authHeader.trim();
     }
+  }
+
+  // Fallback to HttpOnly cookie if header token is absent
+  if (!token && (req as any).cookies?.nexus_session_token) {
+    token = (req as any).cookies.nexus_session_token;
   }
 
   if (!token || !token.trim()) {

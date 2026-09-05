@@ -66,10 +66,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
     try {
-      // Local/Backend API Auth
+      // Local/Backend API Auth with HttpOnly cookie support
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password: pass }),
       });
 
@@ -103,6 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ name, email, password: pass, role }),
       });
 
@@ -129,6 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ name, email, password: pass, companyName, seedDemoData }),
       });
 
@@ -172,7 +175,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // ignore
+    }
     localStorage.removeItem('dashboard_token');
     localStorage.removeItem('dashboard_user');
     setUser(null);
@@ -194,9 +205,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshUser = async (): Promise<User | null> => {
     try {
       const savedToken = token || localStorage.getItem('dashboard_token');
-      if (!savedToken) return null;
+      const headers: Record<string, string> = {};
+      if (savedToken) {
+        headers['Authorization'] = `Bearer ${savedToken}`;
+      }
       const res = await fetch('/api/profile', {
-        headers: { Authorization: `Bearer ${savedToken}` },
+        headers,
+        credentials: 'include',
       });
       if (res.status === 401) {
         logout();

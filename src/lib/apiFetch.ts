@@ -21,6 +21,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     try {
       attempts++;
       const res = await fetch(input, {
+        credentials: 'include',
         ...init,
         headers,
       });
@@ -44,6 +45,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
 
   const finalRes = await fetch(input, {
+    credentials: 'include',
     ...init,
     headers,
   });

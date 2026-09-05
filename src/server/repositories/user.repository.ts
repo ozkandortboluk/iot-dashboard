@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { hashPassword, verifyPassword } from '../utils/crypto.js';
+import { normalizeEmail, validateEmail, validatePassword } from '../utils/validation.js';
 import { defaultWidgets } from '../initialData.js';
 import type { User, UserSession } from '../../types.js';
 
@@ -31,6 +32,19 @@ export class UserRepository {
     this.db.saveData(this.db.data);
     this.db.postgresRepo.saveSession(session).catch(() => {});
     return token;
+  }
+
+  public deleteSession(token: string): boolean {
+    if (!token) return false;
+    const cleanToken = token.trim();
+    const initialLength = (this.db.data.sessions || []).length;
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.token !== cleanToken);
+    const removed = (this.db.data.sessions || []).length < initialLength;
+    if (removed) {
+      this.db.saveData(this.db.data);
+    }
+    this.db.postgresRepo.deleteSession(cleanToken).catch(() => {});
+    return removed;
   }
 
   public verifySession(token: string): { user: User; session: UserSession } | null {
@@ -77,7 +91,13 @@ export class UserRepository {
   }
 
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> {
-    const cleanEmail = email.trim().toLowerCase();
+    const emailRes = validateEmail(email);
+    if (!emailRes.valid) throw new Error(emailRes.error || 'Geçersiz e-posta adresi.');
+    const cleanEmail = emailRes.normalized;
+
+    const passRes = validatePassword(pass);
+    if (!passRes.valid) throw new Error(passRes.error || 'Geçersiz şifre.');
+
     const existing = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (existing) throw new Error('Bu e-posta adresi zaten kayıtlı.');
 
@@ -175,8 +195,9 @@ export class UserRepository {
       throw new Error('Mevcut şifreniz hatalı.');
     }
 
-    if (!newPass || newPass.trim().length < 6) {
-      throw new Error('Yeni şifre en az 6 karakter olmalıdır.');
+    const passRes = validatePassword(newPass);
+    if (!passRes.valid) {
+      throw new Error(passRes.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.');
     }
 
     const newHash = hashPassword(newPass.trim());
