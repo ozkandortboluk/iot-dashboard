@@ -4,6 +4,12 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.2.8] - 2026-09-08
+### 🛠️ Derleme ve Bağımlılık Düzeltmeleri
+- **Eksik Paket Çözümü (react-is)**: Docker imaj derleme (`npm run build`) sürecinde Rollup bundler'ın `recharts` modülü için ihtiyaç duyduğu ancak `--legacy-peer-deps` kullanımı sebebiyle çözümleyemediği `react-is` modülü doğrudan projenin ana bağımlılıklarına (dependencies) eklenerek build hata (Rollup failed to resolve import "react-is") durumu giderildi.
+
+---
+
 ## 🚀 [v1.2.7] - 2026-09-08
 ### 📱 Bildirim Merkezi Performans ve Sayfalama Optimizasyonu
 - **Sayfalama (Pagination)**: Bildirim Merkezi ("NotificationsView") içindeki listelerde on binlerce satırlık yoğun veri biriktiğinde arayüzde (UI) yaşanabilecek donma ve performans düşüşlerini engellemek amacıyla, sayfalama yapısı entegre edildi.
