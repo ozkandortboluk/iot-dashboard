@@ -151,7 +151,7 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
       {/* Main Metric Display */}
       <div className="my-2">
         <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+          <span className="text-3xl @[200px]:text-4xl @[300px]:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight transition-all">
             {formatMetricValue(currentVal)}
           </span>
           <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">{unit}</span>

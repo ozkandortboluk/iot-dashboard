@@ -152,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Mobile/Compact Brand Logo - sığmadığında otomatik küçülür, sadece logo ikonu kalır */}
-          <div className="md:hidden shrink-0">
+          <div className="hidden xs:block md:hidden shrink-0">
             <NexusNodeLogo
               variant="compact"
               size="xs"
@@ -165,7 +165,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Customer Title (if logged in as customer) */}
           {user?.role === 'customer' && (user.companyName || user.name) ? (
-            <div className="flex items-center gap-1.5 xs:gap-2 max-w-[120px] xs:max-w-[160px] sm:max-w-[220px] shrink-0">
+            <div className="hidden sm:flex items-center gap-1.5 xs:gap-2 max-w-[120px] xs:max-w-[160px] sm:max-w-[220px] shrink-0">
               <CustomerAvatar
                 companyName={user.companyName}
                 name={user.name}
@@ -177,71 +177,69 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           ) : null}
 
-          {/* REALTIME CONNECTION STATUS INDICATOR - Compact Icon Badge */}
+          {/* REALTIME CONNECTION STATUS INDICATOR - Icon Badge */}
           <button
             onClick={reconnectWebSocket}
             title={
               connectionStatus === 'connected'
-                ? `Gerçek Zamanlı WebSocket Akışı Aktif (${wsLatency}ms) — Yeniden bağlanmak için tıklayın`
+                ? `Gerçek Zamanlı Akış Aktif (${wsLatency}ms) — Yeniden bağlanmak için tıklayın`
                 : connectionStatus === 'reconnecting'
-                ? 'Sunucuya bağlanılıyor / yeniden deneniyor...'
+                ? 'Sunucuya bağlanılıyor...'
                 : 'Bağlantı koptu. Tekrar bağlanmak için tıklayın.'
             }
-            className={`flex items-center gap-1.5 p-1.5 xs:p-2 2xl:px-2.5 2xl:py-1 rounded-full text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0 ${
               connectionStatus === 'connected'
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20 shadow-sm shadow-emerald-500/10'
+                ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/25 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
                 : connectionStatus === 'reconnecting'
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25 hover:bg-amber-500/20 animate-pulse'
-                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25 hover:bg-rose-500/20'
+                ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/25 hover:bg-amber-100 dark:hover:bg-amber-500/20 animate-pulse'
+                : 'bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/25 hover:bg-rose-100 dark:hover:bg-rose-500/20'
             }`}
           >
             {connectionStatus === 'connected' ? (
               <>
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                </span>
-                <Wifi className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span className="hidden 2xl:inline">Bağlı ({wsLatency}ms)</span>
+                <Wifi className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="hidden lg:inline">Bağlı</span>
               </>
             ) : connectionStatus === 'reconnecting' ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 text-amber-500 animate-spin shrink-0" />
-                <span className="hidden 2xl:inline">Bağlanıyor...</span>
+                <RefreshCw className="w-4 h-4 text-amber-500 animate-spin shrink-0" />
+                <span className="hidden lg:inline">Bağlanıyor</span>
               </>
             ) : (
               <>
-                <WifiOff className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                <span className="hidden 2xl:inline">Kopuk</span>
+                <WifiOff className="w-4 h-4 text-rose-500 shrink-0" />
+                <span className="hidden lg:inline">Kopuk</span>
               </>
             )}
           </button>
 
-          {/* ADMIN CUSTOMER SELECTOR (Searchable with Avatars) */}
+          {/* ADMIN CUSTOMER SELECTOR */}
           {user?.role === 'admin' && (
-            <CustomerSelectorDropdown
-              customers={customerOptions}
-              selectedCustomerId={selectedCustomerForAdmin}
-              onSelectCustomer={setSelectedCustomerForAdmin}
-              totalDevicesCount={devices.length}
-            />
+            <div className="hidden xs:block shrink">
+              <CustomerSelectorDropdown
+                customers={customerOptions}
+                selectedCustomerId={selectedCustomerForAdmin}
+                onSelectCustomer={setSelectedCustomerForAdmin}
+                totalDevicesCount={devices.length}
+              />
+            </div>
           )}
 
-          {/* Simulator Toggle Button (Admin Only) - Doğrudan üst barda görünür */}
+          {/* Simulator Toggle Button (Admin Only) */}
           {user?.role === 'admin' && (
             <button
               type="button"
               id="header-simulator-toggle-btn"
               onClick={toggleSimulator}
-              title={simulatorActive ? 'Sanal Veri Simülatörü Açık (Durdurmak için tıklayın)' : 'Sanal Veri Simülatörü Kapalı (Başlatmak için tıklayın)'}
-              className={`flex items-center gap-1.5 p-1.5 xs:p-2 xl:px-2.5 xl:py-1 rounded-full text-xs font-medium transition-all shrink-0 cursor-pointer ${
+              title={simulatorActive ? 'Simülatör Açık (Durdur)' : 'Simülatör Kapalı (Başlat)'}
+              className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer ${
                 simulatorActive
-                  ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30'
+                  ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30'
                   : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
               }`}
             >
-              {simulatorActive ? <Pause className="w-3.5 h-3.5 shrink-0" /> : <Play className="w-3.5 h-3.5 shrink-0" />}
-              <span className="hidden xl:inline">{simulatorActive ? 'Simülatör Açık' : 'Simülatör Kapalı'}</span>
+              {simulatorActive ? <Pause className="w-4 h-4 shrink-0" /> : <Play className="w-4 h-4 shrink-0" />}
+              <span className="hidden lg:inline">{simulatorActive ? 'Simülatör' : 'Simülatör'}</span>
             </button>
           )}
         </div>
@@ -309,7 +307,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Notifications Bell */}
-          <div ref={notificationsRef} className="relative">
+          <div ref={notificationsRef} className="relative z-50">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
               className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors relative shrink-0 cursor-pointer"

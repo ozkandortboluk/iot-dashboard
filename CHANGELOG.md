@@ -4,6 +4,52 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.2.7] - 2026-09-08
+### 📱 Bildirim Merkezi Performans ve Sayfalama Optimizasyonu
+- **Sayfalama (Pagination)**: Bildirim Merkezi ("NotificationsView") içindeki listelerde on binlerce satırlık yoğun veri biriktiğinde arayüzde (UI) yaşanabilecek donma ve performans düşüşlerini engellemek amacıyla, sayfalama yapısı entegre edildi.
+  - **Aktif Alarmlar**, **Gönderim Kuyruğu** ve **Teslimat Geçmişi** listelerinde her sayfada 15 kayıt gösterilecek şekilde sayfalama (pagination) kontrolleri uygulandı.
+  - Filtreler değiştirildiğinde sayfanın otomatik olarak ilk sayfaya dönmesi sağlandı.
+
+---
+
+## 🚀 [v1.2.6] - 2026-09-08
+### 📱 Üst Menü & Bildirim Merkezi Düzeltmeleri
+- **Bildirim Menüsü Erişilebilirliği (Z-Index Fix)**: Bildirim (çan) ikonuna tıklandığında açılan bildirim listesinin (dropdown) bazı ekran koşullarında veya mobil cihazlarda z-index (katman) çakışması nedeniyle tetiklenmeme veya arka planda kalma sorunu düzeltildi.
+
+---
+
+## 🚀 [v1.2.5] - 2026-09-08
+### 📱 Mobil Dashboard Kaydırma (Swipe) Navigasyonu
+- **Yatay Kaydırma (Horizontal Swipe)**: Mobil ekranlarda (küçük dokunmatik ekranlar) widget'lar arası geçişi kolaylaştırmak ve sayfayı dikey olarak çok uzatmamak için widget grid yapısı yatay olarak kaydırılabilir (swipeable) hale getirildi. 
+- **Sayfalama Göstergeleri (Pagination Dots)**: Kullanıcıların kaçıncı widget'ta olduklarını görebilmeleri için mobil görünüme özel, aktif widget'ı belirten sayfalama (pagination) noktaları eklendi.
+- **Snap Scrolling**: Yumuşak ve pürüzsüz bir deneyim için `CSS Snap` özelliği (snap-mandatory) kullanıldı, böylece widget'lar kaydırıldıklarında ekrana tam oturur.
+
+---
+
+## 🚀 [v1.2.4] - 2026-09-08
+### 📱 Üst Menü (Header) Optimizasyonu
+- **WebSocket Buton İyileştirmesi**: Üst bardaki "Bağlı / Bağlanıyor" bildirim butonu şekil (yuvarlak yerine kavisli kare - rounded-xl) ve boyut açısından diğer standart menü butonları ile aynı olacak şekilde eşitlendi (`w-4 h-4` ikon).
+- **Mobil Ekran Taşma Engellemesi**: Çok küçük (mobil) ekranlarda üst menüde (Header) oluşabilen elemanların birbirine (üst üste) binme sorunu giderildi:
+  - Mobil modda marka/müşteri yazıları alanı daraltmak yerine otomatik gizlenecek şekilde ayarlandı (zaten sidebar menüde mevcut olduğu için).
+  - Admin yetkilisi için müşteri değiştirme menüsü dar ekranlara uygun hale getirildi.
+  - Sığmayan ikon yazıları otomatik olarak gizlenip yalnızca geniş ekranlarda görünür hale getirildi.
+
+---
+
+## 🚀 [v1.2.3] - 2026-09-08
+### 📱 Hibrit Responsive Dashboard & Mobil UX Optimizasyonu
+- **Akıllı Ölçekleme (Container Queries)**:
+  - Widget içindeki verilerin (özellikle MultiMetric ve Metric okumalarının) ekran genişliğine değil, widget kutu genişliğine göre orantılı küçülüp büyümesi sağlandı (`@container` destekli).
+- **Esnek Izgara (Fluid Grid System)**:
+  - Ekran çözünürlüklerine (Tablet, Masaüstü) göre widget genişlikleri yeniden optimize edildi. Ara çözünürlüklerde (örn. 1024x800) kırılmalar giderildi.
+- **Power Analyzer Geliştirmeleri**:
+  - Mobil ekranlarda göstergelerin alt alta kırılması problemi düzeltilerek, daima simetrik ve yan yana (strict grid) kalmaları sağlandı.
+  - SVG gösterge boyutları ve iç padding değerleri küçük ekranlar için esnetildi.
+- **Mobil Menü ve Kontrol Revizyonu**:
+  - Edit (Düzenleme) menüsü dar ekranlarda taşmayacak şekilde kaydırılabilir (scrollable) ve ikon bazlı hale getirildi.
+
+---
+
 ## 🚀 [v1.2.2] - 2026-09-08
 ### 🐳 Docker & Sunucu Derleme / Dağıtım Uyumluluğu & Otomatik Sürüm Yönetimi
 - **Docker & Sunucu Yükleme İyileştirmeleri**:

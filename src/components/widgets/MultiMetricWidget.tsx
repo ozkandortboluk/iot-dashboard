@@ -260,7 +260,7 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
 
               {/* Slot Value */}
               <div className="flex items-baseline gap-1 mt-0.5">
-                <span className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                <span className="text-lg @sm:text-xl @md:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight transition-all">
                   {formatMetricValue(currentVal)}
                 </span>
                 <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{slot.unit}</span>

@@ -46,6 +46,22 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
 
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
+  const [activePageIndex, setActivePageIndex] = useState(0);
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    const scrollLeft = container.scrollLeft;
+    // Calculate page based on container width + gap
+    // Approximation: item width is roughly container width. 
+    const itemWidth = container.offsetWidth;
+    const index = Math.round(scrollLeft / itemWidth);
+    if (index !== activePageIndex) {
+      setActivePageIndex(index);
+    }
+  };
+
   const moveWidget = (index: number, direction: 'left' | 'right') => {
     const newWidgets = [...widgets];
     const targetIndex = direction === 'left' ? index - 1 : index + 1;
@@ -155,7 +171,7 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
   const getSpanClass = (span: WidgetSpan) => {
     switch (span) {
       case 1:
-        return 'col-span-12 lg:col-span-3';
+        return 'col-span-12 md:col-span-6 lg:col-span-3';
       case 2:
         return 'col-span-12 lg:col-span-6';
       case 3:
@@ -186,23 +202,29 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-12 gap-6">
-          {widgets.map((widget, idx) => (
-            <div
-              key={widget.id}
-              className={`${getSpanClass(
-                widget.span
-              )} relative transition-all duration-200 ${
-                editMode ? 'ring-2 ring-amber-500/60 rounded-3xl p-1 bg-amber-500/5' : ''
-              }`}
-            >
-              {/* Edit Mode Controls overlay */}
+        <div className="relative">
+          {/* Main Grid / Swipeable Container */}
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="flex sm:grid sm:grid-cols-12 gap-4 sm:gap-6 overflow-x-auto sm:overflow-visible snap-x snap-mandatory sm:snap-none scrollbar-none sm:custom-scrollbar pb-2 sm:pb-0"
+          >
+            {widgets.map((widget, idx) => (
+              <div
+                key={widget.id}
+                className={`w-full min-w-full sm:min-w-0 shrink-0 snap-center sm:w-auto ${getSpanClass(
+                  widget.span
+                )} @container relative transition-all duration-200 ${
+                  editMode ? 'ring-2 ring-amber-500/60 rounded-3xl p-1 bg-amber-500/5' : ''
+                }`}
+              >
+                {/* Edit Mode Controls overlay */}
               {editMode && (
-                <div className="absolute -top-3 right-3 z-20 flex items-center gap-1 bg-[#020617] text-white p-1.5 rounded-2xl shadow-2xl border border-slate-700 text-[10px]">
+                <div className="absolute -top-3 right-1 sm:-top-3 sm:right-3 z-20 flex items-center gap-0.5 sm:gap-1 bg-[#020617] text-white p-1 sm:p-1.5 rounded-xl sm:rounded-2xl shadow-2xl border border-slate-700 text-[10px] max-w-[95%] overflow-x-auto custom-scrollbar">
                   <button
                     onClick={() => moveWidget(idx, 'left')}
                     disabled={idx === 0}
-                    className="p-1 hover:bg-slate-800 rounded-lg disabled:opacity-30"
+                    className="p-1 hover:bg-slate-800 rounded-lg disabled:opacity-30 shrink-0"
                     title="Sola / Yukarı Taşı"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
@@ -210,15 +232,15 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
                   <button
                     onClick={() => moveWidget(idx, 'right')}
                     disabled={idx === widgets.length - 1}
-                    className="p-1 hover:bg-slate-800 rounded-lg disabled:opacity-30"
+                    className="p-1 hover:bg-slate-800 rounded-lg disabled:opacity-30 shrink-0"
                     title="Sağa / Aşağı Taşı"
                   >
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                  <span className="w-px h-3 bg-slate-700 mx-0.5" />
+                  <span className="w-px h-3 bg-slate-700 mx-0.5 shrink-0" />
                   <button
                     onClick={() => setEditingWidget(widget)}
-                    className="p-1 hover:bg-slate-800 rounded-lg text-blue-400"
+                    className="p-1 hover:bg-slate-800 rounded-lg text-blue-400 shrink-0"
                     title="Widget Ayarlarını Düzenle"
                   >
                     <Settings className="w-3.5 h-3.5" />
@@ -227,15 +249,15 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
                     onClick={() =>
                       changeSpan(idx, widget.span === 1 ? 2 : widget.span === 2 ? 3 : widget.span === 3 ? 4 : 1)
                     }
-                    className="px-1.5 py-0.5 hover:bg-slate-800 rounded-lg font-bold text-amber-400"
+                    className="px-1.5 py-0.5 hover:bg-slate-800 rounded-lg font-bold text-amber-400 shrink-0"
                     title="Genişliği Değiştir"
                   >
                     {widget.span * 25}%
                   </button>
-                  <span className="w-px h-3 bg-slate-700 mx-0.5" />
+                  <span className="w-px h-3 bg-slate-700 mx-0.5 shrink-0" />
                   <button
                     onClick={() => removeWidget(widget.id)}
-                    className="p-1 text-rose-400 hover:bg-rose-950/50 rounded-lg"
+                    className="p-1 text-rose-400 hover:bg-rose-950/50 rounded-lg shrink-0"
                     title="Widget'ı Kaldır"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -248,6 +270,23 @@ export const WidgetGrid: React.FC<WidgetGridProps> = ({ onOpenAddWidgetModal, ed
             </div>
           ))}
         </div>
+
+        {/* Mobile Pagination Dots */}
+        {widgets.length > 1 && (
+          <div className="flex sm:hidden items-center justify-center gap-1.5 mt-4">
+            {widgets.map((_, idx) => (
+              <div
+                key={idx}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  activePageIndex === idx
+                    ? 'w-5 bg-indigo-600 dark:bg-indigo-500'
+                    : 'w-1.5 bg-slate-300 dark:bg-slate-700'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       )}
 
       {/* Edit Widget Modal */}

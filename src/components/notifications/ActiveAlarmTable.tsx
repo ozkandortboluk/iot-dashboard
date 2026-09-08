@@ -19,6 +19,7 @@ import {
   Layers,
   ArrowUpDown,
   ChevronRight,
+  ChevronLeft,
   ShieldAlert,
 } from 'lucide-react';
 import type { ActiveAlarm, Device, Customer } from '../../types';
@@ -54,6 +55,15 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedState, setSelectedState] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const itemsPerPage = 15;
+
+  // Reset page when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedDevice, selectedSeverity, selectedState, sortOrder]);
 
   // Filtered and Sorted Alarms
   const filteredAlarms = useMemo(() => {
@@ -97,6 +107,9 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
         return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
       });
   }, [alarms, searchTerm, selectedDevice, selectedSeverity, selectedState, sortOrder]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredAlarms.length / itemsPerPage));
+  const currentAlarms = filteredAlarms.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const getMetricIcon = (metricKey: string) => {
     const key = metricKey.toLowerCase();
@@ -295,7 +308,7 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {filteredAlarms.map((alarm) => {
+                {currentAlarms.map((alarm) => {
                   const unit = METRIC_DICTIONARY[alarm.metricKey?.toLowerCase()]?.unit || '';
                   const isActionLoading = loadingAction === alarm.id;
                   const isCritical = alarm.severity === 'critical';
@@ -426,7 +439,7 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
 
           {/* Mobile Card View (md altı ekranlar) */}
           <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800">
-            {filteredAlarms.map((alarm) => {
+            {currentAlarms.map((alarm) => {
               const unit = METRIC_DICTIONARY[alarm.metricKey?.toLowerCase()]?.unit || '';
               const isActionLoading = loadingAction === alarm.id;
               const isCritical = alarm.severity === 'critical';
@@ -521,6 +534,40 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 sm:px-5 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Toplam <span className="font-semibold text-slate-700 dark:text-slate-300">{filteredAlarms.length}</span> kayıttan{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {(currentPage - 1) * itemsPerPage + 1}-
+                  {Math.min(currentPage * itemsPerPage, filteredAlarms.length)}
+                </span>{' '}
+                arası gösteriliyor.
+              </span>
+              
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="text-xs font-semibold px-2 text-slate-700 dark:text-slate-300">
+                  {currentPage} / {totalPages}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

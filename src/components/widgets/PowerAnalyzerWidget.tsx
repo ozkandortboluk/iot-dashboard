@@ -165,7 +165,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       : 'bg-cyan-500/5 dark:bg-cyan-500/10 border-cyan-500/20';
 
     return (
-      <div className={`${bgClasses} p-3.5 rounded-2xl border flex flex-col items-center justify-between text-center relative overflow-hidden group transition-all`}>
+      <div className={`${bgClasses} p-2 sm:p-3.5 rounded-2xl border flex flex-col items-center justify-between text-center relative overflow-hidden group transition-all`}>
         {/* Top gauge info */}
         <div className="w-full flex items-center justify-between text-[11px] font-bold mb-1">
           <span className="text-slate-800 dark:text-slate-200 flex items-center gap-1 font-mono">
@@ -186,7 +186,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
 
         {/* Semi-circle Gauge SVG */}
         <div className="relative my-1 flex items-center justify-center w-full max-w-[140px] aspect-[2/1]">
-          <svg className="w-36 h-20" viewBox="0 0 100 55">
+          <svg className="w-full h-full" viewBox="0 0 100 55">
             {/* Background Arc */}
             <path
               d="M 10 50 A 40 40 0 0 1 90 50"
@@ -230,22 +230,22 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
           </svg>
 
           {/* Centered Value overlay inside semi-circle */}
-          <div className="absolute bottom-1 flex flex-col items-center justify-center text-center">
+          <div className="absolute bottom-0 sm:bottom-1 flex flex-col items-center justify-center text-center">
             <span
-              className={`text-xl font-black font-mono leading-none ${
+              className={`text-base sm:text-xl font-black font-mono leading-none ${
                 isPenalty ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'
               }`}
             >
               %{valPercent.toFixed(1)}
             </span>
-            <span className="text-[9px] font-bold text-slate-400 mt-0.5">{subLabel}</span>
+            <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 mt-0.5 max-w-[80px] sm:max-w-none leading-tight">{subLabel}</span>
           </div>
         </div>
 
         {/* Footer limit indicator */}
-        <div className="w-full flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-200/60 dark:border-slate-800/80 pt-1.5 mt-1">
-          <span>Limit: %0</span>
-          <span className="font-extrabold text-rose-500">Yasal Limit: %{limitPercent}</span>
+        <div className="w-full flex items-center justify-between text-[8px] sm:text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-200/60 dark:border-slate-800/80 pt-1 sm:pt-1.5 mt-1">
+          <span className="truncate pr-1">Min: %0</span>
+          <span className="font-extrabold text-rose-500 truncate">Max: %{limitPercent}</span>
         </div>
       </div>
     );
@@ -282,7 +282,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
       </div>
 
       {/* SECTION 1: TOP 2x3 GRID - 6 METRIC LABELS / BOXES (L1, L2, L3, Ri, Rc, P) */}
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2.5">
         {/* Box 1: L1 Voltage */}
         <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-2xl flex flex-col justify-between min-w-0">
           <div className="flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-400 gap-1 min-w-0">
@@ -371,7 +371,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
 
 
       {/* SECTION 2: BOTTOM 2 GAUGES SIDE-BY-SIDE (% Ri and % Rc) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {/* Gauge 1: % Ri (Endüktif Reaktif Ceza Oranı) */}
         {renderGauge(
           '% Ri',

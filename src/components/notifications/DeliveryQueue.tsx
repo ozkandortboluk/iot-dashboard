@@ -14,6 +14,8 @@ import {
   Bell,
   CheckCheck,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import type { NotificationQueueItem, NotificationChannel } from '../../types';
 import { formatDateTime } from '../../lib/utils';
@@ -38,6 +40,14 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const itemsPerPage = 15;
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedChannelFilter, selectedStatusFilter]);
+
   const filteredItems = queueItems.filter((item) => {
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
@@ -54,6 +64,9 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
     }
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / itemsPerPage));
+  const currentItems = filteredItems.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const getChannelIcon = (ch: NotificationChannel) => {
     switch (ch) {
@@ -263,7 +276,7 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {filteredItems.map((item) => {
+                {currentItems.map((item) => {
                   const isActionLoading = loadingAction === item.id;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
@@ -326,7 +339,7 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
 
           {/* Mobile Card View */}
           <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800">
-            {filteredItems.map((item) => (
+            {currentItems.map((item) => (
               <div key={item.id} className="p-4 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -356,6 +369,40 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
               </div>
             ))}
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 sm:px-5 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Toplam <span className="font-semibold text-slate-700 dark:text-slate-300">{filteredItems.length}</span> kayıttan{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {(currentPage - 1) * itemsPerPage + 1}-
+                  {Math.min(currentPage * itemsPerPage, filteredItems.length)}
+                </span>{' '}
+                arası gösteriliyor.
+              </span>
+              
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="text-xs font-semibold px-2 text-slate-700 dark:text-slate-300">
+                  {currentPage} / {totalPages}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
