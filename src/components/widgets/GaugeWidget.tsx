@@ -77,7 +77,7 @@ export const GaugeWidget: React.FC<GaugeWidgetProps> = ({ config }) => {
         <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
           <Gauge className="w-4 h-4 text-emerald-400" />
         </div>
-        <DeviceStatusDot deviceId={config.deviceId} />
+        <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
         <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
           {config.title}
         </h3>

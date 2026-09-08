@@ -55,6 +55,16 @@ export class PostgresRepository {
     return !!this.pool && this.isConnected;
   }
 
+  public async checkIfAdminExists(): Promise<boolean> {
+    if (!this.pool) return false;
+    try {
+      const res = await this.pool.query("SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;");
+      return (res.rowCount || 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
   private isSchemaEnsured = false;
   private isRecoveringSchema = false;
 
@@ -2055,9 +2065,14 @@ export class PostgresRepository {
 
     if (!this.pool) return null;
     try {
-      await this.ensureTelemetrySchema();
-      // 1. Users
-      const usersRes = await this.query(`SELECT * FROM users ORDER BY created_at ASC;`);
+      // 1. Users (Fast path: if tables already exist, load immediately; otherwise ensure schema on demand)
+      let usersRes: any;
+      try {
+        usersRes = await this.query(`SELECT * FROM users ORDER BY created_at ASC;`);
+      } catch {
+        await this.ensureTelemetrySchema();
+        usersRes = await this.query(`SELECT * FROM users ORDER BY created_at ASC;`);
+      }
       const users: User[] = [];
       const passwords: Record<string, string> = {};
 

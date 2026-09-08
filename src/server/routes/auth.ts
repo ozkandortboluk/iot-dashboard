@@ -42,13 +42,32 @@ export function clearSessionCookie(res: Response) {
 }
 
 // Setup/Onboarding Endpoints
-router.get('/setup-status', (req, res) => {
+router.get('/setup-status', async (req, res) => {
+  // 1. Ensure database has completed initial hydration from PostgreSQL / disk cache
+  await db.waitForInitialization();
+
   const users = db.getUsers();
-  const hasAdmin = users.some((u) => u.role === 'admin');
+  let hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+
+  // 2. Direct PostgreSQL fallback: If in-memory cache hasn't loaded admin yet, query PostgreSQL directly
+  if (!hasAdmin && (db.postgresRepo?.getPool() || db.getPostgresUrl())) {
+    try {
+      const pgAdminExists = await db.postgresRepo.checkIfAdminExists();
+      if (pgAdminExists) {
+        hasAdmin = true;
+        // Trigger background hydration to sync in-memory data
+        db.initPostgresRepository().catch(() => {});
+      }
+    } catch (pgErr) {
+      console.warn('[Setup-Status PG Check Warning]:', pgErr);
+    }
+  }
+
   res.json({ needSetup: !hasAdmin, inProgress: isSetupInProgress });
 });
 
 router.post('/setup', async (req, res) => {
+  await db.waitForInitialization();
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -123,7 +142,8 @@ router.post('/setup', async (req, res) => {
 });
 
 // Auth Endpoints (Public)
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
+  await db.waitForInitialization();
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`login:${clientIp}`, 20);
   if (!rateLimit.allowed) {
@@ -159,6 +179,7 @@ router.post('/login', (req, res) => {
 });
 
 router.post('/register', async (req, res) => {
+  await db.waitForInitialization();
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`reg:${clientIp}`, 10);
   if (!rateLimit.allowed) {

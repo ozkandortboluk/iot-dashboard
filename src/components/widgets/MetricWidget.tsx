@@ -93,7 +93,7 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
           <div className="p-1.5 rounded-xl bg-slate-100 dark:bg-indigo-500/10 text-indigo-400 border border-slate-200 dark:border-indigo-500/20 shrink-0">
             {getMetricIcon()}
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
           <div className="min-w-0">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
               {config.title}
@@ -138,7 +138,7 @@ export const MetricWidget: React.FC<MetricWidgetProps> = ({ config, onDelete }) 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-indigo-500/10 text-indigo-400 border border-slate-200 dark:border-indigo-500/20">{getMetricIcon()}</div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
           <h3 className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider truncate max-w-[150px]">
             {config.title}
           </h3>

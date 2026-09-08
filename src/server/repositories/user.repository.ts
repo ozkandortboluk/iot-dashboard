@@ -29,7 +29,7 @@ export class UserRepository {
       (s: any) => new Date(s.expiresAt).getTime() > Date.now()
     );
     this.db.data.sessions.push(session);
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
     this.db.postgresRepo.saveSession(session).catch(() => {});
     return token;
   }
@@ -41,7 +41,7 @@ export class UserRepository {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.token !== cleanToken);
     const removed = (this.db.data.sessions || []).length < initialLength;
     if (removed) {
-      this.db.saveData(this.db.data);
+      this.db.saveData(this.db.data, true);
     }
     this.db.postgresRepo.deleteSession(cleanToken).catch(() => {});
     return removed;
@@ -80,7 +80,7 @@ export class UserRepository {
     if (storedHash && verifyPassword(pass, storedHash)) {
       if (!storedHash.startsWith('$2')) {
         this.db.data.passwords[user.id] = hashPassword(pass);
-        this.db.saveData(this.db.data);
+        this.db.saveData(this.db.data, true);
       }
       const token = this.createSession(user);
       this.db.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
@@ -180,7 +180,7 @@ export class UserRepository {
     this.db.data.dashboards.push(dashboard);
     this.db.data.auditLogs.push(auditLog);
     
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
     
     return newUser;
   }
@@ -206,7 +206,7 @@ export class UserRepository {
     await this.db.postgresRepo.saveUser(user, newHash);
     
     this.db.data.passwords[userId] = newHash;
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
     this.addAuditLog(userId, user.name, 'Kullanıcı Şifresini Başarıyla Güncelledi', 'low');
   }
 
@@ -219,7 +219,7 @@ export class UserRepository {
     await this.db.postgresRepo.saveUser(user);
 
     this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
     return user;
   }
 
@@ -263,7 +263,7 @@ export class UserRepository {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
 
     this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
 
     // 3. PostgreSQL Transaction: Cihazları güncelle ve kullanıcıyı sil
     this.db.postgresRepo?.deleteUser(userId).catch((err: any) => {
@@ -273,7 +273,7 @@ export class UserRepository {
 
   public async terminateUserSessions(userId: string) {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
     await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});
   }
 
@@ -292,7 +292,7 @@ export class UserRepository {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
     
     this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Askıya Alındı (Soft Delete): ${user.name} (${user.email})`, 'high');
-    this.db.saveData(this.db.data);
+    this.db.saveData(this.db.data, true);
   }
 
 

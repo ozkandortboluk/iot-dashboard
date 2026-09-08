@@ -146,7 +146,7 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
           <div className="p-1.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">
             <Sliders className="w-4 h-4" />
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} />
           <div className="min-w-0 hidden sm:block">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
               {config.title || 'Çoklu Metrik'}
@@ -203,7 +203,7 @@ export const MultiMetricWidget: React.FC<MultiMetricWidgetProps> = ({ config, on
           <div className="p-1.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
             <Sliders className="w-3.5 h-3.5" />
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} />
           <div>
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider truncate max-w-[140px]">
               {config.title || `Çoklu Metrik (${count}'li)`}

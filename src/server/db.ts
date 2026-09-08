@@ -264,9 +264,23 @@ class LocalDatabase {
     this.startAutoQuotaCheck();
     this.startQueueWorker();
     this.startAutoRetentionWorker();
-    this.initPostgresRepository().catch(() => {});
+    this.initPromise = this.initPostgresRepository().catch(() => false);
     this.startPostgresAutoReconnect();
     this.startAutoBackupWorker();
+  }
+
+  private initPromise: Promise<boolean> | null = null;
+
+  public async waitForInitialization(timeoutMs = 6000): Promise<boolean> {
+    if (!this.initPromise) return true;
+    try {
+      return await Promise.race([
+        this.initPromise,
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+      ]);
+    } catch {
+      return false;
+    }
   }
 
   private autoBackupInterval: any = null;
@@ -373,26 +387,7 @@ class LocalDatabase {
       this.data.databaseSettings.isPostgresConnected = true;
       this.data.databaseSettings.lastTestedAt = new Date().toISOString();
 
-      // 1. Guarantee PostgreSQL & TimescaleDB schema tables exist (isolated so non-fatal schema notices don't break connection)
-      try {
-        const schemaClient = await pool.connect();
-        try {
-          await schemaClient.query(this.getPostgresSchemaSQL());
-        } finally {
-          schemaClient.release();
-        }
-      } catch (schemaErr: any) {
-        console.warn('[PostgreSQL Schema Warning]:', schemaErr?.message || schemaErr);
-      }
-
-      // 1b. Explicitly ensure telemetry schema columns & tables
-      try {
-        await this.postgresRepo.ensureTelemetrySchema();
-      } catch (tErr: any) {
-        console.warn('[PostgreSQL Telemetry Schema Setup Warning]:', tErr?.message || tErr);
-      }
-
-      // 2. Hydrate from PostgreSQL into in-memory store
+      // 1. FAST-PATH HYDRATION: Immediately hydrate users, devices, and rules into memory
       try {
         const hydrated = await this.postgresRepo.hydrateFromPostgres();
         if (hydrated) {
@@ -433,10 +428,6 @@ class LocalDatabase {
             this.data.activeAlarms = hydrated.alarms;
           }
 
-
-
-
-
           if (hydrated.sessions && hydrated.sessions.length > 0) {
             const sessionMap = new Map<string, UserSession>();
             if (this.data.sessions) {
@@ -450,15 +441,33 @@ class LocalDatabase {
             }
           }
 
-
-
-          this.saveData(this.data);
+          this.saveData(this.data, true);
 
           console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
         }
       } catch (hydrateErr: any) {
         console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
       }
+
+      // 2. Asynchronous Schema & DDL Verification in Background (does not block API startup or authentication)
+      (async () => {
+        try {
+          const schemaClient = await pool.connect();
+          try {
+            await schemaClient.query(this.getPostgresSchemaSQL());
+          } finally {
+            schemaClient.release();
+          }
+        } catch (schemaErr: any) {
+          console.warn('[PostgreSQL Schema Warning]:', schemaErr?.message || schemaErr);
+        }
+
+        try {
+          await this.postgresRepo.ensureTelemetrySchema();
+        } catch (tErr: any) {
+          console.warn('[PostgreSQL Telemetry Schema Setup Warning]:', tErr?.message || tErr);
+        }
+      })().catch(() => {});
 
       return true;
     } catch (err: any) {

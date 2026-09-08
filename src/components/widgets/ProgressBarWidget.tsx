@@ -62,7 +62,7 @@ export const ProgressBarWidget: React.FC<ProgressBarWidgetProps> = ({ config, on
           >
             <Activity className="w-4 h-4" />
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
           <div className="min-w-0">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
               {config.title || 'İlerleme Çubuğu'}
@@ -106,7 +106,7 @@ export const ProgressBarWidget: React.FC<ProgressBarWidgetProps> = ({ config, on
           <div className="p-1.5 rounded-xl text-white font-bold" style={{ backgroundColor: config.colorScheme || '#f59e0b' }}>
             <Activity className="w-3.5 h-3.5" />
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
           <div>
             <h3 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
               {config.title || 'İlerleme & Eşik Çubuğu'}

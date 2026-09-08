@@ -2121,6 +2121,13 @@ Body:
 }`,
     },
     {
+      id: 'faq_widget_freshness',
+      category: 'Widget & Kontrol',
+      question: 'Widget başlıklarındaki renkli durum noktaları (🟢🟡🟠🔴⚪) ne anlama gelir?',
+      answer: 'Durum göstergesi tek bir metriğe kilitlenmek yerine, cihazdan genel olarak metrik (telemetri) akışının sağlanıp sağlanmadığını doğrular. Sahadaki donanımın veri üretim döngüsüne göre şu 5 kademeli akıllı tazelik kuralı uygulanır:\n• 🟢 Canlı: Cihazdan düzenli metrik akışı alınıyor ve beklenen sıklıkta güncelleniyor.\n• 🟡 Gecikmeli: Cihazdan metrik alımı beklenenden uzun süredir gelmedi (gecikme).\n• 🟠 Eski veri: Cihaz bağlı görünse dahi uzun süredir yeni bir metrik paketi alınmıyor.\n• 🔴 Çevrimdışı: Cihaz bağlantısı koptu veya sinyal zaman aşımına uğradı, metrik akışı durdu.\n• ⚪ Veri yok: Cihazdan henüz sisteme hiç metrik alınmamış.\nİmleci gösterge noktasının üzerine getirdiğinizde alınan metrik sayısı, son metrik zamanı, beklenen sıklık ve anlık akış durumu detaylı bilgi kutusunda görüntülenir.',
+      tags: ['canlı', 'gecikmeli', 'eski veri', 'çevrimdışı', 'veri yok', 'durum göstergesi', 'widget', 'metrik akışı'],
+    },
+    {
       id: 'faq_3',
       category: 'Cihaz Entegrasyonu',
       question: 'Sanal Veri Üreteci (Simülatör) ne işe yarar ve nasıl çalışır?',

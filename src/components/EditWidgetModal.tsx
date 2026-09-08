@@ -29,6 +29,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { getMetricUnit, COMMON_UNITS, isInternalOrControlMetric } from '../lib/utils';
+import { getDefaultWidgetTitle } from '../lib/widgetTitles';
 import { AlarmRuleWizard } from './notifications/AlarmRuleWizard';
 import { apiFetch, safeJson } from '../lib/apiFetch';
 
@@ -289,11 +290,12 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const finalTitle = title.trim() || getDefaultWidgetTitle(type, metricKey, buttonCount, multiMetricCount);
     const updatedWidgets = widgets.map((w) => {
       if (w.id === widget.id) {
         return {
           ...w,
-          title: title || (type === 'custom_panel' ? 'Özel Kontrol Paneli' : type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
+          title: finalTitle,
           type,
           metricKey,
           unit: customUnit.trim() || undefined,
@@ -370,6 +372,7 @@ export const EditWidgetModal: React.FC<EditWidgetModalProps> = ({ widget, isOpen
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+                placeholder={getDefaultWidgetTitle(type, metricKey, buttonCount, multiMetricCount)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 text-xs"
               />
             </div>

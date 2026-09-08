@@ -78,4 +78,30 @@ router.delete('/:id', authenticateUser, (req, res) => {
   res.json({ success: true });
 });
 
+router.post('/:id/trigger', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
+  const autoId = req.params.id;
+
+  const existing = db.getAutomations().find(a => a.id === autoId);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  if (user.role !== 'admin' && existing.tenantId !== user.id) {
+    return res.status(403).json({ error: 'Unauthorized.' });
+  }
+
+  // Trigger manually
+  import('../services/automation.engine.js').then(({ automationEngine }) => {
+    // Force execute
+    const actionMethod = (automationEngine as any).executeAction;
+    if (typeof actionMethod === 'function') {
+      actionMethod.call(automationEngine, existing);
+    }
+    const updated = db.updateAutomation(autoId, { lastTriggered: new Date().toISOString() });
+    res.json({ success: true, message: 'Senaryo başarıyla manuel olarak tetiklendi', automation: updated });
+  }).catch((err) => {
+    res.status(500).json({ error: err.message });
+  });
+});
+
 export const automationsRouter = router;

@@ -12,13 +12,13 @@ interface PowerAnalyzerWidgetProps {
 export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config, onEdit }) => {
   const { latestTelemetry, devices } = useRealtime();
 
+  const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
+  const targetDev = isSpecificDevice
+    ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
+    : null;
+
   // Extract values synchronously via useMemo from live telemetry or device metrics
   const metrics = useMemo(() => {
-    const isSpecificDevice = Boolean(config.deviceId && config.deviceId !== 'all');
-    const targetDev = isSpecificDevice
-      ? devices.find((d) => d.id === config.deviceId || d.apiKey === config.deviceId)
-      : null;
-
     // Search for telemetry matching configured deviceId or overall
     const devTelemetry = latestTelemetry.filter((t) => {
       if (isSpecificDevice) {
@@ -177,7 +177,7 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
                 ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 animate-pulse'
                 : isWarning
                 ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
             }`}
           >
             {isPenalty ? 'CEZA' : isWarning ? 'RİSK' : 'NORMAL'}
@@ -259,8 +259,8 @@ export const PowerAnalyzerWidget: React.FC<PowerAnalyzerWidgetProps> = ({ config
           <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-inner">
             <Zap className="w-5 h-5 text-amber-500" />
           </div>
-          <DeviceStatusDot deviceId={config.deviceId} />
-            <div>
+          <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey || 'power'} />
+          <div>
               <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
                 {config.title || 'Elektrik Sayacı & Reaktif Ceza Analizörü'}
               </h3>

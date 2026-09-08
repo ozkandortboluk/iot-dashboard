@@ -241,7 +241,7 @@ export const ChartWidget: React.FC<ChartWidgetProps> = ({ config }) => {
             <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
               <Activity className="w-4 h-4 text-indigo-400" />
             </div>
-            <DeviceStatusDot deviceId={config.deviceId} />
+            <DeviceStatusDot deviceId={config.deviceId} device={targetDev} metricKey={config.metricKey} />
             <h3 className="text-xs font-semibold text-slate-800 dark:text-slate-200">
               {config.title}
             </h3>

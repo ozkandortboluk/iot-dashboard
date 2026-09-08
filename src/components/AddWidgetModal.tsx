@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { X, Plus, Layers, Tag, Activity, Trash2, Grid, Bell, ArrowUpRight, CheckCircle2 } from 'lucide-react';
 import { getMetricUnit, COMMON_UNITS, isInternalOrControlMetric } from '../lib/utils';
 import { WIDGET_SIZE_RULES, getWidgetEffectiveHeight } from '../lib/widgetSizeRules';
+import { getDefaultWidgetTitle } from '../lib/widgetTitles';
 import { AlarmRuleWizard } from './notifications/AlarmRuleWizard';
 import { apiFetch, safeJson } from '../lib/apiFetch';
 
@@ -19,9 +20,12 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
-  const [title, setTitle] = useState('');
   const [type, setType] = useState<WidgetType>('area_chart');
   const [metricKey, setMetricKey] = useState('temperature');
+  const [buttonCount, setButtonCount] = useState<1 | 2 | 3 | 4>(1);
+  const [multiMetricCount, setMultiMetricCount] = useState<2 | 4>(2);
+  const [isTitleCustom, setIsTitleCustom] = useState(false);
+  const [title, setTitle] = useState(getDefaultWidgetTitle('area_chart', 'temperature'));
   const [customUnit, setCustomUnit] = useState('');
   const [isCustomMetric, setIsCustomMetric] = useState(false);
   const [deviceId, setDeviceId] = useState('all');
@@ -35,8 +39,6 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
   const [alarmSuccessBanner, setAlarmSuccessBanner] = useState<string | null>(null);
 
   // Control Widget specific state
-  const [buttonCount, setButtonCount] = useState<1 | 2 | 3 | 4>(1);
-  const [multiMetricCount, setMultiMetricCount] = useState<2 | 4>(2);
   const [sliderMin, setSliderMin] = useState<number>(0);
   const [sliderMax, setSliderMax] = useState<number>(100);
   const [sliderStep, setSliderStep] = useState<number>(1);
@@ -203,8 +205,12 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
       if (type === 'metric_matrix' && matrixSlots.length === 0) {
         setMatrixSlots(generateSmartActiveMatrixSlots());
       }
+      // If title wasn't manually typed or is empty, initialize with default title
+      if (!isTitleCustom || !title.trim()) {
+        setTitle(getDefaultWidgetTitle(type, metricKey, buttonCount, multiMetricCount));
+      }
     }
-  }, [isOpen, type]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -226,10 +232,11 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const finalTitle = title.trim() || getDefaultWidgetTitle(type, metricKey, buttonCount, multiMetricCount);
     const defaultRule = WIDGET_SIZE_RULES[type];
     const newWidget: WidgetConfig = {
       id: `w_custom_${Date.now()}`,
-      title: title || (type === 'custom_panel' ? 'Özel Kontrol Paneli' : type === 'quick_access' ? 'Hızlı Erişim & Sağlık / Alarm Merkezi' : type === 'button_control' ? `${buttonCount}'li Buton Paneli` : type === 'slider_control' ? 'Analog Çıkış Sürgüsü' : type === 'multi_metric' ? `${multiMetricCount}'li Çoklu Metrik Kartı` : type === 'metric_matrix' ? 'Çoklu Cihaz & Metrik Matrisi (4x8)' : `${metricKey} Grafiği`),
+      title: finalTitle,
       type,
       metricKey,
       unit: customUnit.trim() || undefined,
@@ -296,8 +303,11 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
               <input
                 type="text"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Örn: Maslak İstasyonu Sıcaklık Analizi"
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  setIsTitleCustom(e.target.value.trim().length > 0);
+                }}
+                placeholder={getDefaultWidgetTitle(type, metricKey, buttonCount, multiMetricCount)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
               />
             </div>
@@ -314,6 +324,9 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
                   const rule = WIDGET_SIZE_RULES[newType];
                   if (rule?.defaultSpan) {
                     setSpan(rule.defaultSpan as WidgetSpan);
+                  }
+                  if (!isTitleCustom) {
+                    setTitle(getDefaultWidgetTitle(newType, metricKey, buttonCount, multiMetricCount));
                   }
                 }}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
@@ -355,7 +368,12 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
                   <button
                     key={cnt}
                     type="button"
-                    onClick={() => setButtonCount(cnt)}
+                    onClick={() => {
+                      setButtonCount(cnt);
+                      if (!isTitleCustom) {
+                        setTitle(getDefaultWidgetTitle(type, metricKey, cnt, multiMetricCount));
+                      }
+                    }}
                     className={`py-2 rounded-xl font-extrabold text-xs border transition ${
                       buttonCount === cnt
                         ? 'bg-blue-600 text-white border-blue-600 shadow-md'
@@ -567,7 +585,12 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
                     <button
                       key={cnt}
                       type="button"
-                      onClick={() => setMultiMetricCount(cnt)}
+                      onClick={() => {
+                        setMultiMetricCount(cnt);
+                        if (!isTitleCustom) {
+                          setTitle(getDefaultWidgetTitle(type, metricKey, buttonCount, cnt));
+                        }
+                      }}
                       className={`py-2 rounded-xl font-extrabold text-xs border transition cursor-pointer ${
                         multiMetricCount === cnt
                           ? 'bg-purple-600 text-white border-purple-600 shadow-md'
@@ -804,9 +827,13 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
                       if (e.target.value === '__custom__') {
                         setIsCustomMetric(true);
                       } else {
-                        setMetricKey(e.target.value);
+                        const newKey = e.target.value;
+                        setMetricKey(newKey);
                         if (!customUnit) {
-                          setCustomUnit(getMetricUnit(e.target.value));
+                          setCustomUnit(getMetricUnit(newKey));
+                        }
+                        if (!isTitleCustom) {
+                          setTitle(getDefaultWidgetTitle(type, newKey, buttonCount, multiMetricCount));
                         }
                       }
                     }}
