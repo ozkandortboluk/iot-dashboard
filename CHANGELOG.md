@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.2.2] - 2026-09-08
+### 🐳 Docker & Sunucu Derleme / Dağıtım Uyumluluğu & Otomatik Sürüm Yönetimi
+- **Docker & Sunucu Yükleme İyileştirmeleri**:
+  - `npm 10` Arborist bağımlılık çözme ve `edgesOut` hatalarını engelleyen optimize edilmiş `Dockerfile` ve `.dockerignore` eklendi.
+  - `esbuild` doğrudan `dependencies` kapsamına alınarak `npm install --omit=dev` çalışan ortamlarda derleme garantilendi.
+- **Merkezi Sürüm Yönetimi (`src/config/version.ts`)**:
+  - Uygulama sürümü `src/config/version.ts` üzerinden merkezi olarak yönetilecek şekilde dinamikleştirildi.
+  - Sidebar ve Hesap Ayarları altındaki sürüm rozetleri merkezi sürüm değişkenine bağlandı.
+- **Kural Seti Güncellemesi (`AGENTS.md` & `GEMINI.md`)**:
+  - Her kod değişikliğinde SemVer sürüm numarasının otomatik yükseltilmesi zorunlu bir kural olarak sisteme eklendi.
+
+---
+
 ## 🚀 [v1.2.1] - 2026-08-15
 ### 🛡️ Güvenli İlk Kurulum & Dinamik Onboarding Sihirbazı
 - **Dinamik İlk Kurulum Ekranı (First-Run Setup)**:

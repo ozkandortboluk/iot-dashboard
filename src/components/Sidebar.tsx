@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { getRoleBadgeInfo } from '../lib/permissions';
 import { NexusNodeLogo } from './NexusNodeLogo';
+import { APP_RELEASE_TAG } from '../config/version';
 
 interface SidebarProps {
   activeTab: string;
@@ -461,7 +462,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <GitBranch className="w-3.5 h-3.5" />
               </div>
               <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100">
-                v1.2.1
+                {APP_RELEASE_TAG}
               </span>
             </div>
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase tracking-wider">

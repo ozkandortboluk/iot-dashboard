@@ -36,6 +36,7 @@ import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import { formatDateTime } from '../lib/utils';
 import type { User } from '../types';
 import { NexusNodeLogo } from './NexusNodeLogo';
+import { APP_RELEASE_TAG } from '../config/version';
 
 export const AccountSettingsView: React.FC = () => {
   const { user, updateUser, refreshUser, logout } = useAuth();
@@ -971,7 +972,7 @@ export const AccountSettingsView: React.FC = () => {
                 nexusnodeiot.com.tr
               </span>
               <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-                v1.2.1 Üretim Modu
+                {APP_RELEASE_TAG} Üretim Modu
               </span>
             </div>
           </div>
