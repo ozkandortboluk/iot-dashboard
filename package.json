@@ -1,7 +1,7 @@
 {
-  "name": "react-example",
+  "name": "nexusnode-iot",
   "private": true,
-  "version": "1.2.10",
+  "version": "1.2.13",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -16,8 +16,11 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint . && tsc --noEmit",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run src/",
+    "test:watch": "vitest src/",
+    "test:e2e": "vitest run e2e/",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:ci": "npm run lint && npm run type-check && npm run test && npm run build && npm run test:smoke && npm run test:e2e",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {

@@ -43,7 +43,7 @@ import { compilerRouter } from './src/server/routes/compiler.js';
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const server = http.createServer(app);
 
 // Global Middleware & Body Parsers
@@ -53,17 +53,38 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.text({ type: ['text/*', 'application/x-www-form-urlencoded', 'application/octet-stream'], limit: '10mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '10mb' }));
 
-// CORS & Preflight Handling
+// CORS & Preflight Handling (Secure Allowlist)
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/.*\.run\.app$/,
+  /^https?:\/\/nexusnodeiot\.com\.tr$/,
+  /^https?:\/\/.*\.nexusnodeiot\.com\.tr$/
+];
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+  
   if (origin) {
-    res.header('Access-Control-Allow-Origin', origin);
+    // Only allow credentials and reflect origin if it matches our allowlist patterns
+    const isAllowed = ALLOWED_ORIGIN_PATTERNS.some(pattern => pattern.test(origin));
+    if (isAllowed) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      // Do not allow credentials for unknown origins.
+      // We can optionally set it to '*' or omit it. Omitting it means the browser blocks the CORS request.
+      res.header('Access-Control-Allow-Origin', 'null'); // Explicitly deny
+    }
   } else {
+    // Non-browser clients (IoT devices, curl) don't send Origin.
+    // Allow public API access but do not enable credentials (cookies) in this context.
     res.header('Access-Control-Allow-Origin', '*');
   }
-  res.header('Access-Control-Allow-Credentials', 'true');
+  
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-auth-token, x-api-key, x-token, x-device-id, x-device-ip, x-mac-address');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  
   if (req.method === 'OPTIONS') {
     return res.status(200).send('OK');
   }

@@ -4,6 +4,31 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.2.13] - 2026-09-08
+### 🔒 E2E CSRF ve Session Regresyon Testleri
+- **Kalıcı Regresyon Güvencesi:** Uçtan uca (E2E) güvenlik testleri için `e2e/security_e2e.test.ts` yazılarak `npm run test:e2e` betiği olarak CI zincirine eklendi.
+- **CSRF & Cors Origin Savunması:** Kötü niyetli "Origin" başlıklarıyla gönderilen preflight (OPTIONS) ve standart isteklerin CORS katmanında bloklandığı otomatize edildi.
+- **Session ve HttpOnly Doğrulaması:** HttpOnly token'ların başarıyla login sonrası tarayıcı tabanlı yetkilendirme olarak kullanıldığı, logout mekanizmasının token'ı temizleyip `401 Unauthorized` sonucunu tetiklediği otomatik hale getirildi.
+- **WebSocket Auth Testi:** Cihazların ve kullanıcıların WS bağlantısı sırasında çerez veya header ile doğru şekilde içeri alındığı (auth-bypass reddi) sınandı.
+
+---
+
+## 🚀 [v1.2.12] - 2026-09-08
+### ⚙️ CI/CD ve Test Kapsamı İyileştirmeleri
+- **Proje Adı Standardizasyonu:** `package.json` içerisindeki eski `react-example` tanımı projenin gerçek kimliği olan `nexusnode-iot` ile standardize edildi.
+- **Production Smoke Test Entegrasyonu:** CI pipeline'larında build sonrasında doğrudan `dist/server.cjs` bundle dosyasını izole ortamda (node) başlatan, liveness ve readiness uç noktalarını doğrulayan ve başarılıysa güvenli kapanma (graceful shutdown) sağlayan `test:smoke` script'i eklendi.
+- **Entegrasyon/E2E Test Genişlemesi:** Auth, tenant isolation, WS protokolü doğrulama, OTA state machine aşamaları, alarm motoru eşikleri ve komut acknowledgement (ACK) süreçleri için test çatıları (`src/tests/integration/nexus_integration.test.ts`) projeye entegre edilerek kapsam büyütüldü.
+
+---
+
+## 🚀 [v1.2.11] - 2026-09-08
+### 🔒 CORS Güvenliği (Origin Reflection Fix) & Smoke Testleri
+- **Origin Reflection Kapatıldı:** `server.ts` içerisindeki CORS yapılandırması düzeltildi. Gelen her `Origin` isteğini otomatik olarak kabul edip `Access-Control-Allow-Credentials: true` başlığı dönmek yerine, regex tabanlı bir allowlist mekanizması (localhost, *.run.app, nexusnodeiot.com.tr) devreye alındı.
+- **Güvenli Fallback:** Tarayıcı dışı API/IoT istemcileri için (Origin başlığı bulunmayan) kimlik doğrulamasız wildcard (`*`) kuralı korundu, ancak bilinmeyen origin'lerden gelen cookie tabanlı session erişimleri (CORS misconfiguration) tamamen kısıtlandı.
+- **Production Smoke Test:** Docker imajı / build sonrası süreçleri doğrulamak üzere `npm run build`, `npm start` zinciri üzerinden `/health/live` ve `/health/ready` uç noktaları başarıyla doğrulandı.
+
+---
+
 ## 🚀 [v1.2.10] - 2026-09-08
 ### 🔒 Güvenlik & Kimlik Doğrulama Regresyon Testleri ve CORS Optimizasyonu
 - **HttpOnly Cookie Tamamlaması:** Oturum yönetimi uçtan uca test edildi. Kayıt/Giriş akışlarında (login, register, logout) tarayıcıya "HttpOnly" ve "SameSite=Lax" özellikleri ile güvenli token bırakıldığı ve başarılı şekilde temizlendiği doğrulandı. 
