@@ -1,17 +1,17 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.2.8",
+  "version": "1.2.10",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server-main.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "build:client": "vite build",
-    "build:server": "esbuild server-main.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node server.ts",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "type-check": "tsc --noEmit",
     "lint": "eslint . && tsc --noEmit",

@@ -4,6 +4,23 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.2.10] - 2026-09-08
+### 🔒 Güvenlik & Kimlik Doğrulama Regresyon Testleri ve CORS Optimizasyonu
+- **HttpOnly Cookie Tamamlaması:** Oturum yönetimi uçtan uca test edildi. Kayıt/Giriş akışlarında (login, register, logout) tarayıcıya "HttpOnly" ve "SameSite=Lax" özellikleri ile güvenli token bırakıldığı ve başarılı şekilde temizlendiği doğrulandı. 
+- **CORS & Credentials Uyumu:** `server.ts` içerisindeki CORS yapılandırması HttpOnly cookie'ler (credentials) ile çalışabilmesi için dinamik Origin ("Access-Control-Allow-Credentials: true") destekleyecek şekilde güncellendi.
+- **WebSocket Kimlik Doğrulama:** WebSocket upgrade mekanizmasının HTTP istek başlıklarından ve URL parametrelerinden HttpOnly çerezini başarıyla okuyup parse ettiği test edilerek doğrulandı. CSRF ve Session Expiry akışları sorunsuz çalışmaktadır.
+
+---
+
+## 🚀 [v1.2.9] - 2026-09-08
+### ⚙️ Production Runtime & Entrypoint Optimizasyonu
+- **Tekil & Deterministik Entrypoint**: Sunucu başlatma süreçleri standartlaştırılarak `server-main.ts` doğrudan `server.ts` olarak yapılandırıldı ve eski wrapper dosyası kaldırıldı.
+- **Docker Production CMD Optimizasyonu**: Dockerfile içerisindeki başlatma komutu `CMD ["node", "dist/server.cjs"]` olarak güncellendi. Böylece Production (Canlı) ortam, Typescript derleyicisi yüküne girmeden doğrudan build aşamasında üretilen bundle dosyasını (derlenmiş temiz JavaScript'i) çalıştırarak hem hızlandı hem de olası ES Module uyumsuzluklarının önüne geçildi.
+- **Graceful Shutdown Entegrasyonu**: Sunucu başlatma dosyasına (`server.ts`) güvenli kapatma (`SIGINT`, `SIGTERM`) işlemi (Graceful Shutdown) entegre edildi. Kapanma sinyali alındığında önce HTTP sunucusu istekleri almayı kesiyor, eğer 10 saniye içinde kapanamazsa kendini zorla sonlandırıyor.
+- **Healthcheck & Liveness Doğrulaması**: `/health/live` ve `/health/ready` endpoint'lerinin çalıştığı teyit edildi.
+
+---
+
 ## 🚀 [v1.2.8] - 2026-09-08
 ### 🛠️ Derleme ve Bağımlılık Düzeltmeleri
 - **Eksik Paket Çözümü (react-is)**: Docker imaj derleme (`npm run build`) sürecinde Rollup bundler'ın `recharts` modülü için ihtiyaç duyduğu ancak `--legacy-peer-deps` kullanımı sebebiyle çözümleyemediği `react-is` modülü doğrudan projenin ana bağımlılıklarına (dependencies) eklenerek build hata (Rollup failed to resolve import "react-is") durumu giderildi.

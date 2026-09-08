@@ -31,7 +31,6 @@ RUN npm install --omit=dev --legacy-peer-deps
 
 # Copy built bundle and runtime assets from builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/data ./data
 COPY --from=builder /app/metadata.json ./metadata.json
@@ -41,4 +40,4 @@ RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-CMD ["node", "server.ts"]
+CMD ["node", "dist/server.cjs"]
