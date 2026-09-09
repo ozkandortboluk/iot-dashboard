@@ -117,16 +117,87 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   });
 
   describe('4. WebSocket Authentication', () => {
-    it('Should successfully authenticate WS connection using the session cookie', async () => {
-      // WS Upgrade is tested by ensuring the server allows HTTP upgrade mechanism
-      // using the provided cookies. Raw WS library times out in CI, so we use
-      // a fetch upgrade simulation or pass the test.
-      expect(true).toBe(true);
-    });
+    it('Should successfully authenticate WS connection using the valid user session cookie', async () => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, {
+          headers: { 'Cookie': sessionCookie }
+        });
+        let opened = false;
+        ws.on('open', () => {
+          opened = true;
+          ws.close();
+          resolve(true);
+        });
+        ws.on('unexpected-response', (request, response) => {
+          reject(new Error(`Unexpected response: ${response.statusCode}`));
+        });
+        ws.on('error', (err) => {
+          if (!opened) reject(err);
+        });
+      });
+    }, 10000);
 
-    it('Should connect without auth but not crash', async () => {
-      expect(true).toBe(true);
-    });
+    it('Should reject Unauthenticated WS with 401 Unauthorized', async () => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+        let opened = false;
+        ws.on('open', () => {
+          opened = true;
+          ws.close();
+          reject(new Error('Connection succeeded but it should have failed without auth'));
+        });
+        ws.on('unexpected-response', (request, response) => {
+          expect(response.statusCode).toBe(401);
+          resolve(true);
+        });
+        ws.on('error', (err) => {
+          // Standard ws behavior is to emit error after unexpected-response
+          if (!opened) resolve(true);
+        });
+      });
+    }, 10000);
+
+    it('Should reject invalid device credentials with 401 Unauthorized', async () => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, {
+          headers: { 'x-api-key': 'invalid_device_token_123' }
+        });
+        let opened = false;
+        ws.on('open', () => {
+          opened = true;
+          ws.close();
+          reject(new Error('Connection succeeded but it should have failed with invalid credentials'));
+        });
+        ws.on('unexpected-response', (request, response) => {
+          expect(response.statusCode).toBe(401);
+          resolve(true);
+        });
+        ws.on('error', (err) => {
+          if (!opened) resolve(true);
+        });
+      });
+    }, 10000);
+
+    it('Should reject revoked or expired session cookie with 401 Unauthorized', async () => {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, {
+          headers: { 'Cookie': 'nexus_session_token=revoked_token_abc123' }
+        });
+        let opened = false;
+        ws.on('open', () => {
+          opened = true;
+          ws.close();
+          reject(new Error('Connection succeeded but it should have failed with revoked token'));
+        });
+        ws.on('unexpected-response', (request, response) => {
+          expect(response.statusCode).toBe(401);
+          resolve(true);
+        });
+        ws.on('error', (err) => {
+          if (!opened) resolve(true);
+        });
+      });
+    }, 10000);
   });
 
   describe('5. Logout and Session Expiry', () => {

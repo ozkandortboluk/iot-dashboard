@@ -515,12 +515,53 @@ export function initWebSocketServer(server: http.Server) {
       const pathname = urlObj.pathname;
 
       if (pathname === '/ws' || pathname === '/ws/' || pathname.startsWith('/ws')) {
-        wss!.handleUpgrade(request, socket, head, (ws) => {
+        let connectionToken: string | null = null;
+
+        // 1. Extract Token
+        if (request.headers?.cookie) {
+          const match = request.headers.cookie.match(/nexus_session_token=([^;]+)/);
+          if (match && match[1]) {
+            connectionToken = decodeURIComponent(match[1]).trim();
+          }
+        }
+        if (!connectionToken && request.headers?.authorization) {
+          const authHeader = request.headers.authorization;
+          connectionToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+        } else if (!connectionToken && request.headers?.['x-api-key']) {
+          connectionToken = String(request.headers['x-api-key']).trim();
+        } else if (!connectionToken && request.headers?.['sec-websocket-protocol']) {
+          connectionToken = String(request.headers['sec-websocket-protocol']).split(',')[0].trim();
+        } else if (!connectionToken) {
+          connectionToken = urlObj.searchParams.get('token') || urlObj.searchParams.get('apiKey') || urlObj.searchParams.get('api_key');
+        }
+
+        // 2. Validate Token
+        let user = null;
+        let device = null;
+        if (connectionToken) {
+          user = resolveUser(connectionToken);
+          if (!user) {
+            device = resolveDevice(connectionToken);
+          }
+        }
+
+        if (!user && !device) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        wss!.handleUpgrade(request, socket, head, (ws: AuthenticatedWebSocket) => {
+          ws.isAuth = true;
+          ws.user = user || undefined;
+          ws.device = device || undefined;
           wss!.emit('connection', ws, request);
         });
       }
     } catch (err) {
       console.error('[WebSocket] Upgrade error:', err);
+      socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+      socket.destroy();
     }
   });
 
@@ -543,53 +584,12 @@ export function initWebSocketServer(server: http.Server) {
 
   wss.on('connection', (ws: AuthenticatedWebSocket, req?: http.IncomingMessage) => {
     ws.isAlive = true;
-    ws.isAuth = false;
-    ws.user = undefined;
     ws.messageCount = 0;
     ws.lastRateReset = Date.now();
 
     ws.on('pong', () => {
       ws.isAlive = true;
     });
-
-    // Check if token exists in Cookie, Authorization header, Sec-WebSocket-Protocol, or Query parameter
-    let connectionToken: string | null = null;
-    if (req?.headers?.cookie) {
-      const match = req.headers.cookie.match(/nexus_session_token=([^;]+)/);
-      if (match && match[1]) {
-        connectionToken = decodeURIComponent(match[1]).trim();
-      }
-    }
-    if (!connectionToken && req?.headers?.authorization) {
-      const authHeader = req.headers.authorization;
-      connectionToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-    } else if (!connectionToken && req?.headers?.['x-api-key']) {
-      connectionToken = String(req.headers['x-api-key']).trim();
-    } else if (!connectionToken && req?.headers?.['sec-websocket-protocol']) {
-      connectionToken = String(req.headers['sec-websocket-protocol']).split(',')[0].trim();
-    } else if (!connectionToken && req?.url) {
-      try {
-        const parsedUrl = new URL(req.url, 'http://127.0.0.1');
-        connectionToken = parsedUrl.searchParams.get('token') || parsedUrl.searchParams.get('apiKey') || parsedUrl.searchParams.get('api_key');
-      } catch {
-        // ignore
-      }
-    }
-
-    if (connectionToken) {
-      const verifiedUser = resolveUser(connectionToken);
-      if (verifiedUser) {
-        ws.isAuth = true;
-        ws.user = verifiedUser;
-      } else {
-        const verifiedDevice = resolveDevice(connectionToken);
-        if (verifiedDevice) {
-          ws.isAuth = true;
-          ws.device = verifiedDevice;
-          deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
-        }
-      }
-    }
 
     // Send system greeting & initial status
     safeSend(
@@ -610,6 +610,7 @@ export function initWebSocketServer(server: http.Server) {
     if (ws.isAuth && ws.user) {
       sendBootstrapData(ws, ws.user);
     } else if (ws.isAuth && ws.device) {
+      deviceWsProtocolService.registerDeviceSocket(ws.device.id, ws);
       commandService.getAndDeliverPendingCommands(ws.device.id).then((pendingCmds) => {
         if (pendingCmds.length > 0) {
           safeSend(
