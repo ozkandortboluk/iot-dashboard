@@ -1,9 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import type { Device, TelemetryReading } from '../types';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import type { Device, TelemetryReading, Site, Zone, DeviceGroup, DeviceHealthSummary, DeviceReplacementRecord } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch } from '../lib/apiFetch';
+import { DeviceHierarchyBar } from './devices/DeviceHierarchyBar';
+import { DeviceHealthBadge } from './devices/DeviceHealthBadge';
+import { DeviceTagsEditor } from './devices/DeviceTagsEditor';
+import { DeviceMaintenanceModal } from './devices/DeviceMaintenanceModal';
+import { DeviceReplacementModal } from './devices/DeviceReplacementModal';
+import { HierarchyManagementModal } from './devices/HierarchyManagementModal';
 import {
   Cpu,
   Plus,
@@ -38,6 +44,11 @@ import {
   Power,
   Database,
   Filter,
+  Wrench,
+  Tag,
+  History,
+  FolderTree,
+  MapPin,
 } from 'lucide-react';
 
 export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNavigateToHelp }) => {
@@ -60,14 +71,130 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Hierarchy Data & Filter State
+  const [sites, setSites] = useState<Site[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
+  const [healthSummaries, setHealthSummaries] = useState<DeviceHealthSummary[]>([]);
+  const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
+
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('all');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
+
+  // Hierarchy management modal
+  const [showHierarchyModal, setShowHierarchyModal] = useState(false);
+
+  // Maintenance & Replacement modals
+  const [maintenanceDevice, setMaintenanceDevice] = useState<Device | null>(null);
+  const [hardwareReplaceDevice, setHardwareReplaceDevice] = useState<Device | null>(null);
+
+  // Fetch Hierarchy Data
+  const fetchHierarchyData = useCallback(async () => {
+    try {
+      const [sitesRes, zonesRes, groupsRes, healthRes, historyRes] = await Promise.all([
+        fetch('/api/devices/hierarchy/sites'),
+        fetch('/api/devices/hierarchy/zones'),
+        fetch('/api/devices/hierarchy/groups'),
+        fetch('/api/devices/health-summaries'),
+        fetch('/api/devices/replacement-history'),
+      ]);
+
+      if (sitesRes.ok) setSites(await sitesRes.json());
+      if (zonesRes.ok) setZones(await zonesRes.json());
+      if (groupsRes.ok) setGroups(await groupsRes.json());
+      if (healthRes.ok) setHealthSummaries(await healthRes.json());
+      if (historyRes.ok) setReplacementHistory(await historyRes.json());
+    } catch (err) {
+      console.error('Hiyerarşi verileri yüklenemedi:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHierarchyData();
+    const interval = setInterval(fetchHierarchyData, 15000);
+    return () => clearInterval(interval);
+  }, [fetchHierarchyData]);
+
+  // All distinct tags across all devices
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    devices.forEach((d) => {
+      (d.tags || []).forEach((t) => set.add(t));
+    });
+    return Array.from(set).sort();
+  }, [devices]);
+
+  // Filtered devices based on Site, Zone, Group, Tag, and Customer
+  const filteredDevices = useMemo(() => {
+    return devices.filter((d) => {
+      if (selectedSiteId !== 'all' && d.siteId !== selectedSiteId) return false;
+      if (selectedZoneId !== 'all' && d.zoneId !== selectedZoneId) return false;
+      if (selectedGroupId !== 'all' && d.groupId !== selectedGroupId) return false;
+      if (selectedTag !== 'all' && !(d.tags || []).includes(selectedTag)) return false;
+      return true;
+    });
+  }, [devices, selectedSiteId, selectedZoneId, selectedGroupId, selectedTag]);
+
   // Stable selected device resolution by ID (prevents flapping/disconnect ghosting)
   const selectedDevice = React.useMemo(() => {
     if (selectedDeviceId) {
       const match = devices.find((d) => d.id === selectedDeviceId);
       if (match) return match;
     }
-    return devices[0] || null;
-  }, [devices, selectedDeviceId]);
+    return filteredDevices[0] || devices[0] || null;
+  }, [devices, filteredDevices, selectedDeviceId]);
+
+  // Selected device health summary
+  const selectedHealthSummary = useMemo(() => {
+    if (!selectedDevice) return null;
+    return healthSummaries.find((h) => h.deviceId === selectedDevice.id) || null;
+  }, [healthSummaries, selectedDevice?.id]);
+
+  // Handle Maintenance Toggle
+  const handleToggleMaintenance = async (enabled: boolean, reason?: string, until?: string) => {
+    if (!maintenanceDevice) return;
+    const res = await fetch(`/api/devices/${maintenanceDevice.id}/maintenance`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, reason, until }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Bakım modu güncellenemedi.');
+    }
+    await fetchHierarchyData();
+  };
+
+  // Handle Hardware Replace
+  const handleHardwareReplace = async (data: any) => {
+    if (!hardwareReplaceDevice) return;
+    const res = await fetch(`/api/devices/${hardwareReplaceDevice.id}/replace-hardware`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Donanım değişimi gerçekleştirilemedi.');
+    }
+    await fetchHierarchyData();
+  };
+
+  // Handle Save Tags
+  const handleSaveTags = async (deviceId: string, tags: string[]) => {
+    const res = await fetch(`/api/devices/${deviceId}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags }),
+    });
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Etiketler kaydedilemedi.');
+    }
+    await fetchHierarchyData();
+  };
 
   // Conversion state
   const [convertingDevice, setConvertingDevice] = useState<Device | null>(null);
@@ -81,6 +208,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [location, setLocation] = useState('');
   const [ipAddress, setIpAddress] = useState('192.168.1.150');
   const [targetOwnerId, setTargetOwnerId] = useState<string>('usr_admin');
+  const [addSiteId, setAddSiteId] = useState<string>('');
+  const [addZoneId, setAddZoneId] = useState<string>('');
+  const [addGroupId, setAddGroupId] = useState<string>('');
   const [manualApiKey, setManualApiKey] = useState('');
   const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(10);
   const [addExpectedInterval, setAddExpectedInterval] = useState<number>(5);
@@ -97,6 +227,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editLocation, setEditLocation] = useState('');
   const [editIpAddress, setEditIpAddress] = useState('');
   const [editOwnerId, setEditOwnerId] = useState('');
+  const [editSiteId, setEditSiteId] = useState<string>('');
+  const [editZoneId, setEditZoneId] = useState<string>('');
+  const [editGroupId, setEditGroupId] = useState<string>('');
   const [editRateLimit, setEditRateLimit] = useState(120);
   const [editEncryption, setEditEncryption] = useState('AES-256-GCM');
   const [editStatus, setEditStatus] = useState<Device['status']>('online');
@@ -444,6 +577,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         location,
         ipAddress,
         userId: ownerId,
+        siteId: addSiteId || undefined,
+        zoneId: addZoneId || undefined,
+        groupId: addGroupId || undefined,
         apiKey: manualApiKey.trim() || undefined,
         expectedIntervalSeconds: addExpectedInterval,
         intervalMode: addIntervalMode,
@@ -456,6 +592,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       setShowAddModal(false);
       setName('');
       setManualApiKey('');
+      setAddSiteId('');
+      setAddZoneId('');
+      setAddGroupId('');
       setAddExpectedInterval(5);
       setAddIntervalMode('auto');
       setAddHeartbeatTimeout(10);
@@ -474,6 +613,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditLocation(dev.location || '');
     setEditIpAddress(dev.ipAddress || '');
     setEditOwnerId(dev.tenantId || 'usr_admin');
+    setEditSiteId(dev.siteId || '');
+    setEditZoneId(dev.zoneId || '');
+    setEditGroupId(dev.groupId || '');
     setEditRateLimit(dev.rateLimitPerMin || 120);
     setEditEncryption(dev.encryptionMethod || 'AES-256-GCM');
     setEditStatus(dev.status || 'online');
@@ -500,6 +642,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         ipAddress: editIpAddress,
         tenantId: targetOwner,
         userId: targetOwner,
+        siteId: editSiteId || undefined,
+        zoneId: editZoneId || undefined,
+        groupId: editGroupId || undefined,
         rateLimitPerMin: editRateLimit,
         encryptionMethod: editEncryption,
         status: editStatus,
@@ -980,13 +1125,30 @@ void sendHeartbeat() {
 
   return (
     <div className="space-y-6">
+      {/* Hierarchy Filter Bar */}
+      <DeviceHierarchyBar
+        sites={sites}
+        zones={zones}
+        groups={groups}
+        allTags={allTags}
+        selectedSiteId={selectedSiteId}
+        onSelectSiteId={setSelectedSiteId}
+        selectedZoneId={selectedZoneId}
+        onSelectZoneId={setSelectedZoneId}
+        selectedGroupId={selectedGroupId}
+        onSelectGroupId={setSelectedGroupId}
+        selectedTag={selectedTag}
+        onSelectTag={setSelectedTag}
+        onOpenHierarchyModal={() => setShowHierarchyModal(true)}
+      />
+
       {/* 1. Device List Table */}
       <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
             <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <Cpu className="w-4 h-4 text-indigo-500 shrink-0" />
                 <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider truncate">
-                  Kayıtlı Saha Cihazları ({devices.length})
+                  Kayıtlı Saha Cihazları ({filteredDevices.length} / {devices.length})
                 </h3>
               </div>
               <button
@@ -999,152 +1161,205 @@ void sendHeartbeat() {
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800/80 overflow-x-auto">
-              {devices.map((dev, idx) => {
-                const isSelected = activeDevice?.id === dev.id;
-                const colors = getStatusColor(dev.status);
-                return (
-                  <div
-                    key={`${dev.id}_${idx}`}
-                    onClick={() => setSelectedDeviceId(dev.id)}
-                    className={`p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 ${
-                      isSelected
-                        ? 'bg-indigo-500/10 border-l-4 border-l-indigo-500'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="relative flex h-3 w-3 shrink-0">
-                        {dev.status === 'online' && (
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        )}
-                        <span className={`relative inline-flex rounded-full h-3 w-3 ${colors.dot}`}></span>
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                            {dev.name}
-                          </p>
-                          {dev.isSimulated ? (
-                            <>
-                              <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
-                                <Bot className="w-2.5 h-2.5" />
-                                <span>SANAL CİHAZ</span>
-                              </span>
-                              {dev.saveSimulatedDataToDb && (
-                                <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1" title="Sanal Cihaz Verileri Veritabanına Kaydediliyor">
-                                  <Database className="w-2.5 h-2.5" />
-                                  <span>DB KAYDI AKTİF</span>
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
-                              <Cpu className="w-2.5 h-2.5" />
-                              <span>GERÇEK DONANIM</span>
-                            </span>
+              {filteredDevices.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                  Seçilen tesis, bölge veya etiket filtresine uygun cihaz bulunamadı.
+                </div>
+              ) : (
+                filteredDevices.map((dev, idx) => {
+                  const isSelected = activeDevice?.id === dev.id;
+                  const colors = getStatusColor(dev.status);
+                  const devSite = sites.find((s) => s.id === dev.siteId);
+                  const devZone = zones.find((z) => z.id === dev.zoneId);
+                  const devGroup = groups.find((g) => g.id === dev.groupId);
+                  const devHealth = healthSummaries.find((h) => h.deviceId === dev.id);
+
+                  return (
+                    <div
+                      key={`${dev.id}_${idx}`}
+                      onClick={() => setSelectedDeviceId(dev.id)}
+                      className={`p-4 cursor-pointer transition-colors flex items-center justify-between gap-4 ${
+                        isSelected
+                          ? 'bg-indigo-500/10 border-l-4 border-l-indigo-500'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="relative flex h-3 w-3 shrink-0">
+                          {dev.status === 'online' && !dev.maintenanceMode && (
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                           )}
-                          <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
-                            <Building2 className="w-2.5 h-2.5" />
-                            <span>{getOwnerName(dev.tenantId)}</span>
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 flex-wrap">
-                          <span>{dev.location}</span>
-                          <span>•</span>
-                          <span className="font-mono text-[10px]">IP: {dev.ipAddress}</span>
-                          <span>•</span>
-                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40" title={`Aktif Sıklık: ${dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5} sn | 2x Çevrimdışı Eşiği: ${Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)} sn`}>
-                            ⏱️ {dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5}s (2x: {Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)}s)
-                          </span>
-                          <span>•</span>
-                          <span className="text-[10px] text-slate-400">
-                            Son Sinyal: <strong className={dev.status === 'online' ? 'text-emerald-500 font-semibold' : dev.status === 'offline' ? 'text-rose-500 font-semibold' : 'text-amber-500'}>{formatRelativeTime(dev.lastSeen)}</strong>
-                          </span>
+                          <span className={`relative inline-flex rounded-full h-3 w-3 ${dev.maintenanceMode ? 'bg-amber-400' : colors.dot}`}></span>
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                              {dev.name}
+                            </p>
+
+                            <DeviceHealthBadge
+                              summary={devHealth}
+                              status={dev.status}
+                              maintenanceMode={dev.maintenanceMode}
+                            />
+
+                            {devSite && (
+                              <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                                <Building2 className="w-2.5 h-2.5" />
+                                <span>{devSite.name}</span>
+                              </span>
+                            )}
+                            {devZone && (
+                              <span className="px-1.5 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                                <MapPin className="w-2.5 h-2.5" />
+                                <span>{devZone.name}</span>
+                              </span>
+                            )}
+                            {devGroup && (
+                              <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1 border border-slate-700/60 bg-slate-800/80 text-slate-300">
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: devGroup.color || '#3b82f6' }} />
+                                <span>{devGroup.name}</span>
+                              </span>
+                            )}
+
+                            {dev.isSimulated ? (
+                              <>
+                                <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
+                                  <Bot className="w-2.5 h-2.5" />
+                                  <span>SANAL CİHAZ</span>
+                                </span>
+                                {dev.saveSimulatedDataToDb && (
+                                  <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1" title="Sanal Cihaz Verileri Veritabanına Kaydediliyor">
+                                    <Database className="w-2.5 h-2.5" />
+                                    <span>DB KAYDI AKTİF</span>
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
+                                <Cpu className="w-2.5 h-2.5" />
+                                <span>GERÇEK DONANIM</span>
+                              </span>
+                            )}
+                            <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                              <Building2 className="w-2.5 h-2.5" />
+                              <span>{getOwnerName(dev.tenantId)}</span>
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 flex-wrap">
+                            <span>{dev.location}</span>
+                            <span>•</span>
+                            <span className="font-mono text-[10px]">IP: {dev.ipAddress}</span>
+                            <span>•</span>
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40" title={`Aktif Sıklık: ${dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5} sn | 2x Çevrimdışı Eşiği: ${Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)} sn`}>
+                              ⏱️ {dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5}s (2x: {Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)}s)
+                            </span>
+                            <span>•</span>
+                            <span className="text-[10px] text-slate-400">
+                              Son Sinyal: <strong className={dev.status === 'online' ? 'text-emerald-500 font-semibold' : dev.status === 'offline' ? 'text-rose-500 font-semibold' : 'text-amber-500'}>{formatRelativeTime(dev.lastSeen)}</strong>
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* On/Off Power Switch Toggle */}
-                      {(() => {
-                        const isRealDevice = !dev.isSimulated;
-                        const isActive = dev.status === 'online' && dev.dataFlowActive !== false;
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Maintenance Mode Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMaintenanceDevice(dev);
+                          }}
+                          className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                            dev.maintenanceMode
+                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse'
+                              : 'text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 border-transparent'
+                          }`}
+                          title={dev.maintenanceMode ? 'Bakım Modu Aktif (Ayrıntıları gör / kapat)' : 'Bakım Moduna Al (Alarmları sustur)'}
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
+                        </button>
 
-                        return (
-                          <div
-                            className="flex items-center bg-slate-100 dark:bg-slate-800/80 px-1.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700/60 transition-colors"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleDeviceStatus(dev, e)}
-                              className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors focus:outline-none cursor-pointer ${
-                                isActive
-                                  ? 'bg-emerald-500 shadow-xs'
-                                  : 'bg-slate-300 dark:bg-slate-600'
-                              }`}
-                              title={
-                                isRealDevice
-                                  ? isActive
-                                    ? 'Gerçek cihaz akışını durdur (Çevrimdışı Yap)'
-                                    : 'Gerçek cihaz akışını başlat (Çevrimiçi Yap)'
-                                  : isActive
-                                    ? 'Sanal cihazı kapat (Simülasyonu durdur)'
-                                    : 'Sanal cihazı aç (Simülasyonu başlat)'
-                              }
+                        {/* On/Off Power Switch Toggle */}
+                        {(() => {
+                          const isRealDevice = !dev.isSimulated;
+                          const isActive = dev.status === 'online' && dev.dataFlowActive !== false;
+
+                          return (
+                            <div
+                              className="flex items-center bg-slate-100 dark:bg-slate-800/80 px-1.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700/60 transition-colors"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <span
-                                className={`inline-block w-3.5 h-3.5 transform rounded-full bg-white transition-transform shadow-xs flex items-center justify-center ${
-                                  isActive ? 'translate-x-4.5' : 'translate-x-0.5'
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleDeviceStatus(dev, e)}
+                                className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors focus:outline-none cursor-pointer ${
+                                  isActive
+                                    ? 'bg-emerald-500 shadow-xs'
+                                    : 'bg-slate-300 dark:bg-slate-600'
                                 }`}
+                                title={
+                                  isRealDevice
+                                    ? isActive
+                                      ? 'Gerçek cihaz akışını durdur (Çevrimdışı Yap)'
+                                      : 'Gerçek cihaz akışını başlat (Çevrimiçi Yap)'
+                                    : isActive
+                                      ? 'Sanal cihazı kapat (Simülasyonu durdur)'
+                                      : 'Sanal cihazı aç (Simülasyonu başlat)'
+                                }
                               >
-                                <Power
-                                  className={`w-2 h-2 ${
-                                    isActive ? 'text-emerald-600' : 'text-slate-500'
+                                <span
+                                  className={`inline-block w-3.5 h-3.5 transform rounded-full bg-white transition-transform shadow-xs flex items-center justify-center ${
+                                    isActive ? 'translate-x-4.5' : 'translate-x-0.5'
                                   }`}
-                                />
-                              </span>
-                            </button>
-                          </div>
-                        );
-                      })()}
+                                >
+                                  <Power
+                                    className={`w-2 h-2 ${
+                                      isActive ? 'text-emerald-600' : 'text-slate-500'
+                                    }`}
+                                  />
+                                </span>
+                              </button>
+                            </div>
+                          );
+                        })()}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setReplacingDevice(dev);
-                          setReplacePairingCode('');
-                          setReplaceError(null);
-                        }}
-                        className="p-1.5 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 cursor-pointer"
-                        title="Donanım Değiştir (Eşleştirme)"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenEdit(dev);
-                        }}
-                        className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
-                        title="Cihaz Ayarlarını Düzenle"
-                      >
-                        <Settings className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeletingDevice(dev);
-                        }}
-                        className="p-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 cursor-pointer"
-                        title="Cihazı Sil"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        {/* Hardware Replacement Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHardwareReplaceDevice(dev);
+                          }}
+                          className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
+                          title="Donanım Değiştir / Kart Göçü & Tarihçe"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEdit(dev);
+                          }}
+                          className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
+                          title="Cihaz Ayarlarını Düzenle"
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingDevice(dev);
+                          }}
+                          className="p-1.5 rounded-xl text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                          title="Cihazı Sil"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -1315,7 +1530,88 @@ void sendHeartbeat() {
           {/* 3. Selected Device Outputs & Live Terminal */}
           {activeDevice && (
             <div className="space-y-6">
-              
+              {/* Device Health & Tag Summary */}
+              <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <Activity className="w-5 h-5 text-indigo-500" />
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                        {activeDevice.name} — Cihaz Sağlığı & Donanım Durumu
+                      </h3>
+                      <p className="text-[10px] text-slate-500">
+                        Hiyerarşik Konum: {sites.find((s) => s.id === activeDevice.siteId)?.name || 'Tesis Tanımsız'} &gt; {zones.find((z) => z.id === activeDevice.zoneId)?.name || 'Bölge Tanımsız'} &gt; {groups.find((g) => g.id === activeDevice.groupId)?.name || 'Grup Tanımsız'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <DeviceHealthBadge
+                      summary={selectedHealthSummary}
+                      status={activeDevice.status}
+                      maintenanceMode={activeDevice.maintenanceMode}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMaintenanceDevice(activeDevice)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition cursor-pointer ${
+                        activeDevice.maintenanceMode
+                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-amber-500/10 hover:text-amber-400'
+                      }`}
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>{activeDevice.maintenanceMode ? 'Bakım Modu Aktif' : 'Bakım Modu'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHardwareReplaceDevice(activeDevice)}
+                      className="px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-indigo-500/10 hover:text-indigo-400 transition cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Donanım Değiştir</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Health Metrics Strip */}
+                {selectedHealthSummary && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 font-medium block">Sağlık Skoru</span>
+                      <span className="text-lg font-mono font-extrabold text-slate-900 dark:text-white">
+                        {selectedHealthSummary.healthScore}%
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 font-medium block">Veri Taze Mi?</span>
+                      <span className={`text-xs font-mono font-bold ${selectedHealthSummary.isFresh ? 'text-emerald-500' : 'text-amber-500'}`}>
+                        {selectedHealthSummary.isFresh ? '✓ Taze (≤2x Eşik)' : '⚠ Bayat (>2x Eşik)'}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 font-medium block">Son Veri Yaşı</span>
+                      <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {selectedHealthSummary.timeSinceLastSeenSeconds !== null ? `${selectedHealthSummary.timeSinceLastSeenSeconds} sn önce` : 'Veri Yok'}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-500 font-medium block">Saha Donanım Değişimi</span>
+                      <span className="text-xs font-mono font-bold text-indigo-400">
+                        {selectedHealthSummary.replacementCount > 0 ? `${selectedHealthSummary.replacementCount} Kez Değiştirildi` : 'Orijinal Donanım'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tags Editor */}
+                <DeviceTagsEditor
+                  deviceId={activeDevice.id}
+                  currentTags={activeDevice.tags || []}
+                  allTags={allTags}
+                  onSaveTags={handleSaveTags}
+                />
+              </div>
 
               {/* Live Terminal & Telemetry Ingestion Console */}
               <div className="bg-[#020617] text-slate-200 rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-4">
@@ -1834,7 +2130,7 @@ void sendHeartbeat() {
               <div className="p-4 bg-sky-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400 font-bold text-xs uppercase tracking-wider">
                   <Globe className="w-4 h-4" />
-                  <span>Ağ & Konum Yapılandırması</span>
+                  <span>Ağ, Konum & Hiyerarşik Yapı</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1858,6 +2154,51 @@ void sendHeartbeat() {
                       placeholder="192.168.1.100"
                       className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
                     />
+                  </div>
+                </div>
+
+                {/* Hierarchy Assignment */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Tesis (Site)</label>
+                    <select
+                      value={addSiteId}
+                      onChange={(e) => setAddSiteId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Tesis Seçilmedi)</option>
+                      {sites.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Bölge (Zone)</label>
+                    <select
+                      value={addZoneId}
+                      onChange={(e) => setAddZoneId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Bölge Seçilmedi)</option>
+                      {zones
+                        .filter((z) => !addSiteId || z.siteId === addSiteId)
+                        .map((z) => (
+                          <option key={z.id} value={z.id}>{z.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Grup</label>
+                    <select
+                      value={addGroupId}
+                      onChange={(e) => setAddGroupId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Grup Seçilmedi)</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -2112,11 +2453,11 @@ void sendHeartbeat() {
                 </div>
               )}
 
-              {/* Section 2: Ağ & Konum Yapılandırması */}
+              {/* Section 2: Ağ & Konum Yapılandırması & Hiyerarşi */}
               <div className="p-4 bg-sky-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400 font-bold text-xs uppercase tracking-wider">
                   <Globe className="w-4 h-4" />
-                  <span>Ağ & Konum Yapılandırması</span>
+                  <span>Ağ, Konum & Hiyerarşik Yapı</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2140,6 +2481,51 @@ void sendHeartbeat() {
                       placeholder="192.168.1.100"
                       className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
                     />
+                  </div>
+                </div>
+
+                {/* Edit Hierarchy Assignment */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800">
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Tesis (Site)</label>
+                    <select
+                      value={editSiteId}
+                      onChange={(e) => setEditSiteId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Tesis Seçilmedi)</option>
+                      {sites.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Bölge (Zone)</label>
+                    <select
+                      value={editZoneId}
+                      onChange={(e) => setEditZoneId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Bölge Seçilmedi)</option>
+                      {zones
+                        .filter((z) => !editSiteId || z.siteId === editSiteId)
+                        .map((z) => (
+                          <option key={z.id} value={z.id}>{z.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Grup</label>
+                    <select
+                      value={editGroupId}
+                      onChange={(e) => setEditGroupId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                    >
+                      <option value="">(Grup Seçilmedi)</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -2679,6 +3065,36 @@ void sendHeartbeat() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Device Maintenance Modal */}
+      {maintenanceDevice && (
+        <DeviceMaintenanceModal
+          device={maintenanceDevice}
+          onClose={() => setMaintenanceDevice(null)}
+          onToggleMaintenance={handleToggleMaintenance}
+        />
+      )}
+
+      {/* Device Hardware Replacement Modal */}
+      {hardwareReplaceDevice && (
+        <DeviceReplacementModal
+          device={hardwareReplaceDevice}
+          replacementHistory={replacementHistory}
+          onClose={() => setHardwareReplaceDevice(null)}
+          onReplaceHardware={handleHardwareReplace}
+        />
+      )}
+
+      {/* Hierarchy Management Modal */}
+      {showHierarchyModal && (
+        <HierarchyManagementModal
+          sites={sites}
+          zones={zones}
+          groups={groups}
+          onClose={() => setShowHierarchyModal(false)}
+          onRefresh={fetchHierarchyData}
+        />
       )}
     </div>
   );

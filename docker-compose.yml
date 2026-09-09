@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # 1. TimescaleDB / PostgreSQL Time-Series Database Service
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: nexus_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexus_iot}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      TIMESCALEDB_TELEMETRY: 'off'
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nexus_iot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nexus_net
+
+  # 2. NexusNode IoT Full-Stack Application Node.js Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexus_app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/${POSTGRES_DB:-nexus_iot}
+      SESSION_SECRET: ${SESSION_SECRET:-nexus_session_secret_production_random_key_64}
+      VITE_ENABLE_MOCK_FALLBACK: "false"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    expose:
+      - "3000"
+    volumes:
+      - app_data:/app/data
+      - app_uploads:/app/uploads
+      - app_backups:/app/backups
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('http');http.get('http://127.0.0.1:3000/api/health/live',(r)=>{process.exit(r.statusCode===200?0:1);}).on('error',()=>process.exit(1));"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - nexus_net
+
+  # 3. Nginx Reverse Proxy with HTTP/REST + WebSocket Duplex Stream Support
+  proxy:
+    image: nginx:1.27-alpine
+    container_name: nexus_proxy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - nexus_net
+
+networks:
+  nexus_net:
+    driver: bridge
+
+volumes:
+  timescaledb_data:
+    driver: local
+  app_data:
+    driver: local
+  app_uploads:
+    driver: local
+  app_backups:
+    driver: local

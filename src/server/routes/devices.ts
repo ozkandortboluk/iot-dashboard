@@ -13,6 +13,134 @@ const router = Router();
 // Dedicated Ping / Heartbeat route for IoT Hardware
 router.all('/ping', (req, res) => telemetryController.ping(req, res));
 
+// ==========================================
+// HIERARCHY ENDPOINTS: SITES, ZONES & GROUPS
+// ==========================================
+
+router.get('/hierarchy/sites', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const tenantId = currentUser.role === 'admin' ? (req.query.tenantId as string) : currentUser.id;
+  res.json(db.getSites(tenantId));
+});
+
+router.post('/hierarchy/sites', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { name, address, tenantId } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Tesis/Lokasyon adı zorunludur.' });
+  }
+  const targetTenantId = currentUser.role === 'admin' ? (tenantId || currentUser.id) : currentUser.id;
+  const newSite = db.createSite({ name, address, tenantId: targetTenantId });
+  broadcast('hierarchy:sites:updated', db.getSites());
+  res.status(201).json(newSite);
+});
+
+router.delete('/hierarchy/sites/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const siteId = req.params.id;
+  const tenantId = currentUser.role === 'admin' ? undefined : currentUser.id;
+  const success = db.deleteSite(siteId, tenantId);
+  if (!success) {
+    return res.status(404).json({ error: 'Tesis bulunamadı veya silme yetkiniz yok.' });
+  }
+  broadcast('hierarchy:sites:updated', db.getSites());
+  broadcast('devices:updated', db.getDevices());
+  res.json({ success: true, message: 'Tesis silindi.' });
+});
+
+router.get('/hierarchy/zones', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const tenantId = currentUser.role === 'admin' ? (req.query.tenantId as string) : currentUser.id;
+  const siteId = req.query.siteId as string;
+  res.json(db.getZones(tenantId, siteId));
+});
+
+router.post('/hierarchy/zones', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { name, description, siteId, tenantId } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Bölge/Alan adı zorunludur.' });
+  }
+  const targetTenantId = currentUser.role === 'admin' ? (tenantId || currentUser.id) : currentUser.id;
+  const newZone = db.createZone({ name, description, siteId, tenantId: targetTenantId });
+  broadcast('hierarchy:zones:updated', db.getZones());
+  res.status(201).json(newZone);
+});
+
+router.delete('/hierarchy/zones/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const zoneId = req.params.id;
+  const tenantId = currentUser.role === 'admin' ? undefined : currentUser.id;
+  const success = db.deleteZone(zoneId, tenantId);
+  if (!success) {
+    return res.status(404).json({ error: 'Bölge bulunamadı veya silme yetkiniz yok.' });
+  }
+  broadcast('hierarchy:zones:updated', db.getZones());
+  broadcast('devices:updated', db.getDevices());
+  res.json({ success: true, message: 'Bölge silindi.' });
+});
+
+router.get('/hierarchy/groups', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const tenantId = currentUser.role === 'admin' ? (req.query.tenantId as string) : currentUser.id;
+  const siteId = req.query.siteId as string;
+  const zoneId = req.query.zoneId as string;
+  res.json(db.getDeviceGroups(tenantId, siteId, zoneId));
+});
+
+router.post('/hierarchy/groups', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { name, description, color, siteId, zoneId, tenantId } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Grup adı zorunludur.' });
+  }
+  const targetTenantId = currentUser.role === 'admin' ? (tenantId || currentUser.id) : currentUser.id;
+  const newGroup = db.createDeviceGroup({ name, description, color, siteId, zoneId, tenantId: targetTenantId });
+  broadcast('hierarchy:groups:updated', db.getDeviceGroups());
+  res.status(201).json(newGroup);
+});
+
+router.delete('/hierarchy/groups/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const groupId = req.params.id;
+  const tenantId = currentUser.role === 'admin' ? undefined : currentUser.id;
+  const success = db.deleteDeviceGroup(groupId, tenantId);
+  if (!success) {
+    return res.status(404).json({ error: 'Grup bulunamadı veya silme yetkiniz yok.' });
+  }
+  broadcast('hierarchy:groups:updated', db.getDeviceGroups());
+  broadcast('devices:updated', db.getDevices());
+  res.json({ success: true, message: 'Grup silindi.' });
+});
+
+// ==========================================
+// HEALTH SUMMARIES & REPLACEMENT RECORDS
+// ==========================================
+
+router.get('/health-summaries', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const tenantId = currentUser.role === 'admin' ? (req.query.tenantId as string) : currentUser.id;
+  res.json(db.getDeviceHealthSummaries(tenantId));
+});
+
+router.get('/replacement-history', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const tenantId = currentUser.role === 'admin' ? (req.query.tenantId as string) : currentUser.id;
+  const deviceId = req.query.deviceId as string;
+  res.json(db.getReplacementHistory(tenantId, deviceId));
+});
+
 // Devices Endpoints (Protected with Role-based filtering)
 router.get('/', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
@@ -193,6 +321,7 @@ router.post('/:id/regen-key', authenticateUser, (req, res) => {
 
   try {
     const newKey = db.regenerateApiKey(deviceId);
+    terminateDeviceSockets(deviceId, 'API Anahtarı yenilendi (Regenerated)');
     broadcast('devices:updated', db.getDevices());
     res.json({ apiKey: newKey, message: 'API Anahtarı başarıyla yenilendi.' });
   } catch {
@@ -221,6 +350,7 @@ router.post('/:id/rotate-key', authenticateUser, async (req, res) => {
       scopes: Array.isArray(scopes) ? scopes : undefined,
     });
     if (!updated) return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+    terminateDeviceSockets(deviceId, 'API Anahtarı döndürüldü (Rotated)');
     broadcast('devices:updated', db.getDevices());
     res.json({
       success: true,
@@ -419,6 +549,125 @@ router.post('/:id/replace', authenticateUser, (req, res) => {
   }
 });
 
+router.get('/:id/health-summary', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihaz hesabınıza ait değildir.' });
+  }
+
+  const summary = db.getDeviceHealthSummary(deviceId);
+  res.json(summary);
+});
+
+router.put('/:id/maintenance', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { enabled, reason, until } = req.body;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın bakım modunu değiştirebilirsiniz.' });
+  }
+
+  try {
+    const updated = db.setDeviceMaintenanceMode(deviceId, enabled, reason, until, currentUser);
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      maintenanceMode: updated.maintenanceMode,
+      maintenanceReason: updated.maintenanceReason,
+      maintenanceUntil: updated.maintenanceUntil,
+      message: enabled
+        ? 'Cihaz bakım moduna alındı. Alarmlar ve bildirimler geçici olarak susturuldu.'
+        : 'Cihaz bakım modundan çıkarıldı ve normal operasyona döndü.',
+      device: updated,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Bakım modu güncellenemedi.' });
+  }
+});
+
+router.put('/:id/tags', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { tags } = req.body;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın etiketlerini güncelleyebilirsiniz.' });
+  }
+
+  try {
+    const updated = db.updateDeviceTags(deviceId, Array.isArray(tags) ? tags : [], currentUser);
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      tags: updated.tags,
+      message: 'Cihaz etiketleri başarıyla güncellendi.',
+      device: updated,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Etiketler güncellenemedi.' });
+  }
+});
+
+router.post('/:id/replace-hardware', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { newName, newIp, newMac, pairingCode, reason, notes } = req.body;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Değiştirilecek cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın donanımını değiştirebilirsiniz.' });
+  }
+
+  try {
+    const { device: updated, record } = db.replaceDeviceHardware(
+      deviceId,
+      { newName, newIp, newMac, pairingCode, reason, notes },
+      currentUser
+    );
+
+    broadcast('device:updated', updated);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+
+    res.json({
+      success: true,
+      device: updated,
+      record,
+      message: `"${updated.name}" cihazının donanım değişimi başarıyla tamamlandı ve tarihçe kaydedildi.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Donanım değişimi gerçekleştirilemedi.' });
+  }
+});
+
 router.post('/:id/control', authenticateUser, (req, res) => commandController.controlDeviceOutput(req, res));
 router.post('/:deviceId/commands', authenticateUser, (req, res) => commandController.createCommand(req, res));
 router.post('/:deviceId/command', authenticateUser, (req, res) => commandController.createCommand(req, res));
@@ -440,6 +689,7 @@ router.delete('/:id', authenticateUser, (req, res) => {
   }
 
   db.deleteDevice(deviceId);
+  terminateDeviceSockets(deviceId, 'Cihaz sistemden silindi');
   broadcast('device:deleted', { id: deviceId });
   broadcast('devices:updated', db.getDevices());
   broadcast('network:updated', db.getDiscoveredDevices());

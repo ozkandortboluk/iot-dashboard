@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { automationEngine } from '../services/automation.engine.js';
 import type {
   TelemetryReading,
@@ -691,7 +692,7 @@ public async flushPhysicalRetryQueue(): Promise<{
 
       const id =
         r.sequence !== undefined && r.sequence !== null
-          ? `tel_${r.deviceId}_boot_${bootId}_seq_${r.sequence}_${r.metric}`
+          ? `tel_${crypto.createHash('md5').update(`${r.deviceId}:${bootId}:${r.sequence}:${r.metric}`).digest('hex')}`
           : `tel_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
 
       return {
@@ -841,6 +842,12 @@ public async flushPhysicalRetryQueue(): Promise<{
 
     if (!this.latestTelemetryCache[fullReading.deviceId]) this.latestTelemetryCache[fullReading.deviceId] = {};
     this.latestTelemetryCache[fullReading.deviceId][fullReading.metric] = fullReading;
+
+    if (!this.db.data.telemetry) this.db.data.telemetry = [];
+    this.db.data.telemetry.push(fullReading);
+    if (this.db.data.telemetry.length > 5000) {
+      this.db.data.telemetry = this.db.data.telemetry.slice(-5000);
+    }
 
     // Persist to PostgreSQL / TimescaleDB hypertable with safety net
     this.writeTelemetryToPostgres(fullReading).catch((err) => {
@@ -1071,12 +1078,12 @@ public async flushPhysicalRetryQueue(): Promise<{
     }
     list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    // Get list of allowed device IDs for this user or target customer
-    const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);
-    const allowedDeviceIds = new Set(allowedDevices.map((d: Device) => d.id));
-
-    // Filter by allowed devices
-    list = list.filter((t) => allowedDeviceIds.has(t.deviceId));
+    // Filter by allowed devices if user/customer is specified
+    if (requestingUserId || targetCustomerId) {
+      const allowedDevices = this.db.getDevices(requestingUserId, targetCustomerId);
+      const allowedDeviceIds = new Set(allowedDevices.map((d: Device) => d.id));
+      list = list.filter((t) => allowedDeviceIds.has(t.deviceId));
+    }
 
     if (deviceId && deviceId !== 'all') {
       list = list.filter((t) => t.deviceId === deviceId);
@@ -2387,5 +2394,78 @@ public async flushPhysicalRetryQueue(): Promise<{
     updateBucket(history.hourly, hourKey, 168);
     updateBucket(history.daily, dayKey, 365);
     updateBucket(history.monthly, monthKey, 60);
+  }
+
+  /**
+   * Reconciles orphan telemetry (telemetry readings recorded for devices that have since been deleted/unregistered).
+   * Implements Application-Level Referential Integrity without database-level FK locks.
+   */
+  public async reconcileOrphanTelemetry(): Promise<{
+    totalOrphansFound: number;
+    reconciledCount: number;
+    orphanedDeviceIds: string[];
+  }> {
+    const knownDeviceIds = new Set((this.db.data.devices || []).map((d: any) => d.id));
+    const orphanedDeviceIdsSet = new Set<string>();
+    let totalOrphansFound = 0;
+    let reconciledCount = 0;
+
+    // 1. In-memory data reconciliation
+    if (Array.isArray(this.db.data.telemetry)) {
+      for (const reading of this.db.data.telemetry) {
+        if (!knownDeviceIds.has(reading.deviceId)) {
+          totalOrphansFound++;
+          orphanedDeviceIdsSet.add(reading.deviceId);
+          if (!reading.archived) {
+            reading.archived = true;
+            reading.orphaned = true;
+            reconciledCount++;
+          }
+        }
+      }
+      if (reconciledCount > 0) {
+        this.db.saveData(this.db.data);
+      }
+    }
+
+    // 2. PostgreSQL reconciliation if active
+    if (this.db.isPostgresProductionMode() && this.db.postgresRepo?.isReady()) {
+      try {
+        const pgResult = await this.db.postgresRepo.reconcileOrphanTelemetry?.();
+        if (pgResult) {
+          totalOrphansFound += pgResult.totalOrphansFound || 0;
+          reconciledCount += pgResult.reconciledCount || 0;
+          (pgResult.orphanedDeviceIds || []).forEach((id: string) => orphanedDeviceIdsSet.add(id));
+        }
+      } catch (err) {
+        console.warn('[TelemetryRepository] Postgres orphan reconciliation error:', err);
+      }
+    }
+
+    return {
+      totalOrphansFound,
+      reconciledCount,
+      orphanedDeviceIds: Array.from(orphanedDeviceIdsSet),
+    };
+  }
+
+  public getOrphanTelemetryStats(): { totalOrphans: number; orphanedDeviceIds: string[] } {
+    const knownDeviceIds = new Set((this.db.data.devices || []).map((d: any) => d.id));
+    const orphanedDeviceIdsSet = new Set<string>();
+    let totalOrphans = 0;
+
+    if (Array.isArray(this.db.data.telemetry)) {
+      for (const reading of this.db.data.telemetry) {
+        if (!knownDeviceIds.has(reading.deviceId)) {
+          totalOrphans++;
+          orphanedDeviceIdsSet.add(reading.deviceId);
+        }
+      }
+    }
+
+    return {
+      totalOrphans,
+      orphanedDeviceIds: Array.from(orphanedDeviceIdsSet),
+    };
   }
 }

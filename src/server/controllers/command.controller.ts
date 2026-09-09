@@ -260,7 +260,7 @@ export class CommandController {
         idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined,
         timeoutSeconds: timeoutSeconds ? Number(timeoutSeconds) : 300,
         maxRetries: maxRetries ? Number(maxRetries) : 3,
-        parameters: parameters || (targetOutput ? { outputId: targetOutput, value: finalVal } : undefined),
+        parameters: parameters || req.body?.params || (targetOutput ? { outputId: targetOutput, value: finalVal } : undefined),
       });
 
       // Broadcast command lifecycle events to real-time WebSockets
@@ -547,9 +547,11 @@ export class CommandController {
       });
     }
 
-    let targetStatus: 'acknowledged' | 'failed' | 'executed' = 'acknowledged';
+    let targetStatus: 'acknowledged' | 'failed' | 'executed' | 'applied' = 'acknowledged';
     if (status === 'failed') {
       targetStatus = 'failed';
+    } else if (status === 'applied') {
+      targetStatus = 'applied';
     } else if (status === 'executed') {
       targetStatus = 'executed';
     } else if (status === 'received' || status === 'acknowledged') {

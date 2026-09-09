@@ -61,6 +61,8 @@ export const Header: React.FC<HeaderProps> = ({
   const {
     isConnected,
     connectionStatus,
+    reconnectAttempt,
+    reconnectCountdown,
     reconnectWebSocket,
     wsLatency,
     notifications,
@@ -182,9 +184,9 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={reconnectWebSocket}
             title={
               connectionStatus === 'connected'
-                ? `Gerçek Zamanlı Akış Aktif (${wsLatency}ms) — Yeniden bağlanmak için tıklayın`
+                ? `Gerçek Zamanlı Akış Aktif (Gecikme: ${wsLatency}ms) — Yeniden bağlanmak için tıklayın`
                 : connectionStatus === 'reconnecting'
-                ? 'Sunucuya bağlanılıyor...'
+                ? `Sunucuya yeniden bağlanılıyor... (Kalan: ${reconnectCountdown}s, Deneme: #${reconnectAttempt || 1}) — Şimdi denemek için tıklayın`
                 : 'Bağlantı koptu. Tekrar bağlanmak için tıklayın.'
             }
             className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0 ${
@@ -198,12 +200,12 @@ export const Header: React.FC<HeaderProps> = ({
             {connectionStatus === 'connected' ? (
               <>
                 <Wifi className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span className="hidden lg:inline">Bağlı</span>
+                <span className="hidden lg:inline">{wsLatency}ms</span>
               </>
             ) : connectionStatus === 'reconnecting' ? (
               <>
                 <RefreshCw className="w-4 h-4 text-amber-500 animate-spin shrink-0" />
-                <span className="hidden lg:inline">Bağlanıyor</span>
+                <span className="hidden lg:inline">{reconnectCountdown > 0 ? `${reconnectCountdown}s` : 'Bağlanıyor'}</span>
               </>
             ) : (
               <>

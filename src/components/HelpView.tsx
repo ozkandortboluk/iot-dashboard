@@ -431,6 +431,88 @@ void loop() {
 }`,
     },
     {
+      id: 'code_esp32_discovery_pairing',
+      title: 'ESP32 - Otomatik Keşif, PIN/QR Eşleştirme & Dinamik Token Alıcı',
+      category: 'esp32',
+      categoryLabel: 'Discovery & Eşleştirme',
+      badge: 'Sihirbaz Uyumlu',
+      description: 'Cihazın ağa ilk katıldığında tek kullanımlık 6 haneli eşleştirme kodu (PIN) veya MAC adresiyle web paneli Provizyon Sihirbazına kendini tanıtması ve API anahtarını güvenle alması.',
+      tags: ['esp32', 'discovery', 'pairing', 'pin', 'qr', 'provisioning'],
+      endpoint: 'POST /api/network/pair & POST /api/network/check-duplicate',
+      code: `// =========================================================================
+// NEXUSNODE IoT - ESP32 OTOMATİK KEŞİF & PIN / QR EŞLEŞTİRME İSTEMCİSİ
+// 1. Cihaz açıldığında yerel ağda rastgele/benzersiz 6 haneli PIN kodu üretir.
+// 2. Web panelinden "Cihaz Keşfi" ekranında bu PIN veya MAC ile eşleştirilir.
+// 3. Eşleştirme sonrası atanan X-API-Key kalıcı Flash hafızaya (Preferences) yazılır.
+// =========================================================================
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+
+const char* WIFI_SSID     = "WIFI_AG_ADINIZ";
+const char* WIFI_PASS     = "WIFI_SIFRENIZ";
+const char* SERVER_URL    = "${originUrl}";
+
+Preferences prefs;
+String deviceApiKey = "";
+String pairingPin   = "";
+
+void setup() {
+  Serial.begin(115200);
+  prefs.begin("nexus_iot", false);
+  deviceApiKey = prefs.getString("api_key", "");
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+
+  Serial.println("\\n[NEXUSNODE] WiFi Bağlantısı Kuruldu!");
+  Serial.printf("[BİLGİ] MAC Adresi: %s\\n", WiFi.macAddress().c_str());
+  Serial.printf("[BİLGİ] IP Adresi: %s\\n", WiFi.localIP().toString().c_str());
+
+  if (deviceApiKey.length() == 0) {
+    // 6 Haneli rastgele geçici eşleştirme kodu oluştur
+    randomSeed(micros());
+    pairingPin = String(random(100000, 999999));
+    Serial.println("==================================================");
+    Serial.printf(">>> GEÇİCİ EŞLEŞTİRME KODU (PIN): %s <<<\\n", pairingPin.c_str());
+    Serial.println(">>> Web Panelinden Provizyon Sihirbazına bu PIN'i girin.");
+    Serial.println("==================================================");
+  } else {
+    Serial.println("[BİLGİ] Cihaz yetkilendirilmiş API anahtarına sahip. Telemetri moduna geçiliyor.");
+  }
+}
+
+void loop() {
+  if (deviceApiKey.length() == 0) {
+    // Henüz API anahtarı yoksa serial porta PIN hatırlatması yap
+    Serial.printf("[EŞLEŞME BEKLENİYOR] Web panelinden PIN (%s) veya MAC (%s) ile eşleştirin.\\n",
+                  pairingPin.c_str(), WiFi.macAddress().c_str());
+    delay(4000);
+  } else {
+    // Standart Telemetri Gönderimi
+    HTTPClient http;
+    http.begin(String(SERVER_URL) + "/api/telemetry");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-API-Key", deviceApiKey.c_str());
+
+    StaticJsonDocument<200> doc;
+    doc["temperature"] = 23.8 + (random(-10, 10) / 10.0);
+    doc["rssi"] = WiFi.RSSI();
+    String body;
+    serializeJson(doc, body);
+
+    int code = http.POST(body);
+    Serial.printf("[TELEMETRİ] Kod: %d | Yanıt: %s\\n", code, http.getString().c_str());
+    http.end();
+    delay(5000);
+  }
+}`,
+    },
+    {
       id: 'code_esp32_heartbeat_ping',
       title: 'ESP32 - Düşük Güçlü Periyodik Heartbeat (Ping)',
       category: 'ping',

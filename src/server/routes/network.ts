@@ -150,3 +150,104 @@ networkRouter.get('/ping/:taskId', authenticateUser, requireNetworkAdminOrOperat
   
   res.json(result);
 });
+
+// 6. POST /api/network/check-duplicate - Checks collisions for MAC, IP, or Device Name
+networkRouter.post('/check-duplicate', authenticateUser, (req, res) => {
+  const { mac, ip, name, excludeDeviceId, tenantId } = req.body;
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  
+  const targetTenant = currentUser.role === 'admin' ? (tenantId || currentUser.id) : currentUser.id;
+  const result = db.checkDuplicateIdentity({
+    mac,
+    ip,
+    name,
+    excludeDeviceId,
+    tenantId: targetTenant,
+  });
+
+  res.json(result);
+});
+
+// 7. POST /api/network/pair - Full Provisioning & Pairing Wizard Execution
+networkRouter.post('/pair', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  
+  const {
+    name,
+    type,
+    location,
+    ipAddress,
+    macAddress,
+    pairingCode,
+    method,
+    tenantId,
+    siteId,
+    zoneId,
+    groupId,
+    tags,
+    apiKey,
+    collisionStrategy,
+    targetDeviceIdToReplace,
+  } = req.body;
+
+  if (!name || typeof name !== 'string') {
+    return res.status(400).json({ error: 'Cihaz adı belirtilmelidir.' });
+  }
+
+  const actor = {
+    id: currentUser.id,
+    name: currentUser.name,
+    role: currentUser.role,
+  };
+
+  const result = db.pairDevice(
+    {
+      name: name.trim(),
+      type: type || 'ESP32',
+      location: location || 'Merkez Tesis',
+      ipAddress: ipAddress ? ipAddress.trim() : undefined,
+      macAddress: macAddress ? macAddress.trim() : undefined,
+      pairingCode: pairingCode ? pairingCode.trim() : undefined,
+      method: method || 'manual',
+      tenantId: currentUser.role === 'admin' ? tenantId : currentUser.id,
+      siteId,
+      zoneId,
+      groupId,
+      tags: Array.isArray(tags) ? tags : [],
+      apiKey,
+      collisionStrategy: collisionStrategy || 'reject',
+      targetDeviceIdToReplace,
+    },
+    actor
+  );
+
+  if (!result.success) {
+    return res.status(409).json(result);
+  }
+
+  res.status(201).json(result);
+});
+
+// 8. GET /api/network/pairing-history - Returns historical pairing audits
+networkRouter.get('/pairing-history', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const targetTenant = currentUser.role === 'admin' ? (req.query.tenantId as string | undefined) : currentUser.id;
+
+  const history = db.getPairingHistory(targetTenant);
+  res.json(history);
+});
+
+// 9. PATCH /api/network/lifecycle - Updates discovered device lifecycle state
+networkRouter.patch('/lifecycle', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
+  const { target, state } = req.body;
+  if (!target || !state) {
+    return res.status(400).json({ error: 'target (mac/ip/code) ve state belirtilmelidir.' });
+  }
+
+  db.updateDiscoveredLifecycle(target, state);
+  res.json({ success: true, message: `Cihaz yaşam döngüsü durumu ${state} olarak güncellendi.` });
+});
+

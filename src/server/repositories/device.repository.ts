@@ -1,5 +1,19 @@
 import crypto from 'crypto';
-import type { Device, DiscoveredNetworkDevice, TelemetryReading } from '../../types.js';
+import type {
+  Device,
+  DiscoveredNetworkDevice,
+  TelemetryReading,
+  Site,
+  Zone,
+  DeviceGroup,
+  DeviceReplacementRecord,
+  DeviceHealthSummary,
+  DiscoveredDeviceLifecycleState,
+  PairingMethod,
+  PairingAuditRecord,
+  CollisionCheckResult,
+  PairDeviceRequest,
+} from '../../types.js';
 import { smartIntervalService } from '../services/smartInterval.service.js';
 import { tenantSecurityService } from '../services/tenantSecurity.service.js';
 
@@ -610,11 +624,11 @@ export class DeviceRepository {
   public getDiscoveredDevices(requestingUserId?: string, targetCustomerId?: string): DiscoveredNetworkDevice[] {
     const allDevices: Device[] = this.db.data.devices || [];
 
-    // Determine admin privilege (fail-closed: require explicit admin user)
-    let isAdmin = false;
+    // Determine admin privilege (fail-closed for specified non-admin users, allow system when undefined)
+    let isAdmin = !requestingUserId || requestingUserId === 'usr_admin';
     if (requestingUserId) {
       const user = this.db.data.users?.find((u: any) => u.id === requestingUserId);
-      if (user?.role === 'admin' || requestingUserId === 'usr_admin') {
+      if (user?.role === 'admin') {
         isAdmin = true;
       }
     }
@@ -751,4 +765,712 @@ export class DeviceRepository {
 
     return dev;
   }
+
+  // ==========================================
+  // HIERARCHY: SITES, ZONES & GROUPS
+  // ==========================================
+
+  public getSites(tenantId?: string): Site[] {
+    if (!this.db.data.sites) this.db.data.sites = [];
+    if (!tenantId || tenantId === 'all' || tenantId === 'usr_admin') {
+      return this.db.data.sites;
+    }
+    return this.db.data.sites.filter((s: Site) => s.tenantId === tenantId);
+  }
+
+  public createSite(siteData: Partial<Site> & { name: string; tenantId: string }): Site {
+    if (!this.db.data.sites) this.db.data.sites = [];
+    const newSite: Site = {
+      id: siteData.id || `site_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: siteData.tenantId,
+      name: siteData.name.trim(),
+      address: siteData.address?.trim(),
+      createdAt: siteData.createdAt || new Date().toISOString(),
+    };
+    this.db.data.sites.push(newSite);
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(newSite.tenantId, 'Tesis Yönetimi', `Yeni Tesis/Lokasyon Oluşturuldu: ${newSite.name}`, 'info');
+    return newSite;
+  }
+
+  public deleteSite(siteId: string, tenantId?: string): boolean {
+    if (!this.db.data.sites) return false;
+    const idx = this.db.data.sites.findIndex((s: Site) => s.id === siteId && (!tenantId || tenantId === 'usr_admin' || s.tenantId === tenantId));
+    if (idx === -1) return false;
+
+    const [removed] = this.db.data.sites.splice(idx, 1);
+    // Unset siteId on associated devices, zones, groups
+    if (this.db.data.devices) {
+      this.db.data.devices.forEach((d: Device) => {
+        if (d.siteId === siteId) d.siteId = undefined;
+      });
+    }
+    if (this.db.data.zones) {
+      this.db.data.zones.forEach((z: Zone) => {
+        if (z.siteId === siteId) z.siteId = undefined;
+      });
+    }
+    if (this.db.data.deviceGroups) {
+      this.db.data.deviceGroups.forEach((g: DeviceGroup) => {
+        if (g.siteId === siteId) g.siteId = undefined;
+      });
+    }
+
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(removed.tenantId, 'Tesis Yönetimi', `Tesis/Lokasyon Silindi: ${removed.name}`, 'medium');
+    return true;
+  }
+
+  public getZones(tenantId?: string, siteId?: string): Zone[] {
+    if (!this.db.data.zones) this.db.data.zones = [];
+    let list: Zone[] = this.db.data.zones;
+    if (tenantId && tenantId !== 'all' && tenantId !== 'usr_admin') {
+      list = list.filter((z: Zone) => z.tenantId === tenantId);
+    }
+    if (siteId && siteId !== 'all') {
+      list = list.filter((z: Zone) => z.siteId === siteId);
+    }
+    return list;
+  }
+
+  public createZone(zoneData: Partial<Zone> & { name: string; tenantId: string }): Zone {
+    if (!this.db.data.zones) this.db.data.zones = [];
+    const newZone: Zone = {
+      id: zoneData.id || `zone_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: zoneData.tenantId,
+      siteId: zoneData.siteId,
+      name: zoneData.name.trim(),
+      description: zoneData.description?.trim(),
+      createdAt: zoneData.createdAt || new Date().toISOString(),
+    };
+    this.db.data.zones.push(newZone);
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(newZone.tenantId, 'Bölge Yönetimi', `Yeni Bölge/Alan Oluşturuldu: ${newZone.name}`, 'info');
+    return newZone;
+  }
+
+  public deleteZone(zoneId: string, tenantId?: string): boolean {
+    if (!this.db.data.zones) return false;
+    const idx = this.db.data.zones.findIndex((z: Zone) => z.id === zoneId && (!tenantId || tenantId === 'usr_admin' || z.tenantId === tenantId));
+    if (idx === -1) return false;
+
+    const [removed] = this.db.data.zones.splice(idx, 1);
+    if (this.db.data.devices) {
+      this.db.data.devices.forEach((d: Device) => {
+        if (d.zoneId === zoneId) d.zoneId = undefined;
+      });
+    }
+    if (this.db.data.deviceGroups) {
+      this.db.data.deviceGroups.forEach((g: DeviceGroup) => {
+        if (g.zoneId === zoneId) g.zoneId = undefined;
+      });
+    }
+
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(removed.tenantId, 'Bölge Yönetimi', `Bölge/Alan Silindi: ${removed.name}`, 'medium');
+    return true;
+  }
+
+  public getDeviceGroups(tenantId?: string, siteId?: string, zoneId?: string): DeviceGroup[] {
+    if (!this.db.data.deviceGroups) this.db.data.deviceGroups = [];
+    let list: DeviceGroup[] = this.db.data.deviceGroups;
+    if (tenantId && tenantId !== 'all' && tenantId !== 'usr_admin') {
+      list = list.filter((g: DeviceGroup) => g.tenantId === tenantId);
+    }
+    if (siteId && siteId !== 'all') {
+      list = list.filter((g: DeviceGroup) => g.siteId === siteId);
+    }
+    if (zoneId && zoneId !== 'all') {
+      list = list.filter((g: DeviceGroup) => g.zoneId === zoneId);
+    }
+    return list;
+  }
+
+  public createDeviceGroup(groupData: Partial<DeviceGroup> & { name: string; tenantId: string }): DeviceGroup {
+    if (!this.db.data.deviceGroups) this.db.data.deviceGroups = [];
+    const newGroup: DeviceGroup = {
+      id: groupData.id || `grp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: groupData.tenantId,
+      siteId: groupData.siteId,
+      zoneId: groupData.zoneId,
+      name: groupData.name.trim(),
+      description: groupData.description?.trim(),
+      color: groupData.color || '#3b82f6',
+      createdAt: groupData.createdAt || new Date().toISOString(),
+    };
+    this.db.data.deviceGroups.push(newGroup);
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(newGroup.tenantId, 'Grup Yönetimi', `Yeni Cihaz Grubu Oluşturuldu: ${newGroup.name}`, 'info');
+    return newGroup;
+  }
+
+  public deleteDeviceGroup(groupId: string, tenantId?: string): boolean {
+    if (!this.db.data.deviceGroups) return false;
+    const idx = this.db.data.deviceGroups.findIndex((g: DeviceGroup) => g.id === groupId && (!tenantId || tenantId === 'usr_admin' || g.tenantId === tenantId));
+    if (idx === -1) return false;
+
+    const [removed] = this.db.data.deviceGroups.splice(idx, 1);
+    if (this.db.data.devices) {
+      this.db.data.devices.forEach((d: Device) => {
+        if (d.groupId === groupId) d.groupId = undefined;
+      });
+    }
+
+    this.db.saveData(this.db.data);
+    this.db.addAuditLog(removed.tenantId, 'Grup Yönetimi', `Cihaz Grubu Silindi: ${removed.name}`, 'medium');
+    return true;
+  }
+
+  // ==========================================
+  // MAINTENANCE MODE & TAGS
+  // ==========================================
+
+  public setDeviceMaintenanceMode(
+    deviceId: string,
+    enabled: boolean,
+    reason?: string,
+    until?: string,
+    requestingUser?: any
+  ): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    dev.maintenanceMode = Boolean(enabled);
+    dev.maintenanceReason = enabled ? (reason || 'Planlı bakım & servis çalışması') : undefined;
+    dev.maintenanceUntil = enabled && until ? until : undefined;
+
+    this.db.saveData(this.db.data);
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    const operator = requestingUser?.name || 'Kullanıcı';
+    this.db.addAuditLog(
+      dev.tenantId || 'system',
+      'Bakım Modu',
+      `Cihaz Bakım Modu ${enabled ? 'AKTİF EDİLDİ (Alarmlar Susturuldu)' : 'DEVRE DIŞI BIRAKILDI (Normal İzleme)'}: ${dev.name} [Neden: ${dev.maintenanceReason || '—'}, İşlemi Yapan: ${operator}]`,
+      enabled ? 'medium' : 'low'
+    );
+
+    return dev;
+  }
+
+  public updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    const cleanTags = Array.from(new Set((tags || []).map((t) => String(t).trim()).filter(Boolean)));
+    dev.tags = cleanTags;
+
+    this.db.saveData(this.db.data);
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    const operator = requestingUser?.name || 'Kullanıcı';
+    this.db.addAuditLog(
+      dev.tenantId || 'system',
+      'Etiket Yönetimi',
+      `Cihaz Etiketleri Güncellendi: ${dev.name} -> [${cleanTags.join(', ')}] (İşlem: ${operator})`,
+      'low'
+    );
+
+    return dev;
+  }
+
+  // ==========================================
+  // HARDWARE REPLACEMENT & AUDIT MIGRATION
+  // ==========================================
+
+  public replaceDeviceHardware(
+    oldDeviceId: string,
+    data: {
+      newDeviceId?: string;
+      newName?: string;
+      newIp?: string;
+      newMac?: string;
+      pairingCode?: string;
+      reason?: string;
+      notes?: string;
+    },
+    requestingUser: any
+  ): { device: Device; record: DeviceReplacementRecord } {
+    const oldDev = this.db.data.devices.find((d: Device) => d.id === oldDeviceId);
+    if (!oldDev) throw new Error('Değiştirilecek mevcut cihaz bulunamadı.');
+
+    let newMac = data.newMac?.trim();
+    let newIp = data.newIp?.trim();
+    let newFirmware = oldDev.firmwareVersion;
+    let newModel = oldDev.hardwareModel;
+
+    // If pairingCode is provided, resolve from discovered pool
+    if (data.pairingCode) {
+      const discovered = (this.db.data.unregisteredDevices || []).find((d: any) => d.pairingCode === data.pairingCode);
+      if (discovered) {
+        newMac = discovered.mac || newMac;
+        newIp = discovered.ip || newIp;
+        newFirmware = discovered.firmwareVersion || newFirmware;
+        newModel = discovered.hardwareModel || newModel;
+        if (discovered.ip) this.db.removeUnregisteredDevice(discovered.ip);
+        if (discovered.mac) this.db.removeUnregisteredDevice(discovered.mac);
+      }
+    }
+
+    const record: DeviceReplacementRecord = {
+      id: `rep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tenantId: oldDev.tenantId,
+      oldDeviceId: oldDev.id,
+      oldDeviceName: oldDev.name,
+      newDeviceId: data.newDeviceId || oldDev.id,
+      newDeviceName: data.newName || oldDev.name,
+      replacedAt: new Date().toISOString(),
+      replacedBy: requestingUser?.name || requestingUser?.email || 'Sistem Yöneticisi',
+      reason: data.reason || 'Arıza / Donanım Yenileme',
+      notes: data.notes || `Eski MAC: ${oldDev.macAddress || '—'} -> Yeni MAC: ${newMac || '—'}`,
+    };
+
+    if (!this.db.data.replacementHistory) this.db.data.replacementHistory = [];
+    this.db.data.replacementHistory.push(record);
+
+    if (!oldDev.replacementHistory) oldDev.replacementHistory = [];
+    oldDev.replacementHistory.push(record);
+
+    if (newMac) oldDev.macAddress = newMac;
+    if (newIp) oldDev.ipAddress = newIp;
+    if (data.newName) oldDev.name = data.newName;
+    if (newFirmware) oldDev.firmwareVersion = newFirmware;
+    if (newModel) oldDev.hardwareModel = newModel;
+
+    this.db.saveData(this.db.data);
+    this.db.postgresRepo?.saveDevice(oldDev).catch(() => {});
+
+    this.db.addAuditLog(
+      oldDev.tenantId,
+      'Donanım Değişimi',
+      `Cihaz Donanım Değişimi Tamamlandı: "${oldDev.name}" [Eski MAC: ${record.notes}] (Değiştiren: ${record.replacedBy}, Neden: ${record.reason})`,
+      'high'
+    );
+
+    return { device: oldDev, record };
+  }
+
+  public getReplacementHistory(tenantId?: string, deviceId?: string): DeviceReplacementRecord[] {
+    if (!this.db.data.replacementHistory) this.db.data.replacementHistory = [];
+    let list: DeviceReplacementRecord[] = this.db.data.replacementHistory;
+    if (tenantId && tenantId !== 'all' && tenantId !== 'usr_admin') {
+      list = list.filter((r: DeviceReplacementRecord) => r.tenantId === tenantId);
+    }
+    if (deviceId) {
+      list = list.filter((r: DeviceReplacementRecord) => r.oldDeviceId === deviceId || r.newDeviceId === deviceId);
+    }
+    return list;
+  }
+
+  // ==========================================
+  // DEVICE HEALTH SCORE & SUMMARY
+  // ==========================================
+
+  public getDeviceHealthSummary(deviceId: string): DeviceHealthSummary | null {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) return null;
+
+    const now = Date.now();
+    const lastSeenMs = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
+    const diffSec = lastSeenMs > 0 ? (now - lastSeenMs) / 1000 : Infinity;
+    const expInterval = dev.expectedIntervalSeconds || 30;
+
+    let freshness: 'live' | 'fresh' | 'stale' | 'dead' = 'dead';
+    if (diffSec <= expInterval * 1.2) {
+      freshness = 'live';
+    } else if (diffSec <= expInterval * 2.5) {
+      freshness = 'fresh';
+    } else if (diffSec <= expInterval * 5) {
+      freshness = 'stale';
+    } else {
+      freshness = 'dead';
+    }
+
+    // Active alarms for this device
+    const activeAlarms = (this.db.data.activeAlarms || []).filter(
+      (a: any) => a.deviceId === dev.id && a.state === 'ACTIVE'
+    );
+    const totalAlarms24h = (this.db.data.notifications || []).filter((n: any) => {
+      const matchDevice = n.deviceId === dev.id || n.title?.includes(dev.name);
+      if (!matchDevice) return false;
+      const nTime = new Date(n.timestamp).getTime();
+      return now - nTime <= 24 * 3600 * 1000;
+    }).length;
+
+    // Calculate Health Score (0 - 100)
+    let score = 100;
+
+    if (dev.status === 'offline') {
+      score -= 50;
+    } else if (dev.status === 'warning') {
+      score -= 20;
+    }
+
+    if (freshness === 'stale') {
+      score -= 15;
+    } else if (freshness === 'dead') {
+      score -= 30;
+    }
+
+    if (activeAlarms.length > 0) {
+      score -= Math.min(30, activeAlarms.length * 15);
+    }
+
+    if (dev.pingMs && dev.pingMs > 250) {
+      score -= 10;
+    }
+
+    if (dev.apiKeyRevoked) {
+      score -= 40;
+    }
+
+    if (dev.maintenanceMode) {
+      // In maintenance mode, clamp to minimum 70 if no hardware failures
+      score = Math.max(70, score);
+    }
+
+    score = Math.max(0, Math.min(100, score));
+
+    // Get last command info
+    const deviceCmds = (this.db.data.commands || [])
+      .filter((c: any) => c.deviceId === dev.id)
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+    const lastCmd = deviceCmds[0];
+
+    return {
+      deviceId: dev.id,
+      deviceName: dev.name,
+      status: dev.status,
+      healthScore: score,
+      firmwareVersion: dev.firmwareVersion,
+      hardwareModel: dev.hardwareModel,
+      lastTelemetryAt: dev.lastSeen,
+      lastCommandStatus: lastCmd?.status,
+      lastCommandAt: lastCmd?.appliedAt || lastCmd?.executedAt || lastCmd?.created_at,
+      activeAlarmsCount: activeAlarms.length,
+      totalAlarms24h,
+      dataFreshness: freshness,
+      latencyMs: dev.pingMs,
+      maintenanceMode: dev.maintenanceMode,
+    };
+  }
+
+  public getDeviceHealthSummaries(tenantId?: string): DeviceHealthSummary[] {
+    let devices: Device[] = this.db.data.devices || [];
+    if (tenantId && tenantId !== 'all' && tenantId !== 'usr_admin') {
+      devices = devices.filter((d) => d.tenantId === tenantId);
+    }
+    return devices.map((d) => this.getDeviceHealthSummary(d.id)).filter(Boolean) as DeviceHealthSummary[];
+  }
+
+  // ==========================================
+  // DISCOVERY & PAIRING SYSTEM
+  // ==========================================
+
+  public checkDuplicateIdentity(params: {
+    mac?: string;
+    ip?: string;
+    name?: string;
+    excludeDeviceId?: string;
+    tenantId?: string;
+  }): CollisionCheckResult {
+    const devices: Device[] = this.db.data.devices || [];
+    const macClean = params.mac ? params.mac.trim().toLowerCase() : null;
+    const ipClean = params.ip ? params.ip.trim() : null;
+    const nameClean = params.name ? params.name.trim().toLowerCase() : null;
+
+    const conflictingDevices: CollisionCheckResult['conflictingDevices'] = [];
+    let collisionType: CollisionCheckResult['collisionType'] = 'none';
+
+    for (const dev of devices) {
+      if (params.excludeDeviceId && dev.id === params.excludeDeviceId) continue;
+
+      const devMac = (dev.macAddress || '').trim().toLowerCase();
+      const devIp = (dev.ipAddress || '').trim();
+      const devName = (dev.name || '').trim().toLowerCase();
+
+      let isMatch = false;
+      if (macClean && devMac && macClean === devMac) {
+        isMatch = true;
+        collisionType = collisionType === 'none' ? 'mac' : 'multiple';
+      }
+      if (ipClean && devIp && ipClean === devIp) {
+        isMatch = true;
+        collisionType = collisionType === 'none' ? 'ip' : 'multiple';
+      }
+      if (nameClean && devName && nameClean === devName && (!params.tenantId || dev.tenantId === params.tenantId)) {
+        isMatch = true;
+        collisionType = collisionType === 'none' ? 'name' : 'multiple';
+      }
+
+      if (isMatch) {
+        conflictingDevices.push({
+          id: dev.id,
+          name: dev.name,
+          ipAddress: dev.ipAddress,
+          macAddress: dev.macAddress,
+          tenantId: dev.tenantId,
+          status: dev.status,
+        });
+      }
+    }
+
+    if (conflictingDevices.length === 0) {
+      return {
+        hasCollision: false,
+        collisionType: 'none',
+        conflictingDevices: [],
+        suggestedAction: 'proceed',
+        message: 'Herhangi bir kimlik çakışması tespit edilmedi. Cihaz güvenle kaydedilebilir.',
+      };
+    }
+
+    let suggestedAction: CollisionCheckResult['suggestedAction'] = 'update_existing';
+    let message = 'Bu donanıma ait parametrelerle eşleşen kayıtlı cihazlar bulundu: ';
+
+    if (collisionType === 'mac') {
+      suggestedAction = 'replace_hardware';
+      message = `Aynı MAC adresine (${params.mac}) sahip ${conflictingDevices.length} cihaz sistemde mevcut. Donanım değişimi (Hardware Replacement) veya mevcut kaydı güncelleme önerilir.`;
+    } else if (collisionType === 'ip') {
+      suggestedAction = 'update_existing';
+      message = `Aynı IP adresine (${params.ip}) sahip cihazlar mevcut. Dinamik DHCP veya statik IP çakışması olabilir.`;
+    } else if (collisionType === 'name') {
+      suggestedAction = 'rename_unique';
+      message = `"${params.name}" adında bir cihaz bu organizasyonda zaten mevcut. Yeni bir isim seçebilir veya mevcut cihazı güncelleyebilirsiniz.`;
+    } else {
+      message = `Birden fazla kimlik çakışması tespit edildi (MAC/IP/İsim).`;
+    }
+
+    return {
+      hasCollision: true,
+      collisionType,
+      conflictingDevices,
+      suggestedAction,
+      message,
+    };
+  }
+
+  public getPairingHistory(tenantId?: string): PairingAuditRecord[] {
+    if (!this.db.data.pairingHistory) this.db.data.pairingHistory = [];
+    let list: PairingAuditRecord[] = this.db.data.pairingHistory;
+    if (tenantId && tenantId !== 'all' && tenantId !== 'usr_admin') {
+      list = list.filter((r) => r.tenantId === tenantId);
+    }
+    return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  public addPairingAudit(record: PairingAuditRecord) {
+    if (!this.db.data.pairingHistory) this.db.data.pairingHistory = [];
+    this.db.data.pairingHistory.unshift(record);
+    if (this.db.data.pairingHistory.length > 500) {
+      this.db.data.pairingHistory = this.db.data.pairingHistory.slice(0, 500);
+    }
+    this.db.saveData(this.db.data);
+  }
+
+  public updateDiscoveredLifecycle(target: string, state: DiscoveredDeviceLifecycleState) {
+    if (!this.db.data.unregisteredDevices) return;
+    target = target.toLowerCase().trim();
+    const item = this.db.data.unregisteredDevices.find(
+      (d: any) =>
+        (d.mac && d.mac.toLowerCase().trim() === target) ||
+        (d.ip && d.ip.toLowerCase().trim() === target) ||
+        (d.pairingCode && d.pairingCode.toLowerCase().trim() === target)
+    );
+    if (item) {
+      item.lifecycleState = state;
+      this.db.saveData(this.db.data);
+    }
+  }
+
+  public pairDevice(
+    request: PairDeviceRequest,
+    actor: { id: string; name: string; role: string }
+  ): { success: boolean; device?: Device; message: string; auditRecord: PairingAuditRecord } {
+    const isActorAdmin = actor.role === 'admin' || actor.id === 'usr_admin' || actor.id === 'admin';
+    const targetTenantId = isActorAdmin ? (request.tenantId || actor.id) : actor.id;
+    const targetTenant = (this.db.data.users || []).find((u: any) => u.id === targetTenantId);
+    const tenantName = targetTenant ? targetTenant.name : (targetTenantId === 'usr_admin' ? 'Merkez Yönetim' : targetTenantId);
+
+    const collision = this.checkDuplicateIdentity({
+      mac: request.macAddress,
+      ip: request.ipAddress,
+      name: request.name,
+      tenantId: targetTenantId,
+    });
+
+    const strategy = request.collisionStrategy || 'reject';
+
+    // Handle collision strategies
+    let resolvedDeviceName = request.name.trim();
+    let existingConflictingDev: Device | undefined;
+
+    if (collision.hasCollision) {
+      existingConflictingDev = (this.db.data.devices || []).find((d: Device) => d.id === collision.conflictingDevices[0]?.id);
+
+      if (strategy === 'reject') {
+        const auditRecord: PairingAuditRecord = {
+          id: 'pair_audit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          deviceName: request.name,
+          tenantId: targetTenantId,
+          tenantName,
+          actorId: actor.id,
+          actorName: actor.name,
+          method: request.method,
+          pairingCode: request.pairingCode,
+          macAddress: request.macAddress,
+          ipAddress: request.ipAddress,
+          status: 'REJECTED',
+          resolutionAction: 'rejected',
+          details: `Eşleştirme reddedildi: ${collision.message}`,
+          timestamp: new Date().toISOString(),
+        };
+        this.addPairingAudit(auditRecord);
+        return {
+          success: false,
+          message: collision.message,
+          auditRecord,
+        };
+      } else if (strategy === 'force_unique') {
+        let counter = 1;
+        while (
+          (this.db.data.devices || []).some(
+            (d: Device) => d.tenantId === targetTenantId && d.name.toLowerCase() === resolvedDeviceName.toLowerCase()
+          )
+        ) {
+          resolvedDeviceName = `${request.name.trim()} (${counter++})`;
+        }
+      } else if (strategy === 'update_existing' && existingConflictingDev) {
+        // Update the existing device with new connection parameters
+        const updated = this.updateDevice(existingConflictingDev.id, {
+          ipAddress: request.ipAddress || existingConflictingDev.ipAddress,
+          macAddress: request.macAddress || existingConflictingDev.macAddress,
+          location: request.location || existingConflictingDev.location,
+          siteId: request.siteId || existingConflictingDev.siteId,
+          zoneId: request.zoneId || existingConflictingDev.zoneId,
+          groupId: request.groupId || existingConflictingDev.groupId,
+          tags: request.tags && request.tags.length > 0 ? request.tags : existingConflictingDev.tags,
+        });
+
+        if (request.macAddress) this.removeUnregisteredDevice(request.macAddress);
+        if (request.ipAddress) this.removeUnregisteredDevice(request.ipAddress);
+
+        const auditRecord: PairingAuditRecord = {
+          id: 'pair_audit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          deviceId: existingConflictingDev.id,
+          deviceName: existingConflictingDev.name,
+          tenantId: targetTenantId,
+          tenantName,
+          actorId: actor.id,
+          actorName: actor.name,
+          method: request.method,
+          pairingCode: request.pairingCode,
+          macAddress: request.macAddress,
+          ipAddress: request.ipAddress,
+          status: 'DUPLICATE_RESOLVED',
+          resolutionAction: 'updated_existing',
+          details: `Mevcut cihaz kaydı güncellendi (${existingConflictingDev.name})`,
+          timestamp: new Date().toISOString(),
+        };
+        this.addPairingAudit(auditRecord);
+        return { success: true, device: updated, message: 'Mevcut cihaz başarıyla güncellendi.', auditRecord };
+      } else if (strategy === 'replace_hardware' && (request.targetDeviceIdToReplace || existingConflictingDev)) {
+        const targetDevId = request.targetDeviceIdToReplace || existingConflictingDev?.id;
+        if (targetDevId) {
+          const replaced = this.replaceDeviceHardware(
+            targetDevId,
+            {
+              newMac: request.macAddress || 'Bilinmiyor',
+              newIp: request.ipAddress,
+              reason: `Discovery & Provisioning Sihirbazı üzerinden donanım değişimi (${request.method})`,
+              notes: `Eski cihazın yerine atandı. Yeni MAC: ${request.macAddress || '—'}`,
+            },
+            actor
+          );
+
+          if (request.macAddress) this.removeUnregisteredDevice(request.macAddress);
+          if (request.ipAddress) this.removeUnregisteredDevice(request.ipAddress);
+
+          const auditRecord: PairingAuditRecord = {
+            id: 'pair_audit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            deviceId: replaced?.device?.id,
+            deviceName: replaced?.device?.name || request.name,
+            tenantId: targetTenantId,
+            tenantName,
+            actorId: actor.id,
+            actorName: actor.name,
+            method: request.method,
+            pairingCode: request.pairingCode,
+            macAddress: request.macAddress,
+            ipAddress: request.ipAddress,
+            status: 'DUPLICATE_RESOLVED',
+            resolutionAction: 'replaced_hardware',
+            details: `Donanım değişimi tamamlandı: ${replaced?.record?.notes || request.macAddress}`,
+            timestamp: new Date().toISOString(),
+          };
+          this.addPairingAudit(auditRecord);
+          return {
+            success: true,
+            device: replaced?.device,
+            message: 'Donanım değişimi başarıyla uygulandı ve telemetri geçmişi korundu.',
+            auditRecord,
+          };
+        }
+      }
+    }
+
+    // Standard new device creation
+    const createdDev = this.createDevice({
+      name: resolvedDeviceName,
+      type: request.type || 'ESP32',
+      location: request.location || 'Merkez Tesis',
+      ipAddress: request.ipAddress || '',
+      macAddress: request.macAddress || '',
+      tenantId: targetTenantId,
+      userId: targetTenantId,
+      siteId: request.siteId,
+      zoneId: request.zoneId,
+      groupId: request.groupId,
+      tags: request.tags || [],
+      apiKey: request.apiKey || '__USE_CACHED_TOKEN__',
+      rateLimitPerMin: 120,
+      encryptionMethod: 'AES-256-GCM',
+      status: 'offline',
+      metrics: {},
+      isSimulated: false,
+    });
+
+    if (request.macAddress) this.removeUnregisteredDevice(request.macAddress);
+    if (request.ipAddress) this.removeUnregisteredDevice(request.ipAddress);
+    if (request.pairingCode) this.removeUnregisteredDevice(request.pairingCode);
+
+    const auditRecord: PairingAuditRecord = {
+      id: 'pair_audit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      deviceId: createdDev.id,
+      deviceName: createdDev.name,
+      tenantId: targetTenantId,
+      tenantName,
+      actorId: actor.id,
+      actorName: actor.name,
+      method: request.method,
+      pairingCode: request.pairingCode,
+      macAddress: request.macAddress,
+      ipAddress: request.ipAddress,
+      status: collision.hasCollision ? 'DUPLICATE_RESOLVED' : 'SUCCESS',
+      resolutionAction: 'created_unique',
+      details: collision.hasCollision
+        ? `Çakışma çözüldü, benzersiz isimle oluşturuldu: "${createdDev.name}"`
+        : `Başarılı yeni cihaz eşleştirmesi (${request.method})`,
+      timestamp: new Date().toISOString(),
+    };
+    this.addPairingAudit(auditRecord);
+
+    return {
+      success: true,
+      device: createdDev,
+      message: 'Cihaz başarıyla eşleştirildi ve yetkilendirildi.',
+      auditRecord,
+    };
+  }
 }
+

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { WidgetConfig } from '../../types';
 import { useRealtime } from '../../context/RealtimeContext';
-import { Sliders, ToggleLeft, ToggleRight, CheckCircle2, Zap, CircleDot } from 'lucide-react';
+import { Sliders, ToggleLeft, ToggleRight, CheckCircle2, Zap, CircleDot, Loader2, AlertCircle } from 'lucide-react';
 import { DeviceStatusDot } from './DeviceStatusDot';
 
 interface SwitchControlWidgetProps {
@@ -10,7 +10,7 @@ interface SwitchControlWidgetProps {
 }
 
 export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config, onEdit }) => {
-  const { devices, sendControlCommand } = useRealtime();
+  const { devices, sendControlCommand, getPendingCommand } = useRealtime();
 
   // Find target device strictly if configured
   const isSpecificConfigured = Boolean(config.deviceId && config.deviceId !== 'all');
@@ -51,7 +51,7 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
       setFeedbackMsg(`Hata: ${err.message || 'Sinyal gönderilemedi'}`);
     } finally {
       setIsSending(false);
-      setTimeout(() => setFeedbackMsg(null), 3000);
+      setTimeout(() => setFeedbackMsg(null), 3500);
     }
   };
 
@@ -68,7 +68,7 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
     setSwitchStates(newStates);
     setIsSending(false);
     setFeedbackMsg(`Tüm Röleler ${targetState ? 'AÇILDI' : 'KAPATILDI'}`);
-    setTimeout(() => setFeedbackMsg(null), 3000);
+    setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
   const isCompact = (config.height || 'H1') === 'H1';
@@ -110,7 +110,7 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
-            {masterOn ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+            {isSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             <span>{masterOn ? 'AÇIK' : 'KAPALI'}</span>
           </button>
           {onEdit && (
@@ -171,15 +171,17 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
           <button
             onClick={() => handleMasterToggle(true)}
             disabled={!targetDevice || isSending}
-            className="px-2 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold rounded-lg border border-emerald-500/30 transition"
+            className="px-2 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold rounded-lg border border-emerald-500/30 transition flex items-center gap-1"
           >
+            {isSending && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
             AÇ
           </button>
           <button
             onClick={() => handleMasterToggle(false)}
             disabled={!targetDevice || isSending}
-            className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold rounded-lg border border-rose-500/30 transition"
+            className="px-2 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold rounded-lg border border-rose-500/30 transition flex items-center gap-1"
           >
+            {isSending && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
             KAPAT
           </button>
         </div>
@@ -189,6 +191,11 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
       <div className="space-y-1.5 my-1 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         {switchChannels.map((ch) => {
           const isOn = !!switchStates[ch.pin];
+          const pending = targetDevice ? getPendingCommand(targetDevice.id, ch.pin) : null;
+          const isPending = pending?.status === 'pending';
+          const isApplied = pending?.status === 'applied';
+          const isFailed = pending?.status === 'failed' || pending?.status === 'timeout';
+
           return (
             <div
               key={ch.id}
@@ -196,22 +203,53 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span
-                  className={`w-2 h-2 rounded-full ${
-                    isOn ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400 opacity-40'
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    isPending
+                      ? 'bg-amber-400 animate-ping'
+                      : isApplied
+                      ? 'bg-emerald-400 ring-2 ring-emerald-400/40'
+                      : isFailed
+                      ? 'bg-rose-400'
+                      : isOn
+                      ? 'bg-emerald-500 animate-pulse'
+                      : 'bg-slate-400 opacity-40'
                   }`}
                 />
-                <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[130px]">
-                  {ch.label}
-                </span>
+                <div className="min-w-0">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block max-w-[130px]">
+                    {ch.label}
+                  </span>
+                  {isPending && (
+                    <span className="text-[9px] text-amber-500 flex items-center gap-0.5 font-mono">
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" /> İletiliyor...
+                    </span>
+                  )}
+                  {isApplied && (
+                    <span className="text-[9px] text-emerald-500 flex items-center gap-0.5 font-mono">
+                      <CheckCircle2 className="w-2.5 h-2.5" /> Donanım ACK Onaylandı
+                    </span>
+                  )}
+                  {isFailed && (
+                    <span className="text-[9px] text-rose-500 flex items-center gap-0.5 font-mono">
+                      <AlertCircle className="w-2.5 h-2.5" /> {pending?.error || 'Zaman aşımı'}
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => handleToggleSwitch(ch.pin, isOn)}
-                disabled={!targetDevice || isSending}
+                disabled={!targetDevice || isSending || isPending}
                 className={`p-1 rounded-lg transition-colors ${
                   isOn ? 'text-emerald-500' : 'text-slate-400'
                 }`}
               >
-                {isOn ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
+                {isPending ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+                ) : isOn ? (
+                  <ToggleRight className="w-5 h-5" />
+                ) : (
+                  <ToggleLeft className="w-5 h-5" />
+                )}
               </button>
             </div>
           );
@@ -220,8 +258,8 @@ export const SwitchControlWidget: React.FC<SwitchControlWidgetProps> = ({ config
 
       {/* Footer Feedback */}
       <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400 shrink-0">
-        <span>{feedbackMsg || 'GPIO / Röle Çıkışları'}</span>
-        <CircleDot className="w-3 h-3 text-cyan-400" />
+        <span className="truncate max-w-[200px]">{feedbackMsg || 'GPIO / Röle Çıkışları'}</span>
+        <CircleDot className="w-3 h-3 text-cyan-400 shrink-0" />
       </div>
     </div>
   );

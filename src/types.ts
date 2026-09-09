@@ -34,6 +34,56 @@ export interface Site {
   createdAt: string;
 }
 
+export interface Zone {
+  id: string;
+  tenantId: string;
+  siteId?: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+}
+
+export interface DeviceGroup {
+  id: string;
+  tenantId: string;
+  zoneId?: string;
+  siteId?: string;
+  name: string;
+  description?: string;
+  color?: string;
+  createdAt: string;
+}
+
+export interface DeviceReplacementRecord {
+  id: string;
+  tenantId: string;
+  oldDeviceId: string;
+  oldDeviceName: string;
+  newDeviceId: string;
+  newDeviceName: string;
+  replacedAt: string;
+  replacedBy: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface DeviceHealthSummary {
+  deviceId: string;
+  deviceName: string;
+  status: DeviceStatus;
+  healthScore: number; // 0 - 100
+  firmwareVersion?: string;
+  hardwareModel?: string;
+  lastTelemetryAt?: string;
+  lastCommandStatus?: string;
+  lastCommandAt?: string;
+  activeAlarmsCount: number;
+  totalAlarms24h: number;
+  dataFreshness: 'live' | 'fresh' | 'stale' | 'dead';
+  latencyMs?: number;
+  maintenanceMode?: boolean;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -110,6 +160,13 @@ export interface Device {
   previousTenantName?: string; // Prior owner name before deletion
   ownershipTransferredAt?: string; // Timestamp of ownership reassignment
   siteId?: string; // Facility/Location ID
+  zoneId?: string; // Facility Zone/Area ID
+  groupId?: string; // Logical Device Group ID
+  tags?: string[]; // Flexible search and filter tags
+  maintenanceMode?: boolean; // If true, alarms are silenced and marked for service
+  maintenanceReason?: string; // Reason for maintenance
+  maintenanceUntil?: string; // Scheduled completion ISO timestamp
+  replacementHistory?: DeviceReplacementRecord[]; // Hardware migration records
   name: string;
   type: 'sensor' | 'server' | 'meter' | 'inverter' | 'gateway' | string;
   roleKey?: string; // Görev Kimliği (Örn: "PUMP_CTRL", "VALVE_CTRL", "METER_MAIN")
@@ -798,6 +855,10 @@ export interface AuditLog {
   severity: 'low' | 'medium' | 'high';
 }
 
+export type DiscoveredDeviceLifecycleState = 'discovered' | 'pending' | 'assigned' | 'active';
+
+export type PairingMethod = 'qr_scan' | 'pairing_code' | 'network_scan' | 'manual';
+
 export interface DiscoveredNetworkDevice {
   tenantId?: string;
   ip: string;
@@ -806,17 +867,70 @@ export interface DiscoveredNetworkDevice {
   vendor: string;
   openPorts: number[];
   status: 'active' | 'transmitting' | 'idle' | 'unregistered';
+  lifecycleState?: DiscoveredDeviceLifecycleState;
   pingMs?: number;
   rssi?: number;
   lastPacket?: string;
   hasAuthToken?: boolean;
   pairingCode?: string;
+  serialNumber?: string;
   hardwareModel?: string;
   roleKey?: string;
   firmwareVersion?: string;
   lastSeen?: string;
   registeredDeviceId?: string;
   userId?: string;
+}
+
+export interface PairingAuditRecord {
+  id: string;
+  deviceId?: string;
+  deviceName: string;
+  tenantId: string;
+  tenantName?: string;
+  actorId: string;
+  actorName: string;
+  method: PairingMethod;
+  pairingCode?: string;
+  macAddress?: string;
+  ipAddress?: string;
+  status: 'SUCCESS' | 'DUPLICATE_RESOLVED' | 'REJECTED' | 'FAILED';
+  resolutionAction?: 'replaced_hardware' | 'updated_existing' | 'created_unique' | 'rejected';
+  details: string;
+  timestamp: string;
+}
+
+export interface CollisionCheckResult {
+  hasCollision: boolean;
+  collisionType: 'none' | 'mac' | 'ip' | 'name' | 'multiple';
+  conflictingDevices: {
+    id: string;
+    name: string;
+    ipAddress?: string;
+    macAddress?: string;
+    tenantId: string;
+    status: string;
+  }[];
+  suggestedAction: 'proceed' | 'update_existing' | 'replace_hardware' | 'rename_unique';
+  message: string;
+}
+
+export interface PairDeviceRequest {
+  name: string;
+  type?: string;
+  location?: string;
+  ipAddress?: string;
+  macAddress?: string;
+  pairingCode?: string;
+  method: PairingMethod;
+  tenantId?: string;
+  siteId?: string;
+  zoneId?: string;
+  groupId?: string;
+  tags?: string[];
+  apiKey?: string;
+  collisionStrategy?: 'reject' | 'update_existing' | 'replace_hardware' | 'force_unique';
+  targetDeviceIdToReplace?: string;
 }
 
 export interface NetworkScanJob {

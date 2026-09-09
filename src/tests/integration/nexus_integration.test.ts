@@ -19,7 +19,11 @@ describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
   let sessionCookie: string = '';
 
   beforeAll(async () => {
-    // Basic setup if needed
+    await db.waitForInitialization();
+    const users = db.getUsers();
+    if (!users.some((u: any) => u.role === 'admin')) {
+      await db.registerUser('System Admin', 'admin@nexusnodeiot.com.tr', 'AdminPassword123!', 'admin');
+    }
   });
 
   afterAll(async () => {

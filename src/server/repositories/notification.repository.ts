@@ -1,5 +1,6 @@
 import type { NotificationItem, DashboardLayout, WidgetConfig } from '../../types.js';
 import { defaultWidgets } from '../initialData.js';
+import { validateAndSanitizeWidgets } from '../../lib/widgetValidation.js';
 
 export class NotificationRepository {
   constructor(private db: any) {}
@@ -105,7 +106,8 @@ export class NotificationRepository {
     if (!userDash) {
       userDash = this.getDashboard(effectiveUserId);
     }
-    userDash.widgets = widgets;
+    const sanitized = validateAndSanitizeWidgets(widgets);
+    userDash.widgets = sanitized.length > 0 ? sanitized : [...defaultWidgets];
     if (title) userDash.title = title;
     userDash.updatedAt = new Date().toISOString();
     this.db.scheduleSave();

@@ -191,10 +191,11 @@ CREATE INDEX IF NOT EXISTS idx_device_ws_dedup_expires ON device_ws_messages_ded
 CREATE TABLE IF NOT EXISTS telemetry_packets (
     id VARCHAR(128) PRIMARY KEY,
     device_id VARCHAR(64) NOT NULL,
+    boot_id VARCHAR(64) DEFAULT 'default' NOT NULL,
     sequence BIGINT NOT NULL,
     metric_count INT DEFAULT 0,
     received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unq_telemetry_device_sequence UNIQUE(device_id, sequence)
+    CONSTRAINT unq_telemetry_device_boot_sequence UNIQUE(device_id, boot_id, sequence)
 );
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(device_id, sequence);
@@ -203,6 +204,7 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_packets_dev_seq ON telemetry_packets(de
 -- (Prevents hypertable chunk deadlocks and foreign key violation errors on high-throughput time-series ingestion)
 DO $$
 BEGIN
+    ALTER TABLE telemetry_packets DROP CONSTRAINT IF EXISTS unq_telemetry_device_sequence CASCADE;
     ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_device_id_fkey CASCADE;
     ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_device_id_fkey CASCADE;
     ALTER TABLE telemetry_packets DROP CONSTRAINT IF EXISTS telemetry_packets_device_id_fkey CASCADE;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { WidgetConfig, WidgetButtonConfig } from '../../types';
 import { useRealtime } from '../../context/RealtimeContext';
-import { Sliders, Power, CheckCircle2, Zap, Radio, CircleDot } from 'lucide-react';
+import { Sliders, Power, CheckCircle2, Zap, Radio, CircleDot, Loader2, AlertCircle } from 'lucide-react';
 import { DeviceStatusDot } from './DeviceStatusDot';
 
 interface ButtonControlWidgetProps {
@@ -10,7 +10,7 @@ interface ButtonControlWidgetProps {
 }
 
 export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config, onEdit }) => {
-  const { devices, sendControlCommand } = useRealtime();
+  const { devices, sendControlCommand, getPendingCommand } = useRealtime();
 
   // Find target device strictly if configured
   const isSpecificConfigured = Boolean(config.deviceId && config.deviceId !== 'all');
@@ -198,34 +198,48 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
       <div className={`grid gap-2 my-1 ${getGridClass()} flex-1 min-h-0 overflow-y-auto custom-scrollbar`}>
         {activeButtons.map((btn, idx) => {
           const isActive = !!buttonStates[btn.id];
-          const isSending = sendingBtnId === btn.id;
+          const pinName = btn.outputPin || btn.command || `OUT_${idx + 1}`;
+          const pending = targetDevice ? getPendingCommand(targetDevice.id, pinName) : null;
+          const isPending = sendingBtnId === btn.id || pending?.status === 'pending';
+          const isApplied = pending?.status === 'applied';
+          const isFailed = pending?.status === 'failed' || pending?.status === 'timeout';
           const btnColor = btn.color || ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'][idx % 4];
 
           return (
             <button
               key={btn.id || idx}
               onClick={() => handleButtonClick(btn)}
-              disabled={isSending || !targetDevice}
+              disabled={isPending || !targetDevice}
               className={`relative overflow-hidden p-2.5 rounded-xl border transition-all duration-200 text-left cursor-pointer flex flex-col justify-between ${
-                isActive
+                isApplied
+                  ? 'bg-slate-900 dark:bg-slate-900 border-emerald-500 shadow-md shadow-emerald-500/20'
+                  : isActive
                   ? 'bg-slate-900 dark:bg-slate-900 border-emerald-500/50 shadow-md shadow-emerald-500/10'
                   : 'bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800'
               }`}
             >
               <div className="flex items-center justify-between w-full">
                 <span className="text-[9px] font-mono font-bold text-slate-500 dark:text-slate-400 tracking-wider">
-                  [{btn.outputPin || btn.command || `OUT_${idx + 1}`}]
+                  [{pinName}]
                 </span>
 
                 <div className="flex items-center gap-1">
                   <span
                     className={`w-2 h-2 rounded-full transition-all ${
-                      isActive ? 'animate-pulse shadow-sm' : 'opacity-40'
+                      isPending
+                        ? 'bg-amber-400 animate-ping'
+                        : isApplied
+                        ? 'bg-emerald-400 ring-2 ring-emerald-400/40'
+                        : isFailed
+                        ? 'bg-rose-400'
+                        : isActive
+                        ? 'animate-pulse shadow-sm'
+                        : 'opacity-40'
                     }`}
-                    style={{ backgroundColor: isActive ? btnColor : '#64748b' }}
+                    style={{ backgroundColor: isPending ? '#fbbf24' : isApplied ? '#34d399' : isFailed ? '#f87171' : isActive ? btnColor : '#64748b' }}
                   />
-                  <span className={`text-[9px] font-bold ${isActive ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {isActive ? 'ON' : 'OFF'}
+                  <span className={`text-[9px] font-bold ${isApplied ? 'text-emerald-400' : isActive ? 'text-emerald-400' : 'text-slate-500'}`}>
+                    {isApplied ? 'ACK' : isActive ? 'ON' : 'OFF'}
                   </span>
                 </div>
               </div>
@@ -243,14 +257,20 @@ export const ButtonControlWidget: React.FC<ButtonControlWidgetProps> = ({ config
                   color: isActive ? '#ffffff' : '#94a3b8',
                 }}
               >
-                {isSending ? (
-                  <Radio className="w-3 h-3 animate-spin" />
+                {isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                ) : isApplied ? (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                ) : isFailed ? (
+                  <AlertCircle className="w-3 h-3 text-rose-400" />
                 ) : (
                   <Zap className="w-3 h-3" />
                 )}
                 <span>
-                  {isSending
-                    ? 'Gönderiliyor...'
+                  {isPending
+                    ? 'İletiliyor...'
+                    : isApplied
+                    ? 'ACK Onaylandı'
                     : btn.mode === 'pulse'
                     ? 'Pulse'
                     : isActive

@@ -4,6 +4,101 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.6.0] - 2026-09-09
+### 🔍 Roadmap P2: Cihaz Keşfi, Tek Provizyon Sihirbazı & Eşleştirme Güvenlik Denetimi
+- **Tek Birleşik Provizyon Sihirbazı (`ProvisioningWizardModal.tsx`):**
+  - **Adım 1 (Yöntem & Kimlik):** QR Kod tarama/kamera simülasyonu, 6 haneli geçici PIN eşleştirme kodu, yerel ağ keşif havuzundan aktarım ve manuel IP/MAC giriş modları eklendi.
+  - **Adım 2 (Çakışma Analizi & Strateji):** Sunucu taraflı MAC, IP ve İsim çakışma tespiti (`POST /api/network/check-duplicate`). Çakışma durumunda *Donanım Değişimi (Replace Hardware)*, *Mevcut Kaydı Güncelle (Update Existing)* veya *Otomatik Benzersiz İsimle Ekle (Force Unique)* stratejileri entegre edildi.
+  - **Adım 3 (Hiyerarşi, Konum & Tenant Ataması):** Müşteri (Tenant), Tesis (Site), Bölge (Zone), Grup ve dinamik Etiket (Tag) ilişkilendirmesi sağlandı.
+  - **Adım 4 (Yetkilendirme & API Key):** Kriptografik API anahtarının tek tıkla kopyalanması ve donanım özet ekranı tamamlandı.
+- **Cihaz Yaşam Döngüsü & Anlık Durum Rozetleri (`DiscoveredDeviceCard.tsx`):**
+  - Keşif havuzundaki donanımlar için `Discovered → Pending → Assigned → Active` yaşam döngüsü takibi ve rozetleri eklendi.
+  - Canlı RSSI sinyal seviyesi, ICMP ping testi ve doğrudan sihirbaza aktarma aksiyonları sağlandı.
+- **Eşleştirme Güvenlik Denetimi & Günlüğü (`PairingAuditTable.tsx`):**
+  - Tüm eşleştirme operasyonları için aktör (işlemi yapan kullanıcı), hedef organizasyon/tenant, yöntem, çakışma çözüm detayları ve zaman damgası kayıt altına alındı (`GET /api/network/pairing-history`).
+- **Modüler Görünüm (`NetworkDiscoveryView.tsx`):**
+  - Temiz kod prensipleri gereğince devasa dosya modüler alt bileşenlere ayrılarak `src/components/discovery/` altında toplandı.
+
+---
+
+## 🚀 [v1.5.0] - 2026-09-09
+### 🏭 Roadmap P2: Hiyerarşik Cihaz Yönetimi, Bakım Modu & Donanım Değişimi
+- **Hiyerarşik Yapı & Filtreleme (`Site -> Zone -> Group`):**
+  - Tesis, Bölge ve Grup hiyerarşisi veri modelleri ve `DeviceHierarchyBar` bileşeni eklendi.
+  - Cihaz filtreleme ve gruplama Tesis, Bölge, Grup ve Etiket (Tag) parametrelerine göre entegre edildi.
+  - Hiyerarşi yönetimi için `HierarchyManagementModal` modalı ve veritabanı CRUD operasyonları sağlandı.
+- **Dinamik Etiketleme (Device Tagging):**
+  - Cihazlara dinamik renkli etiket ekleme, kaldırma ve etiket bazlı hızlı filtreleme (`DeviceTagsEditor`) eklendi.
+- **Bakım Modu (Maintenance Mode):**
+  - Cihazlar için bakım modu, bakım nedeni ve tahmini bitiş tarihi desteği eklendi.
+  - Bakım modundaki cihazlar için alarm ve uyarı bastırma (suppression) entegrasyonu sağlandı (`DeviceMaintenanceModal`).
+- **Donanım Değişimi & Seri No Tarihçesi (Hardware Replacement):**
+  - Sahada değişen cihazlar için yeni Seri No, MAC ve Değişim Nedeni ile donanım yenileme modalı (`DeviceReplacementModal`) ve tarihçe kaydı oluşturuldu.
+- **Cihaz Sağlık Özeti (Device Health Summary & Badge):**
+  - Cihazların canlılık eşiği, veri tazeliği ve sağlık skoru göstergesi (`DeviceHealthBadge`) entegre edildi.
+
+---
+
+## 🚀 [v1.4.1] - 2026-09-09
+### 📊 Roadmap P2: Canlı Dashboard & Komut Takip İyileştirmeleri
+- **Widget Yapılandırma Doğrulama & Temizleme (`src/lib/widgetValidation.ts`):**
+  - Tüm widget yapılandırmaları için şema doğrulama ve geçersiz alanları düzeltme desteği eklendi.
+  - `notification.repository.ts` ve `RealtimeContext.tsx` içindeki widget kaydetme ve yükleme işlemlerine validatör entegre edildi.
+- **Global Bağlantı Durumu & Üstel Yeniden Bağlanma (Exponential Backoff):**
+  - `RealtimeContext.tsx` içinde dinamik geri sayım sayacı (`reconnectCountdown`) ve deneme sayısı (`reconnectAttempt`) ile akıllı WebSocket yeniden bağlanma algoritması uygulandı.
+  - `Header.tsx` üzerinde bağlantı gecikmesi (`wsLatency`), aktif geri sayım ve anında manuel yeniden bağlanma butonu görselleştirildi.
+- **Canlı Komut Takibi & Donanım ACK Geri Bildirimi:**
+  - `sendControlCommand` için iyimser (optimistic) durum yönetimi ve 6 saniyelik zaman aşımı güvenlik mekanizması eklendi.
+  - `SwitchControlWidget.tsx` ve `ButtonControlWidget.tsx` bileşenlerinde `Pending → Applied / Failed / Timeout` durumları renkli göstergeler ve donanım ACK rozetleri ile güncellendi.
+
+---
+
+## 🚀 [v1.4.0] - 2026-09-09
+### 🎯 Roadmap P0 & P1 Üretim & Güvenilirlik Tamamlama Paketi
+- **P0.4: Yedekleme, Geri Yükleme, Şema Migrasyonu & Sürüm Yükseltme Doğrulaması (`src/tests/backup_restore_migration_upgrade.test.ts`):**
+  - Tam JSON ve SQL veritabanı yedeği oluşturma, meta veri ve dosya boyutu doğrulama.
+  - Yedekten geri yükleme ile cihaz, telemetri, kullanıcı ve alarm varlıklarının eksiksiz korunması.
+  - Legacy (v1.0.0) şema yapılarından güncel çok kiracılı TimescaleDB şemasına geriye dönük uyumlu migrasyon doğrulaması.
+- **P1 - 2.1: Sürüm ve Lockfile Senkronizasyon Kapısı (`src/tests/version_sync.test.ts`):**
+  - `package.json`, `package-lock.json`, `src/config/version.ts`, `CHANGELOG.md` ve `docs/PROJECT_ROADMAP.md` tam senkronize edildi.
+- **P1 - 2.2: Telemetri DB Bütünlüğü & Uygulama Seviyesi Referential Integrity (`src/tests/telemetry_db_integrity.test.ts`):**
+  - Hypertable kilitlenmelerini önleyen FK'siz mimaride uygulama seviyesi referential integrity belgelendi ve doğrulandı.
+  - Yetim (orphan) telemetri kayıtlarını tespit etme, izleme ve mutabakat (`reconcileOrphanTelemetry()`) servisi eklendi.
+  - Cihaz silinmesi/değiştirilmesinde geçmiş telemetrinin denetim/raporlama için güvenle saklanması garantilendi.
+  - Kayıtsız/keşif aşamasındaki cihazların telemetri izolasyon ve karantina politikası test edildi.
+  - `deviceId + bootId + sequence` idempotency ile eşzamanlı veri girişi çakışma koruması doğrulandı.
+- **P1 - 2.3: WebSocket Protokol Güvenliği & Canlı Oturum Yönetimi (`src/tests/ws_protocol_integrity.test.ts`):**
+  - Telemetri şema doğrulaması (zarf yapısı, veri tipi ve zaman damgası kontrolleri).
+  - Canlı komut -> cihaz ACK -> uygulandı yaşam döngüsü.
+  - CORS / Origin doğrulama politikası (`isAllowedWsOrigin`).
+  - Geri basınç (backpressure - 512KB/2MB limitleri) ve azami 1MB çerçeve boyutu koruması.
+  - Cihaz API anahtarı döndürüldüğünde/iptal edildiğinde aktif WebSocket soketlerinin anında sonlandırılması (`terminateDeviceSockets`).
+- **P1 - 2.4: Çok Kiracılı (Multi-Tenant) Negatif Güvenlik Matrisi (Kural 1) (`src/tests/multitenant_negative_matrix.test.ts`):**
+  - Müşteri A ve Müşteri B arasında REST, DB ve WebSocket katmanlarında tam veri ve cihaz izolasyonu.
+  - Cihaz kimlik tahmini/sahteciliği (ID enumeration) engelleme.
+  - Sanal cihaz ve simülasyon yönetiminin SADECE YÖNETİCİYE ait olduğu kuralının mutlak denetimi.
+- **P1 - 2.5: OTA Firmware Güvenliği, Ed25519 İmza & Rollout Durum Makinesi (`src/tests/ota_complete_lifecycle.test.ts`):**
+  - Donanım modeli ve revizyonu uyumluluk matrisi kontrolü.
+  - Ed25519 imza doğrulaması ve güvenilir anahtar halkası (Root-of-Trust).
+  - Otomatik zaman aşımı, yeniden deneme ve geri alma (rollback) işleyicisi (`otaWorker`).
+  - Eşzamanlı OTA dağıtım çakışma koruması.
+
+---
+
+## 🚀 [v1.3.3] - 2026-09-09
+### 🐳 Production Docker, PostgreSQL / TimescaleDB, Reverse Proxy & WebSocket Entegrasyon Paketi (Roadmap P0 - Item 3)
+- **Production Doğrulama Test Paketi (`src/tests/docker_postgres_proxy_ws.test.ts`):**
+  - **Docker Multi-stage & Güvenlik Doğrulaması:** `Dockerfile` multi-stage yapısı, non-root kullanıcı (`node:node`), healthcheck konfigürasyonu ve minimal production imaj kriterleri test edildi.
+  - **Docker Compose Topolojisi:** `docker-compose.yml` içerisinde TimescaleDB, IoT Node.js uygulaması ve Nginx reverse proxy servis tanımları, volume kalıcılığı ve healthcheck bağımlılıkları (`depends_on: condition: service_healthy`) doğrulandı.
+  - **Nginx Reverse Proxy Yapılandırması:** WebSocket `Upgrade` ve `Connection` başlıkları, HTTP/1.1 geçişi, `client_max_body_size 50M` (OTA firmware yüklemeleri için) ve 86400s streaming zaman aşımları test edildi.
+  - **PostgreSQL / TimescaleDB Canlı Veritabanı Şeması:** `devices`, `telemetry_readings`, `telemetry_packets`, `device_commands`, `device_ws_messages_dedup` ve `user_sessions` tabloları, composite indeksler ve deduplication korumaları doğrulandı.
+  - **Saha Cihazı WebSocket & Reverse Proxy İletişimi:** `x-api-key`, `x-forwarded-for` ve `x-real-ip` başlıkları üzerinden saha cihazının canlı bağlanması, telemetri akışı, downlink komut teslimi (`claimed`) ve cihaz ACK (`executed`) yaşam döngüsü doğrulandı.
+  - **Browser UI Gerçek Zamanlı Event Yayını:** Tarayıcı oturum çerezi (`session_id`) ile kimlik doğrulayan WebSocket istemcisinin sistem yayınlarını (`broadcast`) gerçek zamanlı alması test edildi.
+- **Komut Eşleme & ACK Sağlamlaştırması:**
+  - `deviceWsProtocolService.handleAck` ve `db.acknowledgeCommands` fonksiyonlarında `cmd_` ön ekli ve ham ID biçimlerinin çift yönlü eşleşmesi garanti altına alındı.
+
+---
+
 ## 🚀 [v1.3.2] - 2026-09-09
 ### 🛠️ PostgreSQL & TimescaleDB Telemetri Dayanıklılığı & Deadlock Çözüm Paketi
 - **Telemetri Hypertable Yabancı Anahtar (Foreign Key) İzolasyonu:**

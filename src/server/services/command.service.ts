@@ -37,6 +37,8 @@ export class CommandService {
     sentAt?: string;
     sent_at?: string;
     claimed_at?: string;
+    parameters?: any;
+    params?: any;
   }>> {
     if (!deviceId) return [];
 
@@ -75,6 +77,8 @@ export class CommandService {
         sentAt: c.sentAt || c.sent_at,
         sent_at: c.sent_at || c.sentAt || c.claimed_at,
         claimed_at: c.claimed_at || c.delivered_at || c.sent_at,
+        parameters: c.parameters,
+        params: c.parameters,
       }));
     } catch (err: any) {
       console.error(`[CommandService] getAndDeliverPendingCommands error for device ${deviceId}:`, err.message || err);
@@ -89,7 +93,7 @@ export class CommandService {
   public async handleCommandAck(
     deviceId: string,
     ackData: string | string[] | { id: string; status?: string; result?: any; error?: string } | any[],
-    defaultStatus: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
+    defaultStatus: 'acknowledged' | 'failed' | 'executed' | 'applied' = 'acknowledged',
     defaultResult?: any
   ): Promise<number> {
     if (!deviceId || !ackData) return 0;

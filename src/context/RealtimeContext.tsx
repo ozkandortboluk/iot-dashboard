@@ -10,12 +10,26 @@ import type {
 } from '../types';
 import { useAuth } from './AuthContext';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
+import { validateAndSanitizeWidgets } from '../lib/widgetValidation';
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
+
+export interface PendingCommandInfo {
+  commandId?: string;
+  deviceId: string;
+  command: string;
+  value: any;
+  outputPin?: string;
+  status: 'pending' | 'applied' | 'failed' | 'timeout';
+  timestamp: number;
+  error?: string;
+}
 
 interface RealtimeContextType {
   isConnected: boolean;
   connectionStatus: ConnectionStatus;
+  reconnectAttempt: number;
+  reconnectCountdown: number;
   reconnectWebSocket: () => void;
   wsLatency: number;
   devices: Device[];
@@ -56,6 +70,8 @@ interface RealtimeContextType {
     outputPin?: string,
     unit?: string
   ) => Promise<any>;
+  pendingCommands: Record<string, PendingCommandInfo>;
+  getPendingCommand: (deviceId: string, outputPin?: string) => PendingCommandInfo | null;
   subscribeWsEvent: (event: string, callback: (payload: any) => void) => () => void;
 }
 
@@ -79,6 +95,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const { user } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('reconnecting');
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [reconnectCountdown, setReconnectCountdown] = useState(0);
+  const [pendingCommands, setPendingCommands] = useState<Record<string, PendingCommandInfo>>({});
   const [wsLatency, setWsLatency] = useState(12);
   const [rawDevices, setRawDevices] = useState<Device[]>([]);
   const [rawNotifications, setRawNotifications] = useState<NotificationItem[]>([]);
@@ -96,6 +115,14 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     selectedCustomerForAdminRef.current = selectedCustomerForAdmin;
   }, [selectedCustomerForAdmin]);
+
+  const getPendingCommand = useCallback(
+    (deviceId: string, outputPin?: string): PendingCommandInfo | null => {
+      const key = `${deviceId}_${outputPin || ''}`;
+      return pendingCommands[key] || null;
+    },
+    [pendingCommands]
+  );
 
   // Synchronous, flicker-free derived devices list based on active customer filter
   const devices = useMemo(() => {
@@ -364,7 +391,41 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let reconnectTimer: any = null;
     let pingTimer: any = null;
     let watchdogTimer: any = null;
+    let countdownInterval: any = null;
     let isCleanedUp = false;
+    let retryAttempt = 0;
+
+    const scheduleReconnect = () => {
+      if (isCleanedUp) return;
+      retryAttempt++;
+      setReconnectAttempt(retryAttempt);
+      isConnectedRef.current = false;
+      setIsConnected(false);
+      setConnectionStatus('reconnecting');
+      clearInterval(pingTimer);
+      clearInterval(watchdogTimer);
+      clearTimeout(reconnectTimer);
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      // Exponential backoff: min 1.5s, max 15s
+      const delaySec = Math.min(15, Math.max(1, Math.round(Math.pow(1.4, Math.min(retryAttempt, 8)))));
+      setReconnectCountdown(delaySec);
+
+      let remaining = delaySec;
+      countdownInterval = setInterval(() => {
+        remaining = Math.max(0, remaining - 1);
+        setReconnectCountdown(remaining);
+        if (remaining <= 0) {
+          clearInterval(countdownInterval);
+        }
+      }, 1000);
+
+      reconnectTimer = setTimeout(() => {
+        if (!isCleanedUp) {
+          connect();
+        }
+      }, delaySec * 1000);
+    };
 
     const connect = () => {
       if (isCleanedUp) return;
@@ -402,6 +463,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           isConnectedRef.current = true;
           setIsConnected(true);
           setConnectionStatus('connected');
+          setReconnectAttempt(0);
+          setReconnectCountdown(0);
+          retryAttempt = 0;
+          if (countdownInterval) clearInterval(countdownInterval);
           lastMessageReceivedAt = Date.now();
 
           // Authenticate WebSocket connection immediately with user session
@@ -787,6 +852,51 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               } else {
                 refreshCustomers();
               }
+            } else if (
+              data.event === 'command:ack' ||
+              data.event === 'command:ack_confirmed' ||
+              data.event === 'command:executed' ||
+              data.event === 'command:acknowledged' ||
+              data.event === 'command:status' ||
+              data.event === 'command:failed' ||
+              data.event === 'device:command:status'
+            ) {
+              const payload = data.payload || {};
+              const cmdId = payload.commandId || payload.id || payload.forMessageId;
+              const devId = payload.deviceId;
+              const pin = payload.outputPin || payload.pin || payload.command;
+              const isFailed =
+                data.event === 'command:failed' ||
+                payload.status === 'failed' ||
+                payload.status === 'rejected' ||
+                payload.status === 'timeout';
+              const newStatus: 'applied' | 'failed' = isFailed ? 'failed' : 'applied';
+
+              setPendingCommands((prev: Record<string, PendingCommandInfo>) => {
+                let changed = false;
+                const updated: Record<string, PendingCommandInfo> = { ...prev };
+                for (const [key, item] of Object.entries(prev) as [string, PendingCommandInfo][]) {
+                  if (
+                    (cmdId && item.commandId === cmdId) ||
+                    (devId && item.deviceId === devId && (!pin || item.outputPin === pin || item.command === pin))
+                  ) {
+                    changed = true;
+                    updated[key] = {
+                      ...item,
+                      status: newStatus,
+                      error: isFailed ? (payload.error || 'Komut cihaz tarafından reddedildi') : undefined,
+                    };
+                    setTimeout(() => {
+                      setPendingCommands((p) => {
+                        const copy = { ...p };
+                        delete copy[key];
+                        return copy;
+                      });
+                    }, 3000);
+                  }
+                }
+                return changed ? updated : prev;
+              });
             }
 
             // Dispatch to any dynamically subscribed event listeners
@@ -809,18 +919,12 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         ws.onclose = () => {
           if (isCleanedUp) return;
-          isConnectedRef.current = false;
-          setIsConnected(false);
-          setConnectionStatus('reconnecting');
-          clearInterval(pingTimer);
-          clearInterval(watchdogTimer);
-          clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connect, 2500);
+          scheduleReconnect();
         };
 
         ws.onerror = () => {
           if (isCleanedUp) return;
-          setConnectionStatus('reconnecting');
+          scheduleReconnect();
         };
       } catch (err) {
         console.error('[WebSocket] Connection initialization error:', err);
@@ -885,7 +989,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       .then((res) => safeJson<DashboardLayout | null>(res, null))
       .then((data: DashboardLayout | null) => {
         if (data && Array.isArray(data.widgets) && data.widgets.length > 0) {
-          setWidgets(data.widgets);
+          const validated = validateAndSanitizeWidgets(data.widgets);
+          setWidgets(validated);
           if (data.title) setDashboardTitle(data.title);
         }
       })
@@ -914,7 +1019,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const saveWidgets = useCallback(async (newWidgets: WidgetConfig[], title?: string) => {
-    setWidgets(newWidgets);
+    const validated = validateAndSanitizeWidgets(newWidgets);
+    setWidgets(validated);
     if (title) setDashboardTitle(title);
 
     const targetUserId =
@@ -930,7 +1036,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: targetUserId,
-          widgets: newWidgets,
+          widgets: validated,
           title: newTitle,
         }),
       });
@@ -1166,6 +1272,47 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const sendControlCommand = useCallback(
     async (deviceId: string, command: string, value?: any, outputPin?: string, unit?: string) => {
+      const trackingKey = `${deviceId}_${outputPin || command}`;
+      const timestamp = Date.now();
+
+      // Optimistic pending registration
+      setPendingCommands((prev) => ({
+        ...prev,
+        [trackingKey]: {
+          deviceId,
+          command,
+          value,
+          outputPin,
+          status: 'pending',
+          timestamp,
+        },
+      }));
+
+      // 6-second timeout watchdog
+      setTimeout(() => {
+        setPendingCommands((prev) => {
+          const item = prev[trackingKey];
+          if (item && item.timestamp === timestamp && item.status === 'pending') {
+            const timedOut = {
+              ...item,
+              status: 'timeout' as const,
+              error: 'Cihaz yanıt vermedi (Zaman aşımı - 6s)',
+            };
+            setTimeout(() => {
+              setPendingCommands((p) => {
+                const copy = { ...p };
+                if (copy[trackingKey]?.timestamp === timestamp) {
+                  delete copy[trackingKey];
+                }
+                return copy;
+              });
+            }, 3000);
+            return { ...prev, [trackingKey]: timedOut };
+          }
+          return prev;
+        });
+      }, 6000);
+
       try {
         const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/control`, {
           method: 'POST',
@@ -1174,11 +1321,51 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
 
         if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Sinyal gönderilemedi');
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error || 'Sinyal gönderilemedi';
+          setPendingCommands((prev) => ({
+            ...prev,
+            [trackingKey]: {
+              deviceId,
+              command,
+              value,
+              outputPin,
+              status: 'failed',
+              timestamp,
+              error: errMsg,
+            },
+          }));
+          setTimeout(() => {
+            setPendingCommands((p) => {
+              const copy = { ...p };
+              if (copy[trackingKey]?.timestamp === timestamp) {
+                delete copy[trackingKey];
+              }
+              return copy;
+            });
+          }, 3000);
+          throw new Error(errMsg);
         }
 
         const data = await res.json();
+        const cmdId = data.command?.id || data.id;
+
+        // Update tracking with backend commandId
+        setPendingCommands((prev) => {
+          const current = prev[trackingKey];
+          if (current && current.timestamp === timestamp) {
+            return {
+              ...prev,
+              [trackingKey]: {
+                ...current,
+                commandId: cmdId,
+                status: data.command?.status === 'executed' ? 'applied' : current.status,
+              },
+            };
+          }
+          return prev;
+        });
+
         return data;
       } catch (e: any) {
         console.error('sendControlCommand error:', e);
@@ -1190,6 +1377,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const reconnectWebSocket = useCallback(() => {
     setConnectionStatus('reconnecting');
+    setReconnectAttempt(0);
+    setReconnectCountdown(0);
     if (socketRef.current) {
       try {
         socketRef.current.close();
@@ -1208,6 +1397,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     () => ({
       isConnected,
       connectionStatus,
+      reconnectAttempt,
+      reconnectCountdown,
       reconnectWebSocket,
       wsLatency,
       devices,
@@ -1242,11 +1433,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,
+      pendingCommands,
+      getPendingCommand,
       subscribeWsEvent,
     }),
     [
       isConnected,
       connectionStatus,
+      reconnectAttempt,
+      reconnectCountdown,
       reconnectWebSocket,
       wsLatency,
       devices,
@@ -1281,6 +1476,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,
+      pendingCommands,
+      getPendingCommand,
       subscribeWsEvent,
     ]
   );

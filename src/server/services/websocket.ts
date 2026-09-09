@@ -568,7 +568,7 @@ export function initWebSocketServer(server: http.Server) {
       const urlObj = new URL(request.url || '', `http://${request.headers.host || '127.0.0.1'}`);
       const pathname = urlObj.pathname;
 
-      if (pathname === '/ws' || pathname === '/ws/' || pathname.startsWith('/ws')) {
+      if (pathname === '/ws' || pathname.startsWith('/ws') || pathname === '/api/ws' || pathname.startsWith('/api/ws')) {
         let connectionToken: string | null = null;
 
         // 1. Extract Token

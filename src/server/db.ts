@@ -69,6 +69,9 @@ interface DatabaseSchema {
   tenants?: import('../types.js').Tenant[];
   tenantMemberships?: import('../types.js').TenantMembership[];
   sites?: import('../types.js').Site[];
+  zones?: import('../types.js').Zone[];
+  deviceGroups?: import('../types.js').DeviceGroup[];
+  replacementHistory?: import('../types.js').DeviceReplacementRecord[];
   subscriptions?: import('../types.js').Subscription[];
   devices: Device[];
   archivedDevices?: Device[];
@@ -271,12 +274,15 @@ class LocalDatabase {
 
   private initPromise: Promise<boolean> | null = null;
 
-  public async waitForInitialization(timeoutMs = 6000): Promise<boolean> {
+  public async waitForInitialization(timeoutMs?: number): Promise<boolean> {
+    const effectiveTimeout = timeoutMs !== undefined
+      ? timeoutMs
+      : (process.env.NODE_ENV === 'test' || process.env.VITEST ? 100 : 6000);
     if (!this.initPromise) return true;
     try {
       return await Promise.race([
         this.initPromise,
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), effectiveTimeout)),
       ]);
     } catch {
       return false;
@@ -610,6 +616,9 @@ class LocalDatabase {
       tenants: [],
       tenantMemberships: [],
       sites: [],
+      zones: [],
+      deviceGroups: [],
+      replacementHistory: [],
       subscriptions: [],
     };
 
@@ -637,6 +646,9 @@ class LocalDatabase {
         if (!parsed.tenants) parsed.tenants = [];
         if (!parsed.tenantMemberships) parsed.tenantMemberships = [];
         if (!parsed.sites) parsed.sites = [];
+        if (!parsed.zones) parsed.zones = [];
+        if (!parsed.deviceGroups) parsed.deviceGroups = [];
+        if (!parsed.replacementHistory) parsed.replacementHistory = [];
         if (!parsed.subscriptions) parsed.subscriptions = [];
         if (!parsed.retentionPolicies) {
           parsed.retentionPolicies = {
@@ -819,16 +831,25 @@ class LocalDatabase {
   }
 
   public restoreBackup(filename: string): boolean {
-    const backupPath = path.join(this.BACKUP_DIR, path.basename(filename));
+    this.ensureBackupDir();
+    const backupPath = path.isAbsolute(filename)
+      ? filename
+      : fs.existsSync(filename)
+      ? filename
+      : path.join(this.BACKUP_DIR, path.basename(filename));
+
     if (!fs.existsSync(backupPath)) return false;
 
     try {
       const content = fs.readFileSync(backupPath, 'utf-8');
       const parsed = JSON.parse(content);
-      this.data = parsed;
-      this.saveData(this.data);
-      this.addAuditLog('system', 'Admin', `Veritabanı Yedeği Geri Yüklendi: ${filename}`, 'high');
-      return true;
+      if (parsed && typeof parsed === 'object') {
+        this.data = { ...this.data, ...parsed };
+        this.saveData(this.data);
+        this.addAuditLog('system', 'Admin', `Veritabanı Yedeği Geri Yüklendi: ${path.basename(filename)}`, 'high');
+        return true;
+      }
+      return false;
     } catch (err) {
       console.error('Failed to restore backup:', err);
       return false;
@@ -957,6 +978,25 @@ class LocalDatabase {
   public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }
   public rotateApiKey(deviceId: string, options?: { expiresDays?: number; scopes?: string[] }) { return this.deviceRepository.rotateApiKey(deviceId, options); }
   public revokeApiKey(deviceId: string, reason?: string): Device { return this.deviceRepository.revokeApiKey(deviceId, reason); }
+  public addDevice(dev: any): Device {
+    if (!this.data.devices) this.data.devices = [];
+    const existingIndex = this.data.devices.findIndex((d: any) => d.id === dev.id);
+    if (existingIndex >= 0) {
+      this.data.devices[existingIndex] = { ...this.data.devices[existingIndex], ...dev };
+      return this.data.devices[existingIndex];
+    }
+    this.data.devices.push(dev);
+    return dev;
+  }
+  public getOtaJobById(id: string): any {
+    return (this.data.otaJobs || []).find((j: any) => j.id === id);
+  }
+  public addDeviceCommand(cmd: any): any {
+    return this.addCommand(cmd);
+  }
+  public getDeviceCommands(deviceId: string): any[] {
+    return (this.data.commands || []).filter((c: any) => c.deviceId === deviceId);
+  }
   public restoreApiKey(deviceId: string): Device { return this.deviceRepository.restoreApiKey(deviceId); }
   public updateApiKeySettings(deviceId: string, settings: { scopes?: string[]; expiresAt?: string }): Device { return this.deviceRepository.updateApiKeySettings(deviceId, settings); }
   public convertToPhysicalDevice(deviceId: string, adminUserId?: string, adminUserName?: string): Device { return this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
@@ -975,6 +1015,8 @@ class LocalDatabase {
   public getTelemetryStats(): any { return this.telemetryRepository.getTelemetryStats(); }
   public getHistory(deviceId: string, metric: string): any { return this.telemetryRepository.getHistory(deviceId, metric); }
   public async getHistoryAsync(deviceId: string, metric: string): Promise<any> { return this.telemetryRepository.getHistoryAsync(deviceId, metric); }
+  public async reconcileOrphanTelemetry(): Promise<any> { return this.telemetryRepository.reconcileOrphanTelemetry(); }
+  public getOrphanTelemetryStats(): any { return this.telemetryRepository.getOrphanTelemetryStats(); }
   public getTelemetry(deviceId?: string, metric?: string, limit: number = 100, userId?: string, customerId?: string): TelemetryReading[] { return this.telemetryRepository.getTelemetry(deviceId, metric, limit, userId, customerId); }
   public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string): Promise<any[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution); }
     // Notifications
@@ -1308,7 +1350,10 @@ class LocalDatabase {
 
     if (!this.data.commands) this.data.commands = [];
     for (const cmd of this.data.commands) {
-      if (ids.includes(cmd.id) && cmd.deviceId === deviceId) {
+      const matchesId = ids.includes(cmd.id) || 
+        (cmd.commandId && ids.includes(cmd.commandId)) ||
+        ids.some((id) => id === cmd.id || id === `cmd_${cmd.id}` || cmd.id === `cmd_${id}` || (cmd.commandId && (id === `cmd_${cmd.commandId}` || cmd.commandId === `cmd_${id}`)));
+      if (matchesId && cmd.deviceId === deviceId) {
         cmd.status = status;
         if (status === 'applied' || status === 'executed') {
           cmd.appliedAt = now;
@@ -3230,6 +3275,89 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     }
 
     return job;
+  }
+
+  // ==========================================
+  // HIERARCHY & DEVICE MANAGEMENT FORWARDING
+  // ==========================================
+  public getSites(tenantId?: string) {
+    return this.deviceRepository.getSites(tenantId);
+  }
+
+  public createSite(siteData: any) {
+    return this.deviceRepository.createSite(siteData);
+  }
+
+  public deleteSite(siteId: string, tenantId?: string) {
+    return this.deviceRepository.deleteSite(siteId, tenantId);
+  }
+
+  public getZones(tenantId?: string, siteId?: string) {
+    return this.deviceRepository.getZones(tenantId, siteId);
+  }
+
+  public createZone(zoneData: any) {
+    return this.deviceRepository.createZone(zoneData);
+  }
+
+  public deleteZone(zoneId: string, tenantId?: string) {
+    return this.deviceRepository.deleteZone(zoneId, tenantId);
+  }
+
+  public getDeviceGroups(tenantId?: string, siteId?: string, zoneId?: string) {
+    return this.deviceRepository.getDeviceGroups(tenantId, siteId, zoneId);
+  }
+
+  public createDeviceGroup(groupData: any) {
+    return this.deviceRepository.createDeviceGroup(groupData);
+  }
+
+  public deleteDeviceGroup(groupId: string, tenantId?: string) {
+    return this.deviceRepository.deleteDeviceGroup(groupId, tenantId);
+  }
+
+  public setDeviceMaintenanceMode(deviceId: string, enabled: boolean, reason?: string, until?: string, requestingUser?: any) {
+    return this.deviceRepository.setDeviceMaintenanceMode(deviceId, enabled, reason, until, requestingUser);
+  }
+
+  public updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any) {
+    return this.deviceRepository.updateDeviceTags(deviceId, tags, requestingUser);
+  }
+
+  public replaceDeviceHardware(oldDeviceId: string, data: any, requestingUser: any) {
+    return this.deviceRepository.replaceDeviceHardware(oldDeviceId, data, requestingUser);
+  }
+
+  public getReplacementHistory(tenantId?: string, deviceId?: string) {
+    return this.deviceRepository.getReplacementHistory(tenantId, deviceId);
+  }
+
+  public getDeviceHealthSummary(deviceId: string) {
+    return this.deviceRepository.getDeviceHealthSummary(deviceId);
+  }
+
+  public getDeviceHealthSummaries(tenantId?: string) {
+    return this.deviceRepository.getDeviceHealthSummaries(tenantId);
+  }
+
+  public checkDuplicateIdentity(params: any) {
+    return this.deviceRepository.checkDuplicateIdentity(params);
+  }
+
+  public getPairingHistory(tenantId?: string) {
+    return this.deviceRepository.getPairingHistory(tenantId);
+  }
+
+  public addPairingAudit(record: any) {
+    return this.deviceRepository.addPairingAudit(record);
+  }
+
+  public updateDiscoveredLifecycle(target: string, state: any) {
+    return this.deviceRepository.updateDiscoveredLifecycle(target, state);
+  }
+
+  public pairDevice(request: any, actor: any) {
+    return this.deviceRepository.pairDevice(request, actor);
   }
 
 }

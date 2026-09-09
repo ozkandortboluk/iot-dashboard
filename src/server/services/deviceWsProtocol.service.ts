@@ -405,12 +405,14 @@ export class DeviceWsProtocolService {
     messageId: string,
     data: DeviceAckData
   ): Promise<boolean> {
-    if (!data || !data.forMessageId) {
-      console.warn(`[DeviceWsProtocol] ACK mesajı forMessageId içermiyor (${device.id})`);
+    const targetMessageId = data?.forMessageId || (data as any)?.commandId;
+    if (!data || !targetMessageId) {
+      console.warn(`[DeviceWsProtocol] ACK mesajı forMessageId veya commandId içermiyor (${device.id})`);
       return false;
     }
 
-    const { forMessageId, status, error, result } = data;
+    const { status, error, result } = data;
+    const forMessageId = targetMessageId;
 
     // Verify actual physical execution status
     let cleanStatus: 'executed' | 'failed' | 'acknowledged' = 'acknowledged';
@@ -427,17 +429,18 @@ export class DeviceWsProtocolService {
       cleanStatus = 'acknowledged';
     }
 
-    // Extract actual command ID if formatted as "cmd_<id>"
+    // Extract candidate command IDs (both raw forMessageId, stripped cmd_ prefix, and data.commandId)
     const actualCommandId = forMessageId.startsWith('cmd_')
       ? forMessageId.substring(4)
       : forMessageId;
+    const commandCandidates = Array.from(new Set([forMessageId, actualCommandId, (data as any)?.commandId].filter(Boolean))) as string[];
 
     const resPayload = result !== undefined ? result : (error ? { error } : undefined);
 
     // Update command in DB and notify UI
     const updatedCount = await commandService.handleCommandAck(
       device.id,
-      actualCommandId,
+      commandCandidates,
       cleanStatus,
       resPayload
     );
@@ -863,7 +866,8 @@ export class DeviceWsProtocolService {
         );
         return null;
       }
-      return ws.device;
+      ws.device = targetDevice;
+      return targetDevice;
     }
 
     // If socket was authenticated with a web user (e.g. testing / simulation)
