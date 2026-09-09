@@ -280,7 +280,8 @@ export class TelemetryRepository {
         if (!fs.existsSync(walDir)) {
           fs.mkdirSync(walDir, { recursive: true });
         }
-        fs.appendFileSync(this.simulationQueueFilePath, JSON.stringify(packet) + '\n', 'utf8');
+        fs.promises.appendFile(this.simulationQueueFilePath, JSON.stringify(packet) + '\n', 'utf8')
+          .catch(err => console.warn(`[Simulation Queue Append Error Async]: ${err?.message || err}`));
         console.warn(`[Simulation WAL] Simülasyon paketi izole test WAL sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
       } catch (err: any) {
         console.warn(`[Simulation Queue Append Error]: ${err?.message || err}`);
@@ -322,7 +323,8 @@ export class TelemetryRepository {
         if (!fs.existsSync(walDir)) {
           fs.mkdirSync(walDir, { recursive: true });
         }
-        fs.appendFileSync(this.physicalQueueFilePath, JSON.stringify(packet) + '\n', 'utf8');
+        fs.promises.appendFile(this.physicalQueueFilePath, JSON.stringify(packet) + '\n', 'utf8')
+          .catch(err => console.warn(`[Physical Queue Append Error Async]: ${err?.message || err}`));
         console.warn(`[Persistent Physical WAL] Fiziksel üretim paketi WAL sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
       } catch (err: any) {
         console.warn(`[Physical Queue Append Error]: ${err?.message || err}`);
@@ -379,11 +381,11 @@ public async flushPhysicalRetryQueue(): Promise<{
       
       // Move current WAL to processing
       if (!fs.existsSync(processingFile) && fs.existsSync(this.physicalQueueFilePath)) {
-         fs.renameSync(this.physicalQueueFilePath, processingFile);
+         await fs.promises.rename(this.physicalQueueFilePath, processingFile);
       }
 
       if (fs.existsSync(processingFile)) {
-        const content = fs.readFileSync(processingFile, 'utf8');
+        const content = await fs.promises.readFile(processingFile, 'utf8');
         const lines = content.split('\n').filter(l => l.trim().length > 0);
         const failedLines: string[] = [];
         
@@ -408,9 +410,9 @@ public async flushPhysicalRetryQueue(): Promise<{
         
         if (failedLines.length > 0) {
            // Put failed lines back to active WAL
-           fs.appendFileSync(this.physicalQueueFilePath, failedLines.join('\n') + '\n', 'utf8');
+           await fs.promises.appendFile(this.physicalQueueFilePath, failedLines.join('\n') + '\n', 'utf8');
         }
-        fs.unlinkSync(processingFile);
+        await fs.promises.unlink(processingFile);
         
         // Update RAM buffer
         this.physicalRetryQueue = failedLines.map(l => {
@@ -846,7 +848,7 @@ public async flushPhysicalRetryQueue(): Promise<{
     if (!this.db.data.telemetry) this.db.data.telemetry = [];
     this.db.data.telemetry.push(fullReading);
     if (this.db.data.telemetry.length > 5000) {
-      this.db.data.telemetry = this.db.data.telemetry.slice(-5000);
+      this.db.data.telemetry.shift();
     }
 
     // Persist to PostgreSQL / TimescaleDB hypertable with safety net

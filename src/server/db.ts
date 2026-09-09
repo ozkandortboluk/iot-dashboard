@@ -764,11 +764,13 @@ class LocalDatabase {
       }
 
       try {
-        const { execSync } = await import('node:child_process');
-        execSync(`pg_dump "${dbUrl}" > "${backupPath}"`);
+        const { exec } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execAsync = promisify(exec);
+        await execAsync(`pg_dump "${dbUrl}" > "${backupPath}"`);
         
         this.pruneBackups();
-        const stats = fs.statSync(backupPath);
+        const stats = await fs.promises.stat(backupPath);
         return { success: true, filename, size: stats.size };
       } catch (err) {
         console.error('[BACKUP] pg_dump failed:', err);
@@ -782,7 +784,7 @@ class LocalDatabase {
 
     try {
       const serialized = JSON.stringify(this.data, null, 2);
-      fs.writeFileSync(backupPath, serialized, 'utf-8');
+      await fs.promises.writeFile(backupPath, serialized, 'utf-8');
       
       // Keep only last 10 backups
       this.pruneBackups();
@@ -919,7 +921,7 @@ class LocalDatabase {
     this.processWriteQueue();
   }
 
-  private processWriteQueue() {
+  private async processWriteQueue() {
     if (this.isSaving || this.writeQueue.length === 0) return;
     this.isSaving = true;
 
@@ -931,8 +933,8 @@ class LocalDatabase {
       const tmpFile = `${DB_FILE}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 7)}`;
       const serialized = JSON.stringify(latestData, null, 2);
 
-      fs.writeFileSync(tmpFile, serialized, 'utf-8');
-      fs.renameSync(tmpFile, DB_FILE);
+      await fs.promises.writeFile(tmpFile, serialized, 'utf-8');
+      await fs.promises.rename(tmpFile, DB_FILE);
 
       // Periodic backup moved to setInterval in constructor
 
