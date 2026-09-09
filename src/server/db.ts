@@ -1257,7 +1257,7 @@ class LocalDatabase {
       if (!this.data.commands) this.data.commands = [];
       const matching = this.data.commands.filter((c) => {
         if (c.deviceId !== deviceId) return false;
-        if (c.status === 'pending') return true;
+        if (c.status === 'pending' || c.status === 'queued') return true;
         if (c.status === 'claimed' && c.claimed_at) {
           const claimedTime = new Date(c.claimed_at).getTime();
           return nowMs - claimedTime > leaseMs;
@@ -1422,7 +1422,7 @@ class LocalDatabase {
 
     if (!this.data.commands) this.data.commands = [];
     const cmd = this.data.commands.find((c) => c.id === commandId || c.commandId === commandId);
-    if (cmd && (cmd.status === 'pending' || cmd.status === 'sent' || cmd.status === 'claimed')) {
+    if (cmd && (cmd.status === 'queued' || cmd.status === 'pending' || cmd.status === 'sent' || cmd.status === 'claimed')) {
       if (!tenantId || tenantId === 'all' || cmd.tenantId === tenantId || cmd.customerId === tenantId) {
         cmd.status = 'cancelled';
         cmd.error_message = 'Kullanıcı tarafından iptal edildi';

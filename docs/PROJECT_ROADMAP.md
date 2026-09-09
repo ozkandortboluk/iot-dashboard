@@ -116,13 +116,13 @@ Standart lifecycle:
 
 ## 3.1 CI/CD
 
-- [ ] Node 18 matrix kaldırılmalı veya resmi destek politikası açıkça belirlenmeli; `package.json` şu anda Node `>=20` diyor.
-- [ ] CI'ya `test:smoke` eklenmeli.
-- [ ] CI'ya kontrollü `test:e2e` eklenmeli.
-- [ ] E2E için izole PostgreSQL/TimescaleDB test servisi sağlanmalı.
-- [ ] Migration/schema hazırlığı CI'da otomatik yapılmalı.
-- [ ] Başarısız testlerde server logları artifact olarak saklanmalı.
-- [ ] Build sonrası gerçek production bundle test edilmeli.
+- [x] Node 18 matrix kaldırıldı; resmi Node.js LTS (20 ve 22) matrix politikası `.github/workflows/ci.yml` içinde uygulandı.
+- [x] CI'ya `test:smoke` eklendi (`npm run test:smoke`).
+- [x] CI'ya kontrollü `test:e2e` eklendi (`npm run test:e2e`).
+- [x] E2E için izole PostgreSQL/TimescaleDB test servisi sağlandı (`timescale/timescaledb:latest-pg15`).
+- [x] Migration/schema hazırlığı CI'da otomatik yapıldı (`pg_isready` ve migrate kontrolü).
+- [x] Başarısız testlerde server logları artifact olarak saklandı (`actions/upload-artifact@v4`).
+- [x] Build sonrası gerçek production bundle test edildi (`dist/server.cjs` smoke runner).
 
 ## 3.2 Startup/readiness
 
@@ -133,18 +133,18 @@ Standart lifecycle:
 
 ## 3.3 Test kapsamı
 
-- [ ] Auth/session/logout.
-- [ ] CSRF/CORS.
-- [ ] Multi-tenant isolation.
-- [ ] WebSocket auth/protocol.
-- [ ] Command lifecycle.
-- [ ] Telemetry ingestion.
-- [ ] Alarm engine.
-- [ ] Automation engine.
-- [ ] OTA lifecycle.
-- [ ] Device replacement.
-- [ ] Discovery/pairing.
-- [ ] Mobile critical flows.
+- [x] Auth/session/logout (`src/tests/auth.test.ts`, `src/server/auth.test.ts`).
+- [x] CSRF/CORS (`src/tests/integration/nexus_integration.test.ts`, `src/tests/api.test.ts`).
+- [x] Multi-tenant isolation (`src/tests/integration/nexus_integration.test.ts`, `src/tests/command_lifecycle.test.ts`).
+- [x] WebSocket auth/protocol (`src/tests/integration/nexus_integration.test.ts`, `src/tests/simulator.test.ts`).
+- [x] Command lifecycle (`src/tests/command_lifecycle.test.ts`).
+- [x] Telemetry ingestion (`src/tests/automation_and_field_ops.test.ts`, `src/tests/api.test.ts`).
+- [x] Alarm engine (`src/tests/alarm-engine.test.ts`).
+- [x] Automation engine (`src/tests/automation_and_field_ops.test.ts`).
+- [x] OTA lifecycle (`src/server/ota.test.ts`).
+- [x] Device replacement (`src/tests/automation_and_field_ops.test.ts`).
+- [x] Discovery/pairing (`src/tests/automation_and_field_ops.test.ts`).
+- [x] Mobile critical flows (`src/tests/automation_and_field_ops.test.ts`).
 
 ---
 

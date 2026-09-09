@@ -425,6 +425,11 @@ export class PostgresRepository {
         `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);`,
         `CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);`,
 
+        // Ensure no legacy/blocking foreign keys exist on hypertable telemetry tables or packet dedup tables
+        `ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_device_id_fkey CASCADE;`,
+        `ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_device_id_fkey CASCADE;`,
+        `ALTER TABLE telemetry_packets DROP CONSTRAINT IF EXISTS telemetry_packets_device_id_fkey CASCADE;`,
+
         // 4. Threshold Rules
         `CREATE TABLE IF NOT EXISTS threshold_rules (
           id VARCHAR(64) PRIMARY KEY,
@@ -1268,115 +1273,150 @@ export class PostgresRepository {
     }
     if (!readings || readings.length === 0) return { success: true, rowCount: 0 };
 
-    const first = readings[0];
+    // Deterministic sorting to prevent locking order discrepancies / deadlocks across concurrent transactions
+    const sortedReadings = [...readings].sort((a, b) => {
+      const timeA = new Date(a.timestamp || 0).getTime();
+      const timeB = new Date(b.timestamp || 0).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+      const devCompare = (a.deviceId || '').localeCompare(b.deviceId || '');
+      if (devCompare !== 0) return devCompare;
+      const metricCompare = (a.metric || '').localeCompare(b.metric || '');
+      if (metricCompare !== 0) return metricCompare;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+    const first = sortedReadings[0];
     const isSimulation = first?.source === 'simulator' || first?.environment === 'sandbox';
     const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
 
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const maxRetries = 3;
+    let attempt = 0;
 
-      const deviceId = first.deviceId;
-      const sequence = first.sequence;
-      const bootId = first.bootId || 'default';
-      const idempotencyKey = first.idempotencyKey || (
-        deviceId && sequence !== undefined && sequence !== null
-          ? `${deviceId}:${bootId}:${sequence}`
-          : null
-      );
-      let packetId: string | null = first.packetId || null;
+    while (attempt < maxRetries) {
+      attempt++;
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // Packet-Level Idempotency Deduplication for Physical Telemetry Packets (deviceId + bootId + sequence)
-      if (!isSimulation && deviceId && sequence !== undefined && sequence !== null) {
-        packetId = packetId || `pkt_${deviceId}_boot_${bootId}_seq_${sequence}`;
-        const packetSql = `
-          INSERT INTO telemetry_packets (id, device_id, boot_id, sequence, idempotency_key, metric_count, received_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-          ON CONFLICT (device_id, boot_id, sequence) DO NOTHING
-          RETURNING id;
-        `;
-        const pktRes = await client.query(packetSql, [
-          packetId,
-          deviceId,
-          bootId,
-          sequence,
-          idempotencyKey,
-          readings.length,
-          first.timestamp || new Date().toISOString(),
-        ]);
+        const deviceId = first.deviceId;
+        const sequence = first.sequence;
+        const bootId = first.bootId || 'default';
+        const idempotencyKey = first.idempotencyKey || (
+          deviceId && sequence !== undefined && sequence !== null
+            ? `${deviceId}:${bootId}:${sequence}`
+            : null
+        );
+        let packetId: string | null = first.packetId || null;
 
-        if (!pktRes.rows || pktRes.rows.length === 0) {
-          // Conflict occurred: Packet with (deviceId, bootId, sequence) was already processed!
-          await client.query('COMMIT');
-          console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, BootId=${bootId}, Sequence=${sequence} daha önce işlenmiş.`);
-          return { success: true, rowCount: 0, duplicateSkipped: true };
-        }
-      }
-
-      const chunkSize = 100;
-      let totalInserted = 0;
-
-      for (let i = 0; i < readings.length; i += chunkSize) {
-        const chunk = readings.slice(i, i + chunkSize);
-        const valueTuples: string[] = [];
-        const params: any[] = [];
-        let paramIdx = 1;
-
-        for (const r of chunk) {
-          const tenantId = r.tenantId || r.customerId || r.tenantId || 'usr_admin';
-          const customerId = r.customerId || r.tenantId || r.tenantId || 'usr_admin';
-          const userId = r.tenantId || customerId || tenantId || 'usr_admin';
-          const rBootId = r.bootId || bootId;
-          const rIdempotencyKey = r.idempotencyKey || (
-            r.deviceId && r.sequence !== undefined && r.sequence !== null
-              ? `${r.deviceId}:${rBootId}:${r.sequence}`
-              : null
-          );
-
-          valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
-          params.push(
-            r.id,
+        // Packet-Level Idempotency Deduplication for Physical Telemetry Packets (deviceId + bootId + sequence)
+        if (!isSimulation && deviceId && sequence !== undefined && sequence !== null) {
+          packetId = packetId || `pkt_${deviceId}_boot_${bootId}_seq_${sequence}`;
+          const packetSql = `
+            INSERT INTO telemetry_packets (id, device_id, boot_id, sequence, idempotency_key, metric_count, received_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (device_id, boot_id, sequence) DO NOTHING
+            RETURNING id;
+          `;
+          const pktRes = await client.query(packetSql, [
             packetId,
-            tenantId,
-            customerId,
-            userId,
-            r.deviceId,
-            r.deviceName || r.deviceId,
-            r.metric,
-            Number(r.value),
-            r.unit || '',
-            r.status || 'normal',
-            r.sequence ?? null,
-            rBootId,
-            rIdempotencyKey,
-            r.source || (isSimulation ? 'simulator' : 'physical'),
-            r.environment || (isSimulation ? 'sandbox' : 'production'),
-            r.simulationRunId || null,
-            r.timestamp || new Date().toISOString()
-          );
-          paramIdx += 18;
+            deviceId,
+            bootId,
+            sequence,
+            idempotencyKey,
+            sortedReadings.length,
+            first.timestamp || new Date().toISOString(),
+          ]);
+
+          if (!pktRes.rows || pktRes.rows.length === 0) {
+            // Conflict occurred: Packet with (deviceId, bootId, sequence) was already processed!
+            await client.query('COMMIT');
+            console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, BootId=${bootId}, Sequence=${sequence} daha önce işlenmiş.`);
+            return { success: true, rowCount: 0, duplicateSkipped: true };
+          }
         }
 
-        const sql = `
-          INSERT INTO ${targetTable} (
-            id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
-          ) VALUES ${valueTuples.join(', ')}
-          ON CONFLICT DO NOTHING;
-        `;
+        const chunkSize = 100;
+        let totalInserted = 0;
 
-        const res = await client.query(sql, params);
-        totalInserted += res?.rowCount ?? chunk.length;
+        for (let i = 0; i < sortedReadings.length; i += chunkSize) {
+          const chunk = sortedReadings.slice(i, i + chunkSize);
+          const valueTuples: string[] = [];
+          const params: any[] = [];
+          let paramIdx = 1;
+
+          for (const r of chunk) {
+            const tenantId = r.tenantId || r.customerId || 'usr_admin';
+            const customerId = r.customerId || r.tenantId || 'usr_admin';
+            const userId = r.userId || customerId || tenantId || 'usr_admin';
+            const rBootId = r.bootId || bootId;
+            const rIdempotencyKey = r.idempotencyKey || (
+              r.deviceId && r.sequence !== undefined && r.sequence !== null
+                ? `${r.deviceId}:${rBootId}:${r.sequence}`
+                : null
+            );
+
+            valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
+            params.push(
+              r.id,
+              packetId,
+              tenantId,
+              customerId,
+              userId,
+              r.deviceId,
+              r.deviceName || r.deviceId,
+              r.metric,
+              Number(r.value),
+              r.unit || '',
+              r.status || 'normal',
+              r.sequence ?? null,
+              rBootId,
+              rIdempotencyKey,
+              r.source || (isSimulation ? 'simulator' : 'physical'),
+              r.environment || (isSimulation ? 'sandbox' : 'production'),
+              r.simulationRunId || null,
+              r.timestamp || new Date().toISOString()
+            );
+            paramIdx += 18;
+          }
+
+          const sql = `
+            INSERT INTO ${targetTable} (
+              id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+            ) VALUES ${valueTuples.join(', ')}
+            ON CONFLICT DO NOTHING;
+          `;
+
+          const res = await client.query(sql, params);
+          totalInserted += res?.rowCount ?? chunk.length;
+        }
+
+        await client.query('COMMIT');
+        return { success: true, rowCount: totalInserted };
+      } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        const isDeadlockOrSerialization =
+          err?.code === '40P01' || // deadlock_detected
+          err?.code === '40001' || // serialization_failure
+          (typeof err?.message === 'string' && (
+            err.message.includes('deadlock detected') ||
+            err.message.includes('could not serialize access')
+          ));
+
+        if (isDeadlockOrSerialization && attempt < maxRetries) {
+          const backoffMs = Math.floor(25 * Math.pow(2, attempt) + Math.random() * 50);
+          console.warn(`[PostgreSQL Concurrency Retrying] Transient deadlock/serialization on ${targetTable} (attempt ${attempt}/${maxRetries}), retrying in ${backoffMs}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          continue;
+        }
+
+        console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed (${targetTable}): ${err?.message || err}`);
+        throw err;
+      } finally {
+        client.release();
       }
-
-      await client.query('COMMIT');
-      return { success: true, rowCount: totalInserted };
-    } catch (err: any) {
-      await client.query('ROLLBACK').catch(() => {});
-      console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed (${targetTable}): ${err?.message || err}`);
-      throw err;
-    } finally {
-      client.release();
     }
+
+    throw new Error(`[PostgreSQL Transaction Failed] Batch telemetry insertion exceeded ${maxRetries} retry attempts`);
   }
 
   // ==========================================
@@ -1961,7 +2001,7 @@ export class PostgresRepository {
       SET status = 'cancelled', 
           executed_at = CURRENT_TIMESTAMP, 
           error_message = 'Kullanıcı tarafından iptal edildi'
-      WHERE (id = $1 OR command_id = $1) AND status IN ('pending', 'sent', 'claimed')
+      WHERE (id = $1 OR command_id = $1) AND status IN ('queued', 'pending', 'sent', 'claimed')
     `;
     const params: any[] = [commandId];
 

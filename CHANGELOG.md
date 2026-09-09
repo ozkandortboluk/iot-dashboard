@@ -4,6 +4,38 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.3.2] - 2026-09-09
+### 🛠️ PostgreSQL & TimescaleDB Telemetri Dayanıklılığı & Deadlock Çözüm Paketi
+- **Telemetri Hypertable Yabancı Anahtar (Foreign Key) İzolasyonu:**
+  - `telemetry_readings`, `simulation_telemetry_readings` ve `telemetry_packets` tablolarındaki `telemetry_readings_device_id_fkey` kısıtlaması kalıcı olarak kaldırıldı.
+  - TimescaleDB hypertable chunk'larında (`_hyper_*_chunk`) yüksek telemetri akışında oluşan `violates foreign key constraint "telemetry_readings_device_id_fkey"` hatası ve cihaz satır kilitlemelerinden kaynaklanan kilitlenmeler (`deadlock detected`) çözüldü.
+  - Henüz veritabanında kaydı oluşturulmamış veya otomatik keşif / test modundaki cihazlardan gelen telemetri paketlerinin güvenle kabul edilmesi sağlandı.
+- **Toplu Telemetri İnsert Deterministik Sıralama & Deadlock Yeniden Deneme (Retry Loop):**
+  - `saveTelemetryBatchInTransaction` içerisine indeks kilit sıralaması uyuşmazlıklarını önlemek için deterministik çoklu alan sıralaması (`timestamp`, `deviceId`, `metric`, `id`) entegre edildi.
+  - Olası geçici eşzamanlılık çakışmaları ve PostgreSQL kilitlenmeleri (`40P01` deadlock_detected ve `40001` serialization_failure) için üstel geri çekilme (exponential backoff) ve rastgele gecikmeli (jitter) otomatik 3 kademeli yeniden deneme motoru eklendi.
+- **Şema & Otomatik Temizleme Senkronizasyonu:**
+  - `src/server/database/schema.ts` ve `src/server/database/postgres.ts` (`ensureTelemetrySchema`) dosyalarına otomatik yabancı anahtar temizleme DDL blokları eklendi.
+
+---
+
+## 🚀 [v1.3.1] - 2026-09-09
+### 🧪 Production Roadmap P2 CI/CD, Test Kapsamı & Saha Operasyonları Paketi
+- **P2.3.1 CI/CD Pipeline & Otomasyon Standartları:**
+  - `.github/workflows/ci.yml` iş akışı Node.js LTS (20 ve 22) matrisine bağlandı; Node 18 desteği resmi olarak sonlandırıldı.
+  - `test:smoke` (liveness/readiness, graceful shutdown, WS handshake) ve `test:e2e` adımları CI zincirine eklendi.
+  - CI ortamında TimescaleDB/PostgreSQL servisi izole edildi, otomatik schema/migration hazırlığı sağlandı.
+  - Başarısız test durumlarında `server.log` dosyasının GitHub Actions artifact olarak kaydedilmesi sağlandı.
+- **P2.3.2 Startup, Health & Graceful Shutdown Testleri:**
+  - `scripts/smoke-test.mjs` içerisinde HTTP health polling (`/api/health/live`, `/api/health/ready`) ile hazır oluş doğrulandı.
+  - SIGTERM/SIGINT sonrası graceful shutdown ve port salınımı test edildi.
+- **P2.3.3 Kapsamlı Test Paketleri (126/126 Test Geçişi):**
+  - **Komut Yaşam Döngüsü & İdempotency (`src/tests/command_lifecycle.test.ts`):** Komut oluşturma (`queued`), teslim alma (`claimed/delivered`), donanım onayı (`acknowledged/applied`), mükerrer idempotency engelleme, zaman aşımı ve iptal (`cancelled`) senaryoları tam olarak test edildi.
+  - **Otomasyon Motoru, Telemetri Ayrıştırma & Saha Operasyonları (`src/tests/automation_and_field_ops.test.ts`):** Koşul tetikleme (`GREATER_THAN`, `LESS_THAN`), 60 saniyelik debounce/cooldown koruması, virgülle ayrılmış kompakt (`/api/v1/telemetry`) ve JSON telemetri ayrıştırma, arızalı cihaz donanım değişimi (device replacement & pairing), mobil/edge ağ kopması sonrası toplu kuyruk telemetrisi test edildi.
+  - **Güvenlik, Auth & İzolasyon:** Auth/session/logout, CSRF/CORS, multi-tenant veri izolasyonu ve WebSocket auth/protocol testleri doğrulandı.
+  - **Alarm & OTA:** Alarm kural motoru (`src/tests/alarm-engine.test.ts`) ve OTA yaşam döngüsü (`src/server/ota.test.ts`) testleri doğrulandı.
+
+---
+
 ## 🚀 [v1.3.0] - 2026-09-09
 ### 🛡️ Production Roadmap P1 Güvenlik & Mimari Sağlamlık Paketi
 - **P1.2.5 Gelişmiş Komut Motoru & İdempotency (Command Engine):**
