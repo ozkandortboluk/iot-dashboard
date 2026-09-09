@@ -3,10 +3,11 @@
 > Merkezi backlog + hata düzeltme + mevcut özellik geliştirme + yeni özellik yol haritası.
 >
 > **Son inceleme:** 2026-09-09  
-> **Sürüm:** `1.4.0`
+> **Güncel uygulama sürümü:** `1.6.0`  
+> **Son HEAD:** `14b9ed30bf389896139f55e6c76b4147efaecdf1`
 
 ## Öncelik
-- 🔴 P0: production/veri/güvenlik açısından kritik
+- 🔴 P0: production/site erişilebilirliği, veri kaybı veya kritik güvenlik
 - 🟠 P1: yüksek öncelik
 - 🟡 P2: planlı geliştirme
 - 🟢 P3: teknik borç/kalite
@@ -14,258 +15,268 @@
 
 ---
 
-# 1. 🔴 P0 — Production
+# 1. 🔴 P0 — Site çökmesine neden olabilecek durumlar
 
-- [x] Gerçek ESP8266/ESP32 ile `connect → telemetry → DB → dashboard → command → ACK → UI` zinciri (`src/tests/esp_hardware_e2e.test.ts`).
-- [x] Ağ kopması, reconnect, cihaz reboot ve komut kuyruğu soak testi (`src/tests/network_reconnect_reboot_soak.test.ts`).
-- [x] Docker + PostgreSQL/TimescaleDB + reverse proxy + WebSocket gerçek production-benzeri doğrulaması (`src/tests/docker_postgres_proxy_ws.test.ts`).
-- [x] Backup/restore + migration + release upgrade birlikte doğrulanmalı (`src/tests/backup_restore_migration_upgrade.test.ts`).
+## P0.1 — Docker Compose DB healthcheck yanlış veritabanını kontrol ediyor
+**Bulgu:** `POSTGRES_DB` değişkeni özelleştirilebilirken TimescaleDB healthcheck sabit olarak `nexus_iot` veritabanını kontrol ediyor. Uygulama ise `DATABASE_URL` içinde `${POSTGRES_DB}` değerini kullanıyor. Dolayısıyla `.env` içinde `POSTGRES_DB=nexus_production` gibi farklı bir değer verilirse PostgreSQL doğru veritabanını çalıştırdığı halde healthcheck başarısız olabilir.
 
----
+**Olası zincir:**
+`DB healthcheck FAIL → app depends_on service_healthy bekler → app başlamaz → proxy app healthy bekler → site açılmaz.`
 
-# 2. 🟠 P1 — Hatalar ve güvenilirlik
+**Risk:** 🔴 **P0 / doğrudan site downtime riski.** Özellikle temiz kurulum, migration, VPS taşıma veya `.env` değişikliğinde ortaya çıkabilir. fileciteturn90file0L2-L2
 
-## 2.1 Version / lockfile
-- [x] `package.json` **1.4.0**, `src/config/version.ts` **1.4.0**, `package-lock.json` **1.4.0** tam senkronize edildi.
-- [x] CI'da package.json/package-lock version equality kontrolü (`src/tests/version_sync.test.ts`).
-- [x] README/CHANGELOG/roadmap sürüm zinciri tek release ile eşleştirildi (`v1.4.0`).
+- [ ] Healthcheck `${POSTGRES_DB}` / aynı runtime DB bilgisi ile uyumlu hale getirilmeli.
+- [ ] Farklı DB adıyla CI/production compose startup testi eklenmeli.
+- [ ] `docker compose up -d` sonrası `timescaledb → app → proxy` health zinciri release gate olmalı.
+- [ ] DB restart sonrası app/proxy recovery testi yapılmalı.
 
-## 2.2 Telemetry DB integrity
-Son sürüm yüksek ingest sırasında FK kaynaklı kilitlenmeleri azaltmak için telemetry hypertable FK'lerini kaldırıyor ve deterministic batch ordering + deadlock retry ekliyor.
-- [x] FK kaldırma kararının uygulama seviyesinde referential-integrity karşılığı belgelendi ve test edildi.
-- [x] Orphan telemetry reconciliation/monitoring (`db.reconcileOrphanTelemetry()`).
-- [x] Device delete/replacement ile historical telemetry politikası (denetim için saklanma).
-- [x] Unknown/discovered device telemetry kabul politikası (keşif havuzuna alma).
-- [x] Deadlock/serialization retry sonrası partial commit ve duplicate oluşmadığı yük testleri.
-- [x] 3 retry sonrası failure/requeue davranışı (WAL kuyruğuna kalıcı yazma).
-- [x] `deviceId + bootId + sequence` idempotency altında eşzamanlı ingest testi (`src/tests/telemetry_db_integrity.test.ts`).
-
-## 2.3 WebSocket
-Temel auth/origin/tenant E2E ve smoke doğrulamaları mevcut.
-- [x] Gerçek telemetry schema validation.
-- [x] Gerçek command → ACK → applied round-trip.
-- [x] Reconnect/backoff, duplicate event ve stale socket.
-- [x] Backpressure + max payload (512KB / 2MB limitleri & 1MB azami frame).
-- [x] Credential revoke → socket termination (`terminateDeviceSockets`).
-- [x] Origin / CORS doğrulaması (`isAllowedWsOrigin`) ve başlık tabanlı kimlik doğrulama.
-
-## 2.4 Multi-tenant
-- [x] Tenant A/B negatif test matrisi: REST, DB, WS, telemetry, history, commands, alarms, notifications, automation, dashboards, OTA, discovery ve export (`src/tests/multitenant_negative_matrix.test.ts`).
-- [x] ID enumeration/guessing ve bulk endpoint testleri.
-- [x] Admin/root istisnaları ayrı test edildi (Sanal cihaz ve simülasyon yönetimi SADECE yöneticiye aittir).
-
-## 2.5 OTA/Web Compiler
-- [x] Build sandbox ve kaynak limitleri.
-- [x] SHA-256 + Ed25519 + trusted key rotation/revocation.
-- [x] Hardware/firmware compatibility (model ve revizyon denetimi).
-- [x] Canary/staged rollout.
-- [x] Install/verify/failure state machine.
-- [x] Retry/rollback (`otaWorker` zaman aşımı kontrolü).
-- [x] Concurrent deployment protection.
-- [x] Deployment audit/report (`src/tests/ota_complete_lifecycle.test.ts`).
+## P0.2 — Gerçek production outage testi
+- [ ] DB yeniden başlatma.
+- [ ] App container restart.
+- [ ] Nginx/proxy restart.
+- [ ] Disk doluluğu.
+- [ ] DB connection exhaustion.
+- [ ] WebSocket reconnect.
+- [ ] Host reboot sonrası otomatik toparlanma.
 
 ---
 
-# 3. 🟡 P2 — CI/CD, test ve operasyon
+# 2. 🔴 P0 — Production güvenilirliği
 
-Mevcut CI Node 20/22, TimescaleDB service, smoke, E2E ve failure artifacts çalıştırıyor.
+- [ ] Gerçek ESP8266/ESP32 ile `connect → telemetry → DB → dashboard → command → ACK → UI` zinciri.
+- [ ] En az birkaç saatlik gerçek telemetry/WS soak testi.
+- [ ] Backup/restore + migration + release upgrade birlikte doğrulanmalı.
+- [ ] Reverse proxy üzerinden gerçek HTTP + WS production testi.
 
-- [ ] Lockfile mismatch CI gate.
-- [ ] Docker image build + container health + DB + WS smoke.
-- [ ] Production schema/migration ile CI test schema'sının parity kontrolü.
-- [ ] E2E flaky test detection.
+---
+
+# 3. 🟠 P1 — Güncel yüksek öncelikler
+
+## 3.1 Version / lockfile
+- `package.json`: **1.6.0**. fileciteturn73file0L2-L2
+- `src/config/version.ts`: **1.6.0**. fileciteturn74file0L2-L2
+- `package-lock.json`: **1.4.0**. fileciteturn72file0L2-L2
+- [ ] Lockfile kesin olarak 1.6.0 ile senkronlanmalı.
+- [ ] CI `npm ci` öncesinde package/lock eşitliğini zorunlu kontrol etmeli.
+
+## 3.2 Production secret/default değerleri
+Compose içinde default PostgreSQL password ve default session secret bulunuyor. fileciteturn90file0L2-L2
+- [ ] Production'da default değerlerle startup engellenmeli.
+- [ ] Secret yönetimi zorunlu hale getirilmeli.
+- [ ] Session secret rotation prosedürü eklenmeli.
+
+## 3.3 PostgreSQL erişim yüzeyi
+- Compose PostgreSQL portunu host'a publish ediyor. fileciteturn90file0L2-L2
+- [ ] Production'da DB'nin internete açık olmaması doğrulanmalı.
+- [ ] Firewall/allowlist kontrolü.
+- [ ] DB yalnızca private Docker network üzerinden erişilebilir olmalı.
+
+## 3.4 Telemetry DB integrity
+- [x] Deterministic batch ordering + deadlock/serialization retry.
+- [x] FK kaldırma ile ingest kilitlenmesi azaltıldı.
+- [ ] Orphan telemetry reconciliation'ın production davranışı doğrulanmalı.
+- [ ] Idempotency + retry yük testi.
+- [ ] Partial commit / duplicate packet regression testi.
+
+## 3.5 WebSocket
+- [x] Auth/origin/tenant temel testleri.
+- [x] Telemetry schema ve command round-trip.
+- [ ] Credential revoke sonrası tüm aktif socket'lerin kapanması.
+- [ ] Reconnect/backoff/duplicate event.
+- [ ] Backpressure ve max payload soak testi.
+- [ ] Query-string credential kullanımının tamamen kaldırılması.
+
+## 3.6 Multi-tenant
+- [x] REST/DB/WS için temel negatif izolasyon testleri.
+- [ ] Telemetry/history/command/alarm/notification/automation/dashboard/OTA/export için sürekli regression matrisi.
+
+## 3.7 OTA
+- [x] Signature/hash, compatibility, canary, rollback ve concurrent deployment korumaları.
+- [ ] Gerçek saha rollout testi.
+- [ ] Deployment timeout/recovery.
+- [ ] Firmware artifact retention.
+
+---
+
+# 4. 🟡 P2 — CI/CD ve test
+
+CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. fileciteturn75file0L2-L2
+
+- [ ] Docker image build'i CI'da gerçek compose health zinciriyle doğrulamak.
+- [ ] Farklı `POSTGRES_DB` ile compose startup testi.
+- [ ] Production schema/migration parity.
 - [ ] Load/soak test.
-- [ ] Test coverage raporu: auth, tenant, WS, command, telemetry, alarm, automation, OTA, discovery.
+- [ ] Disk/DB connection exhaustion testi.
+- [ ] CI failure artifact kapsamını genişletmek.
 
 ---
 
-# 4. 🟡 P2 — Mevcut özelliklerin geliştirilmesi
+# 5. 🟡 P2 — Mevcut özellik geliştirmeleri
 
 ## Canlı Dashboard
-- [x] Global `Connected / Reconnecting / Offline` (`Header.tsx` & `RealtimeContext.tsx`).
-- [x] Widget `Live / Stale / Offline / Error` (`widgetFreshness.ts` & `DeviceStatusDot.tsx`).
-- [x] Last data / data age / latency.
-- [x] Command `Pending → Applied/Failed/Timeout` (`RealtimeContext.tsx`).
-- [x] ACK gelmeden kalıcı optimistic physical state gösterme (ACK ve timeout takibi).
-- [x] Büyük dashboard render/memory optimizasyonu (Memoization & synchronous filtering).
-- [x] Layout persistence + widget config validation (`widgetValidation.ts`).
+- [x] Connected/Reconnecting/Offline.
+- [x] Widget freshness.
+- [x] Last data / age / latency.
+- [x] Command Pending/Applied/Failed/Timeout.
+- [ ] Büyük dashboardlarda render/memory optimizasyonunu sürekli ölçmek.
+- [ ] Offline/stale durumda kullanıcıya net operasyon mesajı.
 
 ## Device Management
-- [x] Site → Bölge → Grup → Cihaz (`DeviceHierarchyBar.tsx` & `HierarchyManagementModal.tsx`).
-- [x] Tags (`DeviceTagsEditor.tsx` & hiyerarşik filtreleme).
-- [x] Maintenance mode (`DeviceMaintenanceModal.tsx` & alarm bastırma).
-- [x] Health/firmware/last telemetry/last command/last alarm özeti (`DeviceHealthBadge.tsx` & `deviceHealth.ts`).
-- [x] Device replacement history (`DeviceReplacementModal.tsx` & `device_hardware_replacements` tablosu).
+- [x] Site/Bölge/Grup/Cihaz hiyerarşisi.
+- [x] Tags.
+- [x] Maintenance mode.
+- [x] Health/firmware/telemetry/command/alarm özeti.
+- [x] Device replacement history.
+- [ ] Toplu operasyonlar ve bakım planlama.
 
 ## Discovery & Pairing
-- [x] QR + discovery tek provisioning wizard (`ProvisioningWizardModal.tsx`).
-- [x] `Discovered → Pending → Assigned → Active` (`DiscoveredDeviceCard.tsx` & lifecycleState).
-- [x] Duplicate identity (`checkDuplicateIdentity` & çakışma çözümleme stratejileri).
-- [x] Tenant/location assignment (Site, Zone, Group ve Tag hiyerarşi ataması).
-- [x] Pairing audit (`PairingAuditTable.tsx` & `/api/network/pairing-history`).
+- [x] QR + discovery provisioning.
+- [x] Lifecycle.
+- [x] Duplicate identity.
+- [x] Tenant/location assignment.
+- [x] Pairing audit.
+- [ ] Provisioning başarısızlık/recovery UX.
 
 ## Generic Control Panel
 - [ ] Relay/digital/PWM/analog ortak command schema.
 - [ ] Button/toggle/slider/selector.
 - [ ] Kritik komut confirmation.
-- [ ] Result feedback + history.
+- [ ] Result feedback/history.
 - [ ] Manual/automation ayrımı.
 - [ ] Fail-safe/default state.
 
 ## Telemetry
-- [ ] Metric catalog + unit normalization.
-- [ ] Min/max/avg/sum/rate.
-- [ ] Time presets + downsampling/rollup.
-- [ ] CSV/JSON export.
+- [ ] Metric catalog/unit normalization.
+- [ ] Aggregation + downsampling.
 - [ ] Data quality: duplicate/delayed/out-of-order.
 - [ ] Clock drift.
 - [ ] Ingest latency/retry/drop metrics.
-- [ ] Retention/compression yönetimi.
+- [ ] Retention/compression.
 
 ## Alarm & Notification
-- [ ] `Triggered → Acknowledged → Resolved`.
+- [ ] Triggered → Acknowledged → Resolved.
 - [ ] Severity/hysteresis/debounce/cooldown.
 - [ ] Escalation/flood protection.
 - [ ] Offline alarm.
-- [ ] Responsible user + history.
 - [ ] Quiet hours/maintenance suppression.
-- [ ] Kanal bazlı tercihler.
 
 ## Automation
-- [ ] Visual rule builder + AND/OR.
+- [ ] Visual builder.
 - [ ] Schedule/time windows.
-- [ ] Multi-device actions.
-- [ ] Delay/timer.
 - [ ] Retry/fallback.
 - [ ] Dry-run.
 - [ ] Execution trace.
-- [ ] Circular trigger + max-depth protection.
-- [ ] Audit trail.
+- [ ] Circular trigger/max-depth protection.
 
 ## OTA
-- [ ] Firmware registry/build history.
-- [ ] Compatibility matrix.
+- [ ] Firmware registry.
 - [ ] Deployment groups.
 - [ ] Canary/staged rollout.
 - [ ] Schedule/progress.
-- [ ] Failed-device list.
-- [ ] Rollback/deployment report.
+- [ ] Rollback/report.
 
 ## Customer/Tenant
 - [ ] Tenant overview.
 - [ ] User/role management.
 - [ ] Device online ratio.
-- [ ] Telemetry/usage quota.
+- [ ] Usage quota.
 - [ ] Credential management.
-- [ ] Activity/audit history.
+- [ ] Audit history.
 
 ## Mobile UX
 - [ ] Touch target standardı.
 - [ ] Widget drag/edit/swipe.
-- [ ] Alarm/notification quick access.
-- [ ] Connection state visibility.
+- [ ] Alarm quick access.
+- [ ] Connection visibility.
 - [ ] QR pairing optimization.
-- [ ] Accessibility checks.
+- [ ] Accessibility.
 
 ---
 
-# 5. 🟢 P3 — Teknik borç / kalite
+# 6. 🟢 P3 — Teknik borç / kalite
 
-- [ ] Version/package-lock/CHANGELOG/README/roadmap tam senkron.
-- [ ] OpenAPI ↔ gerçek API karşılaştırması.
+- [ ] package/version/CHANGELOG/README/roadmap tam senkron.
+- [ ] OpenAPI ↔ gerçek API.
 - [ ] Versioned WebSocket protocol.
 - [ ] CSP/HSTS/security headers.
 - [ ] Request/body limits.
 - [ ] Dependency vulnerability + secret scanning.
-- [ ] Structured security audit log.
+- [ ] Structured audit log.
 - [ ] Backup restore drill.
-- [ ] Production load/soak test.
+- [ ] Production load/soak/capacity plan.
 
 ---
 
-# 6. ⭐ Yeni özellikler — öncelik sırası
+# 7. ⭐ Yeni özellikler — öncelik
 
-1. ⭐⭐⭐⭐⭐ **Command Center** — queued/sent/ack/applied/failed/timeout, retry, source ve filtreler.
-2. ⭐⭐⭐⭐⭐ **Device Health Center 2.0** — connectivity, RSSI, uptime, memory, telemetry gaps, firmware, error timeline.
-3. ⭐⭐⭐⭐⭐ **Alarm Management Center** — incident, assignment, escalation, SLA, resolution.
-4. ⭐⭐⭐⭐⭐ **OTA Deployment Manager** — registry, canary, staged rollout, schedule, rollback.
-5. ⭐⭐⭐⭐⭐ **Device Credential Center** — rotate/revoke/expiry/scope/last-used.
-6. ⭐⭐⭐⭐⭐ **Audit & Security Center** — kritik kullanıcı/tenant/device/command/OTA/security olayları.
-7. ⭐⭐⭐⭐ **Telemetry Explorer** — çoklu metric/device, aggregation, export, anomaly/data quality.
-8. ⭐⭐⭐⭐ **Sites/Groups/Locations** — toplu komut/alarm/OTA.
-9. ⭐⭐⭐⭐ **Dashboard Templates** — hazır endüstriyel şablonlar + versioning.
-10. ⭐⭐⭐⭐ **System Observability Center** — API/DB/WS/ingest/command latency ve kaynaklar.
-11. ⭐⭐⭐⭐ **Backup & Disaster Recovery Center**.
-12. ⭐⭐⭐⭐ **Reporting & Integration Center** — rapor, webhook, API, Email/Telegram/WhatsApp provider abstraction.
+1. ⭐⭐⭐⭐⭐ Command Center
+2. ⭐⭐⭐⭐⭐ Device Health Center 2.0
+3. ⭐⭐⭐⭐⭐ Alarm Management Center
+4. ⭐⭐⭐⭐⭐ OTA Deployment Manager
+5. ⭐⭐⭐⭐⭐ Device Credential Center
+6. ⭐⭐⭐⭐⭐ Audit & Security Center
+7. ⭐⭐⭐⭐ Telemetry Explorer
+8. ⭐⭐⭐⭐ Sites/Groups/Locations
+9. ⭐⭐⭐⭐ Dashboard Templates
+10. ⭐⭐⭐⭐ System Observability Center
+11. ⭐⭐⭐⭐ Backup & Disaster Recovery Center
+12. ⭐⭐⭐⭐ Reporting & Integration Center
 
 ---
 
-# 7. 🏗️ Uygulama sırası
+# 8. 🏗️ Uygulama sırası
 
-### Faz 1 — Stabilizasyon
-1. Version/lockfile.
-2. Telemetry integrity + idempotency/load tests.
-3. Gerçek saha testi.
-4. Production Docker/DB/WS gate.
+### Faz 1 — Önce siteyi koru
+1. **P0.1 DB healthcheck riskini düzelt.**
+2. Secret/default değerlerini production-safe yap.
+3. DB port exposure'ını kontrol et.
+4. Docker → DB → App → Proxy recovery testleri.
+5. Version/lockfile senkronizasyonu.
 
 ### Faz 2 — IoT çekirdeği
-5. Command Center.
-6. Telemetry Explorer/data quality.
-7. Alarm lifecycle.
-8. Device Health.
+6. Telemetry integrity/load.
+7. Command Center.
+8. Alarm lifecycle.
+9. Device Health.
 
 ### Faz 3 — Saha operasyonu
-9. OTA Deployment Manager.
-10. Canary/rollback.
-11. Maintenance + Sites/Groups.
+10. OTA Deployment Manager.
+11. Canary/rollback.
+12. Maintenance + Sites/Groups.
 
-### Faz 4 — Kurumsal yönetim
-12. Audit & Security.
-13. Device Credential Center.
-14. Tenant Management 2.0.
-15. Reporting.
+### Faz 4 — Kurumsal
+13. Audit & Security.
+14. Device Credential Center.
+15. Tenant Management 2.0.
+16. Reporting.
 
 ### Faz 5 — Ölçek
-16. Observability.
-17. Backup/DR.
-18. Integrations.
-19. Load/soak/capacity planning.
+17. Observability.
+18. Backup/DR.
+19. Integrations.
+20. Load/soak/capacity planning.
 
 ---
 
-# 8. ✅ Definition of Done
+# 9. ✅ Definition of Done
 
-P0/P1 tamamlandı sayılması için:
-- [ ] Kod davranışı doğrulanmış.
-- [ ] Unit/integration test.
-- [ ] Gerekliyse E2E.
-- [ ] Tenant izolasyonu.
-- [ ] WS etkisi.
-- [ ] DB migration/rollback etkisi.
-- [ ] Production smoke.
-- [ ] Gerçek cihaz/simülatör.
-- [ ] Dokümantasyon + CHANGELOG/version senkronu.
+P0/P1 tamamlanmadan production'a alınmamalı:
+- [ ] Unit/integration test
+- [ ] Gerekirse E2E
+- [ ] Tenant isolation
+- [ ] WS etkisi
+- [ ] DB migration/rollback
+- [ ] Docker health chain
+- [ ] Reverse proxy
+- [ ] Gerçek cihaz/simülatör
+- [ ] Restart/recovery
+- [ ] Backup/restore
+- [ ] Version/lockfile/CHANGELOG senkronu
 
 ---
 
-# 9. 🔄 Her yeniden incelemede
+# 10. 🔄 Her incelemede
 
-- [ ] HEAD/son commitler
-- [ ] P0/P1/P2/P3
-- [ ] Auth/CSRF/CORS
-- [ ] Multi-tenant
-- [ ] WebSocket
-- [ ] Command
-- [ ] Telemetry/TimescaleDB
-- [ ] Alarm/Notification
-- [ ] Automation
-- [ ] OTA
-- [ ] Docker/CI/CD
-- [ ] Dependencies/lockfile
-- [ ] Dashboard/mobile UX
-- [ ] API/OpenAPI
-- [ ] Version consistency
-- [ ] Mevcut özellik geliştirmeleri
-- [ ] Yeni özellikler
+HEAD/commitler, P0/P1/P2/P3, auth/CSRF/CORS, multi-tenant, WS, command, telemetry/TimescaleDB, alarm/notification, automation, OTA, Docker/CI/CD, dependency/lockfile, dashboard/mobile UX, API/OpenAPI, version consistency, mevcut özellikler ve yeni özellikler yeniden kontrol edilir.
 
-> Bu dosya ve GitHub Issue #1 projenin merkezi kalite/backlog/yol haritasıdır. İnceleme sırasında kaynak kodu veya mevcut konfigürasyon dosyaları değiştirilmez; yalnızca bu doküman ve Issue #1 güncellenebilir.
+> Bu dosya ve GitHub Issue #1 merkezi kalite/backlog/yol haritasıdır. İnceleme sırasında kaynak kodu ve diğer proje dosyaları değiştirilmez; yalnızca bu dosya ve Issue #1 güncellenebilir.
