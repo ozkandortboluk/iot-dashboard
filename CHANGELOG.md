@@ -4,6 +4,17 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.6.1] - 2026-09-09
+
+### 🐛 Bug Fixes & Stability
+- **React Infinite Loop Fix (`Maximum update depth exceeded`):**
+  - Resolved a critical rendering infinite loop inside the `DeviceTagsEditor` component that crashed the UI when switching views.
+  - Fixed a structural issue where dynamic default array allocations (`tags || []`) inside component props caused constant reference invalidations.
+  - Adjusted React `useEffect` comparison logic and decoupled parent prop mapping (`currentTags` vs `tags`) to prevent recursive `setState` calls.
+- **Improved UI Performance:** Prevented excessive re-rendering inside device cards and component panels.
+
+---
+
 ## 🚀 [v1.6.0] - 2026-09-09
 ### 🔍 Roadmap P2: Cihaz Keşfi, Tek Provizyon Sihirbazı & Eşleştirme Güvenlik Denetimi
 - **Tek Birleşik Provizyon Sihirbazı (`ProvisioningWizardModal.tsx`):**

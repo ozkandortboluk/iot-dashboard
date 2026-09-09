@@ -18,7 +18,14 @@ export const DeviceTagsEditor: React.FC<DeviceTagsEditorProps> = ({
   const [saving, setSaving] = useState(false);
 
   React.useEffect(() => {
-    setCurrentTags(tags || []);
+    setCurrentTags((prev) => {
+      // Only update if the tags actually changed
+      const newTags = tags || [];
+      if (prev.length !== newTags.length || !prev.every((t, i) => t === newTags[i])) {
+        return newTags;
+      }
+      return prev;
+    });
   }, [tags]);
 
   const handleAddTag = async () => {

@@ -1606,10 +1606,8 @@ void sendHeartbeat() {
 
                 {/* Tags Editor */}
                 <DeviceTagsEditor
-                  deviceId={activeDevice.id}
-                  currentTags={activeDevice.tags || []}
-                  allTags={allTags}
-                  onSaveTags={handleSaveTags}
+                  tags={activeDevice.tags || []}
+                  onSaveTags={(tags) => handleSaveTags(activeDevice.id, tags)}
                 />
               </div>
 

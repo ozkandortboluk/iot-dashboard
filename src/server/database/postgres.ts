@@ -481,6 +481,7 @@ export class PostgresRepository {
           device_id VARCHAR(64),
           device_name VARCHAR(128) NOT NULL,
           user_id VARCHAR(64),
+          tenant_id VARCHAR(64),
           metric_key VARCHAR(64) NOT NULL,
           operator VARCHAR(16) NOT NULL,
           threshold_value NUMERIC NOT NULL,
@@ -503,12 +504,15 @@ export class PostgresRepository {
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);`,
+        `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS incident_id VARCHAR(128);`,
         `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMP WITH TIME ZONE;`,
         `ALTER TABLE active_alarms ALTER COLUMN operator TYPE VARCHAR(32);`,
+        `UPDATE active_alarms SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;`,
+        `DELETE FROM active_alarms WHERE device_id IS NOT NULL AND device_id NOT IN (SELECT id FROM devices);`,
 
         // 5.5 Alarm Events
         `CREATE TABLE IF NOT EXISTS alarm_events (
@@ -1497,11 +1501,11 @@ export class PostgresRepository {
     if (!this.pool) return;
     const sql = `
       INSERT INTO active_alarms (
-        id, incident_id, last_evaluated_at, rule_id, device_id, device_name, user_id, metric_key, operator,
+        id, incident_id, last_evaluated_at, rule_id, device_id, device_name, user_id, tenant_id, metric_key, operator,
         threshold_value, current_value, severity, state, first_breach_at,
         triggered_at, last_notified_at, resolved_at, acknowledged,
         acknowledged_at, acknowledged_by, silenced_until, repeat_count, message, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       ON CONFLICT (id) DO UPDATE SET
         incident_id = EXCLUDED.incident_id,
         last_evaluated_at = EXCLUDED.last_evaluated_at,
@@ -1524,7 +1528,8 @@ export class PostgresRepository {
       alarm.ruleId,
       alarm.deviceId,
       alarm.deviceName,
-      alarm.tenantId,
+      alarm.tenantId, // user_id
+      alarm.tenantId, // tenant_id
       alarm.metricKey,
       alarm.operator,
       alarm.thresholdValue,
@@ -2343,7 +2348,7 @@ export class PostgresRepository {
             ruleId: r.rule_id,
             deviceId: r.device_id,
             deviceName: r.device_name,
-            tenantId: r.user_id,
+            tenantId: r.tenant_id || r.user_id,
             metricKey: r.metric_key,
             operator: r.operator,
             thresholdValue: Number(r.threshold_value),
@@ -2642,7 +2647,7 @@ export class PostgresRepository {
       ruleId: r.rule_id,
       deviceId: r.device_id,
       deviceName: r.device_name,
-      tenantId: r.tenant_id,
+      tenantId: r.tenant_id || r.user_id,
       metricKey: r.metric_key,
       operator: r.operator,
       thresholdValue: r.threshold_value,
