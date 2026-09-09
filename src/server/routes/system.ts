@@ -33,7 +33,9 @@ systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
 });
 
 systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
-  const isDbReady = !!db.postgresRepo?.isReady();
+  const isPostgresConfigured = !!(process.env.DATABASE_URL || process.env.POSTGRES_HOST || process.env.PGHOST);
+  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
 
   if (isDbReady) {
@@ -41,8 +43,8 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
       status: 'ready',
       ready: true,
       database: {
-        status: 'connected',
-        engine: 'PostgreSQL / TimescaleDB',
+        status: isPostgresReady ? 'connected' : 'embedded_fallback',
+        engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
         ready: true,
       },
       retryQueue: {
@@ -74,7 +76,9 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
 });
 
 systemRouter.get('/health', (req, res) => {
-  const isDbReady = !!db.postgresRepo?.isReady();
+  const isPostgresConfigured = !!(process.env.DATABASE_URL || process.env.POSTGRES_HOST || process.env.PGHOST);
+  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
 
   const statusCode = isDbReady ? 200 : 503;
@@ -84,7 +88,7 @@ systemRouter.get('/health', (req, res) => {
     ready: isDbReady,
     database: {
       ready: isDbReady,
-      engine: isDbReady ? 'PostgreSQL / TimescaleDB' : 'PostgreSQL (Connecting/Retry WAL)',
+      engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
     },
     retryQueue: {
       pendingPacketCount: retryStats?.pendingPacketCount || 0,
@@ -170,6 +174,11 @@ const databaseRouter = Router();
 
 databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getDatabaseHealth());
+});
+
+databaseRouter.get('/pool-stats', authenticateUser, requireAdmin, async (req, res) => {
+  const stats = await db.getDatabasePerformanceStats();
+  res.json(stats);
 });
 
 databaseRouter.post('/backup', authenticateUser, requireAdmin, async (req, res) => {

@@ -55,6 +55,125 @@ export class PostgresRepository {
     return !!this.pool && this.isConnected;
   }
 
+  public async getPoolAndPerformanceStats(): Promise<{
+    totalCount: number;
+    idleCount: number;
+    waitingCount: number;
+    maxConnections: number;
+    queryLatencyMs: number;
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    activeQueriesCount: number;
+    databaseSizeBytes?: string;
+  }> {
+    if (!this.pool) {
+      return {
+        totalCount: 0,
+        idleCount: 0,
+        waitingCount: 0,
+        maxConnections: 0,
+        queryLatencyMs: -1,
+        status: 'unhealthy',
+        activeQueriesCount: 0,
+      };
+    }
+
+    const t0 = performance.now();
+    let queryLatencyMs = 0;
+    let activeQueriesCount = 0;
+    let databaseSizeBytes = '0';
+
+    try {
+      await this.pool.query('SELECT 1;');
+      queryLatencyMs = Math.round((performance.now() - t0) * 100) / 100;
+
+      const statsRes = await this.pool.query(`
+        SELECT 
+          (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_queries,
+          pg_database_size(current_database()) as db_size;
+      `);
+      activeQueriesCount = parseInt(statsRes.rows[0]?.active_queries || '0', 10);
+      databaseSizeBytes = statsRes.rows[0]?.db_size || '0';
+    } catch {
+      queryLatencyMs = -1;
+    }
+
+    return {
+      totalCount: (this.pool as any).totalCount || 0,
+      idleCount: (this.pool as any).idleCount || 0,
+      waitingCount: (this.pool as any).waitingCount || 0,
+      maxConnections: (this.pool as any).options?.max || 20,
+      queryLatencyMs,
+      status: queryLatencyMs >= 0 && queryLatencyMs < 200 ? 'healthy' : (queryLatencyMs >= 200 ? 'degraded' : 'unhealthy'),
+      activeQueriesCount,
+      databaseSizeBytes,
+    };
+  }
+
+  public async checkDatabaseVersion(): Promise<{
+    postgresVersion: string;
+    isTimescaleInstalled: boolean;
+    timescaleVersion?: string;
+    isCompatible: boolean;
+    warnings: string[];
+  }> {
+    if (!this.pool) {
+      return {
+        postgresVersion: 'unknown',
+        isTimescaleInstalled: false,
+        isCompatible: false,
+        warnings: ['PostgreSQL pool is not initialized.'],
+      };
+    }
+
+    const warnings: string[] = [];
+    let pgVersionStr = '';
+    let isTimescale = false;
+    let timescaleVersion: string | undefined;
+
+    try {
+      const res = await this.pool.query('SELECT version();');
+      pgVersionStr = res.rows[0]?.version || '';
+      
+      const match = pgVersionStr.match(/PostgreSQL (\d+)/i);
+      const majorVersion = match ? parseInt(match[1], 10) : 0;
+      if (majorVersion > 0 && majorVersion < 15) {
+        warnings.push(`PostgreSQL version ${majorVersion} detected. Production recommended version is >= 15.`);
+      }
+    } catch (err: any) {
+      warnings.push(`Failed to query PostgreSQL version: ${err?.message || err}`);
+    }
+
+    try {
+      const extRes = await this.pool.query(
+        "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
+      );
+      if (extRes.rows.length > 0) {
+        isTimescale = true;
+        timescaleVersion = extRes.rows[0].extversion;
+        const tsMatch = timescaleVersion?.match(/^(\d+)\.(\d+)/);
+        if (tsMatch) {
+          const tsMajor = parseInt(tsMatch[1], 10);
+          const tsMinor = parseInt(tsMatch[2], 10);
+          if (tsMajor < 2 || (tsMajor === 2 && tsMinor < 11)) {
+            warnings.push(`TimescaleDB version ${timescaleVersion} detected. Production recommended version is >= 2.11.`);
+          }
+        }
+      } else {
+        warnings.push('TimescaleDB extension is not enabled in this database. Running in standard PostgreSQL mode.');
+      }
+    } catch (err: any) {
+      warnings.push(`Could not query pg_extension: ${err?.message || err}`);
+    }
+
+    return {
+      postgresVersion: pgVersionStr,
+      isTimescaleInstalled: isTimescale,
+      timescaleVersion,
+      isCompatible: warnings.length === 0,
+      warnings,
+    };
+  }
+
   public async checkIfAdminExists(): Promise<boolean> {
     if (!this.pool) return false;
     try {
@@ -1518,10 +1637,17 @@ export class PostgresRepository {
       delivered_at: execAtIso,
       acknowledgedAt: ackAtIso,
       acknowledged_at: ackAtIso,
+      appliedAt: r.applied_at ? new Date(r.applied_at).toISOString() : undefined,
+      applied_at: r.applied_at ? new Date(r.applied_at).toISOString() : undefined,
       executedAt: execAtIso,
       executed_at: execAtIso,
       errorMessage: r.error_message || r.parameters?.errorMessage || undefined,
       error_message: r.error_message || r.parameters?.errorMessage || undefined,
+      idempotencyKey: r.idempotency_key || undefined,
+      idempotency_key: r.idempotency_key || undefined,
+      timeoutSeconds: r.timeout_seconds !== null && r.timeout_seconds !== undefined ? Number(r.timeout_seconds) : 300,
+      retryCount: r.retry_count !== null && r.retry_count !== undefined ? Number(r.retry_count) : 0,
+      maxRetries: r.max_retries !== null && r.max_retries !== undefined ? Number(r.max_retries) : 3,
       parameters: r.parameters,
       result: r.parameters?.result,
     };
@@ -1530,6 +1656,23 @@ export class PostgresRepository {
   public async saveCommand(cmd: Partial<DeviceCommand> & { deviceId: string }): Promise<DeviceCommand> {
     if (!this.pool) {
       throw new Error('PostgreSQL pool not initialized');
+    }
+
+    const idempotencyKey = cmd.idempotencyKey || cmd.idempotency_key;
+    if (idempotencyKey) {
+      try {
+        const existing = await this.query(
+          `SELECT * FROM device_commands 
+           WHERE device_id = $1 AND idempotency_key = $2 AND created_at > NOW() - INTERVAL '1 hour'
+           LIMIT 1;`,
+          [cmd.deviceId, idempotencyKey]
+        );
+        if (existing?.rows && existing.rows.length > 0) {
+          return this.mapDeviceCommandRow(existing.rows[0]);
+        }
+      } catch (idempErr) {
+        console.warn('[PostgreSQL] Idempotency lookup error:', idempErr);
+      }
     }
 
     const id = cmd.id || cmd.commandId || `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -1542,20 +1685,24 @@ export class PostgresRepository {
     const outputId = cmd.outputId || (cmd.parameters?.outputId ? String(cmd.parameters.outputId) : null);
     const valPayload = cmd.value !== undefined ? String(cmd.value) : (cmd.payload !== undefined ? String(cmd.payload) : null);
     const source = cmd.source || 'manual';
-    const status = cmd.status || 'pending';
+    const status = cmd.status || 'queued';
+    const timeoutSeconds = cmd.timeoutSeconds || 300;
+    const retryCount = cmd.retryCount || 0;
+    const maxRetries = cmd.maxRetries || 3;
     const createdAt = cmd.createdAt || cmd.created_at || new Date().toISOString();
     const sentAt = cmd.sentAt || cmd.sent_at || (status === 'sent' || status === 'claimed' ? new Date().toISOString() : null);
     const acknowledgedAt = cmd.acknowledgedAt || cmd.acknowledged_at || (status === 'acknowledged' ? new Date().toISOString() : null);
-    const executedAt = cmd.executedAt || cmd.executed_at || (status === 'executed' ? new Date().toISOString() : null);
+    const appliedAt = cmd.appliedAt || cmd.applied_at || (status === 'applied' || status === 'executed' ? new Date().toISOString() : null);
+    const executedAt = cmd.executedAt || cmd.executed_at || (status === 'executed' || status === 'applied' ? new Date().toISOString() : null);
     const errorMessage = cmd.errorMessage || cmd.error_message || null;
 
     // 1. Output Superseding Protection: If a new command targets an outputId, cancel older pending/sent commands for that same output
-    if (outputId && status === 'pending') {
+    if (outputId && (status === 'pending' || status === 'queued')) {
       try {
         await this.query(
           `UPDATE device_commands 
            SET status = 'cancelled', executed_at = CURRENT_TIMESTAMP, error_message = 'Yeni çıkış komutu ile geçersiz kılındı (Superseded)'
-           WHERE device_id = $1 AND output_id = $2 AND status IN ('pending', 'sent', 'claimed');`,
+           WHERE device_id = $1 AND output_id = $2 AND status IN ('queued', 'pending', 'sent', 'claimed');`,
           [cmd.deviceId, outputId]
         );
       } catch (err: any) {
@@ -1570,7 +1717,7 @@ export class PostgresRepository {
          SET status = 'cancelled', executed_at = CURRENT_TIMESTAMP, error_message = 'Kuyruk sınırını aştığı için iptal edildi (Maks. 30 komut)'
          WHERE id IN (
            SELECT id FROM device_commands
-           WHERE device_id = $1 AND status IN ('pending', 'sent')
+           WHERE device_id = $1 AND status IN ('queued', 'pending', 'sent')
            ORDER BY created_at ASC
            OFFSET 29
          );`,
@@ -1593,9 +1740,10 @@ export class PostgresRepository {
       INSERT INTO device_commands (
         id, command_id, tenant_id, customer_id, device_id, user_id,
         command_type, command_name, output_id, value_payload, parameters,
-        source, status, sent_by, created_at, sent_at, acknowledged_at, executed_at, error_message
+        source, status, sent_by, created_at, sent_at, acknowledged_at, applied_at, executed_at, error_message,
+        idempotency_key, timeout_seconds, retry_count, max_retries
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       ON CONFLICT (id) DO UPDATE SET
         tenant_id = COALESCE(EXCLUDED.tenant_id, device_commands.tenant_id),
         customer_id = COALESCE(EXCLUDED.customer_id, device_commands.customer_id),
@@ -1609,15 +1757,18 @@ export class PostgresRepository {
         status = EXCLUDED.status,
         sent_at = COALESCE(EXCLUDED.sent_at, device_commands.sent_at),
         acknowledged_at = COALESCE(EXCLUDED.acknowledged_at, device_commands.acknowledged_at),
+        applied_at = COALESCE(EXCLUDED.applied_at, device_commands.applied_at),
         executed_at = COALESCE(EXCLUDED.executed_at, device_commands.executed_at),
-        error_message = COALESCE(EXCLUDED.error_message, device_commands.error_message)
+        error_message = COALESCE(EXCLUDED.error_message, device_commands.error_message),
+        retry_count = EXCLUDED.retry_count
       RETURNING *;
     `;
 
     const res = await this.query(sql, [
       id, commandId, tenantId, customerId, cmd.deviceId, userId,
       commandType, commandName, outputId, valPayload, JSON.stringify(paramsObj),
-      source, status, userId || source, createdAt, sentAt, acknowledgedAt, executedAt, errorMessage
+      source, status, userId || source, createdAt, sentAt, acknowledgedAt, appliedAt, executedAt, errorMessage,
+      idempotencyKey || null, timeoutSeconds, retryCount, maxRetries
     ]);
 
     return this.mapDeviceCommandRow(res.rows[0]);
@@ -1662,17 +1813,17 @@ export class PostgresRepository {
       UPDATE device_commands
       SET status = 'sent',
           sent_at = CURRENT_TIMESTAMP,
-          executed_at = CURRENT_TIMESTAMP
+          executed_at = CURRENT_TIMESTAMP,
+          retry_count = COALESCE(retry_count, 0) + 1
       WHERE id IN (
         SELECT id FROM device_commands
         WHERE device_id = $1 
           AND (
-            status = 'pending' 
-            OR status = 'sent'
-            OR status = 'claimed'
+            status IN ('queued', 'pending') 
             OR ((status = 'sent' OR status = 'claimed') AND executed_at < CURRENT_TIMESTAMP - ($3 || ' seconds')::INTERVAL)
           )
-          AND status NOT IN ('acknowledged', 'executed', 'failed', 'expired', 'cancelled')
+          AND status NOT IN ('acknowledged', 'applied', 'executed', 'failed', 'timeout', 'expired', 'cancelled')
+          AND (retry_count IS NULL OR retry_count < COALESCE(max_retries, 3))
         ORDER BY created_at ASC
         LIMIT $2
         FOR UPDATE SKIP LOCKED
@@ -1689,13 +1840,13 @@ export class PostgresRepository {
   }
 
   /**
-   * Transitions a claimed or pending command to 'acknowledged', 'executed' or 'failed' when the device confirms execution.
+   * Transitions a claimed or pending command to 'acknowledged', 'applied', 'executed' or 'failed' when the device confirms execution.
    * Mandates matching both commandId AND deviceId for strict device security isolation.
    */
   public async acknowledgeCommand(
     deviceId: string,
     commandId: string,
-    status: 'acknowledged' | 'failed' | 'executed' | 'cancelled' | 'expired' = 'acknowledged',
+    status: 'acknowledged' | 'applied' | 'failed' | 'executed' | 'cancelled' | 'expired' | 'timeout' = 'acknowledged',
     result?: any,
     errorMessage?: string
   ): Promise<DeviceCommand | null> {
@@ -1703,7 +1854,8 @@ export class PostgresRepository {
     const sql = `
       UPDATE device_commands
       SET status = $3,
-          acknowledged_at = CASE WHEN $3 IN ('acknowledged', 'executed') THEN CURRENT_TIMESTAMP ELSE acknowledged_at END,
+          acknowledged_at = CASE WHEN $3 IN ('acknowledged', 'applied', 'executed') THEN COALESCE(acknowledged_at, CURRENT_TIMESTAMP) ELSE acknowledged_at END,
+          applied_at = CASE WHEN $3 IN ('applied', 'executed') THEN CURRENT_TIMESTAMP ELSE applied_at END,
           executed_at = CURRENT_TIMESTAMP,
           error_message = COALESCE($5, error_message),
           parameters = CASE 
@@ -1742,7 +1894,7 @@ export class PostgresRepository {
       UPDATE device_commands
       SET status = $3,
           error_message = COALESCE($4, error_message),
-          executed_at = CASE WHEN $3 IN ('executed', 'failed', 'cancelled', 'expired') THEN CURRENT_TIMESTAMP ELSE executed_at END
+          executed_at = CASE WHEN $3 IN ('applied', 'executed', 'failed', 'cancelled', 'timeout', 'expired') THEN CURRENT_TIMESTAMP ELSE executed_at END
       WHERE (id = $1 OR command_id = $1) AND device_id = $2
       RETURNING *;
     `;
@@ -1762,11 +1914,11 @@ export class PostgresRepository {
     if (!this.pool) return [];
     const sql = `
       UPDATE device_commands
-      SET status = 'expired',
+      SET status = 'timeout',
           executed_at = CURRENT_TIMESTAMP,
           error_message = 'Komut zaman aşımına uğradı (cihaz yanıt vermedi / süresi doldu)'
-      WHERE status IN ('pending', 'sent', 'claimed')
-        AND created_at < CURRENT_TIMESTAMP - ($1 || ' seconds')::INTERVAL
+      WHERE status IN ('queued', 'pending', 'sent', 'claimed')
+        AND created_at < CURRENT_TIMESTAMP - (COALESCE(timeout_seconds, $1) || ' seconds')::INTERVAL
       RETURNING *;
     `;
     try {

@@ -24,6 +24,19 @@ const TERMINATE_BUFFERED_AMOUNT = 2 * 1024 * 1024; // 2 MB hard limit
 const WS_RATE_LIMIT_WINDOW_MS = 10000; // 10 seconds window
 const WS_MAX_MESSAGES_PER_WINDOW = 120; // 120 messages per 10s allowed per socket
 
+const ALLOWED_WS_ORIGIN_PATTERNS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /^https?:\/\/.*\.run\.app$/,
+  /^https?:\/\/nexusnodeiot\.com\.tr$/,
+  /^https?:\/\/.*\.nexusnodeiot\.com\.tr$/,
+];
+
+export function isAllowedWsOrigin(origin?: string | null): boolean {
+  if (!origin) return true; // Non-browser clients (ESP32, NodeMCU, Python scripts) don't send Origin
+  return ALLOWED_WS_ORIGIN_PATTERNS.some(pattern => pattern.test(origin));
+}
+
 let wss: WebSocketServer | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
 
@@ -79,12 +92,45 @@ function resolveDevice(token?: string | null): Device | null {
 
   const cleanToken = token.trim();
   const dev = db.getDeviceByApiKey(cleanToken);
-  if (dev) return dev;
+  const foundDev = dev || db.getDevices().find((d) => (d.id === cleanToken || d.apiKey === cleanToken) && d.apiKey);
+  if (!foundDev) return null;
 
-  const devById = db.getDevices().find((d) => (d.id === cleanToken || d.apiKey === cleanToken) && d.apiKey);
-  if (devById) return devById;
+  // 1. API Key Revocation Check
+  if (foundDev.apiKeyRevoked === true) {
+    console.warn(`[WebSocket Auth] Cihaz API anahtarı iptal edilmiş (Revoked): ${foundDev.id} (${foundDev.name})`);
+    return null;
+  }
 
-  return null;
+  // 2. API Key Expiry Check
+  if (foundDev.apiKeyExpiresAt && new Date(foundDev.apiKeyExpiresAt).getTime() < Date.now()) {
+    console.warn(`[WebSocket Auth] Cihaz API anahtarının süresi dolmuş (Expired): ${foundDev.id} (${foundDev.name})`);
+    return null;
+  }
+
+  // 3. Update Last-Used Timestamp
+  foundDev.apiKeyLastUsedAt = new Date().toISOString();
+  db.updateDevice(foundDev.id, { apiKeyLastUsedAt: foundDev.apiKeyLastUsedAt });
+
+  return foundDev;
+}
+
+/**
+ * Actively disconnects any open WebSocket connections associated with a specific device.
+ * Used during API key revocation, rotation, or security lockouts.
+ */
+export function terminateDeviceSockets(deviceId: string, codeOrReason: number | string = 1008, maybeReason?: string): void {
+  if (!wss) return;
+  const code = typeof codeOrReason === 'number' ? codeOrReason : 1008;
+  const reason = typeof codeOrReason === 'string' ? codeOrReason : (maybeReason || 'API key revoked');
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((ws) => {
+    if (ws.device?.id === deviceId) {
+      try {
+        ws.close(code, reason);
+      } catch {
+        ws.terminate();
+      }
+    }
+  });
 }
 
 // Push initial state data to authenticated client
@@ -511,6 +557,14 @@ export function initWebSocketServer(server: http.Server) {
   // Setup server-level HTTP upgrade routing
   server.on('upgrade', (request, socket, head) => {
     try {
+      const origin = request.headers?.origin as string | undefined;
+      if (origin && !isAllowedWsOrigin(origin)) {
+        console.warn(`[WebSocket Security] Cross-Site WebSocket Hijacking attempt blocked from origin: ${origin}`);
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
       const urlObj = new URL(request.url || '', `http://${request.headers.host || '127.0.0.1'}`);
       const pathname = urlObj.pathname;
 

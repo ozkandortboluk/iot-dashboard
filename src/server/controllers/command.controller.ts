@@ -207,7 +207,8 @@ export class CommandController {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user;
     const { deviceId } = req.params;
-    const { command, commandType, outputId, outputPin, value, payload, source, parameters } = req.body || {};
+    const { command, commandType, outputId, outputPin, value, payload, source, parameters, timeoutSeconds, maxRetries } = req.body || {};
+    const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || req.headers['x-idempotency-key'] || req.headers['idempotency-key'];
 
     // 1-4: Authenticated, Tenant Access, Device Ownership, Command Permission
     const accessCheck = this.validateUserDeviceAccess(currentUser, deviceId, true);
@@ -255,7 +256,10 @@ export class CommandController {
         value: finalVal,
         payload: finalVal,
         source: source || 'manual',
-        status: 'pending',
+        status: 'queued',
+        idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined,
+        timeoutSeconds: timeoutSeconds ? Number(timeoutSeconds) : 300,
+        maxRetries: maxRetries ? Number(maxRetries) : 3,
         parameters: parameters || (targetOutput ? { outputId: targetOutput, value: finalVal } : undefined),
       });
 
@@ -313,11 +317,15 @@ export class CommandController {
 
     const numericValue = typeof value === 'number' ? value : (value === 'ON' || value === 'HIGH' || value === true || value === 1 || value === '1' ? 1 : 0);
     const displayValue = value !== undefined ? String(value) : 'COMMAND';
+    const idempotencyKey = req.body?.idempotencyKey || req.body?.idempotency_key || req.headers['x-idempotency-key'] || req.headers['idempotency-key'];
 
     try {
-      // Update metrics on device
-      const updatedMetrics = { ...device.metrics, [pinOrMetric]: numericValue };
-      db.updateDevice(deviceId, { metrics: updatedMetrics, lastSeen: new Date().toISOString() });
+      // For simulated devices, update metrics immediately for test responsiveness.
+      // For physical production devices, avoid permanent optimistic updates until confirmed by device ACK.
+      if (device.isSimulated) {
+        const updatedMetrics = { ...device.metrics, [pinOrMetric]: numericValue };
+        db.updateDevice(deviceId, { metrics: updatedMetrics, lastSeen: new Date().toISOString() });
+      }
 
       // Record Telemetry Reading for control signal feedback
       const reading = db.addTelemetryReading({
@@ -362,7 +370,8 @@ export class CommandController {
         value: displayValue,
         payload: displayValue,
         source: 'manual',
-        status: 'pending',
+        status: 'queued',
+        idempotencyKey: idempotencyKey ? String(idempotencyKey) : undefined,
       });
 
       // Broadcast command lifecycle events to real-time WebSockets

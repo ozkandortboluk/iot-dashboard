@@ -4,6 +4,62 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.3.0] - 2026-09-09
+### 🛡️ Production Roadmap P1 Güvenlik & Mimari Sağlamlık Paketi
+- **P1.2.5 Gelişmiş Komut Motoru & İdempotency (Command Engine):**
+  - Komut modeli ve `device_commands` tablosu `idempotency_key`, `timeout_seconds`, `retry_count`, `max_retries` ve `applied_at` alanlarıyla genişletildi.
+  - Mükerrer komut gönderimini önleyen idempotency mekanizması `X-Idempotency-Key` HTTP başlığı ve gövde desteğiyle API katmanına bağlandı.
+  - Fiziksel cihazlar için donanım ACK teyidi gelmeden kalıcı optimistik durum güncellemesi yapılması engellendi (state desync önlemi).
+  - Komut yaşam döngüsü standartlaştırıldı: `queued → sent → acknowledged / applied → executed / timeout`.
+- **P1.2.4 Cihaz Kimlik Bilgileri & Güvenlik Yönetimi (Device Credentials):**
+  - Cihaz API anahtarı rotasyonu (`POST /api/devices/:id/rotate-key`), iptali (`POST /api/devices/:id/revoke-key`) ve geri yüklenmesi (`POST /api/devices/:id/restore-key`) uç noktaları eklendi.
+  - Anahtar iptal edildiğinde cihaza ait tüm aktif WebSocket oturumlarının anında sonlandırılması sağlandı (`terminateDeviceSockets` ile close code 1008).
+  - Cihaz API anahtarı son kullanım tarihi (`expiresAt`), kapsam izinleri (`scopes`) ve son kullanım zamanı (`lastUsedAt`) denetimi devreye alındı.
+- **P1.2.3 Çok Kiracılı İzolasyon & Güvenlik Denetimi (Multi-Tenant Isolation):**
+  - REST API cihaz komutları, tekil cihaz sorgulama ve OTA dağıtım uç noktalarında kiracı sahiplik kontrolleri (`tenantSecurityService`) sıkılaştırıldı.
+  - Başka bir kiracının cihazına ID tahminiyle komut gönderme veya toplu OTA dağıtımı yapma girişimleri `403 Forbidden` ile engellendi.
+- **P1.2.6 OTA Studio / Web Compiler Bütünlük & Yetkilendirme:**
+  - Firmware Ed25519 imza ve SHA-256 hash doğrulama uç noktası (`POST /api/firmwares/:id/verify`) eklendi.
+  - Anahtar rotasyonu desteği için firmware'leri aktif anahtarla yeniden imzalama uç noktası (`POST /api/firmwares/:id/resign`) geliştirildi.
+  - Toplu OTA dağıtımında yetkisiz cihazların sürece dahil edilmesi engellendi.
+- **P1.2.7 Veritabanı & TimescaleDB Havuz / Gecikme İzleme:**
+  - PostgreSQL ve TimescaleDB için bağlantı havuzu (active/idle/waiting) ve sorgu gecikmesi (query latency) ölçüm metotları eklendi (`/api/database/pool-stats`).
+- **P1.2.1 / P1.2.2 WebSocket & CORS İyileştirmeleri:**
+  - WebSocket bağlantı kopma ve kapatma kodları (1008, 1000) ile 30s ping/pong drift temizliği entegre edildi.
+  - CORS başlıklarına `X-Idempotency-Key` ve `Idempotency-Key` eklendi; ters vekil (reverse proxy) arkasındaki origin politikaları doğrulandı.
+- **P1.2.8 Bağımlılık & Kütüphane Eşitlemesi:**
+  - `package.json` ve `package-lock.json` metadata senkronizasyonu tamamlandı.
+
+---
+
+## 🚀 [v1.2.15] - 2026-09-09
+### 🛡️ Production Roadmap P0 Güvenilirlik & WebSocket Güvenliği
+- **Docker Production İmajı & Smoke Pipeline (P0):**
+  - `Dockerfile` içine multi-stage production runner ve dahili `HEALTHCHECK` direktifi entegre edildi (`/api/health/live` kontrolü).
+  - `scripts/smoke-test.mjs` baştan aşağı yenilendi: `build → start → DB doğrulaması → health/live (liveness) → health/ready (readiness) → WebSocket (401 reddi, auth bağlantısı, ping/pong) → graceful shutdown` tam zinciri test edildi.
+  - Testlerin `Aktif!` stdout string matching bağımlılığı kaldırılarak yerine dinamik HTTP health polling mimarisi getirildi.
+- **Production PostgreSQL / TimescaleDB Şema & Sürüm Doğrulaması (P0):**
+  - `src/server/database/postgres.ts` içerisine `checkDatabaseVersion()` fonksiyonu eklendi; PostgreSQL (>=15) ve TimescaleDB (>=2.11) sürümleri ve eklenti varlığı doğrulanabilir hale getirildi.
+  - `/api/health` uç noktası veritabanı durumunu dinamik olarak tespit ederek DB yokluğunda otomatik fallback (Embedded JSON DB) durumunu raporlayacak şekilde senkronize edildi.
+  - `src/tests/postgres_schema.test.ts` test paketi yazılarak DDL doğrulaması, TimescaleDB hypertable sıkıştırma (compression) & veri saklama (retention) politikaları, idempotency ve bağlantı kopmalarında WAL retry queue davranışı test edildi.
+- **WebSocket CSWSH (Cross-Site WebSocket Hijacking) Engellemesi & Tenant İzolasyonu (P1):**
+  - WebSocket upgrade el sıkışmasında `ALLOWED_WS_ORIGIN_PATTERNS` allowlist kontrolü eklendi; kötü amaçlı domain'lerden (`evil-hacker-site.com`) gelen tarayıcı WS bağlantı girişimleri `HTTP 403 Forbidden` ile soket seviyesinde reddedildi.
+  - WebSocket bootstrap ve broadcast aşamalarında tenant izolasyonu E2E testleri ile garanti altına alındı; müşteri kullanıcılarının yalnızca kendi tenant'ına ait cihazları ve telemetrileri alabildiği doğrulandı.
+
+---
+
+## 🚀 [v1.2.14] - 2026-09-08
+### 🔒 Gerçek WebSocket Kimlik Doğrulama ve CSRF Regresyon Güvencesi
+- **Gerçek WebSocket E2E Doğrulaması:** `e2e/security_e2e.test.ts` içerisindeki mock/placeholder WS testleri yerine gerçek WebSocket bağlantı el sıkışmaları (handshake) entegre edildi.
+  - Geçerli kullanıcı oturumu çerezi (`nexus_session_token`) ile WebSocket bağlantısının başarıyla açıldığı (`ws.on('open')`),
+  - Kimlik doğrulanmamış bağlantı girişimlerinin `HTTP 401 Unauthorized` ile reddedildiği,
+  - Geçersiz cihaz API anahtarlarının (`x-api-key`) ve sahte token'ların `HTTP 401 Unauthorized` ile geri çevrildiği,
+  - İptal edilmiş/süresi dolmuş çerezlerin bağlantı kuramadığı uçtan uca doğrulanıp garantiye alındı.
+- **CSRF State-Changing Test İzolasyonu:** CSRF savunma testinde oturumu sonlandıran logout yerine cihaz oluşturma (`POST /api/devices`) gibi durum değiştiren endpoint'ler kullanılarak test zincirindeki oturum bütünlüğü korundu.
+- **Entegrasyon Test Suite Senkronizasyonu:** `src/tests/integration/nexus_integration.test.ts` dosyası named export'lar (`authRouter`, `telemetryRouter`, `devicesRouter`) ve `cookie-parser` ile güncellenerek tüm birim ve entegrasyon testlerinin (102 test) ve E2E güvenlik testlerinin (12 test) %100 yeşil geçmesi sağlandı.
+
+---
+
 ## 🚀 [v1.2.13] - 2026-09-08
 ### 🔒 E2E CSRF ve Session Regresyon Testleri
 - **Kalıcı Regresyon Güvencesi:** Uçtan uca (E2E) güvenlik testleri için `e2e/security_e2e.test.ts` yazılarak `npm run test:e2e` betiği olarak CI zincirine eklendi.

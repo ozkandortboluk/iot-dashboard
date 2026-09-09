@@ -120,6 +120,12 @@ export interface Device {
   apiKey: string;
   apiKeyPrefix?: string;
   apiKeyHash?: string;
+  apiKeyExpiresAt?: string;
+  apiKeyRevoked?: boolean;
+  apiKeyLastUsedAt?: string;
+  apiKeyScopes?: string[];
+  apiKeyRotatedAt?: string;
+  previousApiKeyHash?: string;
   status: DeviceStatus;
   location: string;
   ipAddress: string;
@@ -262,13 +268,16 @@ export interface TelemetryReading {
 }
 
 export type DeviceCommandStatus = 
+  | 'queued'
   | 'pending'
   | 'sent'
   | 'claimed'
   | 'delivered'
   | 'acknowledged'
+  | 'applied'
   | 'executed'
   | 'failed'
+  | 'timeout'
   | 'expired'
   | 'cancelled';
 
@@ -297,12 +306,19 @@ export interface DeviceCommandInputOptions {
   payload?: string | number | any;
   source?: DeviceCommandSource;
   status?: DeviceCommandStatus;
+  idempotencyKey?: string;
+  idempotency_key?: string;
+  timeoutSeconds?: number;
+  retryCount?: number;
+  maxRetries?: number;
   createdAt?: string;
   created_at?: string;
   sentAt?: string;
   sent_at?: string;
   acknowledgedAt?: string;
   acknowledged_at?: string;
+  appliedAt?: string;
+  applied_at?: string;
   executedAt?: string;
   executed_at?: string;
   errorMessage?: string;
@@ -326,6 +342,11 @@ export interface DeviceCommand {
   payload: string | number | any;
   source: DeviceCommandSource;
   status: DeviceCommandStatus;
+  idempotencyKey?: string;
+  idempotency_key?: string;
+  timeoutSeconds?: number;
+  retryCount?: number;
+  maxRetries?: number;
   createdAt: string;
   created_at: string;
   sentAt?: string;
@@ -334,6 +355,8 @@ export interface DeviceCommand {
   delivered_at?: string;
   acknowledgedAt?: string;
   acknowledged_at?: string;
+  appliedAt?: string;
+  applied_at?: string;
   executedAt?: string;
   executed_at?: string;
   errorMessage?: string;

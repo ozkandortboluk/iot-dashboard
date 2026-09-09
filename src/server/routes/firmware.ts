@@ -11,6 +11,7 @@ import { isValidSemver, isHardwareModelCompatible, isHardwareRevisionCompatible 
 
 import {
   signBinaryBuffer,
+  verifyBinarySignature,
   validateEspBinary,
   saveFirmwareFileToDisk,
   readFirmwareFileFromDisk,
@@ -256,6 +257,81 @@ firmwareRouter.delete('/:id', authenticateUser, requireAdmin, (req: Request, res
   broadcast('firmwares:updated', db.getFirmwares().map(sanitizeFirmware));
 
   res.json({ success: true, message: 'Firmware başarıyla silindi.' });
+});
+
+// POST /api/firmwares/:id/verify - Cryptographically verify hash & Ed25519 signature
+firmwareRouter.post('/:id/verify', authenticateUser, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const fw = db.getFirmwareById(id);
+  if (!fw) {
+    return res.status(404).json({ error: 'Firmware bulunamadı.' });
+  }
+
+  const binaryBuffer = fw.filePath ? readFirmwareFileFromDisk(fw.filePath) : null;
+  if (!binaryBuffer) {
+    return res.status(404).json({ error: 'Firmware ikili binary dosyası diskte bulunamadı.' });
+  }
+
+  const actualSha256 = crypto.createHash('sha256').update(binaryBuffer).digest('hex');
+  const hashMatch = actualSha256.toLowerCase() === fw.sha256.toLowerCase();
+  const signatureMatch = verifyBinarySignature(binaryBuffer, fw.signature, fw.keyId);
+
+  const trustedKeyInfo = fw.keyId ? getPublicKeyByKeyId(fw.keyId) : null;
+
+  res.json({
+    valid: hashMatch && signatureMatch,
+    firmwareId: fw.id,
+    version: fw.version,
+    sha256: actualSha256,
+    expectedSha256: fw.sha256,
+    hashMatch,
+    signatureMatch,
+    keyId: fw.keyId,
+    keyStatus: trustedKeyInfo ? (trustedKeyInfo.isCurrent ? 'active' : 'transitional') : 'unknown',
+    verifiedAt: new Date().toISOString(),
+  });
+});
+
+// POST /api/firmwares/:id/resign - Re-sign firmware with currently active key (Key rotation support)
+firmwareRouter.post('/:id/resign', authenticateUser, requireAdmin, (req: Request, res: Response) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
+  const { id } = req.params;
+  const fw = db.getFirmwareById(id);
+  if (!fw) {
+    return res.status(404).json({ error: 'Firmware bulunamadı.' });
+  }
+
+  const binaryBuffer = fw.filePath ? readFirmwareFileFromDisk(fw.filePath) : null;
+  if (!binaryBuffer) {
+    return res.status(404).json({ error: 'Firmware ikili binary dosyası diskte bulunamadı.' });
+  }
+
+  const { sha256, signatureHex, keyId } = signBinaryBuffer(binaryBuffer);
+
+  fw.sha256 = sha256;
+  fw.signature = signatureHex;
+  fw.keyId = keyId;
+
+  db.saveFirmware(fw);
+  (db.postgresRepo as any)?.saveFirmware?.(fw)?.catch?.(() => {});
+
+  db.addAuditLog(
+    user.id,
+    user.name,
+    `Firmware Yeni Anahtarla Yeniden İmzalandı: ${fw.name} (${fw.version}) [KeyID: ${keyId}]`,
+    'high'
+  );
+
+  const safeFw = sanitizeFirmware(fw);
+  broadcast('firmware:updated', safeFw);
+  broadcast('firmwares:updated', db.getFirmwares().map(sanitizeFirmware));
+
+  res.json({
+    success: true,
+    message: `Firmware başarıyla aktif imzalama anahtarı (${keyId}) ile yeniden imzalandı.`,
+    firmware: safeFw,
+  });
 });
 
 // POST /api/firmwares/upload - Streaming Busboy parser for binaries (Admin only)

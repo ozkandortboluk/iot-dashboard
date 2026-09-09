@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { broadcast } from '../services/websocket.js';
+import { broadcast, terminateDeviceSockets } from '../services/websocket.js';
 import { runSimulationStep } from '../services/simulator.js';
 import { telemetryController } from '../controllers/telemetry.controller.js';
 import { commandController } from '../controllers/command.controller.js';
@@ -26,6 +26,23 @@ router.get('/', authenticateUser, (req, res) => {
     // Non-admin users can ONLY view their own devices
     res.json(db.getDevices(currentUser.id, currentUser.id));
   }
+});
+
+router.get('/:id', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Bu cihaz hesabınıza ait değildir.' });
+  }
+
+  res.json(existingDev);
 });
 
 router.post('/', authenticateUser, (req, res) => {
@@ -180,6 +197,130 @@ router.post('/:id/regen-key', authenticateUser, (req, res) => {
     res.json({ apiKey: newKey, message: 'API Anahtarı başarıyla yenilendi.' });
   } catch {
     res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+});
+
+router.post('/:id/rotate-key', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { expiresDays, scopes } = req.body || {};
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın anahtarını döndürebilirsiniz.' });
+  }
+
+  try {
+    const updated = await db.rotateApiKey(deviceId, {
+      expiresDays: expiresDays ? Number(expiresDays) : undefined,
+      scopes: Array.isArray(scopes) ? scopes : undefined,
+    });
+    if (!updated) return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      apiKey: updated.apiKey,
+      apiKeyExpiresAt: updated.expiresAt,
+      message: 'Cihaz API anahtarı başarıyla döndürüldü (rotated).'
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Anahtar döndürülemedi.' });
+  }
+});
+
+router.post('/:id/revoke-key', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { reason } = req.body || {};
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın anahtarını iptal edebilirsiniz.' });
+  }
+
+  try {
+    const updated = await db.revokeApiKey(deviceId, reason || 'Kullanıcı tarafından askıya alındı');
+    if (!updated) return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+    // Immediately terminate any active WebSockets for this revoked device
+    terminateDeviceSockets(deviceId, `API Key iptal edildi: ${reason || 'Revoked'}`);
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      apiKeyRevoked: updated.apiKeyRevoked ?? true,
+      message: 'Cihaz API anahtarı iptal edildi ve tüm aktif bağlantılar sonlandırıldı.'
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Anahtar iptal edilemedi.' });
+  }
+});
+
+router.post('/:id/restore-key', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın anahtarını geri yükleyebilirsiniz.' });
+  }
+
+  try {
+    const updated = await db.restoreApiKey(deviceId);
+    if (!updated) return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      apiKeyRevoked: false,
+      message: 'Cihaz API anahtarı başarıyla yeniden aktif edildi.'
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Anahtar geri yüklenemedi.' });
+  }
+});
+
+router.put('/:id/credentials', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deviceId = req.params.id;
+  const { apiKeyScopes, apiKeyExpiresAt } = req.body || {};
+
+  const existingDev = db.getDeviceById(deviceId) || db.getDevices().find((d) => d.id === deviceId);
+  if (!existingDev) {
+    return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+  }
+
+  if (!tenantSecurityService.canUserAccessDevice(currentUser, existingDev, db.data.tenantMemberships || [])) {
+    return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazın kimlik ayarlarını güncelleyebilirsiniz.' });
+  }
+
+  try {
+    const updated = await db.updateApiKeySettings(deviceId, {
+      scopes: Array.isArray(apiKeyScopes) ? apiKeyScopes : undefined,
+      expiresAt: apiKeyExpiresAt !== undefined ? apiKeyExpiresAt : undefined,
+    });
+    if (!updated) return res.status(404).json({ error: 'Cihaz bulunamadı.' });
+    broadcast('devices:updated', db.getDevices());
+    res.json({
+      success: true,
+      device: updated,
+      message: 'Cihaz kimlik ve yetki ayarları güncellendi.'
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Kimlik ayarları güncellenemedi.' });
   }
 });
 

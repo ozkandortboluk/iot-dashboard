@@ -248,9 +248,12 @@ export class DeviceRepository {
     if (!dev) throw new Error('Cihaz bulunamadı');
 
     const keyDetails = generateDeviceKeyDetails();
+    dev.previousApiKeyHash = dev.apiKeyHash;
     dev.apiKey = keyDetails.rawKey;
     dev.apiKeyPrefix = keyDetails.prefix;
     dev.apiKeyHash = keyDetails.hash;
+    dev.apiKeyRotatedAt = new Date().toISOString();
+    dev.apiKeyRevoked = false;
 
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Yenilendi: ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
@@ -259,6 +262,98 @@ export class DeviceRepository {
     this.db.postgresRepo?.saveDevice(dev).catch(() => {});
 
     return dev.apiKey;
+  }
+
+  public rotateApiKey(
+    deviceId: string,
+    options?: { expiresDays?: number; scopes?: string[] }
+  ): { apiKey: string; prefix: string; expiresAt?: string; scopes: string[]; rotatedAt: string } {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    const keyDetails = generateDeviceKeyDetails();
+    dev.previousApiKeyHash = dev.apiKeyHash;
+    dev.apiKey = keyDetails.rawKey;
+    dev.apiKeyPrefix = keyDetails.prefix;
+    dev.apiKeyHash = keyDetails.hash;
+    dev.apiKeyRotatedAt = new Date().toISOString();
+    dev.apiKeyRevoked = false;
+
+    if (options?.scopes && Array.isArray(options.scopes)) {
+      dev.apiKeyScopes = options.scopes;
+    } else if (!dev.apiKeyScopes || dev.apiKeyScopes.length === 0) {
+      dev.apiKeyScopes = ['all'];
+    }
+
+    if (options?.expiresDays && options.expiresDays > 0) {
+      const exp = new Date();
+      exp.setDate(exp.getDate() + options.expiresDays);
+      dev.apiKeyExpiresAt = exp.toISOString();
+    }
+
+    this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Rotasyonu Gerçekleştirildi: ${dev.name}`, 'high');
+    this.db.saveData(this.db.data);
+
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    return {
+      apiKey: dev.apiKey,
+      prefix: dev.apiKeyPrefix,
+      expiresAt: dev.apiKeyExpiresAt,
+      scopes: dev.apiKeyScopes || ['all'],
+      rotatedAt: dev.apiKeyRotatedAt,
+    };
+  }
+
+  public revokeApiKey(deviceId: string, reason = 'Manuel İptal'): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    dev.apiKeyRevoked = true;
+    dev.websocketConnected = false;
+
+    this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı İptal Edildi (Revoked): ${dev.name} (Neden: ${reason})`, 'high');
+    this.db.saveData(this.db.data);
+
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    return dev;
+  }
+
+  public restoreApiKey(deviceId: string): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    dev.apiKeyRevoked = false;
+
+    this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Yeniden Aktifleştirildi: ${dev.name}`, 'medium');
+    this.db.saveData(this.db.data);
+
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    return dev;
+  }
+
+  public updateApiKeySettings(
+    deviceId: string,
+    settings: { scopes?: string[]; expiresAt?: string }
+  ): Device {
+    const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
+    if (!dev) throw new Error('Cihaz bulunamadı');
+
+    if (settings.scopes !== undefined) {
+      dev.apiKeyScopes = settings.scopes;
+    }
+    if (settings.expiresAt !== undefined) {
+      dev.apiKeyExpiresAt = settings.expiresAt;
+    }
+
+    this.db.addAuditLog('system', 'API Manager', `Cihaz API İzinleri ve Süresi Güncellendi: ${dev.name}`, 'medium');
+    this.db.saveData(this.db.data);
+
+    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+
+    return dev;
   }
 
   public convertToPhysicalDevice(deviceId: string, adminUserId = 'system', adminUserName = 'Yönetici'): Device {

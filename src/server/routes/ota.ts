@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { db } from '../db.js';
 import { broadcast, sendOtaCommandViaWs, isDeviceConnectedViaWs } from '../services/websocket.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { tenantSecurityService } from '../services/tenantSecurity.service.js';
 import type { OtaDeploymentJob, Device, Firmware } from '../../types.js';
 import {
   isValidSemver,
@@ -140,6 +141,18 @@ otaRouter.post('/deploy', authenticateUser, requireAdmin, (req: Request, res: Re
     return res.status(400).json({
       error: 'Güncelleme için uygun cihaz bulunamadı. Lütfen hedef filtrelerini kontrol edin.',
     });
+  }
+
+  // Multi-device deployment authorization: Device ownership control
+  if (user.role !== 'admin') {
+    const unownedDevice = targetDevices.find(
+      (dev) => !tenantSecurityService.canUserAccessDevice(user, dev, db.data.tenantMemberships || [])
+    );
+    if (unownedDevice) {
+      return res.status(403).json({
+        error: `Toplu güncelleme yetkisiz cihaz içeriyor: [${unownedDevice.name} (${unownedDevice.id})]. Yalnızca kendi cihazlarınıza güncelleme dağıtabilirsiniz.`,
+      });
+    }
   }
 
   const simulatedTarget = targetDevices.find((d) => d.isSimulated);

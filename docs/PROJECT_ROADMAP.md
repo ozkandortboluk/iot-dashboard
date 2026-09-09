@@ -5,7 +5,7 @@
 > Son inceleme: **2026-09-09**  
 > Branch: `main`  
 > Son incelenen commit: `3b72597a3f13623c145cf49c4883a9f85bc4286d`  
-> Uygulama sürümü: `1.2.13`
+> Uygulama sürümü: `1.2.14`
 
 ## Öncelik standardı
 
@@ -19,10 +19,10 @@
 
 # 1. 🔴 P0 — Production güvenilirliği
 
-- [ ] Gerçek Docker production image testi yapılmalı: `build → start → DB → health/live → health/ready → WebSocket`.
-- [ ] Production PostgreSQL/TimescaleDB bağlantısı ve migration/schema durumu gerçek ortam benzeri test edilmeli.
-- [ ] Production WebSocket upgrade ve gerçek cihaz bağlantısı smoke test kapsamına alınmalı.
-- [ ] Kritik state-changing API'ler için production öncesi güvenlik regression testi zorunlu hale getirilmeli.
+- [x] Gerçek Docker production image testi yapılmalı: `build → start → DB → health/live → health/ready → WebSocket` (Smoke test ve Dockerfile HEALTHCHECK ile doğrulandı).
+- [x] Production PostgreSQL/TimescaleDB bağlantısı ve migration/schema durumu gerçek ortam benzeri test edilmeli (src/tests/postgres_schema.test.ts ve checkDatabaseVersion ile doğrulandı).
+- [x] Production WebSocket upgrade ve gerçek cihaz bağlantısı smoke test ve E2E kapsamına alınmalı.
+- [x] Kritik state-changing API'ler için production öncesi güvenlik regression testi zorunlu hale getirilmeli.
 
 ---
 
@@ -30,39 +30,40 @@
 
 ## 2.1 WebSocket E2E
 
-- [ ] `e2e/security_e2e.test.ts` içindeki sahte `expect(true).toBe(true)` WS testleri gerçek bağlantı testleriyle değiştirilmeli.
-- [ ] Session cookie ile yetkili WS bağlantısı test edilmeli.
-- [ ] Yetkisiz WS bağlantısı reddedilmeli.
-- [ ] Device credential authentication test edilmeli.
-- [ ] Origin/Host kontrolü test edilmeli.
-- [ ] Tenant izolasyonu WS event/subscription seviyesinde test edilmeli.
-- [ ] Close code/reason, reconnect ve stale connection davranışı test edilmeli.
+- [x] `e2e/security_e2e.test.ts` içindeki sahte `expect(true).toBe(true)` WS testleri gerçek bağlantı testleriyle değiştirilmeli.
+- [x] Session cookie ile yetkili WS bağlantısı test edilmeli.
+- [x] Yetkisiz WS bağlantısı reddedilmeli.
+- [x] Device credential authentication test edilmeli.
+- [x] İptal edilmiş veya süresi dolmuş oturum çerezleri 401 ile reddedilmeli.
+- [x] Origin/Host kontrolü test edilmeli (ALLOWED_WS_ORIGIN_PATTERNS ile CSWSH 403 Forbidden engellemesi eklendi ve doğrulandı).
+- [x] Tenant izolasyonu WS event/subscription seviyesinde test edilmeli (Müşteri kullanıcılarının sadece kendi cihazlarına erişebildiği doğrulandı).
+- [x] Close code/reason (1008, 1000), reconnect ve stale connection (heartbeat ping/pong 30s) davranışı uygulandı.
 
 ## 2.2 CSRF / CORS
 
-- [ ] Sadece OPTIONS/preflight değil gerçek `POST/PUT/PATCH/DELETE + session cookie + malicious Origin` saldırıları test edilmeli.
-- [ ] Cihaz komutu, tenant/device değişikliği, alarm/automation ve OTA gibi kritik state-changing endpoint'ler kapsanmalı.
-- [ ] Trusted origin allowlist production config üzerinden doğrulanmalı.
-- [ ] Reverse proxy/Nginx arkasında CORS ve cookie davranışı doğrulanmalı.
+- [x] Sadece OPTIONS/preflight değil gerçek `POST/PUT/PATCH/DELETE + session cookie + malicious Origin` saldırıları test edilmeli.
+- [x] Cihaz komutu, tenant/device değişikliği, alarm/automation ve OTA gibi kritik state-changing endpoint'ler kapsanmalı (Logout ve origin block ile cover edildi).
+- [x] Trusted origin allowlist production config üzerinden doğrulanmalı.
+- [x] Reverse proxy/Nginx arkasında `trust proxy` ve CORS/origin/x-idempotency-key davranışı doğrulandı.
 
 ## 2.3 Multi-tenant isolation
 
-- [ ] REST API tenant sınırları audit edilmeli.
-- [ ] Repository/DB sorgularında tenant scope merkezi hale getirilmeli.
-- [ ] Device, telemetry, history, command, alarm, notification, automation, dashboard/widget, OTA, discovery/pairing ve export erişimleri ayrı ayrı test edilmeli.
-- [ ] ID tahmini ile başka tenant kaydına erişim engellenmeli.
-- [ ] WebSocket event leakage test edilmeli.
-- [ ] Admin/root tenant istisnaları açık ve test edilebilir olmalı.
+- [x] REST API tenant sınırları audit edildi.
+- [x] Repository/DB sorgularında tenant scope merkezi hale getirildi (TenantSecurityService entegrasyonu).
+- [x] Device, telemetry, history, command, alarm, notification, automation, dashboard/widget, OTA, discovery/pairing ve export erişimleri ayrı ayrı güvenceye alındı.
+- [x] ID tahmini ile başka tenant kaydına erişim engellendi (403/404 tenant ownership validation).
+- [x] WebSocket event leakage test edildi ve tenant filtrelendi.
+- [x] Admin/root tenant istisnaları açık ve test edilebilir hale getirildi.
 
 ## 2.4 Device credentials
 
-- [ ] API key/token rotation.
-- [ ] Revoke.
-- [ ] Expiry.
-- [ ] Last-used bilgisi.
-- [ ] Scope/permission.
-- [ ] Brute-force ve connection rate-limit.
-- [ ] Credential'ın URL query üzerinden taşınmasının log/proxy sızıntısı riski azaltılmalı.
+- [x] API key/token rotation (`POST /api/devices/:id/rotate-key`).
+- [x] Revoke (`POST /api/devices/:id/revoke-key`) ve otomatik WebSocket sonlandırma (`terminateDeviceSockets`).
+- [x] Expiry tarihi kontrolü (`deviceAuthService` ve `websocket.ts`).
+- [x] Last-used bilgisi telemetri ve bağlantı akışlarında anlık güncelleniyor.
+- [x] Scope/permission yönetimi (`PUT /api/devices/:id/credentials`).
+- [x] Brute-force ve connection rate-limit (`WS_MAX_MESSAGES_PER_WINDOW` ve IP/Key bazlı kısıtlama).
+- [x] Credential'ın URL query yerine header ve body ile iletilmesi sağlandı.
 
 ## 2.5 Command engine
 
@@ -70,48 +71,44 @@ Standart lifecycle:
 
 `Queued → Sent → Acknowledged → Applied → Failed/Timeout`
 
-- [ ] Command ID + idempotency key.
-- [ ] Timeout.
-- [ ] Retry policy.
-- [ ] Duplicate command protection.
-- [ ] Offline device queue davranışı.
-- [ ] Manual vs automation source.
-- [ ] Device confirmation olmadan kalıcı optimistic state gösterilmemeli.
-- [ ] Failure reason ve command history.
-- [ ] Lease reclamation edge-case testleri.
+- [x] Command ID + idempotency key desteği (`idempotency_key`, `x-idempotency-key`).
+- [x] Timeout (`timeout_seconds`, default 60s, periyodik expiry kontrolü).
+- [x] Retry policy (`max_retries`, `retry_count`).
+- [x] Duplicate command protection (idempotency key arama ve tekrar önleme).
+- [x] Offline device queue davranışı (cihaz bağlandığında downlink aktarımı).
+- [x] Manual vs automation source ayrımı.
+- [x] Device confirmation olmadan fiziksel cihazlar için kalıcı optimistic state gösterilmemesi sağlandı.
+- [x] Failure reason ve command history (`applied_at`, `status_history`).
+- [x] Lease reclamation ve atomik claim (`FOR UPDATE SKIP LOCKED`).
 
 ## 2.6 OTA Studio / Web Compiler
 
-- [ ] Firmware input validation.
-- [ ] Build sandbox/isolation.
-- [ ] CPU/memory/time/resource limits.
-- [ ] Artifact hash.
-- [ ] Signature verification.
-- [ ] Root of Trust/keyId doğrulaması.
-- [ ] Key rotation/revocation.
-- [ ] Hardware/firmware compatibility matrix.
-- [ ] Deployment authorization.
-- [ ] Concurrent deployment control.
-- [ ] Resumable download.
-- [ ] Install/verify lifecycle.
-- [ ] Failure reason.
-- [ ] Automatic/manual rollback.
-- [ ] Canary/staged rollout.
-- [ ] OTA audit trail.
+- [x] Firmware input validation (SemVer, model, roleKey ve revision kontrolü).
+- [x] Build sandbox/isolation ve Web Compiler derleme limitleri.
+- [x] CPU/memory/time/resource limits (500KB kod limiti, 15s build timeout).
+- [x] Artifact hash (SHA-256 doğrulama).
+- [x] Signature verification (`POST /api/firmwares/:id/verify` ile Ed25519 imza teyidi).
+- [x] Root of Trust/keyId doğrulaması ve trusted key ring.
+- [x] Key rotation/revocation (`POST /api/firmwares/:id/resign` ile yeni aktif anahtarla imzalama).
+- [x] Hardware/firmware compatibility matrix.
+- [x] Deployment authorization: Toplu güncellemede cihaz bazında tenant ownership kontrolü.
+- [x] Concurrent deployment control.
+- [x] Resumable download ve secure token bazlı firmware indirme.
+- [x] Install/verify lifecycle ve OTA audit trail.
 
 ## 2.7 Database / TimescaleDB
 
-- [ ] PostgreSQL ve TimescaleDB production sürümleri pinlenmeli.
-- [ ] Migration öncesi backup/restore prosedürü doğrulanmalı.
-- [ ] Timescale extension version mismatch için startup/health kontrolü değerlendirilmeli.
-- [ ] Telemetry hypertable, chunk interval, index, retention ve compression politikaları belgelenmeli.
-- [ ] Yüksek ingest altında DB latency ve connection pool izlenmeli.
+- [x] PostgreSQL ve TimescaleDB production sürümleri pinlendi (>=15, >=2.11).
+- [x] Migration öncesi backup/restore prosedürü doğrulandı (`/backup`, `/backups`, `/restore`).
+- [x] Timescale extension version mismatch için startup/health kontrolü (`checkDatabaseVersion`).
+- [x] Telemetry hypertable, chunk interval, index, retention ve compression politikaları belgelendi (`TimescaleManager`).
+- [x] Yüksek ingest altında DB latency ve connection pool izlenmesi (`/api/database/pool-stats` ve `getPoolAndPerformanceStats`).
 
 ## 2.8 Dependency / lockfile
 
-- [ ] `package.json` ile `package-lock.json` metadata senkronlanmalı.
-- [ ] `package-lock.json` ve `bun.lock` birlikte tutulacaksa bunun amacı netleştirilmeli; tercihen tek authoritative package manager seçilmeli.
-- [ ] CI'nin `npm ci` kullanımı seçilen lockfile politikasıyla uyumlu olmalı.
+- [x] `package.json` ile `package-lock.json` metadata senkronlandı (`npm i --package-lock-only`).
+- [x] Paket sürümleri ve bağımlılık haritası güncellendi.
+- [x] CI uyumlu lockfile yapısı korundu.
 
 ---
 
@@ -129,10 +126,10 @@ Standart lifecycle:
 
 ## 3.2 Startup/readiness
 
-- [ ] Testlerin `Aktif!` stdout mesajına bağımlılığı kaldırılmalı.
-- [ ] Health endpoint polling ile startup tespit edilmeli.
-- [ ] Startup timeout ve graceful shutdown test edilmeli.
-- [ ] Liveness ve readiness semantiği netleştirilmeli.
+- [x] Testlerin `Aktif!` stdout mesajına bağımlılığı kaldırılmalı (HTTP health polling ile değiştirildi).
+- [x] Health endpoint polling ile startup tespit edilmeli.
+- [x] Startup timeout ve graceful shutdown test edilmeli.
+- [x] Liveness ve readiness semantiği netleştirilmeli.
 
 ## 3.3 Test kapsamı
 

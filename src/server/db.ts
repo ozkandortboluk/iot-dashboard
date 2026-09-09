@@ -852,6 +852,28 @@ class LocalDatabase {
     };
   }
 
+  public async getDatabasePerformanceStats() {
+    if (this.postgresRepo && this.postgresRepo.isReady()) {
+      const poolStats = await this.postgresRepo.getPoolAndPerformanceStats();
+      return {
+        engine: 'PostgreSQL / TimescaleDB',
+        isConnected: true,
+        ...poolStats,
+      };
+    }
+    return {
+      engine: 'In-Memory / Local JSON',
+      isConnected: true,
+      totalCount: 1,
+      idleCount: 1,
+      waitingCount: 0,
+      maxConnections: 1,
+      queryLatencyMs: 0.1,
+      status: 'healthy',
+      activeQueriesCount: 0,
+    };
+  }
+
   private saveTimer: NodeJS.Timeout | null = null;
 
   public scheduleSave() {
@@ -933,6 +955,10 @@ class LocalDatabase {
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
   public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
   public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }
+  public rotateApiKey(deviceId: string, options?: { expiresDays?: number; scopes?: string[] }) { return this.deviceRepository.rotateApiKey(deviceId, options); }
+  public revokeApiKey(deviceId: string, reason?: string): Device { return this.deviceRepository.revokeApiKey(deviceId, reason); }
+  public restoreApiKey(deviceId: string): Device { return this.deviceRepository.restoreApiKey(deviceId); }
+  public updateApiKeySettings(deviceId: string, settings: { scopes?: string[]; expiresAt?: string }): Device { return this.deviceRepository.updateApiKeySettings(deviceId, settings); }
   public convertToPhysicalDevice(deviceId: string, adminUserId?: string, adminUserName?: string): Device { return this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
   public updateDevice(deviceId: string, updates: Partial<Device>): Device { return this.deviceRepository.updateDevice(deviceId, updates); }
   public deleteDevice(deviceId: string): void { return this.deviceRepository.deleteDevice(deviceId); }
@@ -1105,12 +1131,25 @@ class LocalDatabase {
       throw new Error(`[Multi-Tenant Error] Bu cihaza (${opts.deviceId}) komut gönderme yetkiniz yok.`);
     }
 
+    // Idempotency Key check: if provided, return existing active command within 1 hour
+    const idempotencyKey = opts.idempotencyKey || opts.idempotency_key;
+    if (idempotencyKey && this.data.commands) {
+      const existing = this.data.commands.find(
+        (c) => c.deviceId === opts.deviceId && (c.idempotencyKey === idempotencyKey || c.idempotency_key === idempotencyKey) && c.status !== 'cancelled'
+      );
+      if (existing) {
+        return existing;
+      }
+    }
+
     const id = opts.commandId || opts.id || `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const nowIso = new Date().toISOString();
 
     const cmd: DeviceCommand = {
       id,
       commandId: opts.commandId || id,
+      idempotencyKey: idempotencyKey || undefined,
+      idempotency_key: idempotencyKey || undefined,
       tenantId: opts.tenantId || opts.customerId || dev.tenantId || undefined,
       customerId: opts.customerId || opts.tenantId || dev.tenantId || undefined,
       deviceId: opts.deviceId,
@@ -1122,13 +1161,18 @@ class LocalDatabase {
       value: opts.value !== undefined ? opts.value : opts.payload,
       payload: opts.payload !== undefined ? opts.payload : (opts.value ?? ''),
       source: opts.source || 'manual',
-      status: opts.status || 'pending',
+      status: opts.status || 'queued',
+      timeoutSeconds: opts.timeoutSeconds || 300,
+      retryCount: opts.retryCount || 0,
+      maxRetries: opts.maxRetries || 3,
       createdAt: opts.createdAt || opts.created_at || nowIso,
       created_at: opts.createdAt || opts.created_at || nowIso,
       sentAt: opts.sentAt || opts.sent_at,
       sent_at: opts.sentAt || opts.sent_at,
       acknowledgedAt: opts.acknowledgedAt || opts.acknowledged_at,
       acknowledged_at: opts.acknowledgedAt || opts.acknowledged_at,
+      appliedAt: opts.appliedAt || opts.applied_at,
+      applied_at: opts.appliedAt || opts.applied_at,
       executedAt: opts.executedAt || opts.executed_at,
       executed_at: opts.executedAt || opts.executed_at,
       errorMessage: opts.errorMessage || opts.error_message,
@@ -1243,7 +1287,7 @@ class LocalDatabase {
   public async acknowledgeCommands(
     deviceId: string,
     commandIds: string | string[],
-    status: 'acknowledged' | 'failed' | 'executed' = 'acknowledged',
+    status: 'acknowledged' | 'applied' | 'failed' | 'executed' = 'acknowledged',
     result?: any
   ): Promise<{ count: number; commands: DeviceCommand[] }> {
     const ids = Array.isArray(commandIds) ? commandIds : [commandIds];
@@ -1266,8 +1310,26 @@ class LocalDatabase {
     for (const cmd of this.data.commands) {
       if (ids.includes(cmd.id) && cmd.deviceId === deviceId) {
         cmd.status = status;
-        cmd.executed_at = now;
-        cmd.acknowledged_at = now;
+        if (status === 'applied' || status === 'executed') {
+          cmd.appliedAt = now;
+          cmd.applied_at = now;
+          cmd.executedAt = now;
+          cmd.executed_at = now;
+          if (!cmd.acknowledgedAt) {
+            cmd.acknowledgedAt = now;
+            cmd.acknowledged_at = now;
+          }
+        } else if (status === 'acknowledged') {
+          cmd.acknowledgedAt = now;
+          cmd.acknowledged_at = now;
+        } else if (status === 'failed') {
+          cmd.executedAt = now;
+          cmd.executed_at = now;
+          if (result?.error || result?.errorMessage) {
+            cmd.errorMessage = result.error || result.errorMessage;
+            cmd.error_message = cmd.errorMessage;
+          }
+        }
         if (result !== undefined) cmd.result = result;
         if (!this.isPostgresProductionMode()) {
           count++;
@@ -1287,17 +1349,21 @@ class LocalDatabase {
     if (this.isPostgresProductionMode()) {
       return await this.postgresRepo.expireStaleCommands(timeoutSeconds);
     } else {
-      const cutoff = Date.now() - timeoutSeconds * 1000;
+      const nowMs = Date.now();
       const expired: DeviceCommand[] = [];
       if (!this.data.commands) this.data.commands = [];
       for (const c of this.data.commands) {
+        const cmdTimeout = c.timeoutSeconds || timeoutSeconds;
+        const cutoff = nowMs - cmdTimeout * 1000;
         if (
-          (c.status === 'pending' || c.status === 'sent' || (c.status as any) === 'claimed') &&
+          (c.status === 'queued' || c.status === 'pending' || c.status === 'sent' || (c.status as any) === 'claimed') &&
           new Date(c.createdAt || c.created_at || 0).getTime() < cutoff
         ) {
-          c.status = 'expired';
+          c.status = 'timeout';
           c.executedAt = new Date().toISOString();
+          c.executed_at = c.executedAt;
           c.errorMessage = 'Komut zaman aşımına uğradı (cihaz yanıt vermedi / süresi doldu)';
+          c.error_message = c.errorMessage;
           expired.push({ ...c });
         }
       }

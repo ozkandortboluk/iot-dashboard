@@ -139,6 +139,63 @@ export class DeviceAuthService {
       };
     }
 
+    // 3.1. API Key Revocation Check
+    if (device.apiKeyRevoked === true) {
+      return {
+        success: false,
+        httpStatus: 401,
+        errorResponse: {
+          error: 'api_key_revoked',
+          status: 'unauthorized',
+          deviceId: device.id,
+          deviceName: device.name,
+          message: 'Bu cihazın API anahtarı iptal edilmiştir (Revoked). Lütfen yönetim panelinden yeni bir anahtar oluşturun.',
+        },
+      };
+    }
+
+    // 3.2. API Key Expiry Check
+    if (device.apiKeyExpiresAt && new Date(device.apiKeyExpiresAt).getTime() < Date.now()) {
+      return {
+        success: false,
+        httpStatus: 401,
+        errorResponse: {
+          error: 'api_key_expired',
+          status: 'unauthorized',
+          deviceId: device.id,
+          deviceName: device.name,
+          expiresAt: device.apiKeyExpiresAt,
+          message: 'Bu cihazın API anahtarının geçerlilik süresi dolmuştur (Expired).',
+        },
+      };
+    }
+
+    // 3.3. API Key Scope Permission Check (Requires telemetry:write or all)
+    if (
+      device.apiKeyScopes &&
+      Array.isArray(device.apiKeyScopes) &&
+      device.apiKeyScopes.length > 0 &&
+      !device.apiKeyScopes.includes('all') &&
+      !device.apiKeyScopes.includes('telemetry:write')
+    ) {
+      return {
+        success: false,
+        httpStatus: 403,
+        errorResponse: {
+          error: 'insufficient_api_key_scope',
+          status: 'forbidden',
+          deviceId: device.id,
+          deviceName: device.name,
+          grantedScopes: device.apiKeyScopes,
+          requiredScope: 'telemetry:write',
+          message: 'Bu cihaz API anahtarı telemetri verisi yazma ("telemetry:write") yetkisine sahip değildir.',
+        },
+      };
+    }
+
+    // Update Last-Used Timestamp
+    device.apiKeyLastUsedAt = new Date().toISOString();
+
     // 4. Device ID Verification & Auto-Resolution
     // If device is authenticated via valid API Key, we accept it.
     // We only alert if the payload explicitly contains another distinct registered device's ID.

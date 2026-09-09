@@ -1767,7 +1767,8 @@ curl -X POST "${originUrl}/api/device/commands/ack" \\
 POST ${originUrl}/api/devices/dev_esp32_01/commands
 Headers: {
   "Content-Type": "application/json",
-  "Authorization": "Bearer YOUR_USER_JWT_TOKEN"
+  "Authorization": "Bearer YOUR_USER_JWT_TOKEN",
+  "X-Idempotency-Key": "req_uniq_987654321"  // Çift gönderimi önleyen benzersiz idempotency anahtarı (P1)
 }
 Body:
 {
@@ -1775,7 +1776,9 @@ Body:
   "commandType": "SET_OUTPUT",
   "outputId": "RELAY_1",
   "value": "1",
-  "source": "manual"
+  "source": "manual",
+  "timeoutSeconds": 60,                     // Özel zaman aşımı süresi (saniye) (P1)
+  "idempotencyKey": "req_uniq_987654321"    // Body üzerinden de idempotency anahtarı iletilebilir
 }
 
 // Başarılı Yanıt (HTTP 201 Created):
@@ -1794,6 +1797,8 @@ Body:
     "value": "1",
     "source": "manual",
     "status": "pending",
+    "idempotencyKey": "req_uniq_987654321",
+    "timeoutSeconds": 60,
     "createdAt": "2026-08-31T15:30:00.000Z"
   }
 }

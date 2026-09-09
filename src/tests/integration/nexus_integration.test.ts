@@ -1,20 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import { db } from '../../server/db';
-import authRoutes from '../../server/routes/auth';
-import telemetryRoutes from '../../server/routes/telemetry';
-import deviceRoutes from '../../server/routes/devices';
+import { authRouter } from '../../server/routes/auth';
+import { telemetryRouter } from '../../server/routes/telemetry';
+import { devicesRouter } from '../../server/routes/devices';
 
 // Mount a test app
 const app = express();
 app.use(express.json());
-app.use('/api/auth', authRoutes);
-app.use('/api/telemetry', telemetryRoutes);
-app.use('/api/devices', deviceRoutes);
+app.use(cookieParser());
+app.use('/api/auth', authRouter);
+app.use('/api/telemetry', telemetryRouter);
+app.use('/api/devices', devicesRouter);
 
 describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
-  let adminToken: string = '';
   let sessionCookie: string = '';
 
   beforeAll(async () => {
@@ -25,37 +26,40 @@ describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
     // Cleanup if needed
   });
 
+  const testEmail = `integration_${Date.now()}@nexusnodeiot.com.tr`;
+  const testPassword = 'IntegrationStrongPassword123!';
+
   describe('1. Auth & Tenant Isolation (HttpOnly Cookie & RBAC)', () => {
-    it('should register a new tenant admin safely', async () => {
+    it('should register a new tenant customer safely', async () => {
       const res = await request(app)
         .post('/api/auth/register')
         .send({
-          name: 'Integration Test Admin',
-          email: 'integration@nexusnodeiot.com.tr',
-          password: 'IntegrationStrongPassword123!'
+          name: 'Integration Test User',
+          email: testEmail,
+          password: testPassword,
+          companyName: 'Test Corp'
         });
       
-      // Depending on the logic, might be 200 or 400 if already exists
-      if (res.status === 200) {
-        expect(res.body).toHaveProperty('user');
-        expect(res.headers['set-cookie']).toBeDefined();
-        sessionCookie = res.headers['set-cookie'][0];
-      }
-    });
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('user');
+      expect(res.body.user.email).toBe(testEmail);
+      expect(res.headers['set-cookie']).toBeDefined();
+      sessionCookie = res.headers['set-cookie'][0];
+    }, 15000);
 
     it('should login and return HttpOnly secure cookie', async () => {
       const res = await request(app)
         .post('/api/auth/login')
         .send({
-          email: 'admin@dashboard.io', // Default admin from initialData
-          password: 'admin'
+          email: testEmail,
+          password: testPassword
         });
       
       expect(res.status).toBe(200);
       expect(res.headers['set-cookie']).toBeDefined();
       expect(res.headers['set-cookie'][0]).toMatch(/HttpOnly/);
       sessionCookie = res.headers['set-cookie'][0];
-    });
+    }, 15000);
 
     it('should block unauthenticated access to protected routes', async () => {
       const res = await request(app).get('/api/auth/me');
@@ -68,8 +72,9 @@ describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
         .set('Cookie', sessionCookie);
       
       expect(res.status).toBe(200);
-      expect(res.body.user.role).toBe('admin');
-    });
+      expect(res.body.user.email).toBe(testEmail);
+      expect(res.body.user.role).toBe('customer');
+    }, 10000);
   });
 
   describe('2. WebSocket Protocol & Command Acknowledgement', () => {

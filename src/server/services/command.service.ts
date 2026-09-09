@@ -2,9 +2,10 @@ import { db } from '../db.js';
 import { broadcast } from './websocket.js';
 import type { DeviceCommand } from '../../types.js';
 
-function normalizeAckStatus(status?: string): 'acknowledged' | 'failed' | 'executed' {
+function normalizeAckStatus(status?: string): 'acknowledged' | 'applied' | 'failed' | 'executed' {
   if (!status) return 'acknowledged';
   const s = String(status).toLowerCase().trim();
+  if (s === 'applied') return 'applied';
   if (s === 'executed' || s === 'completed' || s === 'done' || s === 'success') return 'executed';
   if (s === 'failed' || s === 'error' || s === 'rejected') return 'failed';
   if (s === 'received' || s === 'acknowledged' || s === 'claimed' || s === 'ack') return 'acknowledged';
@@ -128,13 +129,17 @@ export class CommandService {
 
       // Emit real-time WebSocket events corresponding to each updated command status
       for (const cmd of allUpdatedCommands) {
-        if (cmd.status === 'executed') {
+        if (cmd.status === 'applied') {
+          broadcast('command:applied', cmd);
+          broadcast('command:executed', cmd);
+        } else if (cmd.status === 'executed') {
           broadcast('command:executed', cmd);
         } else if (cmd.status === 'failed') {
           broadcast('command:failed', cmd);
         } else if (cmd.status === 'acknowledged') {
           broadcast('command:acknowledged', cmd);
-        } else if (cmd.status === 'expired') {
+        } else if (cmd.status === 'timeout' || cmd.status === 'expired') {
+          broadcast('command:timeout', cmd);
           broadcast('command:expired', cmd);
         }
       }
