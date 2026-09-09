@@ -2303,6 +2303,9 @@ class LocalDatabase {
         connectionTimeoutMillis: 5000,
         ssl: this.getPgSslOption(connStr),
       });
+      pool.on('error', (err: any) => {
+        console.warn('[PostgreSQL Test Pool Error]:', err?.message);
+      });
 
       const client = await pool.connect();
       const latencyMs = Date.now() - startTime;
@@ -2393,6 +2396,9 @@ class LocalDatabase {
         connectionString: connStr,
         connectionTimeoutMillis: 8000,
         ssl: this.getPgSslOption(connStr),
+      });
+      pool.on('error', (err: any) => {
+        console.warn('[PostgreSQL Migration Pool Error]:', err?.message);
       });
 
       const client = await pool.connect();

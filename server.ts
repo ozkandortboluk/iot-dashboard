@@ -130,6 +130,16 @@ app.all('/api/*', (req, res) => {
   });
 });
 
+// API Global Error Handler: Ensure API crashes return JSON, not HTML
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.path.startsWith('/api/')) {
+    console.error('[API Error]:', err);
+    res.status(500).json({ success: false, error: 'Sunucu hatası', details: err?.message || String(err) });
+  } else {
+    next(err);
+  }
+});
+
 // Initialize WebSocket, OTA Worker & Background Simulation Engines
 initWebSocketServer(server);
 initSimulator();
