@@ -855,6 +855,19 @@ export interface AuditLog {
   severity: 'low' | 'medium' | 'high';
 }
 
+export type SystemEventLevel = 'info' | 'warn' | 'error' | 'critical';
+export type SystemEventCategory = 'database' | 'server' | 'websocket' | 'telemetry' | 'auto_repair' | 'security' | 'auth';
+
+export interface SystemEvent {
+  id: string;
+  timestamp: string;
+  level: SystemEventLevel;
+  category: SystemEventCategory;
+  message: string;
+  details?: string;
+  source?: string;
+}
+
 export type DiscoveredDeviceLifecycleState = 'discovered' | 'pending' | 'assigned' | 'active';
 
 export type PairingMethod = 'qr_scan' | 'pairing_code' | 'network_scan' | 'manual';

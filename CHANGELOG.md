@@ -4,6 +4,25 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.7.0] - 2026-09-10
+
+### 🛡️ Database Auto-Healing & System Event Logging Architecture
+- **Automatic Database Self-Healer (`DatabaseAutoHealer`):** Built an autonomous background watchdog service running every 30 seconds to inspect `pg_stat_activity`, terminate hung queries and deadlock locks (`waiting for locks` > 10s or runtime > 45s), verify database latency, and automatically recycle exhausted connection pools.
+- **Persistent System Event Logger (`SystemLoggerService`):** Created a unified event logging engine supporting real-time in-memory rolling buffers, file persistence (`logs/system_events.json`), severity levels (`critical`, `error`, `warn`, `info`), category tagging, text search, and export capability.
+- **PostgreSQL Lock & Deadlock Shielding:** Hardened all DDL checks with `statement_timeout = '6s'` and `lock_timeout = '2s'`, implemented 60-second debounced background schema execution, and bypassed monolithic table recreations when tables already exist.
+- **Process Crash Shields:** Added global Node.js process protection via `uncaughtException` and `unhandledRejection` guards hooked directly into `systemLogger.critical`, preventing server process termination during unexpected database timeouts or socket aborts.
+- **WebSocket Upgrade Hardening:** Attached error interceptors to HTTP upgrade sockets and the WebSocket server instance, eliminating crash vectors from client aborts.
+- **Self-Healing & Event Explorer UI Panel (`DatabaseAutoHealerPanel`):** Introduced a modern, responsive dashboard tab in Database Management with live latency meters, pool status counters, manual auto-repair trigger, installation audit checklist, and real-time event filtering.
+
+---
+
+## 🚀 [v1.6.7] - 2026-09-10
+
+### 🛡️ Bug Fixes & Stability
+- **PostgreSQL Fallback Reliability:** Fixed a UI breaking issue where timeout errors during data explorer queries (`users`, `dispatch_logs`, `active_alarms`) bypassed the fallback detection logic. The data exploration layer now properly suppresses timeout connections and safely trips the in-memory fallback mechanism seamlessly.
+
+---
+
 ## 🚀 [v1.6.6] - 2026-09-10
 
 ### 🛡️ Bug Fixes & Stability

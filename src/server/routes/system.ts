@@ -15,6 +15,7 @@ import {
 } from '../services/simulator.js';
 import { simulationTelemetryController } from '../controllers/simulationTelemetry.controller.js';
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
+import { systemLogger } from '../services/systemLogger.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const startTime = Date.now();
@@ -157,6 +158,22 @@ systemRouter.get('/system/postgres-schema', authenticateUser, requireAdmin, (req
   res.send(db.getPostgresSchemaSQL());
 });
 
+// System Event Logs
+systemRouter.get('/system/events', authenticateUser, requireAdmin, (req, res) => {
+  const level = req.query.level as any;
+  const category = req.query.category as any;
+  const search = req.query.search as string;
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+
+  const result = systemLogger.getEvents({ level, category, search, limit });
+  res.json(result);
+});
+
+systemRouter.post('/system/events/clear', authenticateUser, requireAdmin, (req, res) => {
+  systemLogger.clearEvents();
+  res.json({ success: true, message: 'Sistem olay günlükleri başarıyla temizlendi.' });
+});
+
 // Admin Stats & Quotas
 const adminRouter = Router();
 
@@ -174,6 +191,25 @@ const databaseRouter = Router();
 
 databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getDatabaseHealth());
+});
+
+// Database Auto-Healer Endpoints
+databaseRouter.get('/auto-repair/health', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const report = await db.autoHealer.runHealthCheckAndAutoRepair();
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Sağlık raporu alınamadı: ' + (err?.message || err) });
+  }
+});
+
+databaseRouter.post('/auto-repair/run', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const report = await db.autoHealer.runHealthCheckAndAutoRepair();
+    res.json({ success: true, message: 'Otomatik veritabanı onarım ve denetim döngüsü tamamlandı.', report });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Otomatik onarım çalıştırılamadı: ' + (err?.message || err) });
+  }
 });
 
 databaseRouter.get('/pool-stats', authenticateUser, requireAdmin, async (req, res) => {

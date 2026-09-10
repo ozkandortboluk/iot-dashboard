@@ -49,6 +49,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
+import { DatabaseAutoHealerPanel } from './database/DatabaseAutoHealerPanel';
 import type {
   DatabaseEngineType,
   DatabaseEngineConfig,
@@ -133,7 +134,7 @@ export const DatabaseDataView: React.FC = () => {
   const { user } = useAuth();
   const { isConnected, wsLatency } = useRealtime();
 
-  const [activeTab, setActiveTab] = useState<'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users'>('timescale');
+  const [activeTab, setActiveTab] = useState<'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users'>('auto_healer');
   const [opCategoryFilter, setOpCategoryFilter] = useState<'all' | 'widget' | 'api' | 'system' | 'sync'>('all');
 
   // Retention Policies State
@@ -870,6 +871,7 @@ export const DatabaseDataView: React.FC = () => {
       {/* Modern Navigation Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 sm:gap-6 px-1 overflow-x-auto">
         {[
+          { id: 'auto_healer', label: 'Otomatik Onarım & Sistem Olay Günlüğü', icon: ShieldAlert, badge: 'Self-Healing' },
           { id: 'timescale', label: 'TimescaleDB & Veri Sıkıştırma (Geçmiş Kayıt)', icon: Clock, badge: 'Ana Veritabanı' },
           { id: 'postgres', label: 'PostgreSQL & Sunucu Kurulumu', icon: Server },
           { id: 'explorer', label: 'Tablo Veri Gezgini & SQL Yönetimi', icon: Table, badge: 'İçerik & Düzeltme' },
@@ -900,6 +902,9 @@ export const DatabaseDataView: React.FC = () => {
           );
         })}
       </div>
+
+      {/* TAB: DATABASE AUTO-HEALER & SYSTEM EVENT LOGS */}
+      {activeTab === 'auto_healer' && <DatabaseAutoHealerPanel />}
 
       {/* TAB: TIMESCALEDB TIME-SERIES & COMPRESSION MANAGEMENT */}
       {activeTab === 'timescale' && (

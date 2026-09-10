@@ -7,6 +7,7 @@ import { telemetryService } from './telemetry.service.js';
 import { commandService } from './command.service.js';
 import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 import { tenantSecurityService } from './tenantSecurity.service.js';
+import { systemLogger } from './systemLogger.service.js';
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -538,6 +539,9 @@ export function getWebSocketClientsCount(): number {
 export function initWebSocketServer(server: http.Server) {
   // Use noServer: true to cleanly handle HTTP upgrade events and avoid path collision
   wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
+  wss.on('error', (err: any) => {
+    systemLogger.error('websocket', 'WebSocket sunucu hatası', err?.message || err);
+  });
 
   // Subscribe DB notification events to WebSocket broadcast
   db.onNotificationEvent((event, payload) => {
@@ -556,6 +560,9 @@ export function initWebSocketServer(server: http.Server) {
 
   // Setup server-level HTTP upgrade routing
   server.on('upgrade', (request, socket, head) => {
+    socket.on('error', (err: any) => {
+      systemLogger.warn('websocket', 'İstemci socket upgrade hatası', err?.message || err);
+    });
     try {
       const origin = request.headers?.origin as string | undefined;
       if (origin && !isAllowedWsOrigin(origin)) {

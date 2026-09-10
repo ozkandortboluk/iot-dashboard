@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { systemLogger } from '../services/systemLogger.service.js';
 import type {
   User,
   Device,
@@ -186,11 +187,21 @@ export class PostgresRepository {
 
   private isSchemaEnsured = false;
   private isRecoveringSchema = false;
+  private lastSchemaEnsureTime = 0;
 
   public async ensureTelemetrySchema(force = false): Promise<void> {
+    const now = Date.now();
     if (!this.pool || (this.isSchemaEnsured && !force)) return;
+    if (!force && now - this.lastSchemaEnsureTime < 60000) return; // Debounce to prevent cascading checks
+    this.lastSchemaEnsureTime = now;
+
     try {
-      const statements = [
+      const client = await this.pool.connect();
+      try {
+        await client.query("SET statement_timeout = '6s';");
+        await client.query("SET lock_timeout = '2s';");
+
+        const statements = [
         // 1. Users Table & Columns
         `CREATE TABLE IF NOT EXISTS users (
           id VARCHAR(64) PRIMARY KEY,
@@ -726,12 +737,15 @@ export class PostgresRepository {
 
       for (const stmt of statements) {
         try {
-          await this.pool.query(stmt);
+          await client.query(stmt);
         } catch {
           // ignore individual DDL notices
         }
       }
       this.isSchemaEnsured = true;
+      } finally {
+        client.release();
+      }
     } catch (err: any) {
       console.warn('[PostgreSQL ensureTelemetrySchema Warning]:', err?.message || err);
     }
@@ -814,12 +828,12 @@ export class PostgresRepository {
 
       if (isConnectionIssue) {
         this.isConnected = false;
-        console.warn(`[PostgreSQL Bağlantı Kesintisi Tespit Edildi]: ${errMsg}. Bellek içi veritabanına sorunsuz geçiş yapılıyor.`);
+        systemLogger.warn('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bellek içi veritabanına sorunsuz geçiş yapılıyor.`);
         return { rows: [], rowCount: 0, fields: [] };
       } else {
-        console.warn(`[PostgreSQL Query Error]: ${errMsg}`);
+        systemLogger.warn('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
       }
-      throw err;
+      return { rows: [], rowCount: 0, fields: [] };
     }
   }
 

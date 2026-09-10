@@ -5,6 +5,8 @@ import { TelemetryRepository } from "./repositories/telemetry.repository.js";
 import { AlarmRepository } from "./repositories/alarm.repository.js";
 import { NotificationRepository } from "./repositories/notification.repository.js";
 import { TimescaleManager } from "./database/timescale.js";
+import { DatabaseAutoHealer } from "./services/databaseAutoHealer.service.js";
+import { systemLogger } from "./services/systemLogger.service.js";
 import { seedDemoDataForDatabase } from "./db/demoData.js";
 import { postgresSchemaSQL } from "./database/schema.js";
 import fs from 'node:fs';
@@ -246,6 +248,7 @@ class LocalDatabase {
   public alarmRepository = new AlarmRepository(this);
   public notificationRepository = new NotificationRepository(this);
   public timescaleManager = new TimescaleManager(this);
+  public autoHealer = new DatabaseAutoHealer(this);
   private pgPool: PgPoolType | null = null;
   private pgPoolUrl: string = '';
 
@@ -270,6 +273,7 @@ class LocalDatabase {
     this.initPromise = this.initPostgresRepository().catch(() => false);
     this.startPostgresAutoReconnect();
     this.startAutoBackupWorker();
+    this.autoHealer.startWatchdog(30000);
   }
 
   private initPromise: Promise<boolean> | null = null;
@@ -326,6 +330,19 @@ class LocalDatabase {
     return undefined;
   }
 
+  public recyclePgPool(): void {
+    if (this.pgPool) {
+      try {
+        this.pgPool.end().catch(() => {});
+      } catch {}
+      this.pgPool = null;
+      this.pgPoolUrl = '';
+      this.postgresRepo.setPool(null);
+      this.postgresRepo.setConnected(false);
+      systemLogger.info('database', 'PostgreSQL bağlantı havuzu sıfırlandı.');
+    }
+  }
+
   public getPgPool(): PgPoolType | null {
     const url = this.getPostgresUrl().trim();
     if (!url) {
@@ -340,19 +357,23 @@ class LocalDatabase {
       try {
         this.pgPool = new Pool({
           connectionString: url,
-          connectionTimeoutMillis: 10000,
+          connectionTimeoutMillis: 7000,
           idleTimeoutMillis: 30000,
+          statement_timeout: 15000,
+          query_timeout: 15000,
           max: 20,
           ssl: this.getPgSslOption(url),
         });
         this.pgPool.on('error', (err) => {
           console.warn('[PostgreSQL Pool Error]', err?.message);
+          systemLogger.warn('database', 'PostgreSQL havuz hatası tespit edildi', err?.message);
           this.postgresRepo.setConnected(false);
           if (this.data.databaseSettings) {
             this.data.databaseSettings.isPostgresConnected = false;
           }
         });
-      } catch {
+      } catch (err: any) {
+        systemLogger.error('database', 'PostgreSQL havuzu oluşturulamadı', err?.message);
         this.pgPool = null;
         return null;
       }
@@ -460,18 +481,25 @@ class LocalDatabase {
         try {
           const schemaClient = await pool.connect();
           try {
-            await schemaClient.query(this.getPostgresSchemaSQL());
+            await schemaClient.query("SET statement_timeout = '8s';");
+            await schemaClient.query("SET lock_timeout = '2s';");
+            // If users table already exists, skip monolithic DDL script to prevent table lock contention
+            const chkRes = await schemaClient.query("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users' LIMIT 1;");
+            if (!chkRes.rows || chkRes.rows.length === 0) {
+              systemLogger.info('database', 'İlk kurulum: PostgreSQL temel şeması yükleniyor...');
+              await schemaClient.query(this.getPostgresSchemaSQL());
+            }
           } finally {
             schemaClient.release();
           }
         } catch (schemaErr: any) {
-          console.warn('[PostgreSQL Schema Warning]:', schemaErr?.message || schemaErr);
+          systemLogger.warn('database', 'PostgreSQL Şema Kontrol Uyarısı:', schemaErr?.message || schemaErr);
         }
 
         try {
           await this.postgresRepo.ensureTelemetrySchema();
         } catch (tErr: any) {
-          console.warn('[PostgreSQL Telemetry Schema Setup Warning]:', tErr?.message || tErr);
+          systemLogger.warn('database', 'PostgreSQL Telemetri Şema Kurulum Uyarısı:', tErr?.message || tErr);
         }
       })().catch(() => {});
 
@@ -2136,7 +2164,7 @@ class LocalDatabase {
     endTime?: string;
   }): Promise<import('../types.js').TimeBucketDataPoint[]> {
     const pool = this.getPgPool();
-    if (pool) {
+    if (pool && this.isPostgresProductionMode()) {
       try {
         const intervalMap: Record<string, string> = {
           '1m': '1 minute',
@@ -2183,8 +2211,9 @@ class LocalDatabase {
             readingCount: Number(r.readingCount),
           }));
         }
-      } catch {
+      } catch (err: any) {
         // Fallback to in-memory computation
+        this.postgresRepo.setConnected(false);
       }
     }
     return this.queryTimeBucketTelemetry(params as any);
@@ -2602,7 +2631,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     isPostgres: boolean;
   }> {
     const pool = this.getPgPool();
-    if (pool) {
+    if (pool && this.isPostgresProductionMode()) {
       try {
         const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
         const offset = Math.max(0, (page - 1) * limit);
@@ -2635,8 +2664,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
           records,
           isPostgres: true,
         };
-      } catch (err) {
-        console.error(`Postgres table fetch error for ${tableName}:`, err);
+      } catch (err: any) {
+        // Suppress timeout errors and gracefully fallback to memory database
+        this.postgresRepo.setConnected(false);
       }
     }
 
@@ -2680,7 +2710,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
   public async updateTableRecord(tableName: string, recordId: string, updates: Record<string, any>): Promise<{ success: boolean; message: string }> {
     const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
     const pool = this.getPgPool();
-    if (pool) {
+    if (pool && this.isPostgresProductionMode()) {
       try {
         const keys = Object.keys(updates).filter(k => k !== 'id');
         if (keys.length > 0) {
@@ -2692,8 +2722,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
           await pool.query(`UPDATE "${safeTableName}" SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, recordId]);
         }
       } catch (err: any) {
-        console.error(`Postgres update error for table ${safeTableName}:`, err);
-        return { success: false, message: `PostgreSQL güncelleme hatası: ${err.message}` };
+        this.postgresRepo.setConnected(false);
       }
     }
 
@@ -2727,12 +2756,11 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
   public async deleteTableRecord(tableName: string, recordId: string): Promise<{ success: boolean; message: string }> {
     const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
     const pool = this.getPgPool();
-    if (pool) {
+    if (pool && this.isPostgresProductionMode()) {
       try {
         await pool.query(`DELETE FROM "${safeTableName}" WHERE id = $1`, [recordId]);
       } catch (err: any) {
-        console.error(`Postgres delete error for table ${safeTableName}:`, err);
-        return { success: false, message: `PostgreSQL silme hatası: ${err.message}` };
+        this.postgresRepo.setConnected(false);
       }
     }
 
@@ -2766,7 +2794,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     }
 
     const pool = this.getPgPool();
-    if (pool) {
+    if (pool && this.isPostgresProductionMode()) {
       try {
         const keys = Object.keys(record);
         const colNames = keys.map(k => `"${k}"`).join(', ');
@@ -2778,8 +2806,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
 
         await pool.query(`INSERT INTO "${safeTableName}" (${colNames}) VALUES (${paramPlaceholders})`, values);
       } catch (err: any) {
-        console.error(`Postgres insert error for table ${safeTableName}:`, err);
-        return { success: false, message: `PostgreSQL ekleme hatası: ${err.message}` };
+        this.postgresRepo.setConnected(false);
       }
     }
 

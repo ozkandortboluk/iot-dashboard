@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
 // Services & Database
+import { systemLogger } from './src/server/services/systemLogger.service.js';
 import { initWebSocketServer } from './src/server/services/websocket.js';
 import { initSimulator } from './src/server/services/simulator.js';
 import { startOtaWorker } from './src/server/services/otaWorker.js';
@@ -40,6 +41,30 @@ import {
 import { firmwareRouter } from './src/server/routes/firmware.js';
 import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
+
+// Global Process Crash Shields
+process.on('uncaughtException', (err: any) => {
+  const errMsg = err?.message || String(err);
+  console.error('[CRITICAL][uncaughtException]:', errMsg, err?.stack || '');
+  try {
+    systemLogger.critical('server', `Yakalanmamış Sistem Hatası (uncaughtException): ${errMsg}`, {
+      stack: err?.stack,
+      name: err?.name,
+      code: err?.code,
+    });
+  } catch {}
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  const reasonMsg = reason?.message || String(reason);
+  console.error('[CRITICAL][unhandledRejection]:', reasonMsg, reason?.stack || '');
+  try {
+    systemLogger.error('server', `Yakalanmamış Promise Reddi (unhandledRejection): ${reasonMsg}`, {
+      stack: reason?.stack,
+      name: reason?.name,
+    });
+  } catch {}
+});
 
 const app = express();
 app.set('trust proxy', true);
