@@ -43,7 +43,7 @@ import { compilerRouter } from './src/server/routes/compiler.js';
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 3000;
 const server = http.createServer(app);
 
 // Global Middleware & Body Parsers

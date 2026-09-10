@@ -4,6 +4,13 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.6.6] - 2026-09-10
+
+### 🛡️ Bug Fixes & Stability
+- **Dev Server Port Configuration:** Hardcoded the server port to 3000 in `server.ts` to fix `EADDRINUSE` port binding crashes and align with the platform's reverse proxy constraints.
+
+---
+
 ## 🚀 [v1.6.5] - 2026-09-09
 
 ### 🛡️ Bug Fixes & Stability
