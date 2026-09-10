@@ -4,6 +4,45 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.6.5] - 2026-09-09
+
+### 🛡️ Bug Fixes & Stability
+- **PostgreSQL Connection Resiliency:** Prevented the Node.js process from crashing by safely catching and swallowing `timeout exceeded when trying to connect` errors within `PostgresRepository.query`.
+- **Seamless Local DB Failover:** Implemented a transparent failover mechanism in `isPostgresProductionMode()` so the system automatically uses the local memory fallback when the PostgreSQL pool disconnects.
+- **TimescaleDB Compression Error Fix:** Wrapped hypertable compression setup statements for `telemetry_readings` and `simulation_telemetry_readings` inside `EXCEPTION` handlers to prevent script termination during schema initialization.
+- **Missing Columns in PostgreSQL Schema:** Safely added `tenant_id` to `active_alarms` and integrated missing `device_commands` table creation schema to the `ensureTelemetrySchema()` automated checks.
+
+---
+
+## 🚀 [v1.6.4] - 2026-09-09
+
+### 🛡️ Feature Updates & Management
+- **Bulk Advanced Customer Deletion:**
+  - Upgraded the Customer Management (`CustomerManagement.tsx`) panel to support multi-select functionality with checkboxes on the table rows and header.
+  - Introduced a Bulk Actions header that appears when multiple customers are selected.
+  - Created a new `BulkAdvancedCustomerDeleteModal` to process advanced data deletion (devices, telemetry, alarms, dashboards) for multiple customers simultaneously.
+  - Added backend endpoint `POST /api/admin/tenants/bulk-advanced-delete` to securely process batch deletion requests via existing repository functions.
+
+---
+
+## 🚀 [v1.6.3] - 2026-09-09
+
+### 🛡️ Feature Updates & Security
+- **Advanced Customer Deletion Modal (`AdvancedCustomerDeleteModal.tsx`):**
+  - Added a new administrative feature inside the "Yönet" (Manage Customer) modal to perform granular and secure customer deletion.
+  - Admins can now explicitly choose whether to permanently delete user devices, custom dashboards, alarms, and telemetry data, or gracefully transfer hardware ownership to the canonical `usr_admin` account.
+  - Implemented the `advancedDeleteUser` flow in both in-memory and PostgreSQL database repositories.
+  - Backend integration via `POST /api/admin/tenants/:id/advanced-delete`.
+  
+---
+
+## 🚀 [v1.6.2] - 2026-09-09
+
+### 🐛 Bug Fixes & UI Adjustments
+- **Admin Customer Selector Visibility:** Fixed a Tailwind CSS class issue (`hidden xs:block`) that inadvertently hid the "Tüm Müşteriler" (Customer Selector) dropdown in the top header for admin users. The dropdown is now properly visible across the administrative dashboard.
+
+---
+
 ## 🚀 [v1.6.1] - 2026-09-09
 
 ### 🐛 Bug Fixes & Stability

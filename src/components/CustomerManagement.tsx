@@ -8,6 +8,8 @@ import { useAuth } from '../context/AuthContext';
 import type { User } from '../types';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
 import { CustomerAvatar } from './CustomerAvatar';
+import { BulkAdvancedCustomerDeleteModal } from './admin/BulkAdvancedCustomerDeleteModal';
+import { apiFetch as fetch } from '../lib/apiFetch';
 
 interface CustomerManagementProps {
   onSelectCustomerForDashboard: (customerId: string) => void;
@@ -26,6 +28,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     setSelectedCustomerForAdmin,
     selectedCustomerForAdmin,
     notifications,
+    refreshCustomers,
   } = useRealtime();
   const { user } = useAuth();
 
@@ -76,6 +79,8 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; customer: User | null; dependencies: any; confirmText: string; isLoading: boolean }>({ open: false, customer: null, dependencies: null, confirmText: '', isLoading: false });
   const [detailsModalCustomer, setDetailsModalCustomer] = useState<User | null>(null);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+  const [showBulkAdvancedDelete, setShowBulkAdvancedDelete] = useState(false);
 
   const filteredCustomers = [...customersList].filter(
     (c) => {
@@ -139,6 +144,26 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     link.download = `musteriler_${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
   };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedCustomerIds(new Set(filteredCustomers.map(c => c.id)));
+    } else {
+      setSelectedCustomerIds(new Set());
+    }
+  };
+
+  const toggleCustomerSelection = (id: string) => {
+    const newSet = new Set(selectedCustomerIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedCustomerIds(newSet);
+  };
+
+  const selectedCustomers = customersList.filter(c => selectedCustomerIds.has(c.id));
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,8 +293,33 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             </p>
           </div>
 
+          {/* Bulk Action Header */}
+          {selectedCustomerIds.size > 0 && (
+            <div className="bg-rose-50/80 dark:bg-rose-500/10 border-b border-rose-100 dark:border-rose-500/20 px-4 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400">
+                <CheckCircle2 className="w-4 h-4" />
+                <span className="text-xs font-semibold">{selectedCustomerIds.size} müşteri seçildi</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedCustomerIds(new Set())}
+                  className="px-3 py-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                >
+                  Seçimi Temizle
+                </button>
+                <button
+                  onClick={() => setShowBulkAdvancedDelete(true)}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Seçilenleri Sil (Gelişmiş)</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Action Tools: Adaptive Search with Integrated Filter Icon, CSV, Add Customer */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 w-full xl:w-auto xl:max-w-2xl">
+          <div className={`flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 w-full xl:w-auto xl:max-w-2xl ${selectedCustomerIds.size > 0 ? 'mt-4' : ''}`}>
             {/* Search Input with Integrated Filter Button & Popover */}
             <div className="relative flex-1 min-w-[200px] w-full sm:w-72 md:w-80 xl:w-96 transition-all duration-200" ref={filterMenuRef}>
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -596,6 +646,14 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold tracking-wider">
+                <th className="py-3 px-4 w-10">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
+                    checked={filteredCustomers.length > 0 && selectedCustomerIds.size === filteredCustomers.length}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                  />
+                </th>
                 <th className="py-3 px-4">Firma / Müşteri</th>
                 <th className="py-3 px-4">E-posta (Kullanıcı Adı)</th>
                 <th className="py-3 px-4">Rol</th>
@@ -613,15 +671,24 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
               ) : (
                 filteredCustomers.map((cust) => {
                   const devCount = getCustomerDeviceCount(cust.id);
-                  const isSelected = selectedCustomerForAdmin === cust.id;
+                  const isSelectedForDashboard = selectedCustomerForAdmin === cust.id;
+                  const isSelected = selectedCustomerIds.has(cust.id);
 
                   return (
                     <tr
                       key={cust.id}
                       className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                        isSelected ? 'bg-indigo-50/70 dark:bg-indigo-500/10 border-l-2 border-indigo-500' : ''
-                      }`}
+                        isSelectedForDashboard ? 'bg-indigo-50/70 dark:bg-indigo-500/10 border-l-2 border-indigo-500' : ''
+                      } ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-500/5' : ''}`}
                     >
+                      <td className="py-4 px-4 w-10">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-indigo-600 focus:ring-indigo-500/20 cursor-pointer"
+                          checked={isSelected}
+                          onChange={() => toggleCustomerSelection(cust.id)}
+                        />
+                      </td>
                       <td className="py-4 px-4 font-medium text-slate-800 dark:text-slate-200">
                         <div className="flex items-center gap-3">
                           <CustomerAvatar
@@ -807,6 +874,28 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {showBulkAdvancedDelete && (
+        <BulkAdvancedCustomerDeleteModal
+          customers={selectedCustomers}
+          onClose={() => setShowBulkAdvancedDelete(false)}
+          onConfirm={async (options) => {
+            const res = await fetch(`/api/admin/tenants/bulk-advanced-delete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tenantIds: Array.from(selectedCustomerIds),
+                ...options
+              })
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Toplu silme başarısız oldu');
+            
+            setSelectedCustomerIds(new Set());
+            refreshCustomers();
+          }}
+        />
       )}
     </div>
   );

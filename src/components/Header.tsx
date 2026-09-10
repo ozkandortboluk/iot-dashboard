@@ -154,7 +154,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Mobile/Compact Brand Logo - sığmadığında otomatik küçülür, sadece logo ikonu kalır */}
-          <div className="hidden xs:block md:hidden shrink-0">
+          <div className="hidden sm:block md:hidden shrink-0">
             <NexusNodeLogo
               variant="compact"
               size="xs"
@@ -217,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* ADMIN CUSTOMER SELECTOR */}
           {user?.role === 'admin' && (
-            <div className="hidden xs:block shrink">
+            <div className="shrink">
               <CustomerSelectorDropdown
                 customers={customerOptions}
                 selectedCustomerId={selectedCustomerForAdmin}

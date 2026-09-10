@@ -147,9 +147,9 @@ function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
     }
 
     if (user.role === 'admin') {
-      db.getAlarms('usr_admin', undefined, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a })));
+      db.getAlarms('usr_admin', undefined, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
     } else {
-      db.getAlarms(user.id, user.id, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a })));
+      db.getAlarms(user.id, user.id, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
     }
 
     // Default channels assignment: Connections default to both physical and simulation channels
@@ -353,7 +353,7 @@ export function broadcast(event: string, payload: unknown) {
     // 4. Notifications update broadcast
     if (event === 'notifications:updated') {
       if (isAdmin) {
-        db.getNotifications().then(n => safeSend(client, JSON.stringify({ event, payload: n, timestamp: new Date().toISOString() })));
+        db.getNotifications().then(n => safeSend(client, JSON.stringify({ event, payload: n, timestamp: new Date().toISOString() }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
       } else {
         db.getNotifications(clientUser.id, clientUser.id).then(userNotifs => {
           safeSend(client, JSON.stringify({ event, payload: userNotifs, timestamp: new Date().toISOString() }));
@@ -494,9 +494,9 @@ export function broadcast(event: string, payload: unknown) {
     // 9. Alarms update broadcast
     if (event === 'alarms:updated') {
       if (isAdmin) {
-        db.getAlarms().then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() })));
+        db.getAlarms().then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
       } else {
-        db.getAlarms(clientUser.id, clientUser.id).then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() })));
+        db.getAlarms(clientUser.id, clientUser.id).then(a => safeSend(client, JSON.stringify({ event, payload: a, timestamp: new Date().toISOString() }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
       }
       return;
     }
@@ -550,7 +550,7 @@ export function initWebSocketServer(server: http.Server) {
     if (statusChanged) {
       broadcast('devices:updated', db.getDevices());
       broadcast('network:updated', db.getDiscoveredDevices());
-      db.getNotifications().then(n => broadcast('notifications:updated', n));
+      db.getNotifications().then(n => broadcast('notifications:updated', n)).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
     }
   }, 3000);
 

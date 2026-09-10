@@ -312,6 +312,9 @@ BEGIN
         );
         PERFORM add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
     END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'telemetry_readings compression setup notice: %', SQLERRM;
 END $$;
 
 -- PostgreSQL Row Level Security (RLS) for telemetry_readings
@@ -421,6 +424,9 @@ BEGIN
         PERFORM add_compression_policy('simulation_telemetry_readings', INTERVAL '3 days', if_not_exists => TRUE);
         PERFORM add_retention_policy('simulation_telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
     END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'simulation_telemetry_readings compression setup notice: %', SQLERRM;
 END $$;
 
 -- PostgreSQL Row Level Security (RLS) for simulation_telemetry_readings
@@ -659,6 +665,7 @@ ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH T
 ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS first_breach_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS triggered_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_notified_at TIMESTAMP WITH TIME ZONE;
@@ -668,6 +675,12 @@ ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WIT
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;
 ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS incident_id VARCHAR(128);
+ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE active_alarms ALTER COLUMN operator TYPE VARCHAR(32);
 
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS device_id VARCHAR(64);

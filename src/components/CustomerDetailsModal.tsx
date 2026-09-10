@@ -21,6 +21,7 @@ import type { User as UserType } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { CustomerAvatar } from './CustomerAvatar';
+import { AdvancedCustomerDeleteModal } from './admin/AdvancedCustomerDeleteModal';
 
 interface CustomerDetailsModalProps {
   customer: UserType;
@@ -33,8 +34,9 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   onClose,
   onNavigateToDevices,
 }) => {
-  const { devices } = useRealtime();
+  const { devices, refreshCustomers } = useRealtime();
   const [activeTab, setActiveTab] = useState<'info' | 'devices' | 'security'>('info');
+  const [showAdvancedDelete, setShowAdvancedDelete] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -488,10 +490,51 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Advanced Delete Section */}
+              <div className="p-5 bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-500/50 rounded-2xl shadow-xs">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex gap-3.5">
+                    <div className="p-2.5 bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 rounded-xl border border-rose-200 dark:border-rose-500/30 shrink-0">
+                      <Trash2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-rose-700 dark:text-rose-400">Müşteriyi Sil (Gelişmiş)</h4>
+                      <p className="text-slate-600 dark:text-slate-400 mt-0.5">
+                        Müşteriyi ve ona ait olan cihaz, ekran, alarm ve telemetri verilerini kalıcı olarak silin.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowAdvancedDelete(true)}
+                    className="px-3.5 py-2 font-semibold rounded-xl transition-colors shrink-0 cursor-pointer bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30"
+                  >
+                    Silme Seçenekleri
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      {showAdvancedDelete && (
+        <AdvancedCustomerDeleteModal
+          customer={customer}
+          onClose={() => setShowAdvancedDelete(false)}
+          onConfirm={async (options) => {
+            const res = await fetch(`/api/admin/tenants/${customer.id}/advanced-delete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(options)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Silme işlemi başarısız oldu');
+            refreshCustomers();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };

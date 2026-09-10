@@ -594,6 +594,10 @@ class LocalDatabase {
   }
 
   public isPostgresProductionMode() {
+    // If PostgreSQL repository exists but is marked as disconnected, fallback to memory
+    if (this.postgresRepo && !this.postgresRepo.isReady()) {
+      return false;
+    }
     return process.env.DB_ENGINE === 'postgres' || process.env.LOCAL_DB_ENABLED === 'false';
   }
 

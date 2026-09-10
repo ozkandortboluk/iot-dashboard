@@ -294,6 +294,74 @@ adminTenantsRouter.post('/:id/reset-password', requireAdmin, async (req, res) =>
   }
 });
 
+// POST /api/admin/tenants/bulk-advanced-delete
+adminTenantsRouter.post('/bulk-advanced-delete', requireAdmin, async (req, res) => {
+  try {
+    const { tenantIds, deleteDevices, deleteDashboards, deleteAlarms, deleteTelemetry } = req.body;
+    
+    if (!Array.isArray(tenantIds)) {
+      return res.status(400).json({ error: 'Geçersiz parametreler' });
+    }
+
+    if (tenantIds.includes('usr_admin')) {
+      return res.status(400).json({ error: 'Kanonik sistem yöneticisi hesabı (usr_admin) silinemez.' });
+    }
+
+    const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };
+
+    let successCount = 0;
+    for (const tenantId of tenantIds) {
+      const tenant = db.data.users.find((u: any) => u.id === tenantId);
+      if (tenant) {
+        await db.userRepository.advancedDeleteUser(tenantId, adminUser.id, adminUser.name, {
+          deleteDevices,
+          deleteDashboards,
+          deleteAlarms,
+          deleteTelemetry
+        });
+        successCount++;
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: `${successCount} müşteri başarıyla silindi ve seçili veriler temizlendi.` 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/tenants/:id/advanced-delete
+adminTenantsRouter.post('/:id/advanced-delete', requireAdmin, async (req, res) => {
+  try {
+    const tenantId = req.params.id;
+    const { deleteDevices, deleteDashboards, deleteAlarms, deleteTelemetry } = req.body;
+    
+    if (tenantId === 'usr_admin') {
+      return res.status(400).json({ error: 'Kanonik sistem yöneticisi hesabı (usr_admin) silinemez.' });
+    }
+    const tenant = db.data.users.find((u: any) => u.id === tenantId);
+    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
+
+    const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };
+
+    await db.userRepository.advancedDeleteUser(tenantId, adminUser.id, adminUser.name, {
+      deleteDevices,
+      deleteDashboards,
+      deleteAlarms,
+      deleteTelemetry
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Müşteri "${tenant.name}" başarıyla silindi ve seçili veriler temizlendi.` 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
 // DELETE /api/admin/tenants/:id
 adminTenantsRouter.delete('/:id', requireAdmin, async (req, res) => {
   try {

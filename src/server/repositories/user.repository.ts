@@ -271,6 +271,60 @@ export class UserRepository {
     });
   }
 
+  public async advancedDeleteUser(userId: string, adminId: string, adminName: string, options: {
+    deleteDevices?: boolean;
+    deleteDashboards?: boolean;
+    deleteAlarms?: boolean;
+    deleteTelemetry?: boolean;
+  }) {
+    const index = this.db.data.users.findIndex((u: any) => u.id === userId);
+    if (index === -1) return;
+
+    const removed = this.db.data.users[index];
+
+    const ownedDevices = (this.db.data.devices || []).filter(
+      (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
+    );
+
+    if (options.deleteDevices) {
+      // Memory cleanup for devices
+      this.db.data.devices = (this.db.data.devices || []).filter(
+        (d: any) => !(d.tenantId === userId || d.userId === userId || d.customerId === userId)
+      );
+      this.db.addAuditLog(adminId, adminName, `Müşteri Silindi & ${ownedDevices.length} Cihazı Kalıcı Olarak Silindi: ${removed.name}`, 'high');
+    } else {
+      // Transfer to usr_admin
+      const now = new Date().toISOString();
+      for (const dev of ownedDevices) {
+        dev.previousTenantId = userId;
+        dev.previousTenantName = removed.name;
+        dev.ownershipTransferredAt = now;
+        dev.tenantId = 'usr_admin';
+        dev.userId = 'usr_admin';
+        if (!dev.location || dev.location === 'Varsayılan') {
+          dev.location = `Merkez Depo (Eski Müşteri: ${removed.name})`;
+        }
+      }
+      if (ownedDevices.length > 0) {
+        this.db.addAuditLog(adminId, adminName, `Müşteri Silindi, ${ownedDevices.length} Cihazı Merkez'e Devredildi: ${removed.name}`, 'medium');
+      }
+    }
+
+    // Kullanıcıyı ve oturumları kaldır
+    this.db.data.users.splice(index, 1);
+    delete this.db.data.passwords[userId];
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
+
+    this.db.saveData(this.db.data, true);
+
+    // PostgreSQL Transaction
+    if (this.db.postgresRepo) {
+      await this.db.postgresRepo.advancedDeleteUser(userId, options).catch((err: any) => {
+        console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
+      });
+    }
+  }
+
   public async terminateUserSessions(userId: string) {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
     this.db.saveData(this.db.data, true);
