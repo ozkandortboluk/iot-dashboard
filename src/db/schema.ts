@@ -182,6 +182,74 @@ export const dispatchLogs = pgTable('dispatch_logs', {
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow(),
 });
 
+// 10. Firmwares Table
+export const firmwares = pgTable('firmwares', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  name: varchar('name', { length: 128 }).notNull(),
+  deviceType: varchar('device_type', { length: 64 }).notNull(),
+  roleKey: varchar('role_key', { length: 64 }).notNull(),
+  hardwareModel: varchar('hardware_model', { length: 64 }).default('ALL'),
+  version: varchar('version', { length: 32 }).notNull(),
+  description: text('description'),
+  binaryData: text('binary_data'),
+  binarySize: integer('binary_size').default(0),
+  sha256: varchar('sha256', { length: 64 }).notNull(),
+  signature: text('signature'),
+  filePath: text('file_path'),
+  minHardwareRevision: varchar('min_hardware_revision', { length: 32 }),
+  isActive: boolean('is_active').default(true),
+  uploadedBy: varchar('uploaded_by', { length: 128 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+// 11. OTA Deployment Jobs Table
+export const otaDeploymentJobs = pgTable('ota_deployment_jobs', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  firmwareId: varchar('firmware_id', { length: 64 }),
+  firmwareVersion: varchar('firmware_version', { length: 32 }).notNull(),
+  firmwareName: varchar('firmware_name', { length: 128 }).notNull(),
+  deviceId: varchar('device_id', { length: 64 }),
+  deviceName: varchar('device_name', { length: 128 }).notNull(),
+  deviceType: varchar('device_type', { length: 64 }).notNull(),
+  roleKey: varchar('role_key', { length: 64 }).notNull(),
+  targetScope: varchar('target_scope', { length: 32 }).default('single'),
+  status: varchar('status', { length: 32 }).default('PENDING'),
+  progressPercent: integer('progress_percent').default(0),
+  errorMessage: text('error_message'),
+  initiatedBy: varchar('initiated_by', { length: 128 }).notNull(),
+  downloadToken: varchar('download_token', { length: 128 }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  attemptCount: integer('attempt_count').default(0),
+  maxAttempts: integer('max_attempts').default(3),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
+  downloadStartedAt: timestamp('download_started_at', { withTimezone: true }),
+  bootConfirmedAt: timestamp('boot_confirmed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
+// 12. Device Commands Queue Table
+export const deviceCommands = pgTable('device_commands', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  deviceId: varchar('device_id', { length: 64 }).notNull(),
+  targetPin: varchar('target_pin', { length: 32 }).notNull(),
+  value: doublePrecision('value').notNull(),
+  action: varchar('action', { length: 32 }).notNull(),
+  status: varchar('status', { length: 32 }).default('PENDING').notNull(),
+  priority: integer('priority').default(1),
+  ttlSeconds: integer('ttl_seconds').default(60),
+  requiresAck: boolean('requires_ack').default(true),
+  idempotencyKey: varchar('idempotency_key', { length: 128 }),
+  createdBy: varchar('created_by', { length: 128 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   devices: many(devices),

@@ -30,7 +30,9 @@ export class UserRepository {
     );
     this.db.data.sessions.push(session);
     this.db.saveData(this.db.data, true);
-    this.db.postgresRepo.saveSession(session).catch(() => {});
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
+      this.db.postgresRepo.saveSession(session).catch(() => {});
+    }
     return token;
   }
 
@@ -43,7 +45,9 @@ export class UserRepository {
     if (removed) {
       this.db.saveData(this.db.data, true);
     }
-    this.db.postgresRepo.deleteSession(cleanToken).catch(() => {});
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
+      this.db.postgresRepo.deleteSession(cleanToken).catch(() => {});
+    }
     return removed;
   }
 
@@ -130,19 +134,21 @@ export class UserRepository {
 
     const hashedPassword = hashPassword(pass);
 
-    // 1. Yazma önceliği: PostgreSQL
-    try {
-      await this.db.postgresRepo.saveUser(newUser, hashedPassword);
-    } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      if (errMsg.includes('unique constraint') || errMsg.includes('users_email_key') || err.code === '23505') {
-        throw new Error('Bu e-posta adresi zaten kayıtlı.', { cause: err });
+    // 1. Yazma önceliği: PostgreSQL (aktif ise doğrudan yazılır ve gerçek SQL hataları yukarı fırlatılır)
+    if (this.db.postgresRepo?.isReady()) {
+      try {
+        await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('unique constraint') || errMsg.includes('users_email_key') || err.code === '23505') {
+          throw new Error('Bu e-posta adresi zaten kayıtlı.', { cause: err });
+        }
+        throw err;
       }
-      throw err;
+      
+      await this.db.postgresRepo.saveDashboard(dashboard);
+      await this.db.postgresRepo.saveAuditLog(auditLog);
     }
-    
-    await this.db.postgresRepo.saveDashboard(dashboard);
-    await this.db.postgresRepo.saveAuditLog(auditLog);
 
     // 2. Local cache güncellemesi (Postgres başarılı olduktan sonra)
     if (companyName) {
@@ -202,8 +208,10 @@ export class UserRepository {
 
     const newHash = hashPassword(newPass.trim());
     
-    // Postgres'e yazılmasını bekle
-    await this.db.postgresRepo.saveUser(user, newHash);
+    // Postgres'e yazılmasını bekle (aktif ise)
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.saveUser(user, newHash);
+    }
     
     this.db.data.passwords[userId] = newHash;
     this.db.saveData(this.db.data, true);
@@ -216,7 +224,9 @@ export class UserRepository {
     const oldRole = user.role;
     user.role = newRole;
 
-    await this.db.postgresRepo.saveUser(user);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.saveUser(user);
+    }
 
     this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
     this.db.saveData(this.db.data, true);
@@ -335,8 +345,10 @@ export class UserRepository {
     const user = this.db.data.users.find((u: any) => u.id === userId);
     if (!user) throw new Error("Kullanıcı bulunamadı");
     
-    // Postgres Transaction
-    await this.db.postgresRepo.softDeleteUser(userId);
+    // Postgres Transaction (aktif ise)
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.softDeleteUser(userId);
+    }
     
     // In-memory update
     user.status = 'suspended';

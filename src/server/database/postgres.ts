@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { getSharedPgPoolStats } from './connection.js';
 import type {
   User,
   Device,
@@ -30,6 +31,10 @@ export class PostgresRepository {
     }
   }
 
+  public getPoolStats() {
+    return getSharedPgPoolStats();
+  }
+
   public setPool(pool: Pool | null) {
     this.pool = pool;
     this.isConnected = false;
@@ -42,7 +47,9 @@ export class PostgresRepository {
     if (connected) {
       this.connectionErrorNotified = false;
       this.lastTestedAt = new Date().toISOString();
-      this.ensureTelemetrySchema(true).catch((err) => {
+      // DO NOT force schema ensure on transient reconnects.
+      // If it was already ensured during the app lifecycle, this becomes a fast no-op.
+      this.ensureTelemetrySchema(false).catch((err) => {
         console.warn('[PostgreSQL Auto Schema Ensure Warning]:', err?.message || err);
       });
     }
@@ -53,7 +60,12 @@ export class PostgresRepository {
   }
 
   public isReady(): boolean {
-    return !!this.pool && this.isConnected;
+    if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
+      return !!this.pool && this.isConnected;
+    }
+    // Block readiness until runtime schema migrations have successfully completed
+    // Incoming telemetry will naturally fall back to resilient WAL during this period.
+    return !!this.pool && this.isConnected && this.isSchemaEnsured;
   }
 
   public async getPoolAndPerformanceStats(): Promise<{
@@ -191,6 +203,11 @@ export class PostgresRepository {
   private lastSchemaEnsureTime = 0;
 
   public async ensureTelemetrySchema(force = false): Promise<void> {
+    if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
+      this.isSchemaEnsured = true;
+      return;
+    }
+    
     const now = Date.now();
     if (!this.pool) return;
     if (this.isSchemaEnsured && !force) return;
@@ -203,8 +220,24 @@ export class PostgresRepository {
     this.lastSchemaEnsureTime = now;
     this.schemaEnsuringPromise = (async () => {
       let client: any = null;
+      let hasLock = false;
+      const SCHEMA_LOCK_ID = 13374242; // Distributed lock ID for schema migration
       try {
         client = await this.pool!.connect();
+        
+        // Use a distributed advisory lock to prevent multiple cloud instances from running DDL simultaneously
+        const lockRes = await client.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEMA_LOCK_ID]);
+        hasLock = lockRes.rows[0]?.acquired;
+        
+        if (!hasLock) {
+          console.log('[PostgreSQL Schema] Başka bir instance (container) schema kontrolünü yürütüyor. İşlemin tamamlanması bekleniyor...');
+          // Simply wait and yield without running DDL. 
+          // After 3 seconds, assume the other instance has finished or is progressing.
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          this.isSchemaEnsured = true;
+          return;
+        }
+
         await client.query("SET statement_timeout = '8s';");
         await client.query("SET lock_timeout = '2s';");
 
@@ -307,7 +340,8 @@ export class PostgresRepository {
               sequence BIGINT NOT NULL,
               idempotency_key VARCHAR(192),
               metric_count INTEGER DEFAULT 1,
-              received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+              received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+              CONSTRAINT unq_telemetry_device_boot_sequence UNIQUE(device_id, boot_id, sequence)
             );`
           },
           {
@@ -561,10 +595,10 @@ export class PostgresRepository {
             name: 'ota_deployment_jobs',
             ddl: `CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
               id VARCHAR(64) PRIMARY KEY,
-              firmware_id VARCHAR(64) REFERENCES firmwares(id) ON DELETE CASCADE,
+              firmware_id VARCHAR(64),
               firmware_version VARCHAR(32) NOT NULL,
               firmware_name VARCHAR(128) NOT NULL,
-              device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+              device_id VARCHAR(64),
               device_name VARCHAR(128) NOT NULL,
               device_type VARCHAR(64) NOT NULL,
               role_key VARCHAR(64) NOT NULL,
@@ -729,6 +763,10 @@ export class PostgresRepository {
           { table: 'device_commands', column: 'user_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'device_commands', column: 'source', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'manual';` },
           { table: 'device_commands', column: 'idempotency_key', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);` },
+          // Notifications & Logs
+          { table: 'notifications', column: 'tenant_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
+          { table: 'notifications', column: 'type', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(64);` },
+          { table: 'dispatch_logs', column: 'tenant_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
           // Firmwares & OTA
           { table: 'firmwares', column: 'signature', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS signature TEXT;` },
           { table: 'firmwares', column: 'file_path', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS file_path TEXT;` },
@@ -748,7 +786,33 @@ export class PostgresRepository {
           }
         }
 
-        // 5. Seed Canonical Root Admin (usr_admin)
+        // 5. Cleanup foreign key constraints on ota_deployment_jobs that can block independent lifecycle
+        await client.query(`
+          ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_firmware_id_fkey;
+          ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_device_id_fkey;
+          ALTER TABLE dashboard_layouts DROP CONSTRAINT IF EXISTS dashboard_layouts_user_id_fkey;
+          ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
+        `).catch(() => {});
+
+        // 5.1 Enforce telemetry packet deduplication constraint retroactively for legacy deployments
+        await client.query(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1
+              FROM pg_constraint
+              WHERE conrelid = 'telemetry_packets'::regclass
+                AND conname = 'unq_telemetry_device_boot_sequence'
+            ) THEN
+              ALTER TABLE telemetry_packets ADD CONSTRAINT unq_telemetry_device_boot_sequence UNIQUE (device_id, boot_id, sequence);
+            END IF;
+          EXCEPTION
+            WHEN OTHERS THEN
+              -- Ignore concurrent constraint additions or relation missing errors
+          END $$;
+        `).catch((err: any) => console.warn('[PostgreSQL Deduplication Constraint Setup]', err?.message));
+
+        // 6. Seed Canonical Root Admin (usr_admin)
         await client.query(`
           INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
           VALUES (
@@ -770,6 +834,9 @@ export class PostgresRepository {
       } finally {
         if (client) {
           try {
+            if (hasLock) {
+              await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_LOCK_ID]).catch(() => {});
+            }
             client.release();
           } catch {}
         }
@@ -783,12 +850,14 @@ export class PostgresRepository {
   /**
    * Runs parameterized query against PostgreSQL pool.
    * Throws an error on execution failure or when connection is not ready,
-   * ensuring caller services (e.g. Telemetry Ingestion) can reliably detect write failures and retry.
+   * ensuring caller services (e.g. Telemetry Ingestion, API Controllers)
+   * can reliably detect failures, avoid split-brain fallback, and retry safely.
    */
   public async query(text: string, params: any[] = []): Promise<any> {
     if (!this.pool || !this.isConnected) {
-      console.warn('[PostgreSQL Query]: Veritabanı bağlantısı aktif değil, sorgu bellek içine düştü.');
-      return { rows: [], rowCount: 0, fields: [] };
+      const errMsg = `[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil (isReady: false). Sorgu yürütülemedi: ${text.substring(0, 120)}`;
+      systemLogger.error('database', errMsg);
+      throw new Error(errMsg);
     }
     try {
       return await this.pool.query(text, params);
@@ -852,6 +921,26 @@ export class PostgresRepository {
         }
       }
 
+      const isOtaJobsFkError =
+        (err?.code === '23503' || errMsg.includes('foreign key constraint')) &&
+        (errMsg.includes('ota_deployment_jobs_firmware_id_fkey') ||
+         errMsg.includes('ota_deployment_jobs_device_id_fkey') ||
+         (errMsg.includes('table "ota_deployment_jobs"') && (errMsg.includes('firmware_id') || errMsg.includes('device_id') || errMsg.includes('foreign key'))));
+
+      if (isOtaJobsFkError && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: OTA işleri yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak sorgu tekrarlanıyor...`);
+          await this.pool.query(`ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_firmware_id_fkey;`);
+          await this.pool.query(`ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_device_id_fkey;`);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL OTA Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
       const isConnectionIssue =
         errMsg.includes('timeout') ||
         errMsg.includes('Connection terminated') ||
@@ -864,12 +953,11 @@ export class PostgresRepository {
 
       if (isConnectionIssue) {
         this.isConnected = false;
-        systemLogger.warn('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bellek içi veritabanına sorunsuz geçiş yapılıyor.`);
-        return { rows: [], rowCount: 0, fields: [] };
+        systemLogger.error('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
       } else {
-        systemLogger.warn('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
+        systemLogger.error('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
       }
-      return { rows: [], rowCount: 0, fields: [] };
+      throw err;
     }
   }
 
@@ -877,7 +965,9 @@ export class PostgresRepository {
   // USERS & PASSWORDS
   // ==========================================
   public async saveUser(user: User, passwordHash?: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO users (
         id, name, email, phone, notification_email, whatsapp_number, 
@@ -919,7 +1009,9 @@ export class PostgresRepository {
   }
 
   public async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     await this.query(`UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2;`, [
       passwordHash,
       userId,
@@ -927,7 +1019,9 @@ export class PostgresRepository {
   }
 
   public async deleteUser(userId: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -1057,7 +1151,9 @@ export class PostgresRepository {
   // DEVICES
   // ==========================================
   public async saveDevice(dev: Device): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
 
     // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_admin'e yönlendirilir
     const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_admin';
@@ -1198,7 +1294,9 @@ export class PostgresRepository {
   }
 
   public async deleteDevice(deviceId: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     await this.query(`DELETE FROM devices WHERE id = $1;`, [deviceId]);
   }
 
@@ -1252,31 +1350,27 @@ export class PostgresRepository {
   }
 
   public async getDeviceById(id: string): Promise<Device | null> {
-    if (!this.pool || !id) return null;
-    try {
-      const res = await this.query(`SELECT * FROM devices WHERE id = $1 LIMIT 1;`, [id]);
-      if (res.rows && res.rows.length > 0) {
-        return this.mapDeviceRow(res.rows[0]);
-      }
-      return null;
-    } catch (err: any) {
-      console.error(`[PostgreSQL] getDeviceById error for ${id}:`, err.message || err);
-      return null;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    if (!id) return null;
+    const res = await this.query(`SELECT * FROM devices WHERE id = $1 LIMIT 1;`, [id]);
+    if (res.rows && res.rows.length > 0) {
+      return this.mapDeviceRow(res.rows[0]);
+    }
+    return null;
   }
 
   public async getDeviceByApiKey(apiKey: string): Promise<Device | null> {
-    if (!this.pool || !apiKey) return null;
-    try {
-      const res = await this.query(`SELECT * FROM devices WHERE api_key = $1 OR api_key_hash = $1 LIMIT 1;`, [apiKey]);
-      if (res.rows && res.rows.length > 0) {
-        return this.mapDeviceRow(res.rows[0]);
-      }
-      return null;
-    } catch (err: any) {
-      console.error(`[PostgreSQL] getDeviceByApiKey error:`, err.message || err);
-      return null;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    if (!apiKey) return null;
+    const res = await this.query(`SELECT * FROM devices WHERE api_key = $1 OR api_key_hash = $1 LIMIT 1;`, [apiKey]);
+    if (res.rows && res.rows.length > 0) {
+      return this.mapDeviceRow(res.rows[0]);
+    }
+    return null;
   }
 
   public async updateDeviceWsStatus(
@@ -1286,23 +1380,22 @@ export class PostgresRepository {
     lastSeenIso?: string,
     lastMessageAtIso?: string
   ): Promise<void> {
-    if (!this.pool || !deviceId) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    if (!deviceId) return;
     const now = new Date().toISOString();
     const seen = lastSeenIso || now;
     const msgAt = lastMessageAtIso || (isConnected ? now : null);
-    try {
-      await this.query(
-        `UPDATE devices
-         SET websocket_connected = $2,
-             status = COALESCE($3, status),
-             last_seen = COALESCE($4::timestamptz, last_seen),
-             last_message_at = COALESCE($5::timestamptz, last_message_at)
-         WHERE id = $1;`,
-        [deviceId, isConnected, status || (isConnected ? 'online' : 'offline'), seen, msgAt]
-      );
-    } catch (err: any) {
-      console.error(`[PostgreSQL] updateDeviceWsStatus error for ${deviceId}:`, err.message || err);
-    }
+    await this.query(
+      `UPDATE devices
+       SET websocket_connected = $2,
+           status = COALESCE($3, status),
+           last_seen = COALESCE($4::timestamptz, last_seen),
+           last_message_at = COALESCE($5::timestamptz, last_message_at)
+       WHERE id = $1;`,
+      [deviceId, isConnected, status || (isConnected ? 'online' : 'offline'), seen, msgAt]
+    );
   }
 
   public async updateDeviceOutputsAndMetrics(
@@ -1311,20 +1404,19 @@ export class PostgresRepository {
     outputDefinitions?: any[],
     lastSeenIso?: string
   ): Promise<void> {
-    if (!this.pool || !deviceId) return;
-    const seen = lastSeenIso || new Date().toISOString();
-    try {
-      await this.query(
-        `UPDATE devices
-         SET metrics = $2::jsonb,
-             output_definitions = COALESCE($3::jsonb, output_definitions),
-             last_seen = COALESCE($4::timestamptz, last_seen)
-         WHERE id = $1;`,
-        [deviceId, JSON.stringify(metrics || {}), outputDefinitions ? JSON.stringify(outputDefinitions) : null, seen]
-      );
-    } catch (err: any) {
-      console.error(`[PostgreSQL] updateDeviceOutputsAndMetrics error for ${deviceId}:`, err.message || err);
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    if (!deviceId) return;
+    const seen = lastSeenIso || new Date().toISOString();
+    await this.query(
+      `UPDATE devices
+       SET metrics = $2::jsonb,
+           output_definitions = COALESCE($3::jsonb, output_definitions),
+           last_seen = COALESCE($4::timestamptz, last_seen)
+       WHERE id = $1;`,
+      [deviceId, JSON.stringify(metrics || {}), outputDefinitions ? JSON.stringify(outputDefinitions) : null, seen]
+    );
   }
 
   public async updateDeviceHelloInfo(
@@ -1339,33 +1431,32 @@ export class PostgresRepository {
       lastSeen?: string;
     }
   ): Promise<void> {
-    if (!this.pool || !deviceId) return;
-    const seen = info.lastSeen || new Date().toISOString();
-    try {
-      await this.query(
-        `UPDATE devices
-         SET firmware_version = COALESCE($2, firmware_version),
-             hardware_model = COALESCE($3, hardware_model),
-             ip_address = COALESCE($4, ip_address),
-             mac_address = COALESCE($5, mac_address),
-             status = COALESCE($6, status),
-             websocket_connected = COALESCE($7, websocket_connected),
-             last_seen = COALESCE($8::timestamptz, last_seen)
-         WHERE id = $1;`,
-        [
-          deviceId,
-          info.firmwareVersion || null,
-          info.hardwareModel || null,
-          info.ipAddress || null,
-          info.macAddress || null,
-          info.status || 'online',
-          info.websocketConnected !== undefined ? info.websocketConnected : true,
-          seen,
-        ]
-      );
-    } catch (err: any) {
-      console.error(`[PostgreSQL] updateDeviceHelloInfo error for ${deviceId}:`, err.message || err);
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    if (!deviceId) return;
+    const seen = info.lastSeen || new Date().toISOString();
+    await this.query(
+      `UPDATE devices
+       SET firmware_version = COALESCE($2, firmware_version),
+           hardware_model = COALESCE($3, hardware_model),
+           ip_address = COALESCE($4, ip_address),
+           mac_address = COALESCE($5, mac_address),
+           status = COALESCE($6, status),
+           websocket_connected = COALESCE($7, websocket_connected),
+           last_seen = COALESCE($8::timestamptz, last_seen)
+       WHERE id = $1;`,
+      [
+        deviceId,
+        info.firmwareVersion || null,
+        info.hardwareModel || null,
+        info.ipAddress || null,
+        info.macAddress || null,
+        info.status || 'online',
+        info.websocketConnected !== undefined ? info.websocketConnected : true,
+        seen,
+      ]
+    );
   }
 
   // ==========================================
@@ -1461,10 +1552,6 @@ export class PostgresRepository {
       return (a.id || '').localeCompare(b.id || '');
     });
 
-    const first = sortedReadings[0];
-    const isSimulation = first?.source === 'simulator' || first?.environment === 'sandbox';
-    const targetTable = isSimulation ? 'simulation_telemetry_readings' : 'telemetry_readings';
-
     const maxRetries = 3;
     let attempt = 0;
 
@@ -1474,100 +1561,207 @@ export class PostgresRepository {
       try {
         await client.query('BEGIN');
 
-        const deviceId = first.deviceId;
-        const sequence = first.sequence;
-        const bootId = first.bootId || 'default';
-        const idempotencyKey = first.idempotencyKey || (
-          deviceId && sequence !== undefined && sequence !== null
-            ? `${deviceId}:${bootId}:${sequence}`
-            : null
-        );
-        let packetId: string | null = first.packetId || null;
+        // Extract and deduplicate physical packet headers across all devices in this batch
+        const physicalPacketsMap = new Map<
+          string,
+          {
+            id: string;
+            deviceId: string;
+            bootId: string;
+            sequence: number;
+            idempotencyKey: string;
+            metricCount: number;
+            timestamp: string;
+          }
+        >();
 
-        // Packet-Level Idempotency Deduplication for Physical Telemetry Packets (deviceId + bootId + sequence)
-        if (!isSimulation && deviceId && sequence !== undefined && sequence !== null) {
-          packetId = packetId || `pkt_${deviceId}_boot_${bootId}_seq_${sequence}`;
-          const packetSql = `
-            INSERT INTO telemetry_packets (id, device_id, boot_id, sequence, idempotency_key, metric_count, received_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (device_id, boot_id, sequence) DO NOTHING
-            RETURNING id;
-          `;
-          const pktRes = await client.query(packetSql, [
-            packetId,
-            deviceId,
-            bootId,
-            sequence,
-            idempotencyKey,
-            sortedReadings.length,
-            first.timestamp || new Date().toISOString(),
-          ]);
-
-          if (!pktRes.rows || pktRes.rows.length === 0) {
-            // Conflict occurred: Packet with (deviceId, bootId, sequence) was already processed!
-            await client.query('COMMIT');
-            console.log(`[Telemetry Packet Deduplication] Paket Atlandı: Cihaz=${deviceId}, BootId=${bootId}, Sequence=${sequence} daha önce işlenmiş.`);
-            return { success: true, rowCount: 0, duplicateSkipped: true };
+        for (const r of sortedReadings) {
+          const isSim = r.source === 'simulator' || r.environment === 'sandbox';
+          if (!isSim && r.deviceId && r.sequence !== undefined && r.sequence !== null) {
+            const bootId = r.bootId || 'default';
+            const key = `${r.deviceId}:${bootId}:${r.sequence}`;
+            if (!physicalPacketsMap.has(key)) {
+              const packetId = r.packetId || `pkt_${r.deviceId}_boot_${bootId}_seq_${r.sequence}`;
+              const idempotencyKey = r.idempotencyKey || key;
+              physicalPacketsMap.set(key, {
+                id: packetId,
+                deviceId: r.deviceId,
+                bootId,
+                sequence: r.sequence,
+                idempotencyKey,
+                metricCount: 0,
+                timestamp: r.timestamp || new Date().toISOString(),
+              });
+            }
+            physicalPacketsMap.get(key)!.metricCount++;
           }
         }
 
-        const chunkSize = 100;
-        let totalInserted = 0;
+        const validPacketKeys = new Set<string>();
+        const duplicatePacketKeys = new Set<string>();
 
-        for (let i = 0; i < sortedReadings.length; i += chunkSize) {
-          const chunk = sortedReadings.slice(i, i + chunkSize);
-          const valueTuples: string[] = [];
-          const params: any[] = [];
-          let paramIdx = 1;
+        if (physicalPacketsMap.size > 0) {
+          for (const pkt of physicalPacketsMap.values()) {
+            const packetSql = `
+              INSERT INTO telemetry_packets (id, device_id, boot_id, sequence, idempotency_key, metric_count, received_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7)
+              ON CONFLICT (device_id, boot_id, sequence) DO NOTHING
+              RETURNING id, device_id, boot_id, sequence;
+            `;
+            const pktRes = await client.query(packetSql, [
+              pkt.id,
+              pkt.deviceId,
+              pkt.bootId,
+              pkt.sequence,
+              pkt.idempotencyKey,
+              pkt.metricCount,
+              pkt.timestamp,
+            ]);
 
-          for (const r of chunk) {
-            const tenantId = r.tenantId || r.customerId || 'usr_admin';
-            const customerId = r.customerId || r.tenantId || 'usr_admin';
-            const userId = r.userId || customerId || tenantId || 'usr_admin';
-            const rBootId = r.bootId || bootId;
-            const rIdempotencyKey = r.idempotencyKey || (
-              r.deviceId && r.sequence !== undefined && r.sequence !== null
-                ? `${r.deviceId}:${rBootId}:${r.sequence}`
-                : null
-            );
-
-            valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
-            params.push(
-              r.id,
-              packetId,
-              tenantId,
-              customerId,
-              userId,
-              r.deviceId,
-              r.deviceName || r.deviceId,
-              r.metric,
-              Number(r.value),
-              r.unit || '',
-              r.status || 'normal',
-              r.sequence ?? null,
-              rBootId,
-              rIdempotencyKey,
-              r.source || (isSimulation ? 'simulator' : 'physical'),
-              r.environment || (isSimulation ? 'sandbox' : 'production'),
-              r.simulationRunId || null,
-              r.timestamp || new Date().toISOString()
-            );
-            paramIdx += 18;
+            const key = `${pkt.deviceId}:${pkt.bootId}:${pkt.sequence}`;
+            if (pktRes.rows && pktRes.rows.length > 0) {
+              validPacketKeys.add(key);
+            } else {
+              duplicatePacketKeys.add(key);
+            }
           }
+        }
 
-          const sql = `
-            INSERT INTO ${targetTable} (
-              id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
-            ) VALUES ${valueTuples.join(', ')}
-            ON CONFLICT DO NOTHING;
-          `;
+        // Filter out readings belonging to already processed duplicate packets
+        const filteredReadings = sortedReadings.filter((r) => {
+          const isSim = r.source === 'simulator' || r.environment === 'sandbox';
+          if (isSim || !r.deviceId || r.sequence === undefined || r.sequence === null) {
+            return true;
+          }
+          const bootId = r.bootId || 'default';
+          const key = `${r.deviceId}:${bootId}:${r.sequence}`;
+          return !duplicatePacketKeys.has(key);
+        });
 
-          const res = await client.query(sql, params);
-          totalInserted += res?.rowCount ?? chunk.length;
+        if (filteredReadings.length === 0 && duplicatePacketKeys.size > 0) {
+          // All packets in this batch were duplicate!
+          await client.query('COMMIT');
+          console.log(`[Telemetry Packet Deduplication] Tüm paketler atlandı (${duplicatePacketKeys.size} paket daha önce işlenmiş).`);
+          return { success: true, rowCount: 0, duplicateSkipped: true };
+        }
+
+        // Group readings by target table (physical vs simulation) for optimal batch multi-row INSERTs
+        const physicalReadings = filteredReadings.filter((r) => r.source !== 'simulator' && r.environment !== 'sandbox');
+        const simulationReadings = filteredReadings.filter((r) => r.source === 'simulator' || r.environment === 'sandbox');
+
+        let totalInserted = 0;
+        const chunkSize = 100;
+
+        // 1. Insert physical readings into telemetry_readings
+        if (physicalReadings.length > 0) {
+          for (let i = 0; i < physicalReadings.length; i += chunkSize) {
+            const chunk = physicalReadings.slice(i, i + chunkSize);
+            const valueTuples: string[] = [];
+            const params: any[] = [];
+            let paramIdx = 1;
+
+            for (const r of chunk) {
+              const tenantId = r.tenantId || r.customerId || 'usr_admin';
+              const customerId = r.customerId || r.tenantId || 'usr_admin';
+              const userId = r.userId || customerId || tenantId || 'usr_admin';
+              const bootId = r.bootId || 'default';
+              const rPacketId = r.packetId || (r.sequence !== undefined && r.sequence !== null ? `pkt_${r.deviceId}_boot_${bootId}_seq_${r.sequence}` : null);
+              const rIdempotencyKey = r.idempotencyKey || (
+                r.deviceId && r.sequence !== undefined && r.sequence !== null
+                  ? `${r.deviceId}:${bootId}:${r.sequence}`
+                  : null
+              );
+
+              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
+              params.push(
+                r.id,
+                rPacketId,
+                tenantId,
+                customerId,
+                userId,
+                r.deviceId,
+                r.deviceName || r.deviceId,
+                r.metric,
+                Number(r.value),
+                r.unit || '',
+                r.status || 'normal',
+                r.sequence ?? null,
+                bootId,
+                rIdempotencyKey,
+                r.source || 'physical',
+                r.environment || 'production',
+                r.simulationRunId || null,
+                r.timestamp || new Date().toISOString()
+              );
+              paramIdx += 18;
+            }
+
+            const sql = `
+              INSERT INTO telemetry_readings (
+                id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+              ) VALUES ${valueTuples.join(', ')}
+              ON CONFLICT DO NOTHING;
+            `;
+
+            const res = await client.query(sql, params);
+            totalInserted += res?.rowCount ?? chunk.length;
+          }
+        }
+
+        // 2. Insert simulation readings into simulation_telemetry_readings
+        if (simulationReadings.length > 0) {
+          for (let i = 0; i < simulationReadings.length; i += chunkSize) {
+            const chunk = simulationReadings.slice(i, i + chunkSize);
+            const valueTuples: string[] = [];
+            const params: any[] = [];
+            let paramIdx = 1;
+
+            for (const r of chunk) {
+              const tenantId = r.tenantId || r.customerId || 'usr_admin';
+              const customerId = r.customerId || r.tenantId || 'usr_admin';
+              const userId = r.userId || customerId || tenantId || 'usr_admin';
+              const bootId = r.bootId || 'default';
+              const rPacketId = r.packetId || null;
+              const rIdempotencyKey = r.idempotencyKey || null;
+
+              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
+              params.push(
+                r.id,
+                rPacketId,
+                tenantId,
+                customerId,
+                userId,
+                r.deviceId,
+                r.deviceName || r.deviceId,
+                r.metric,
+                Number(r.value),
+                r.unit || '',
+                r.status || 'normal',
+                r.sequence ?? null,
+                bootId,
+                rIdempotencyKey,
+                'simulator',
+                'sandbox',
+                r.simulationRunId || null,
+                r.timestamp || new Date().toISOString()
+              );
+              paramIdx += 18;
+            }
+
+            const sql = `
+              INSERT INTO simulation_telemetry_readings (
+                id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+              ) VALUES ${valueTuples.join(', ')}
+              ON CONFLICT DO NOTHING;
+            `;
+
+            const res = await client.query(sql, params);
+            totalInserted += res?.rowCount ?? chunk.length;
+          }
         }
 
         await client.query('COMMIT');
-        return { success: true, rowCount: totalInserted };
+        return { success: true, rowCount: totalInserted, duplicateSkipped: duplicatePacketKeys.size > 0 && totalInserted === 0 };
       } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
         const isDeadlockOrSerialization =
@@ -1580,12 +1774,12 @@ export class PostgresRepository {
 
         if (isDeadlockOrSerialization && attempt < maxRetries) {
           const backoffMs = Math.floor(25 * Math.pow(2, attempt) + Math.random() * 50);
-          console.warn(`[PostgreSQL Concurrency Retrying] Transient deadlock/serialization on ${targetTable} (attempt ${attempt}/${maxRetries}), retrying in ${backoffMs}ms...`);
+          console.warn(`[PostgreSQL Concurrency Retrying] Transient deadlock/serialization (attempt ${attempt}/${maxRetries}), retrying in ${backoffMs}ms...`);
           await new Promise((resolve) => setTimeout(resolve, backoffMs));
           continue;
         }
 
-        console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed (${targetTable}): ${err?.message || err}`);
+        console.warn(`[PostgreSQL Transaction Rollback] Batch telemetry insertion failed: ${err?.message || err}`);
         throw err;
       } finally {
         client.release();
@@ -1599,7 +1793,9 @@ export class PostgresRepository {
   // THRESHOLD RULES
   // ==========================================
   public async saveRule(rule: ThresholdRule): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO threshold_rules (
         id, user_id, user_name, device_id, metric_key, operator, threshold_value,
@@ -1661,7 +1857,9 @@ export class PostgresRepository {
   }
 
   public async deleteRule(ruleId: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     await this.query(`DELETE FROM threshold_rules WHERE id = $1;`, [ruleId]);
   }
 
@@ -1669,7 +1867,9 @@ export class PostgresRepository {
   // ACTIVE ALARMS
   // ==========================================
   public async saveAlarm(alarm: ActiveAlarm): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO active_alarms (
         id, incident_id, last_evaluated_at, rule_id, device_id, device_name, user_id, tenant_id, metric_key, operator,
@@ -1725,7 +1925,9 @@ export class PostgresRepository {
   // NOTIFICATIONS
   // ==========================================
   public async saveNotification(n: NotificationItem): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO notifications (
         id, user_id, title, message, severity, device_id, device_name,
@@ -1762,12 +1964,16 @@ export class PostgresRepository {
   }
 
   public async markNotificationRead(id: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     await this.query(`UPDATE notifications SET is_read = TRUE WHERE id = $1;`, [id]);
   }
 
   public async markAllNotificationsRead(userId?: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     if (userId && userId !== 'usr_admin') {
       await this.query(`UPDATE notifications SET is_read = TRUE WHERE user_id = $1;`, [userId]);
     } else {
@@ -1779,7 +1985,9 @@ export class PostgresRepository {
   // DASHBOARD LAYOUTS
   // ==========================================
   public async saveDashboard(dash: DashboardLayout): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO dashboard_layouts (
         id, user_id, title, widgets_json, updated_at
@@ -1802,7 +2010,9 @@ export class PostgresRepository {
   // AUDIT LOGS
   // ==========================================
   public async saveAuditLog(log: AuditLog): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO audit_logs (id, user_id, user_name, action, ip_address, severity, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1991,7 +2201,9 @@ export class PostgresRepository {
   }
 
   public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     let sql = `SELECT * FROM device_commands WHERE device_id = $1`;
     const params: any[] = [deviceId];
 
@@ -2010,7 +2222,9 @@ export class PostgresRepository {
   }
 
   public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const res = await this.query(
       `SELECT * FROM device_commands WHERE device_id = $1 AND status IN ('pending', 'sent') ORDER BY created_at ASC LIMIT 20`,
       [deviceId]
@@ -2024,7 +2238,10 @@ export class PostgresRepository {
    * Reclaims any previously 'sent'/'claimed' command whose lease expired (>60s) without an ACK.
    */
   public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
-    if (!this.pool || !deviceId) return [];
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    if (!deviceId) return [];
     const sql = `
       UPDATE device_commands
       SET status = 'sent',
@@ -2046,13 +2263,8 @@ export class PostgresRepository {
       )
       RETURNING *;
     `;
-    try {
-      const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
-      return res.rows.map(r => this.mapDeviceCommandRow(r));
-    } catch (err: any) {
-      console.error('[PostgreSQL] claimPendingCommands error:', err.message || err);
-      return [];
-    }
+    const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
+    return res.rows.map(r => this.mapDeviceCommandRow(r));
   }
 
   /**
@@ -2066,7 +2278,10 @@ export class PostgresRepository {
     result?: any,
     errorMessage?: string
   ): Promise<DeviceCommand | null> {
-    if (!this.pool || !commandId || !deviceId) return null;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    if (!commandId || !deviceId) return null;
     const sql = `
       UPDATE device_commands
       SET status = $3::text,
@@ -2081,22 +2296,17 @@ export class PostgresRepository {
       WHERE (id = $1 OR command_id = $1) AND device_id = $2
       RETURNING *;
     `;
-    try {
-      const res = await this.query(sql, [
-        commandId,
-        deviceId,
-        status,
-        result !== undefined ? JSON.stringify(result) : null,
-        errorMessage || null
-      ]);
-      if (res && res.rows && res.rows.length > 0) {
-        return this.mapDeviceCommandRow(res.rows[0]);
-      }
-      return null;
-    } catch (err: any) {
-      console.error('[PostgreSQL] acknowledgeCommand error:', err.message || err);
-      return null;
+    const res = await this.query(sql, [
+      commandId,
+      deviceId,
+      status,
+      result !== undefined ? JSON.stringify(result) : null,
+      errorMessage || null
+    ]);
+    if (res && res.rows && res.rows.length > 0) {
+      return this.mapDeviceCommandRow(res.rows[0]);
     }
+    return null;
   }
 
   public async updateCommandStatus(
@@ -2105,7 +2315,10 @@ export class PostgresRepository {
     status: DeviceCommandStatus,
     errorMessage?: string
   ): Promise<DeviceCommand | null> {
-    if (!this.pool || !commandId || !deviceId) return null;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    if (!commandId || !deviceId) return null;
     const sql = `
       UPDATE device_commands
       SET status = $3::text,
@@ -2114,20 +2327,17 @@ export class PostgresRepository {
       WHERE (id = $1 OR command_id = $1) AND device_id = $2
       RETURNING *;
     `;
-    try {
-      const res = await this.query(sql, [commandId, deviceId, status, errorMessage || null]);
-      if (res && res.rows && res.rows.length > 0) {
-        return this.mapDeviceCommandRow(res.rows[0]);
-      }
-      return null;
-    } catch (err: any) {
-      console.error('[PostgreSQL] updateCommandStatus error:', err.message || err);
-      return null;
+    const res = await this.query(sql, [commandId, deviceId, status, errorMessage || null]);
+    if (res && res.rows && res.rows.length > 0) {
+      return this.mapDeviceCommandRow(res.rows[0]);
     }
+    return null;
   }
 
   public async expireStaleCommands(timeoutSeconds = 600): Promise<DeviceCommand[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       UPDATE device_commands
       SET status = 'timeout',
@@ -2137,13 +2347,8 @@ export class PostgresRepository {
         AND created_at < CURRENT_TIMESTAMP - (COALESCE(timeout_seconds, $1) || ' seconds')::INTERVAL
       RETURNING *;
     `;
-    try {
-      const res = await this.query(sql, [timeoutSeconds]);
-      return (res?.rows || []).map((r: any) => this.mapDeviceCommandRow(r));
-    } catch (err: any) {
-      console.error('[PostgreSQL] expireStaleCommands error:', err.message || err);
-      return [];
-    }
+    const res = await this.query(sql, [timeoutSeconds]);
+    return (res?.rows || []).map((r: any) => this.mapDeviceCommandRow(r));
   }
 
   public async markCommandsDelivered(commandIds: string[]): Promise<void> {
@@ -2281,65 +2486,128 @@ export class PostgresRepository {
       total: 0,
     };
 
-    if (!this.pool || !this.isConnected) return counts;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
 
     try {
       // 1. Telemetry readings (Both physical and simulation hypertables)
       if (options.telemetryDays && options.telemetryDays > 0) {
-        const resPhysical = await this.query(
-          `DELETE FROM telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.telemetryDays]
-        );
-        const resSim = await this.query(
-          `DELETE FROM simulation_telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.telemetryDays]
-        );
-        counts.telemetry = (resPhysical?.rowCount || 0) + (resSim?.rowCount || 0);
+        let deletedPhysical = 0;
+        let deletedSim = 0;
+
+        // Try TimescaleDB drop_chunks first for older chunks (works on compressed hypertable chunks!)
+        try {
+          const dropRes = await this.query(
+            `SELECT drop_chunks('telemetry_readings', older_than => ($1 || ' days')::interval);`,
+            [options.telemetryDays]
+          );
+          if (dropRes && dropRes.rows && dropRes.rows.length > 0) {
+            console.log(`[PostgreSQL TimescaleDB] drop_chunks dropped ${dropRes.rows.length} chunk(s) from telemetry_readings`);
+          }
+        } catch (dropErr: any) {
+          // If drop_chunks is not supported or table is not a hypertable, proceed to standard delete
+        }
+
+        try {
+          const dropSimRes = await this.query(
+            `SELECT drop_chunks('simulation_telemetry_readings', older_than => ($1 || ' days')::interval);`,
+            [options.telemetryDays]
+          );
+          if (dropSimRes && dropSimRes.rows && dropSimRes.rows.length > 0) {
+            console.log(`[PostgreSQL TimescaleDB] drop_chunks dropped ${dropSimRes.rows.length} chunk(s) from simulation_telemetry_readings`);
+          }
+        } catch (dropSimErr: any) {
+          // Silently proceed
+        }
+
+        // Delete any remaining records from uncompressed chunks or non-hypertable
+        try {
+          const resPhysical = await this.query(
+            `DELETE FROM telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.telemetryDays]
+          );
+          deletedPhysical = resPhysical?.rowCount || 0;
+        } catch (delErr: any) {
+          console.warn('[PostgreSQL telemetry_readings delete error]:', delErr?.message || delErr);
+        }
+
+        try {
+          const resSim = await this.query(
+            `DELETE FROM simulation_telemetry_readings WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.telemetryDays]
+          );
+          deletedSim = resSim?.rowCount || 0;
+        } catch (delSimErr: any) {
+          console.warn('[PostgreSQL simulation_telemetry_readings delete error]:', delSimErr?.message || delSimErr);
+        }
+
+        counts.telemetry = deletedPhysical + deletedSim;
       }
 
       // 2. Resolved Alarms
       if (options.resolvedAlarmsDays && options.resolvedAlarmsDays > 0) {
-        const res = await this.query(
-          `DELETE FROM active_alarms WHERE state = 'RESOLVED' AND (resolved_at < NOW() - ($1 * INTERVAL '1 day') OR (resolved_at IS NULL AND updated_at < NOW() - ($1 * INTERVAL '1 day')));`,
-          [options.resolvedAlarmsDays]
-        );
-        counts.alarms = res?.rowCount || 0;
+        try {
+          const res = await this.query(
+            `DELETE FROM active_alarms WHERE state = 'RESOLVED' AND (resolved_at < NOW() - ($1 * INTERVAL '1 day') OR (resolved_at IS NULL AND updated_at < NOW() - ($1 * INTERVAL '1 day')));`,
+            [options.resolvedAlarmsDays]
+          );
+          counts.alarms = res?.rowCount || 0;
+        } catch (err: any) {
+          console.warn('[PostgreSQL Alarms Retention Error]:', err?.message || err);
+        }
       }
 
       // 3. Read Notifications
       if (options.readNotificationsDays && options.readNotificationsDays > 0) {
-        const res = await this.query(
-          `DELETE FROM notifications WHERE is_read = TRUE AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.readNotificationsDays]
-        );
-        counts.notifications = res?.rowCount || 0;
+        try {
+          const res = await this.query(
+            `DELETE FROM notifications WHERE is_read = TRUE AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.readNotificationsDays]
+          );
+          counts.notifications = res?.rowCount || 0;
+        } catch (err: any) {
+          console.warn('[PostgreSQL Notifications Retention Error]:', err?.message || err);
+        }
       }
 
       // 4. Audit Logs
       if (options.auditLogsDays && options.auditLogsDays > 0) {
-        const res = await this.query(
-          `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.auditLogsDays]
-        );
-        counts.auditLogs = res?.rowCount || 0;
+        try {
+          const res = await this.query(
+            `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.auditLogsDays]
+          );
+          counts.auditLogs = res?.rowCount || 0;
+        } catch (err: any) {
+          console.warn('[PostgreSQL Audit Logs Retention Error]:', err?.message || err);
+        }
       }
 
       // 5. Dispatch Logs
       if (options.dispatchLogsDays && options.dispatchLogsDays > 0) {
-        const res = await this.query(
-          `DELETE FROM dispatch_logs WHERE sent_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.dispatchLogsDays]
-        );
-        counts.dispatchLogs = res?.rowCount || 0;
+        try {
+          const res = await this.query(
+            `DELETE FROM dispatch_logs WHERE sent_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.dispatchLogsDays]
+          );
+          counts.dispatchLogs = res?.rowCount || 0;
+        } catch (err: any) {
+          console.warn('[PostgreSQL Dispatch Logs Retention Error]:', err?.message || err);
+        }
       }
 
       // 6. Device Commands (Delivered or Failed)
       if (options.deviceCommandsDays && options.deviceCommandsDays > 0) {
-        const res = await this.query(
-          `DELETE FROM device_commands WHERE status IN ('delivered', 'failed', 'expired') AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
-          [options.deviceCommandsDays]
-        );
-        counts.deviceCommands = res?.rowCount || 0;
+        try {
+          const res = await this.query(
+            `DELETE FROM device_commands WHERE status IN ('delivered', 'failed', 'expired') AND created_at < NOW() - ($1 * INTERVAL '1 day');`,
+            [options.deviceCommandsDays]
+          );
+          counts.deviceCommands = res?.rowCount || 0;
+        } catch (err: any) {
+          console.warn('[PostgreSQL Device Commands Retention Error]:', err?.message || err);
+        }
       }
 
       counts.total =
@@ -2351,6 +2619,7 @@ export class PostgresRepository {
         counts.deviceCommands;
     } catch (err: any) {
       console.warn('[PostgreSQL Retention Cleanup Error]:', err.message || err);
+      throw err;
     }
 
     return counts;
@@ -2371,47 +2640,97 @@ export class PostgresRepository {
       total: 0,
     };
 
-    if (!this.pool || !this.isConnected) return counts;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
 
     try {
-      // 1. Telemetry readings: Purge dedicated simulation hypertable + any legacy simulation rows
-      const simTelRes = await this.query(`DELETE FROM simulation_telemetry_readings;`);
-      const legacyTelRes = await this.query(`
-        DELETE FROM telemetry_readings 
-        WHERE source = 'simulator' 
-           OR environment = 'sandbox'
-           OR device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
-           OR device_id LIKE 'sim_%';
-      `);
-      counts.telemetry = (simTelRes?.rowCount || 0) + (legacyTelRes?.rowCount || 0);
+      // 1. Telemetry readings: Purge dedicated simulation hypertable
+      try {
+        const simTelRes = await this.query(`DELETE FROM simulation_telemetry_readings;`);
+        counts.telemetry += simTelRes?.rowCount || 0;
+      } catch (err: any) {
+        console.warn('[PostgreSQL Simulated Telemetry Purge Error]:', err?.message || err);
+      }
+
+      // Find simulated device IDs in PostgreSQL
+      let simIds: string[] = [];
+      try {
+        const devRes = await this.query(`SELECT id FROM devices WHERE is_simulated = TRUE OR id LIKE $1;`, ['sim_%']);
+        simIds = (devRes?.rows || []).map((r: any) => r.id);
+      } catch (err: any) {
+        console.warn('[PostgreSQL Find Simulated Devices Error]:', err?.message || err);
+      }
+
+      // Check and delete simulation records from telemetry_readings efficiently using indexes
+      try {
+        const hasSimSource = await this.query(
+          `SELECT 1 FROM telemetry_readings WHERE source = $1 OR environment = $2 LIMIT 1;`,
+          ['simulator', 'sandbox']
+        );
+        if (hasSimSource?.rows?.length > 0) {
+          const delRes = await this.query(
+            `DELETE FROM telemetry_readings WHERE source = $1 OR environment = $2;`,
+            ['simulator', 'sandbox']
+          );
+          counts.telemetry += delRes?.rowCount || 0;
+        }
+      } catch (err: any) {
+        console.warn('[PostgreSQL Simulator Source Delete Error]:', err?.message || err);
+      }
+
+      if (simIds.length > 0) {
+        try {
+          const hasDevRows = await this.query(
+            `SELECT 1 FROM telemetry_readings WHERE device_id = ANY($1) LIMIT 1;`,
+            [simIds]
+          );
+          if (hasDevRows?.rows?.length > 0) {
+            const delDevRes = await this.query(
+              `DELETE FROM telemetry_readings WHERE device_id = ANY($1);`,
+              [simIds]
+            );
+            counts.telemetry += delDevRes?.rowCount || 0;
+          }
+        } catch (err: any) {
+          console.warn('[PostgreSQL Simulated Device Telemetry Delete Error]:', err?.message || err);
+        }
+      }
 
       // 2. Active/Resolved Alarms
-      const alarmRes = await this.query(`
-        DELETE FROM active_alarms 
-        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
-           OR device_id LIKE 'sim_%';
-      `);
-      counts.alarms = alarmRes?.rowCount || 0;
+      try {
+        const alarmRes = simIds.length > 0
+          ? await this.query(`DELETE FROM active_alarms WHERE device_id = ANY($1) OR device_id LIKE $2;`, [simIds, 'sim_%'])
+          : await this.query(`DELETE FROM active_alarms WHERE device_id LIKE $1;`, ['sim_%']);
+        counts.alarms = alarmRes?.rowCount || 0;
+      } catch (err: any) {
+        console.warn('[PostgreSQL Simulated Alarms Delete Error]:', err?.message || err);
+      }
 
       // 3. Notifications
-      const notifRes = await this.query(`
-        DELETE FROM notifications 
-        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
-           OR device_id LIKE 'sim_%';
-      `);
-      counts.notifications = notifRes?.rowCount || 0;
+      try {
+        const notifRes = simIds.length > 0
+          ? await this.query(`DELETE FROM notifications WHERE device_id = ANY($1) OR device_id LIKE $2;`, [simIds, 'sim_%'])
+          : await this.query(`DELETE FROM notifications WHERE device_id LIKE $1;`, ['sim_%']);
+        counts.notifications = notifRes?.rowCount || 0;
+      } catch (err: any) {
+        console.warn('[PostgreSQL Simulated Notifications Delete Error]:', err?.message || err);
+      }
 
       // 4. Device Commands
-      const cmdRes = await this.query(`
-        DELETE FROM device_commands 
-        WHERE device_id IN (SELECT id FROM devices WHERE is_simulated = TRUE)
-           OR device_id LIKE 'sim_%';
-      `);
-      counts.deviceCommands = cmdRes?.rowCount || 0;
+      try {
+        const cmdRes = simIds.length > 0
+          ? await this.query(`DELETE FROM device_commands WHERE device_id = ANY($1) OR device_id LIKE $2;`, [simIds, 'sim_%'])
+          : await this.query(`DELETE FROM device_commands WHERE device_id LIKE $1;`, ['sim_%']);
+        counts.deviceCommands = cmdRes?.rowCount || 0;
+      } catch (err: any) {
+        console.warn('[PostgreSQL Simulated Device Commands Delete Error]:', err?.message || err);
+      }
 
       counts.total = counts.telemetry + counts.alarms + counts.notifications + counts.deviceCommands;
     } catch (err: any) {
       console.warn('[PostgreSQL Simulated Data Cleanup Error]:', err.message || err);
+      throw err;
     }
 
     return counts;
@@ -2429,6 +2748,8 @@ export class PostgresRepository {
     alarms: ActiveAlarm[];
     dashboards: DashboardLayout[];
     sessions?: any[];
+    firmwares?: Firmware[];
+    otaJobs?: OtaDeploymentJob[];
   } | null> {
 
     if (!this.pool) return null;
@@ -2573,7 +2894,68 @@ export class PostgresRepository {
         });
       }
 
-                  return {
+      // 6. Firmwares
+      const fwRes = await this.query(`SELECT * FROM firmwares ORDER BY created_at DESC;`).catch(() => null);
+      const firmwares: Firmware[] = [];
+      if (fwRes?.rows) {
+        fwRes.rows.forEach((r: any) => {
+          firmwares.push({
+            id: r.id,
+            name: r.name,
+            deviceType: r.device_type,
+            roleKey: r.role_key,
+            hardwareModel: r.hardware_model || 'ALL',
+            version: r.version,
+            description: r.description || undefined,
+            binaryData: r.binary_data ? (Buffer.isBuffer(r.binary_data) ? r.binary_data.toString('base64') : String(r.binary_data)) : undefined,
+            binarySize: Number(r.binary_size || 0),
+            sha256: r.sha256,
+            signature: r.signature || undefined,
+            filePath: r.file_path || undefined,
+            minHardwareRevision: r.min_hardware_revision || undefined,
+            isActive: r.is_active !== false,
+            uploadedBy: r.uploaded_by,
+            created_at: new Date(r.created_at).toISOString(),
+            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+          });
+        });
+      }
+
+      // 7. OTA Jobs
+      const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs ORDER BY created_at DESC LIMIT 200;`).catch(() => null);
+      const otaJobs: OtaDeploymentJob[] = [];
+      if (otaRes?.rows) {
+        otaRes.rows.forEach((r: any) => {
+          otaJobs.push({
+            id: r.id,
+            firmwareId: r.firmware_id,
+            firmwareVersion: r.firmware_version,
+            firmwareName: r.firmware_name,
+            deviceId: r.device_id,
+            deviceName: r.device_name,
+            deviceType: r.device_type,
+            roleKey: r.role_key,
+            targetScope: r.target_scope,
+            status: r.status,
+            progressPercent: Number(r.progress_percent || 0),
+            errorMessage: r.error_message || undefined,
+            initiatedBy: r.initiated_by,
+            downloadToken: r.download_token || undefined,
+            expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
+            attemptCount: Number(r.attempt_count || 0),
+            maxAttempts: Number(r.max_attempts || 3),
+            lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
+            nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
+            downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
+            bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
+            created_at: new Date(r.created_at).toISOString(),
+            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+            completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
+          });
+        });
+      }
+
+      return {
         users,
         passwords,
         devices,
@@ -2581,6 +2963,8 @@ export class PostgresRepository {
         alarms,
         dashboards,
         sessions,
+        firmwares,
+        otaJobs,
       };
     } catch (err: any) {
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
@@ -2592,7 +2976,9 @@ export class PostgresRepository {
   // FIRMWARE & OTA POSTGRES REPOSITORY METHODS
   // ==========================================
   public async saveFirmware(fw: Firmware): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO firmwares (
         id, name, device_type, role_key, hardware_model, version, description,
@@ -2640,12 +3026,16 @@ export class PostgresRepository {
   }
 
   public async deleteFirmware(id: string): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     await this.query(`DELETE FROM firmwares WHERE id = $1;`, [id]);
   }
 
   public async saveOtaJob(job: OtaDeploymentJob): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
     const sql = `
       INSERT INTO ota_deployment_jobs (
         id, firmware_id, firmware_version, firmware_name, device_id, device_name,
@@ -2713,6 +3103,8 @@ export class PostgresRepository {
     sessions?: UserSession[];
     dispatchLogs?: DispatchLogItem[];
     commands?: DeviceCommand[];
+    firmwares?: Firmware[];
+    otaJobs?: OtaDeploymentJob[];
   }): Promise<{ success: boolean; counts: Record<string, number> }> {
     if (!this.pool) {
       return { success: false, counts: {} };
@@ -2730,6 +3122,8 @@ export class PostgresRepository {
       sessions: 0,
       dispatchLogs: 0,
       commands: 0,
+      firmwares: 0,
+      otaJobs: 0,
     };
 
     // 1. Users
@@ -2790,6 +3184,22 @@ export class PostgresRepository {
       for (const s of data.sessions) {
         await this.saveSession(s);
         counts.sessions++;
+      }
+    }
+
+    // 11. Firmwares (Must precede OTA jobs)
+    if (data.firmwares) {
+      for (const f of data.firmwares) {
+        await this.saveFirmware(f).catch(() => {});
+        counts.firmwares++;
+      }
+    }
+
+    // 12. OTA Jobs
+    if (data.otaJobs) {
+      for (const j of data.otaJobs) {
+        await this.saveOtaJob(j).catch(() => {});
+        counts.otaJobs++;
       }
     }
 

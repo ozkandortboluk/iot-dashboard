@@ -61,17 +61,20 @@ export class DatabaseAutoHealer {
         await client.query("SET statement_timeout = '5s';");
         await client.query("SET lock_timeout = '2s';");
 
-        // Find and terminate queries stuck in Locks or running for too long
+        // ONLY terminate queries stuck in genuine deadlocks or locks for > 60 seconds.
+        // DO NOT terminate long-running queries arbitrarily, as TimescaleDB analytical queries
+        // or large batch inserts might legitimately take longer than 30s.
+        // Native PostgreSQL statement_timeout handles runaway queries more safely.
+        // Ignore system processes like autovacuum.
         const findHungSql = `
           SELECT pid, query_start, wait_event_type, wait_event, query
           FROM pg_stat_activity
           WHERE datname = current_database()
             AND pid != pg_backend_pid()
             AND state = 'active'
-            AND (
-              (wait_event_type = 'Lock' AND NOW() - query_start > interval '10 seconds')
-              OR (NOW() - query_start > interval '${maxQueryDurationSec} seconds')
-            );
+            AND wait_event_type = 'Lock' 
+            AND query NOT ILIKE 'autovacuum:%'
+            AND NOW() - query_start > interval '60 seconds';
         `;
 
         const hungRes = await client.query(findHungSql);
@@ -273,13 +276,9 @@ export class DatabaseAutoHealer {
         this.dbInstance.data.databaseSettings.isPostgresConnected = false;
       }
 
-      // Try emergency pool recycling if pool was corrupted
-      if (errMsg.includes('timeout') || errMsg.includes('Connection terminated')) {
-        this.recordHealingEvent('Bağlantı havuzu sıfırlanıyor (Emergency Pool Reset)...');
-        try {
-          this.dbInstance.recyclePgPool();
-        } catch {}
-      }
+      // We DO NOT recycle the entire pool on transient timeouts here.
+      // The 'pg' module's pool is self-healing and will automatically evict broken clients.
+      // Aggressive pool recycling causes thundering herd reconnection storms.
     } finally {
       this.isHealingInProgress = false;
     }

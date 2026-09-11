@@ -9,6 +9,12 @@ import { DatabaseAutoHealer } from "./services/databaseAutoHealer.service.js";
 import { systemLogger } from "./services/systemLogger.service.js";
 import { seedDemoDataForDatabase } from "./db/demoData.js";
 import { postgresSchemaSQL } from "./database/schema.js";
+import {
+  getSharedPgPool,
+  recycleSharedPgPool,
+  resolvePostgresConnectionString,
+  getPostgresSslOption,
+} from "./database/connection.js";
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -316,31 +322,15 @@ class LocalDatabase {
   }
 
   private getPgSslOption(url: string) {
-    if (!url) return undefined;
-    if (url.includes('sslmode=disable')) {
-      return undefined;
-    }
-    const hasSslParam = url.includes('sslmode=') || url.includes('ssl=true') || url.includes('ssl=1');
-    const isCloudHost = url.includes('neon.tech') || url.includes('supabase.co') || url.includes('render.com') || url.includes('railway.app') || url.includes('aivencloud.com') || url.includes('amazonaws.com') || url.includes('cockroachlabs.cloud');
-    const isProductionRemote = process.env.NODE_ENV === 'production' && !url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('postgres:5432');
-
-    if (hasSslParam || isCloudHost || isProductionRemote) {
-      return { rejectUnauthorized: false };
-    }
-    return undefined;
+    return getPostgresSslOption(url);
   }
 
   public recyclePgPool(): void {
-    if (this.pgPool) {
-      try {
-        this.pgPool.end().catch(() => {});
-      } catch {}
-      this.pgPool = null;
-      this.pgPoolUrl = '';
-      this.postgresRepo.setPool(null);
-      this.postgresRepo.setConnected(false);
-      systemLogger.info('database', 'PostgreSQL bağlantı havuzu sıfırlandı.');
-    }
+    recycleSharedPgPool().catch(() => {});
+    this.pgPool = null;
+    this.pgPoolUrl = '';
+    this.postgresRepo.setPool(null);
+    this.postgresRepo.setConnected(false);
   }
 
   public getPgPool(): PgPoolType | null {
@@ -349,37 +339,15 @@ class LocalDatabase {
       return null;
     }
 
-    if (!this.pgPool || this.pgPoolUrl !== url) {
-      if (this.pgPool) {
-        try { this.pgPool.end().catch(() => {}); } catch {}
-      }
-      this.pgPoolUrl = url;
-      try {
-        this.pgPool = new Pool({
-          connectionString: url,
-          connectionTimeoutMillis: 7000,
-          idleTimeoutMillis: 30000,
-          statement_timeout: 15000,
-          query_timeout: 15000,
-          max: 20,
-          ssl: this.getPgSslOption(url),
-        });
-        this.pgPool.on('error', (err) => {
-          console.warn('[PostgreSQL Pool Error]', err?.message);
-          systemLogger.warn('database', 'PostgreSQL havuz hatası tespit edildi', err?.message);
-          this.postgresRepo.setConnected(false);
-          if (this.data.databaseSettings) {
-            this.data.databaseSettings.isPostgresConnected = false;
-          }
-        });
-      } catch (err: any) {
-        systemLogger.error('database', 'PostgreSQL havuzu oluşturulamadı', err?.message);
-        this.pgPool = null;
-        return null;
-      }
+    const pool = getSharedPgPool(url);
+    this.pgPool = pool;
+    this.pgPoolUrl = url;
+
+    if (pool && !this.postgresRepo.isReady()) {
+      this.postgresRepo.setPool(pool);
     }
 
-    return this.pgPool;
+    return pool;
   }
 
   public async initPostgresRepository(): Promise<boolean> {
@@ -475,6 +443,32 @@ class LocalDatabase {
           } else if (this.data.sessions && this.data.sessions.length > 0) {
             for (const s of this.data.sessions) {
               await this.postgresRepo.saveSession(s).catch(() => {});
+            }
+          }
+
+          if (hydrated.firmwares && hydrated.firmwares.length > 0) {
+            const existingFwIds = new Set(hydrated.firmwares.map(f => f.id));
+            const missingFw = (this.data.firmwares || []).filter(f => !existingFwIds.has(f.id));
+            this.data.firmwares = [...hydrated.firmwares, ...missingFw];
+            for (const f of missingFw) {
+              await this.postgresRepo.saveFirmware(f).catch(() => {});
+            }
+          } else if (this.data.firmwares && this.data.firmwares.length > 0) {
+            for (const f of this.data.firmwares) {
+              await this.postgresRepo.saveFirmware(f).catch(() => {});
+            }
+          }
+
+          if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
+            const existingJobIds = new Set(hydrated.otaJobs.map(j => j.id));
+            const missingJobs = (this.data.otaJobs || []).filter(j => !existingJobIds.has(j.id));
+            this.data.otaJobs = [...hydrated.otaJobs, ...missingJobs];
+            for (const j of missingJobs) {
+              await this.postgresRepo.saveOtaJob(j).catch(() => {});
+            }
+          } else if (this.data.otaJobs && this.data.otaJobs.length > 0) {
+            for (const j of this.data.otaJobs) {
+              await this.postgresRepo.saveOtaJob(j).catch(() => {});
             }
           }
 
@@ -613,7 +607,7 @@ class LocalDatabase {
     // Firestore sync is disabled since we are completely migrated to PostgreSQL
   }
 
-  public isPostgresProductionMode() {
+  public isPostgresProductionMode(): boolean {
     // If PostgreSQL repository exists but is marked as disconnected, fallback to memory
     if (this.postgresRepo && !this.postgresRepo.isReady()) {
       return false;
@@ -622,7 +616,6 @@ class LocalDatabase {
     const isEnginePg = engine === 'postgres' || engine === 'timescaledb';
     return (
       Boolean(this.postgresRepo?.isReady() && isEnginePg) ||
-      process.env.DB_ENGINE === 'postgres' ||
       process.env.LOCAL_DB_ENABLED === 'false'
     );
   }
@@ -912,6 +905,19 @@ class LocalDatabase {
         engine: 'PostgreSQL / TimescaleDB',
         isConnected: true,
         ...poolStats,
+      };
+    }
+    if (this.isPostgresProductionMode()) {
+      return {
+        engine: 'PostgreSQL / TimescaleDB',
+        isConnected: false,
+        totalCount: 0,
+        idleCount: 0,
+        waitingCount: 0,
+        maxConnections: 20,
+        queryLatencyMs: -1,
+        status: 'unhealthy',
+        activeQueriesCount: 0,
       };
     }
     return {
@@ -2083,7 +2089,7 @@ class LocalDatabase {
 
   // Database Engine & PostgreSQL / TimescaleDB Management Methods
   public getActiveEngine(): DatabaseEngineType {
-    if (this.data.databaseSettings?.activeEngine) {
+    if (this.data?.databaseSettings?.activeEngine) {
       return this.data.databaseSettings.activeEngine;
     }
     const envEngine = process.env.DB_ENGINE as DatabaseEngineType;
@@ -2124,30 +2130,8 @@ class LocalDatabase {
   }
 
   public getPostgresUrl(): string {
-    const envUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRESQL_URL || process.env.PG_URL || '').trim();
     const storedUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
-
-    let candidate = '';
-
-    if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
-      candidate = envUrl;
-    } else if (storedUrl && (storedUrl.startsWith('postgres://') || storedUrl.startsWith('postgresql://')) && !storedUrl.includes('••••••••')) {
-      candidate = storedUrl;
-    }
-
-    if (candidate.includes('••••••••')) {
-      if (envUrl && !envUrl.includes('••••••••')) {
-        candidate = envUrl;
-      } else {
-        candidate = '';
-      }
-    }
-
-    if (!candidate.startsWith('postgres://') && !candidate.startsWith('postgresql://')) {
-      return '';
-    }
-
-    return candidate;
+    return resolvePostgresConnectionString(storedUrl);
   }
 
   public getTimescaleStats(): import('../types.js').TimescaleDBStats { return this.timescaleManager.getTimescaleStats(); }
@@ -2930,8 +2914,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     // 1. In-Memory Cleanups
     // Telemetry
     if (policies.telemetryDays && policies.telemetryDays > 0) {
-      const cutoff = now - policies.telemetryDays * 24 * 3600 * 1000;
-      cleaned.telemetry = 0;
+      cleaned.telemetry = this.telemetryRepository.cleanOldTelemetry(policies.telemetryDays);
     }
 
     // Resolved Alarms
@@ -3075,7 +3058,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     );
 
     // Filter in-memory arrays
-    cleaned.telemetry = 0;
+    cleaned.telemetry = this.telemetryRepository.clearSimulationTelemetry(simDeviceIds);
 
     if (this.data.activeAlarms) {
       const initAlarms = this.data.activeAlarms.length;
@@ -3155,7 +3138,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     const optionsForPg: any = {};
 
     if (category === 'telemetry') {
-      cleaned.telemetry = 0;
+      cleaned.telemetry = this.telemetryRepository.cleanOldTelemetry(days);
       optionsForPg.telemetryDays = days;
     } else if (category === 'resolvedAlarms' || category === 'alarms') {
       if (this.data.activeAlarms) {
@@ -3335,9 +3318,19 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     this.saveData(this.data);
 
     if (this.postgresRepo.isReady()) {
-      this.postgresRepo.saveOtaJob(job).catch((err) => {
-        console.error('[PostgreSQL Save OTA Job Error]:', err?.message || err);
-      });
+      (async () => {
+        try {
+          if (job.firmwareId) {
+            const fw = this.getFirmwareById(job.firmwareId);
+            if (fw) {
+              await this.postgresRepo.saveFirmware(fw).catch(() => {});
+            }
+          }
+          await this.postgresRepo.saveOtaJob(job);
+        } catch (err: any) {
+          console.error('[PostgreSQL Save OTA Job Error]:', err?.message || err);
+        }
+      })();
     }
 
     return job;

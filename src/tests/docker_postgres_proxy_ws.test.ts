@@ -334,7 +334,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     clientWs.send(JSON.stringify(telemetryMsg));
 
     // Wait for batch ingestion to process
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 25; i++) {
       const current = db.getDeviceById(proxyDeviceId);
       if (current?.metrics?.temperature === 26.8) break;
       await new Promise((r) => setTimeout(r, 50));

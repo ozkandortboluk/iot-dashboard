@@ -64,8 +64,12 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
     db.data.devices = [...existing, { ...testDevice }, { ...testTargetDevice }];
     // Reset automations
     db.data.automations = [];
-    // Reset commands
-    db.data.commands = [];
+    // Reset commands for test devices
+    if (db.data.commands) {
+      db.data.commands = db.data.commands.filter(
+        c => c.deviceId !== testDevice.id && c.deviceId !== testTargetDevice.id
+      );
+    }
   });
 
   describe('1. Automation Engine Evaluation & Cooldown', () => {
@@ -99,7 +103,8 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
         unit: '°C',
       });
       automationEngine.evaluateAutomations(normalReading);
-      expect(db.data.commands.length).toBe(0);
+      const targetCmdsBefore = (db.data.commands || []).filter(c => c.deviceId === testTargetDevice.id);
+      expect(targetCmdsBefore.length).toBe(0);
 
       // Telemetry reading above threshold -> triggers action
       const highReading = createReading({
@@ -112,8 +117,9 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
       automationEngine.evaluateAutomations(highReading);
 
       // Command should be queued for target device
-      expect(db.data.commands.length).toBe(1);
-      const createdCmd = db.data.commands[0];
+      const targetCmdsAfter = (db.data.commands || []).filter(c => c.deviceId === testTargetDevice.id);
+      expect(targetCmdsAfter.length).toBe(1);
+      const createdCmd = targetCmdsAfter[0];
       expect(createdCmd.deviceId).toBe(testTargetDevice.id);
       expect((createdCmd as any).issuerId).toBe('system_automation');
     });
@@ -149,11 +155,13 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
 
       // First evaluation -> triggers
       automationEngine.evaluateAutomations(lowPressure);
-      expect(db.data.commands.length).toBe(1);
+      const targetCmds1 = (db.data.commands || []).filter(c => c.deviceId === testTargetDevice.id);
+      expect(targetCmds1.length).toBe(1);
 
       // Immediate second evaluation -> debounced (no second command created)
       automationEngine.evaluateAutomations(lowPressure);
-      expect(db.data.commands.length).toBe(1);
+      const targetCmds2 = (db.data.commands || []).filter(c => c.deviceId === testTargetDevice.id);
+      expect(targetCmds2.length).toBe(1);
     });
 
     it('should NOT trigger when automation is disabled (enabled: false)', () => {
@@ -186,7 +194,8 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
       });
 
       automationEngine.evaluateAutomations(reading);
-      expect(db.data.commands.length).toBe(0);
+      const targetCmds = (db.data.commands || []).filter(c => c.deviceId === testTargetDevice.id);
+      expect(targetCmds.length).toBe(0);
     });
   });
 

@@ -38,6 +38,7 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
   const isPostgresReady = !!db.postgresRepo?.isReady();
   const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
+  const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   if (isDbReady) {
     return res.status(200).json({
@@ -47,10 +48,12 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
         status: isPostgresReady ? 'connected' : 'embedded_fallback',
         engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
         ready: true,
+        pool: poolStats,
       },
       retryQueue: {
         pendingPacketCount: retryStats?.pendingPacketCount || 0,
         pendingReadingCount: retryStats?.pendingReadingCount || 0,
+        microBatch: retryStats?.microBatch,
       },
       uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
       timestamp: new Date().toISOString(),
@@ -64,11 +67,13 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
       status: 'disconnected',
       engine: 'PostgreSQL',
       ready: false,
+      pool: poolStats,
       error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya bağlantı hazır değil.',
     },
     retryQueue: {
       pendingPacketCount: retryStats?.pendingPacketCount || 0,
       pendingReadingCount: retryStats?.pendingReadingCount || 0,
+      microBatch: retryStats?.microBatch,
       durable: true,
     },
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
@@ -81,6 +86,7 @@ systemRouter.get('/health', (req, res) => {
   const isPostgresReady = !!db.postgresRepo?.isReady();
   const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
+  const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   const statusCode = isDbReady ? 200 : 503;
   return res.status(statusCode).json({
@@ -90,10 +96,12 @@ systemRouter.get('/health', (req, res) => {
     database: {
       ready: isDbReady,
       engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
+      pool: poolStats,
     },
     retryQueue: {
       pendingPacketCount: retryStats?.pendingPacketCount || 0,
       pendingReadingCount: retryStats?.pendingReadingCount || 0,
+      microBatch: retryStats?.microBatch,
     },
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
@@ -343,6 +351,11 @@ databaseRouter.get('/retention', authenticateUser, requireAdmin, (req, res) => {
 });
 
 databaseRouter.put('/retention', authenticateUser, requireAdmin, (req, res) => {
+  const updated = db.updateRetentionPolicies(req.body);
+  res.json(updated);
+});
+
+databaseRouter.post('/retention', authenticateUser, requireAdmin, (req, res) => {
   const updated = db.updateRetentionPolicies(req.body);
   res.json(updated);
 });

@@ -131,8 +131,17 @@ interface DatabaseStatsResponse {
 }
 
 export const DatabaseDataView: React.FC = () => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { isConnected, wsLatency } = useRealtime();
+
+  const getAuthHeaders = (extra: Record<string, string> = {}) => {
+    const t = token || localStorage.getItem('dashboard_token');
+    return {
+      'Content-Type': 'application/json',
+      ...(t ? { Authorization: `Bearer ${t}`, 'x-auth-token': t } : {}),
+      ...extra,
+    };
+  };
 
   const [activeTab, setActiveTab] = useState<'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users'>('auto_healer');
   const [opCategoryFilter, setOpCategoryFilter] = useState<'all' | 'widget' | 'api' | 'system' | 'sync'>('all');
@@ -377,10 +386,10 @@ export const DatabaseDataView: React.FC = () => {
     setError(null);
     try {
       const [resStats, resEngine, resGuide, resRetention] = await Promise.all([
-        fetch('/api/admin/database-stats'),
-        fetch('/api/database/config'),
-        fetch('/api/database/postgres/setup-guide'),
-        fetch('/api/database/retention'),
+        fetch('/api/admin/database-stats', { headers: getAuthHeaders() }),
+        fetch('/api/database/config', { headers: getAuthHeaders() }),
+        fetch('/api/database/postgres/setup-guide', { headers: getAuthHeaders() }),
+        fetch('/api/database/retention', { headers: getAuthHeaders() }),
       ]);
 
       if (resStats.ok) {
@@ -413,7 +422,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/retention', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(retentionPolicies),
       });
       const data = await res.json();
@@ -438,7 +447,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/retention/cleanup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -471,7 +480,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/retention/cleanup-simulated', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -504,7 +513,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/retention/cleanup-category', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ category: categoryName, days }),
       });
       const data = await res.json();

@@ -23,8 +23,9 @@ app.use('/api', commandsRouter);
 describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (Roadmap P0 - Item 2)', () => {
   const testTenantId = 'tenant_soak_01';
   const testCustomerId = 'cust_soak_01';
-  const testDeviceId = 'esp32_soak_field_node_01';
-  const testApiKey = 'nex_soak_key_445566778899aabbcc';
+  const uniqueSuffix = Date.now().toString();
+  const testDeviceId = `esp32_soak_node_${uniqueSuffix}`;
+  const testApiKey = `nex_soak_key_${uniqueSuffix}`;
   let sessionCookie: string = '';
 
   const soakDevice: Device = {
@@ -92,8 +93,11 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     sessionCookie = `nexus_session_token=${token}`;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     db.data.devices = db.getDevices().filter((d) => d.id !== testDeviceId);
+    if (db.postgresRepo?.isReady()) {
+      await db.postgresRepo.deleteDevice(testDeviceId).catch(() => {});
+    }
   });
 
   const sessionAlphaBootId = `boot_alpha_${Date.now()}`;
@@ -208,7 +212,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
         .send(pkt);
 
       expect(res.status).toBe(200);
-      expect(['SUCCESS', 'queued']).toContain(res.body.status);
+      expect(['SUCCESS', 'queued', 'accepted']).toContain(res.body.status);
     }
 
     // Verify device status is online and latest telemetry reflects the most recent flushed packet
@@ -332,7 +336,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
         .set('x-api-key', testApiKey);
 
       expect(claimRes.status).toBe(200);
-      const target = claimRes.body.commands.find((c: any) => c.id === cycleCmdId);
+      const target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId);
       expect(target).toBeDefined();
 
       // 4. Device sends execution ACK

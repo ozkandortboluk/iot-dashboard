@@ -728,10 +728,10 @@ CREATE INDEX IF NOT EXISTS idx_firmwares_type_role ON firmwares(device_type, rol
 -- 7. OTA Deployment Jobs Tracking
 CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
     id VARCHAR(64) PRIMARY KEY,
-    firmware_id VARCHAR(64) REFERENCES firmwares(id) ON DELETE CASCADE,
+    firmware_id VARCHAR(64),
     firmware_version VARCHAR(32) NOT NULL,
     firmware_name VARCHAR(128) NOT NULL,
-    device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
+    device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     device_type VARCHAR(64) NOT NULL,
     role_key VARCHAR(64) NOT NULL,

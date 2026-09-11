@@ -31,16 +31,25 @@ export interface TelemetryPacket {
 export class TelemetryRepository {
   private physicalQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'physical-telemetry.ndjson');
   private simulationQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'simulation-telemetry.ndjson');
+  private walArchiveDir = path.join(process.cwd(), 'data', 'wal', 'archive');
   private legacyQueueFilePath = path.join(process.cwd(), 'data', 'telemetry-retry.ndjson');
 
   private physicalRetryQueue: TelemetryPacket[] = [];
   private simulationRetryQueue: TelemetryPacket[] = [];
   private isFlushingPhysicalQueue = false;
   private isFlushingSimulationQueue = false;
+  private isReplayingArchive = false;
   private retryWorkerTimer: NodeJS.Timeout | null = null;
   private readonly MAX_PHYSICAL_QUEUE_SIZE = 2000;
   private readonly PHYSICAL_QUEUE_WARN_THRESHOLD = 5000;
   private readonly MAX_SIMULATION_QUEUE_SIZE = 1000;
+  private readonly MAX_ACTIVE_WAL_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB rotation threshold
+  private readonly BATCH_CHUNK_SIZE = 100;
+  private readonly MIN_BACKOFF_INTERVAL_MS = 5000;
+  private readonly MAX_BACKOFF_INTERVAL_MS = 60000;
+  private currentBackoffIntervalMs = 5000;
+  private consecutiveFailures = 0;
+  private circuitOpen = false;
   private lastQueueAlarmAt = 0;
   private latestTelemetryCache: Record<string, Record<string, TelemetryReading>> = {};
 
@@ -55,6 +64,9 @@ export class TelemetryRepository {
       const walDir = path.join(process.cwd(), 'data', 'wal');
       if (!fs.existsSync(walDir)) {
         fs.mkdirSync(walDir, { recursive: true });
+      }
+      if (!fs.existsSync(this.walArchiveDir)) {
+        fs.mkdirSync(this.walArchiveDir, { recursive: true });
       }
 
       // 1. Load Physical WAL Queue (Strictly source === 'physical')
@@ -183,6 +195,52 @@ export class TelemetryRepository {
     }
   }
 
+  // Tiered Archiving: Safely write excess memory-evicted packets to disk archive
+  private archiveExcessPacketsToDisk(packets: TelemetryPacket[]) {
+    if (!packets || packets.length === 0) return;
+    try {
+      if (!fs.existsSync(this.walArchiveDir)) {
+        fs.mkdirSync(this.walArchiveDir, { recursive: true });
+      }
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const archiveFile = path.join(this.walArchiveDir, `physical-overflow-${dateStr}.ndjson`);
+      const payload = packets.map((p) => JSON.stringify(p)).join('\n') + '\n';
+      fs.promises
+        .appendFile(archiveFile, payload, 'utf8')
+        .catch((err) => console.warn(`[WAL Overflow Archive Append Error]: ${err?.message || err}`));
+      console.warn(
+        `[WAL Tiered Archiving] ${packets.length} fiziksel paket RAM sınırını (${this.MAX_PHYSICAL_QUEUE_SIZE}) korumak için ${path.basename(
+          archiveFile
+        )} arşivine aktarıldı (Sıfır Veri Kaybı).`
+      );
+    } catch (err: any) {
+      console.error(`[WAL Tiered Archiving Error]: ${err?.message || err}`);
+    }
+  }
+
+  // Check active WAL file size and rotate if it exceeds limit (protecting disk I/O and parse time)
+  private checkAndRotateActiveWalFile() {
+    try {
+      if (fs.existsSync(this.physicalQueueFilePath)) {
+        const stats = fs.statSync(this.physicalQueueFilePath);
+        if (stats.size >= this.MAX_ACTIVE_WAL_FILE_SIZE_BYTES) {
+          if (!fs.existsSync(this.walArchiveDir)) {
+            fs.mkdirSync(this.walArchiveDir, { recursive: true });
+          }
+          const archiveTarget = path.join(this.walArchiveDir, `physical-segment-${Date.now()}.ndjson`);
+          fs.renameSync(this.physicalQueueFilePath, archiveTarget);
+          console.log(
+            `[WAL Rotation] Aktif dosya boyutu (${Math.round(stats.size / 1024)} KB) sınırı aştı. ${path.basename(
+              archiveTarget
+            )} olarak arşivlendi.`
+          );
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[WAL Rotation Check Error]: ${err?.message || err}`);
+    }
+  }
+
   // Trigger alarms when queue reaches warning or critical overflow levels
   private triggerQueueCapacityAlarm(level: 'WARN' | 'CRITICAL', currentSize: number, deviceId?: string) {
     const now = Date.now();
@@ -308,9 +366,12 @@ export class TelemetryRepository {
         lastAttemptAt: new Date().toISOString(),
       };
 
-      // Check physical queue capacity limit & alarms
+      // Check physical queue capacity limit & alarms with Tiered Archiving
       if (this.physicalRetryQueue.length >= this.MAX_PHYSICAL_QUEUE_SIZE) {
         const evicted = this.physicalRetryQueue.shift(); // Protect memory from OOM
+        if (evicted) {
+          this.archiveExcessPacketsToDisk([evicted]);
+        }
         this.triggerQueueCapacityAlarm('CRITICAL', this.physicalRetryQueue.length, evicted?.deviceId);
       } else if (this.physicalRetryQueue.length >= this.PHYSICAL_QUEUE_WARN_THRESHOLD) {
         this.triggerQueueCapacityAlarm('WARN', this.physicalRetryQueue.length, first.deviceId);
@@ -323,6 +384,7 @@ export class TelemetryRepository {
         if (!fs.existsSync(walDir)) {
           fs.mkdirSync(walDir, { recursive: true });
         }
+        this.checkAndRotateActiveWalFile();
         fs.promises.appendFile(this.physicalQueueFilePath, JSON.stringify(packet) + '\n', 'utf8')
           .catch(err => console.warn(`[Physical Queue Append Error Async]: ${err?.message || err}`));
         console.warn(`[Persistent Physical WAL] Fiziksel üretim paketi WAL sırasına kilitlendi (Paket ID: ${packetId}, Cihaz: ${packet.deviceId}, Metrik Sayısı: ${readings.length}).`);
@@ -347,21 +409,152 @@ export class TelemetryRepository {
     // Disk queue is now append-only
   }
 
-  // Auto-retry worker runs every 5 seconds to flush pending telemetry packets atomically
+  // Adaptive Auto-retry worker with Exponential Backoff & Circuit Breaker
   private startRetryWorker() {
     if (this.retryWorkerTimer) return;
-    this.retryWorkerTimer = setInterval(() => {
-      this.flushRetryQueue().catch(() => {});
-    }, 5000);
+    this.scheduleNextRetry(this.MIN_BACKOFF_INTERVAL_MS);
   }
 
-public async flushPhysicalRetryQueue(): Promise<{
+  private scheduleNextRetry(delayMs: number) {
+    if (this.retryWorkerTimer) {
+      clearTimeout(this.retryWorkerTimer);
+      this.retryWorkerTimer = null;
+    }
+    this.retryWorkerTimer = setTimeout(async () => {
+      try {
+        await this.flushRetryQueue();
+      } catch {}
+      finally {
+        this.scheduleNextRetry(this.currentBackoffIntervalMs);
+      }
+    }, delayMs);
+  }
+
+  public stopRetryWorker() {
+    if (this.retryWorkerTimer) {
+      clearTimeout(this.retryWorkerTimer);
+      this.retryWorkerTimer = null;
+    }
+  }
+
+  // Progressive Replay Engine for Archived Overflow Segments (Throttled Background Replay)
+  private async replayArchiveSegmentsThrottled(): Promise<number> {
+    if (this.isReplayingArchive || !this.db.postgresRepo?.isReady()) {
+      return 0;
+    }
+
+    this.isReplayingArchive = true;
+    let totalReplayedPackets = 0;
+
+    try {
+      if (!fs.existsSync(this.walArchiveDir)) {
+        return 0;
+      }
+
+      const files = (await fs.promises.readdir(this.walArchiveDir))
+        .filter((f) => f.endsWith('.ndjson'))
+        .sort(); // Oldest files first
+
+      if (files.length === 0) {
+        return 0;
+      }
+
+      console.log(`[WAL Archive Replay Engine] ${files.length} adet arşivlenmiş segment kuyruğu tespit edildi. Kademeli geri yükleme başlatılıyor...`);
+
+      for (const file of files) {
+        if (!this.db.postgresRepo?.isReady()) {
+          console.warn('[WAL Archive Replay Engine] PostgreSQL bağlantısı kesildi, arşiv geri yükleme duraklatıldı.');
+          break;
+        }
+
+        const filePath = path.join(this.walArchiveDir, file);
+        const processingPath = `${filePath}.replaying`;
+
+        try {
+          await fs.promises.rename(filePath, processingPath);
+        } catch {
+          continue;
+        }
+
+        const content = await fs.promises.readFile(processingPath, 'utf8');
+        const lines = content.split('\n').filter((l) => l.trim().length > 0);
+        const failedLines: string[] = [];
+        let fileInsertedCount = 0;
+
+        // Process in throttled batches
+        for (let i = 0; i < lines.length; i += this.BATCH_CHUNK_SIZE) {
+          if (!this.db.postgresRepo?.isReady()) {
+            failedLines.push(...lines.slice(i));
+            break;
+          }
+
+          const chunkLines = lines.slice(i, i + this.BATCH_CHUNK_SIZE);
+          for (const line of chunkLines) {
+            try {
+              const packet: TelemetryPacket = JSON.parse(line);
+              const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
+              if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
+                fileInsertedCount++;
+                totalReplayedPackets++;
+              } else {
+                failedLines.push(line);
+              }
+            } catch {
+              failedLines.push(line);
+            }
+          }
+
+          // Small yield to prevent event-loop / Postgres starvation
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+
+        if (failedLines.length > 0) {
+          // Write back uncommitted lines to original archive file
+          await fs.promises.writeFile(filePath, failedLines.join('\n') + '\n', 'utf8');
+          try {
+            await fs.promises.unlink(processingPath);
+          } catch {}
+          console.warn(`[WAL Archive Replay] ${file}: ${fileInsertedCount} paket aktarıldı, ${failedLines.length} paket tekrar sıraya bırakıldı.`);
+          break;
+        } else {
+          try {
+            await fs.promises.unlink(processingPath);
+            console.log(`[WAL Archive Replay] Segman ${file} (${fileInsertedCount} paket) veritabanına başarıyla aktarıldı ve arşivden temizlendi.`);
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[WAL Archive Replay Global Error]: ${err?.message || err}`);
+    } finally {
+      this.isReplayingArchive = false;
+    }
+
+    return totalReplayedPackets;
+  }
+
+  public async flushPhysicalRetryQueue(): Promise<{
     flushedPacketCount: number;
     flushedReadingCount: number;
     remainingPacketCount: number;
     remainingReadingCount: number;
   }> {
-    if (this.isFlushingPhysicalQueue || !this.db.postgresRepo?.isReady()) {
+    if (this.isFlushingPhysicalQueue) {
+      return {
+        flushedPacketCount: 0,
+        flushedReadingCount: 0,
+        remainingPacketCount: this.physicalRetryQueue.length,
+        remainingReadingCount: this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0),
+      };
+    }
+
+    // Circuit Breaker: If DB is not ready, back off exponentially without thrashing disk I/O
+    if (!this.db.postgresRepo?.isReady()) {
+      this.consecutiveFailures++;
+      this.circuitOpen = true;
+      this.currentBackoffIntervalMs = Math.min(
+        this.MAX_BACKOFF_INTERVAL_MS,
+        this.MIN_BACKOFF_INTERVAL_MS * Math.pow(2, Math.min(this.consecutiveFailures - 1, 4))
+      );
       return {
         flushedPacketCount: 0,
         flushedReadingCount: 0,
@@ -379,7 +572,7 @@ public async flushPhysicalRetryQueue(): Promise<{
     try {
       const processingFile = `${this.physicalQueueFilePath}.processing`;
       
-      // Move current WAL to processing
+      // Move current active WAL to processing
       if (!fs.existsSync(processingFile) && fs.existsSync(this.physicalQueueFilePath)) {
          await fs.promises.rename(this.physicalQueueFilePath, processingFile);
       }
@@ -389,23 +582,35 @@ public async flushPhysicalRetryQueue(): Promise<{
         const lines = content.split('\n').filter(l => l.trim().length > 0);
         const failedLines: string[] = [];
         
-        for (const line of lines) {
-           try {
-              const packet = JSON.parse(line);
-              const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
-              if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
-                 flushedPacketCount++;
-                 flushedReadingCount += packet.readings.length;
-              } else {
-                 packet.attempts = (packet.attempts || 0) + 1;
-                 packet.lastAttemptAt = new Date().toISOString();
-                 failedLines.push(JSON.stringify(packet));
-                 remainingPacketCount++;
-                 remainingReadingCount += packet.readings.length;
-              }
-           } catch (err) {
-              failedLines.push(line);
-           }
+        for (let i = 0; i < lines.length; i += this.BATCH_CHUNK_SIZE) {
+          if (!this.db.postgresRepo?.isReady()) {
+            failedLines.push(...lines.slice(i));
+            break;
+          }
+
+          const chunk = lines.slice(i, i + this.BATCH_CHUNK_SIZE);
+          for (const line of chunk) {
+             try {
+                const packet = JSON.parse(line);
+                const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
+                if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
+                   flushedPacketCount++;
+                   flushedReadingCount += packet.readings.length;
+                } else {
+                   packet.attempts = (packet.attempts || 0) + 1;
+                   packet.lastAttemptAt = new Date().toISOString();
+                   failedLines.push(JSON.stringify(packet));
+                   remainingPacketCount++;
+                   remainingReadingCount += packet.readings.length;
+                }
+             } catch {
+                failedLines.push(line);
+             }
+          }
+
+          if (i + this.BATCH_CHUNK_SIZE < lines.length) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
         }
         
         if (failedLines.length > 0) {
@@ -420,10 +625,26 @@ public async flushPhysicalRetryQueue(): Promise<{
         }).filter(Boolean).slice(-this.MAX_PHYSICAL_QUEUE_SIZE);
         
         if (flushedPacketCount > 0) {
-           console.log(`[Physical Telemetry WAL Flush] ${flushedPacketCount} paket DB'ye aktarıldı, ${remainingPacketCount} paket retry'a döndü.`);
+           console.log(`[Physical Telemetry WAL Flush] ${flushedPacketCount} paket DB'ye aktarıldı, ${remainingPacketCount} paket aktif sırada.`);
         }
       }
+
+      // Success: Reset Circuit Breaker and Backoff Interval
+      this.consecutiveFailures = 0;
+      this.circuitOpen = false;
+      this.currentBackoffIntervalMs = this.MIN_BACKOFF_INTERVAL_MS;
+
+      // Check and progressively replay archived overflow segments if active queue is healthy
+      if (this.physicalRetryQueue.length === 0) {
+        this.replayArchiveSegmentsThrottled().catch(() => {});
+      }
     } catch (err: any) {
+      this.consecutiveFailures++;
+      this.circuitOpen = true;
+      this.currentBackoffIntervalMs = Math.min(
+        this.MAX_BACKOFF_INTERVAL_MS,
+        this.MIN_BACKOFF_INTERVAL_MS * Math.pow(2, Math.min(this.consecutiveFailures - 1, 4))
+      );
       console.warn(`[Physical WAL Flush Error]: ${err?.message || err}`);
     } finally {
       this.isFlushingPhysicalQueue = false;
@@ -552,6 +773,10 @@ public async flushPhysicalRetryQueue(): Promise<{
   public getRetryQueueStats() {
     let physicalDiskSizeBytes = 0;
     let simulationDiskSizeBytes = 0;
+    let archiveFileCount = 0;
+    let archiveTotalSizeBytes = 0;
+    const archiveFiles: string[] = [];
+
     try {
       if (fs.existsSync(this.physicalQueueFilePath)) {
         physicalDiskSizeBytes = fs.statSync(this.physicalQueueFilePath).size;
@@ -562,11 +787,32 @@ public async flushPhysicalRetryQueue(): Promise<{
         simulationDiskSizeBytes = fs.statSync(this.simulationQueueFilePath).size;
       }
     } catch {}
+    try {
+      if (fs.existsSync(this.walArchiveDir)) {
+        const files = fs.readdirSync(this.walArchiveDir).filter((f) => f.endsWith('.ndjson'));
+        archiveFileCount = files.length;
+        for (const file of files) {
+          archiveFiles.push(file);
+          try {
+            archiveTotalSizeBytes += fs.statSync(path.join(this.walArchiveDir, file)).size;
+          } catch {}
+        }
+      }
+    } catch {}
 
     const physicalReadings = this.physicalRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
     const simulationReadings = this.simulationRetryQueue.reduce((acc, p) => acc + (p.readings?.length || 0), 0);
     const totalReadings = physicalReadings + simulationReadings;
     const totalPackets = this.physicalRetryQueue.length + this.simulationRetryQueue.length;
+
+    let congestionLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' = 'LOW';
+    if (archiveFileCount > 5 || this.physicalRetryQueue.length >= 1800) {
+      congestionLevel = 'CRITICAL';
+    } else if (archiveFileCount > 0 || this.physicalRetryQueue.length >= 1000) {
+      congestionLevel = 'HIGH';
+    } else if (this.physicalRetryQueue.length >= 200) {
+      congestionLevel = 'MODERATE';
+    }
 
     return {
       physical: {
@@ -585,54 +831,111 @@ public async flushPhysicalRetryQueue(): Promise<{
         durable: false,
         acceptedSource: 'simulator (Sanal Test Hypertable - Kısa Ömürlü/Ephemeral)',
       },
+      archive: {
+        dirPath: this.walArchiveDir,
+        fileCount: archiveFileCount,
+        totalSizeBytes: archiveTotalSizeBytes,
+        isReplaying: this.isReplayingArchive,
+        files: archiveFiles.slice(0, 10),
+      },
+      circuitBreaker: {
+        isOpen: this.circuitOpen,
+        consecutiveFailures: this.consecutiveFailures,
+        currentBackoffIntervalMs: this.currentBackoffIntervalMs,
+      },
+      congestionLevel,
       pendingPacketCount: totalPackets,
       pendingReadingCount: totalReadings,
       pendingRetryCount: totalReadings,
-      isFlushing: this.isFlushingPhysicalQueue || this.isFlushingSimulationQueue,
+      isFlushing: this.isFlushingPhysicalQueue || this.isFlushingSimulationQueue || this.isReplayingArchive,
       persistentQueuePath: this.physicalQueueFilePath,
-      diskSizeBytes: physicalDiskSizeBytes + simulationDiskSizeBytes,
+      diskSizeBytes: physicalDiskSizeBytes + simulationDiskSizeBytes + archiveTotalSizeBytes,
       durable: true,
-      model: 'Isolated Two-Queue WAL (physical-telemetry.ndjson & simulation-telemetry.ndjson)',
+      model: 'Tiered WAL Archiving with Circuit Breaker & Progressive Replay Engine',
+      microBatch: {
+        pendingCount: this.microBatchBuffer.length,
+        windowMs: this.MICRO_BATCH_WINDOW_MS,
+        maxBatchSize: this.MICRO_BATCH_MAX_SIZE,
+      },
     };
   }
 
-  // Ingestion Engine
+  // Ingestion Engine & Adaptive Micro-Batch Aggregator
   private RAW_TELEMETRY_MAX_BUFFER = 10000; // Expanded high-frequency ring buffer
+  private MICRO_BATCH_WINDOW_MS = 35; // 35ms coalescing window for concurrent multi-device streams
+  private MICRO_BATCH_MAX_SIZE = 150; // Max batch chunk before immediate flush
+  private microBatchBuffer: {
+    reading: TelemetryReading;
+    resolve: (val: boolean) => void;
+    reject: (err: any) => void;
+  }[] = [];
+  private microBatchTimer: NodeJS.Timeout | null = null;
+  private isFlushingMicroBatch = false;
 
-  public async writeTelemetryToPostgres(reading: TelemetryReading): Promise<boolean> {
+  private async flushMicroBatch(): Promise<void> {
+    if (this.microBatchTimer) {
+      clearTimeout(this.microBatchTimer);
+      this.microBatchTimer = null;
+    }
+
+    if (this.microBatchBuffer.length === 0 || this.isFlushingMicroBatch) {
+      return;
+    }
+
+    this.isFlushingMicroBatch = true;
+    const batch = this.microBatchBuffer.splice(0, this.MICRO_BATCH_MAX_SIZE);
+    const readings = batch.map((item) => item.reading);
+
+    try {
+      if (this.db.postgresRepo?.isReady()) {
+        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(readings);
+        const success = txRes.success && (txRes.rowCount > 0 || !!txRes.duplicateSkipped);
+        batch.forEach((item) => item.resolve(success));
+      } else {
+        // Enqueue to resilient WAL
+        this.enqueuePacketToRetryQueue(readings);
+        batch.forEach((item) => item.resolve(false));
+      }
+    } catch (err: any) {
+      console.warn(`[Micro-Batch Telemetry Flush Error] ${err?.message || err}. Paketler WAL tekrar kuyruğuna aktarılıyor.`);
+      this.enqueuePacketToRetryQueue(readings);
+      batch.forEach((item) => item.resolve(false));
+    } finally {
+      this.isFlushingMicroBatch = false;
+      // If more items accumulated during flush, schedule next flush immediately
+      if (this.microBatchBuffer.length > 0) {
+        if (this.microBatchBuffer.length >= this.MICRO_BATCH_MAX_SIZE) {
+          setImmediate(() => this.flushMicroBatch());
+        } else if (!this.microBatchTimer) {
+          this.microBatchTimer = setTimeout(() => this.flushMicroBatch(), this.MICRO_BATCH_WINDOW_MS);
+        }
+      }
+    }
+  }
+
+  public enqueueToMicroBatch(reading: TelemetryReading): Promise<boolean> {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isSimulated = dev?.isSimulated || false;
     const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
-    // Do not write virtual device telemetry to DB unless saveSimulatedDataToDb is explicitly active
+    // Skip DB for virtual devices unless explicit
     if (isSimulated && !saveSimulatedDataToDb) {
-      return true;
+      return Promise.resolve(true);
     }
 
-    if (this.db.postgresRepo?.isReady()) {
-      try {
-        const writeRes = await this.db.postgresRepo.saveTelemetry(reading);
-        const rowCount = typeof writeRes?.rowCount === 'number' ? writeRes.rowCount : 1;
-        if (rowCount > 0) {
-          return true;
-        }
-        console.warn(`[Telemetry Write Warning] PostgreSQL 0 satır güncellendi (${reading.deviceId}/${reading.metric}). Sıraya alındı.`);
-        this.enqueueToRetryQueue(reading);
-        return false;
-      } catch (err: any) {
-        console.warn(`[Telemetry Write Error] PostgreSQL INSERT hatası (${reading.deviceId}/${reading.metric}): ${err?.message || err}. Otomatik tekrar sırasına eklendi.`);
-        this.enqueueToRetryQueue(reading);
-        return false;
+    return new Promise<boolean>((resolve, reject) => {
+      this.microBatchBuffer.push({ reading, resolve, reject });
+
+      if (this.microBatchBuffer.length >= this.MICRO_BATCH_MAX_SIZE) {
+        this.flushMicroBatch();
+      } else if (!this.microBatchTimer) {
+        this.microBatchTimer = setTimeout(() => this.flushMicroBatch(), this.MICRO_BATCH_WINDOW_MS);
       }
-    }
+    });
+  }
 
-    const activeEngine = typeof this.db.getActiveEngine === 'function' ? this.db.getActiveEngine() : 'postgres';
-    if (activeEngine === 'postgres' || activeEngine === 'timescaledb') {
-      console.warn(`[Telemetry Write Warning] PostgreSQL aktif ancak bağlı değil. Kayıt tekrar sırasına alındı (${reading.deviceId}/${reading.metric}).`);
-      this.enqueueToRetryQueue(reading);
-      return false;
-    }
-    return true;
+  public async writeTelemetryToPostgres(reading: TelemetryReading): Promise<boolean> {
+    return this.enqueueToMicroBatch(reading);
   }
 
   // Async Telemetry Ingestion with Write Acknowledgment (Zero Data Loss)
@@ -2484,5 +2787,95 @@ public async flushPhysicalRetryQueue(): Promise<{
       totalOrphans,
       orphanedDeviceIds: Array.from(orphanedDeviceIdsSet),
     };
+  }
+
+  public clearSimulationTelemetry(simDeviceIds: Set<string>): number {
+    let clearedCount = 0;
+
+    // 1. Clear simulation retry queue
+    clearedCount += this.simulationRetryQueue.length;
+    this.simulationRetryQueue = [];
+    try {
+      if (fs.existsSync(this.simulationQueueFilePath)) {
+        fs.unlinkSync(this.simulationQueueFilePath);
+      }
+    } catch {}
+
+    // 2. Clear from latest cache
+    for (const devId of Object.keys(this.latestTelemetryCache)) {
+      if (simDeviceIds.has(devId) || devId.startsWith('sim_')) {
+        clearedCount += Object.keys(this.latestTelemetryCache[devId] || {}).length;
+        delete this.latestTelemetryCache[devId];
+      }
+    }
+
+    // 3. Clear from in-memory history
+    if (this.db.data.history) {
+      for (const devId of Object.keys(this.db.data.history)) {
+        if (simDeviceIds.has(devId) || devId.startsWith('sim_')) {
+          const metrics = this.db.data.history[devId];
+          if (metrics) {
+            for (const m of Object.values(metrics) as any[]) {
+              clearedCount += (m.hourly?.length || 0) + (m.daily?.length || 0) + (m.monthly?.length || 0);
+            }
+          }
+          delete this.db.data.history[devId];
+        }
+      }
+    }
+
+    // 4. Clear from in-memory legacy telemetry array if present
+    if (Array.isArray(this.db.data.telemetry)) {
+      const init = this.db.data.telemetry.length;
+      this.db.data.telemetry = this.db.data.telemetry.filter(
+        (t: any) => !simDeviceIds.has(t.deviceId) && !t.deviceId?.startsWith('sim_')
+      );
+      clearedCount += init - this.db.data.telemetry.length;
+    }
+
+    return clearedCount;
+  }
+
+  public cleanOldTelemetry(telemetryDays: number): number {
+    if (!telemetryDays || telemetryDays <= 0) return 0;
+    const cutoff = Date.now() - telemetryDays * 24 * 3600 * 1000;
+    let cleanedCount = 0;
+
+    // 1. Clean history buckets
+    if (this.db.data.history) {
+      for (const devId of Object.keys(this.db.data.history)) {
+        const metrics = this.db.data.history[devId];
+        if (metrics) {
+          for (const m of Object.values(metrics) as any[]) {
+            if (m.hourly) {
+              const prev = m.hourly.length;
+              m.hourly = m.hourly.filter((b: any) => new Date(b.time).getTime() >= cutoff);
+              cleanedCount += prev - m.hourly.length;
+            }
+            if (m.daily) {
+              const prev = m.daily.length;
+              m.daily = m.daily.filter((b: any) => new Date(b.time).getTime() >= cutoff);
+              cleanedCount += prev - m.daily.length;
+            }
+            if (m.monthly) {
+              const prev = m.monthly.length;
+              m.monthly = m.monthly.filter((b: any) => new Date(b.time).getTime() >= cutoff);
+              cleanedCount += prev - m.monthly.length;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Clean in-memory legacy telemetry array
+    if (Array.isArray(this.db.data.telemetry)) {
+      const init = this.db.data.telemetry.length;
+      this.db.data.telemetry = this.db.data.telemetry.filter(
+        (t: any) => new Date(t.timestamp).getTime() >= cutoff
+      );
+      cleanedCount += init - this.db.data.telemetry.length;
+    }
+
+    return cleanedCount;
   }
 }
