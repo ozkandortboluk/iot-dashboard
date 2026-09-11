@@ -283,7 +283,7 @@ databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req
 
 // Database Explorer & Management Endpoints
 databaseRouter.get('/explorer/tables', authenticateUser, requireAdmin, async (req, res) => {
-  const counts = db.getTableCounts();
+  const counts = await db.getTableCountsAsync();
   const engineConfig = db.getPostgresConfig();
   const tables = [
     { id: 'users', name: 'Kullanıcılar (users)', count: counts.users || 0 },

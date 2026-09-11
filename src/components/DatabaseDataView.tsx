@@ -178,6 +178,37 @@ export const DatabaseDataView: React.FC = () => {
   const [editingJsonText, setEditingJsonText] = useState<string>('');
   const [savingRecord, setSavingRecord] = useState<boolean>(false);
   const [viewingRecordDetail, setViewingRecordDetail] = useState<any | null>(null);
+
+  const displayedColumns = React.useMemo(() => {
+    if (!tableData?.columns || tableData.columns.length === 0) return ['id'];
+    const priorityOrder = [
+      'id',
+      'created_at',
+      'timestamp',
+      'device_name',
+      'device_id',
+      'metric',
+      'metric_value',
+      'unit',
+      'status_level',
+      'status',
+      'name',
+      'email',
+      'role',
+      'last_seen',
+      'ip_address',
+    ];
+    const cols = [...tableData.columns];
+    cols.sort((a, b) => {
+      const idxA = priorityOrder.indexOf(a);
+      const idxB = priorityOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return 0;
+    });
+    return cols.slice(0, 8);
+  }, [tableData?.columns]);
   const [isNewRecordModal, setIsNewRecordModal] = useState<boolean>(false);
 
   // SQL Console State
@@ -1852,12 +1883,14 @@ sudo systemctl restart postgresql`}
                     <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
                       <tr>
                         <th className="p-3 w-12 text-center">İşlem</th>
-                        {(tableData?.columns || ['id']).slice(0, 7).map((col) => (
+                        {displayedColumns.map((col) => (
                           <th key={col} className="p-3 font-semibold tracking-wider">
                             {col}
                           </th>
                         ))}
-                        {(tableData?.columns || []).length > 7 && <th className="p-3 text-slate-400">...</th>}
+                        {(tableData?.columns || []).length > displayedColumns.length && (
+                          <th className="p-3 text-slate-400">...</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-200">
@@ -1908,12 +1941,20 @@ sudo systemctl restart postgresql`}
                               </div>
                             </td>
 
-                            {(tableData?.columns || []).slice(0, 7).map((col) => {
+                            {displayedColumns.map((col) => {
                               const val = row[col];
                               let displayVal = '';
                               if (val === null || val === undefined) displayVal = 'NULL';
                               else if (typeof val === 'object') displayVal = JSON.stringify(val);
-                              else displayVal = String(val);
+                              else if ((col === 'created_at' || col === 'timestamp' || col === 'last_seen') && typeof val === 'string' && val.includes('T')) {
+                                try {
+                                  displayVal = new Date(val).toLocaleTimeString('tr-TR', { hour12: false }) + ' (' + val.slice(0, 10) + ')';
+                                } catch {
+                                  displayVal = String(val);
+                                }
+                              } else {
+                                displayVal = String(val);
+                              }
 
                               return (
                                 <td key={col} className="p-3 max-w-[200px] truncate" title={displayVal}>
@@ -1925,8 +1966,8 @@ sudo systemctl restart postgresql`}
                                 </td>
                               );
                             })}
-                            {(tableData?.columns || []).length > 7 && (
-                              <td className="p-3 text-slate-400 text-xs">+{tableData.columns.length - 7} alan</td>
+                            {(tableData?.columns || []).length > displayedColumns.length && (
+                              <td className="p-3 text-slate-400 text-xs">+{tableData.columns.length - displayedColumns.length} alan</td>
                             )}
                           </tr>
                         ))

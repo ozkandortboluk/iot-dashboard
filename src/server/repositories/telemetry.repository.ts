@@ -1162,99 +1162,111 @@ public async flushPhysicalRetryQueue(): Promise<{
             if (!isSimulatedQuery && selectedResolution === '1d') {
               tierSource = 'telemetry_daily_summary (Continuous Aggregate)';
               sql = `
-                SELECT 
-                  bucket AS timestamp,
-                  device_id AS "deviceId",
-                  metric,
-                  ROUND(avg_val::numeric, 2)::float AS value,
-                  ROUND(min_val::numeric, 2)::float AS "minVal",
-                  ROUND(max_val::numeric, 2)::float AS "maxVal",
-                  reading_count::int AS count
-                FROM telemetry_daily_summary
-                WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
-                  AND ($2::text IS NULL OR device_id = $2)
-                  AND ($3::text IS NULL OR metric = $3)
-                  AND ($4::timestamptz IS NULL OR bucket >= $4)
-                  AND ($5::timestamptz IS NULL OR bucket <= $5)
-                ORDER BY bucket ASC
-                LIMIT $6;
+                SELECT * FROM (
+                  SELECT 
+                    bucket AS timestamp,
+                    device_id AS "deviceId",
+                    metric,
+                    ROUND(avg_val::numeric, 2)::float AS value,
+                    ROUND(min_val::numeric, 2)::float AS "minVal",
+                    ROUND(max_val::numeric, 2)::float AS "maxVal",
+                    reading_count::int AS count
+                  FROM telemetry_daily_summary
+                  WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
+                    AND ($2::text IS NULL OR device_id = $2)
+                    AND ($3::text IS NULL OR metric = $3)
+                    AND ($4::timestamptz IS NULL OR bucket >= $4)
+                    AND ($5::timestamptz IS NULL OR bucket <= $5)
+                  ORDER BY (CASE WHEN $4::timestamptz IS NULL THEN bucket END) DESC, bucket ASC
+                  LIMIT $6
+                ) sub
+                ORDER BY timestamp ASC;
               `;
             } else if (!isSimulatedQuery && selectedResolution === '1h') {
               tierSource = 'telemetry_hourly_summary (Continuous Aggregate)';
               sql = `
-                SELECT 
-                  bucket AS timestamp,
-                  device_id AS "deviceId",
-                  metric,
-                  ROUND(avg_val::numeric, 2)::float AS value,
-                  ROUND(min_val::numeric, 2)::float AS "minVal",
-                  ROUND(max_val::numeric, 2)::float AS "maxVal",
-                  reading_count::int AS count
-                FROM telemetry_hourly_summary
-                WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
-                  AND ($2::text IS NULL OR device_id = $2)
-                  AND ($3::text IS NULL OR metric = $3)
-                  AND ($4::timestamptz IS NULL OR bucket >= $4)
-                  AND ($5::timestamptz IS NULL OR bucket <= $5)
-                ORDER BY bucket ASC
-                LIMIT $6;
+                SELECT * FROM (
+                  SELECT 
+                    bucket AS timestamp,
+                    device_id AS "deviceId",
+                    metric,
+                    ROUND(avg_val::numeric, 2)::float AS value,
+                    ROUND(min_val::numeric, 2)::float AS "minVal",
+                    ROUND(max_val::numeric, 2)::float AS "maxVal",
+                    reading_count::int AS count
+                  FROM telemetry_hourly_summary
+                  WHERE (device_id = ANY($1::text[]) OR ($7::text IS NOT NULL AND device_id IN (SELECT id FROM devices WHERE user_id = $7)))
+                    AND ($2::text IS NULL OR device_id = $2)
+                    AND ($3::text IS NULL OR metric = $3)
+                    AND ($4::timestamptz IS NULL OR bucket >= $4)
+                    AND ($5::timestamptz IS NULL OR bucket <= $5)
+                  ORDER BY (CASE WHEN $4::timestamptz IS NULL THEN bucket END) DESC, bucket ASC
+                  LIMIT $6
+                ) sub
+                ORDER BY timestamp ASC;
               `;
             } else if (selectedResolution === '5m' || selectedResolution === '15m') {
               const bucketInterval = selectedResolution === '15m' ? '15 minutes' : '5 minutes';
               tierSource = `${rawTable} (Bucket: ${bucketInterval})`;
               sql = `
-                SELECT 
-                  time_bucket('${bucketInterval}', created_at) AS timestamp,
-                  device_id AS "deviceId",
-                  metric,
-                  ROUND(AVG(metric_value)::numeric, 2)::float AS value,
-                  ROUND(MIN(metric_value)::numeric, 2)::float AS "minVal",
-                  ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
-                  COUNT(*)::int AS count
-                FROM ${rawTable}
-                WHERE (
-                  device_id = ANY($1::text[]) 
-                  OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
-                )
-                  AND ($2::text IS NULL OR device_id = $2)
-                  AND ($3::text IS NULL OR metric = $3)
-                  AND ($4::timestamptz IS NULL OR created_at >= $4)
-                  AND ($5::timestamptz IS NULL OR created_at <= $5)
-                GROUP BY timestamp, device_id, metric
-                ORDER BY timestamp ASC
-                LIMIT $6;
+                SELECT * FROM (
+                  SELECT 
+                    time_bucket('${bucketInterval}', created_at) AS timestamp,
+                    device_id AS "deviceId",
+                    metric,
+                    ROUND(AVG(metric_value)::numeric, 2)::float AS value,
+                    ROUND(MIN(metric_value)::numeric, 2)::float AS "minVal",
+                    ROUND(MAX(metric_value)::numeric, 2)::float AS "maxVal",
+                    COUNT(*)::int AS count
+                  FROM ${rawTable}
+                  WHERE (
+                    device_id = ANY($1::text[]) 
+                    OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                  )
+                    AND ($2::text IS NULL OR device_id = $2)
+                    AND ($3::text IS NULL OR metric = $3)
+                    AND ($4::timestamptz IS NULL OR created_at >= $4)
+                    AND ($5::timestamptz IS NULL OR created_at <= $5)
+                  GROUP BY timestamp, device_id, metric
+                  ORDER BY (CASE WHEN $4::timestamptz IS NULL THEN timestamp END) DESC, timestamp ASC
+                  LIMIT $6
+                ) sub
+                ORDER BY timestamp ASC;
               `;
             } else {
               tierSource = `${rawTable} (Raw)`;
               sql = `
-                SELECT 
-                  id,
-                  packet_id AS "packetId",
-                  tenant_id AS "tenantId",
-                  customer_id AS "customerId",
-                  user_id AS "userId",
-                  device_id AS "deviceId",
-                  device_name AS "deviceName",
-                  metric,
-                  metric_value AS value,
-                  unit,
-                  status_level AS status,
-                  sequence,
-                  source,
-                  environment,
-                  simulation_run_id AS "simulationRunId",
-                  created_at AS timestamp
-                FROM ${rawTable}
-                WHERE (
-                  device_id = ANY($1::text[]) 
-                  OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
-                )
-                  AND ($2::text IS NULL OR device_id = $2)
-                  AND ($3::text IS NULL OR metric = $3)
-                  AND ($4::timestamptz IS NULL OR created_at >= $4)
-                  AND ($5::timestamptz IS NULL OR created_at <= $5)
-                ORDER BY created_at ASC
-                LIMIT $6;
+                SELECT * FROM (
+                  SELECT 
+                    id,
+                    packet_id AS "packetId",
+                    tenant_id AS "tenantId",
+                    customer_id AS "customerId",
+                    user_id AS "userId",
+                    device_id AS "deviceId",
+                    device_name AS "deviceName",
+                    metric,
+                    metric_value AS value,
+                    unit,
+                    status_level AS status,
+                    sequence,
+                    source,
+                    environment,
+                    simulation_run_id AS "simulationRunId",
+                    created_at AS timestamp
+                  FROM ${rawTable}
+                  WHERE (
+                    device_id = ANY($1::text[]) 
+                    OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                  )
+                    AND ($2::text IS NULL OR device_id = $2)
+                    AND ($3::text IS NULL OR metric = $3)
+                    AND ($4::timestamptz IS NULL OR created_at >= $4)
+                    AND ($5::timestamptz IS NULL OR created_at <= $5)
+                  ORDER BY (CASE WHEN $4::timestamptz IS NULL THEN created_at END) DESC, created_at ASC
+                  LIMIT $6
+                ) sub
+                ORDER BY timestamp ASC;
               `;
             }
 
@@ -1288,28 +1300,31 @@ public async flushPhysicalRetryQueue(): Promise<{
                 : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS legacy_combined_telemetry`;
 
               const fallbackSql = `
-                SELECT 
-                  id,
-                  packet_id AS "packetId",
-                  device_id AS "deviceId",
-                  device_name AS "deviceName",
-                  metric,
-                  metric_value AS value,
-                  unit,
-                  status_level AS status,
-                  sequence,
-                  source,
-                  environment,
-                  simulation_run_id AS "simulationRunId",
-                  created_at AS timestamp
-                FROM ${safeRawTable}
-                WHERE device_id = ANY($1::text[])
-                  AND ($2::text IS NULL OR device_id = $2)
-                  AND ($3::text IS NULL OR metric = $3)
-                  AND ($4::timestamptz IS NULL OR created_at >= $4)
-                  AND ($5::timestamptz IS NULL OR created_at <= $5)
-                ORDER BY created_at ASC
-                LIMIT $6;
+                SELECT * FROM (
+                  SELECT 
+                    id,
+                    packet_id AS "packetId",
+                    device_id AS "deviceId",
+                    device_name AS "deviceName",
+                    metric,
+                    metric_value AS value,
+                    unit,
+                    status_level AS status,
+                    sequence,
+                    source,
+                    environment,
+                    simulation_run_id AS "simulationRunId",
+                    created_at AS timestamp
+                  FROM ${safeRawTable}
+                  WHERE device_id = ANY($1::text[])
+                    AND ($2::text IS NULL OR device_id = $2)
+                    AND ($3::text IS NULL OR metric = $3)
+                    AND ($4::timestamptz IS NULL OR created_at >= $4)
+                    AND ($5::timestamptz IS NULL OR created_at <= $5)
+                  ORDER BY (CASE WHEN $4::timestamptz IS NULL THEN created_at END) DESC, created_at ASC
+                  LIMIT $6
+                ) sub
+                ORDER BY timestamp ASC;
               `;
               try {
                 res = await pool.query(fallbackSql, [allowedDeviceIds, queryDev, queryMetric, validFrom, validTo, numLimit]);

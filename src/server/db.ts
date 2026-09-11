@@ -419,8 +419,13 @@ class LocalDatabase {
         const hydrated = await this.postgresRepo.hydrateFromPostgres();
         if (hydrated) {
           if (hydrated.users.length > 0) {
-            this.data.users = hydrated.users;
+            const existingUserIds = new Set(hydrated.users.map(u => u.id));
+            const missingUsers = this.data.users.filter(u => !existingUserIds.has(u.id));
+            this.data.users = [...hydrated.users, ...missingUsers];
             this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
+            for (const u of missingUsers) {
+              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch(() => {});
+            }
           } else {
             for (const u of this.data.users) {
               await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch(() => {});
@@ -428,7 +433,12 @@ class LocalDatabase {
           }
 
           if (hydrated.devices.length > 0) {
-            this.data.devices = hydrated.devices;
+            const existingDeviceIds = new Set(hydrated.devices.map(d => d.id));
+            const missingDevices = this.data.devices.filter(d => !existingDeviceIds.has(d.id));
+            this.data.devices = [...hydrated.devices, ...missingDevices];
+            for (const d of missingDevices) {
+              await this.postgresRepo.saveDevice(d).catch(() => {});
+            }
           } else {
             for (const d of this.data.devices) {
               await this.postgresRepo.saveDevice(d).catch(() => {});
@@ -478,24 +488,6 @@ class LocalDatabase {
 
       // 2. Asynchronous Schema & DDL Verification in Background (does not block API startup or authentication)
       (async () => {
-        try {
-          const schemaClient = await pool.connect();
-          try {
-            await schemaClient.query("SET statement_timeout = '8s';");
-            await schemaClient.query("SET lock_timeout = '2s';");
-            // If users table already exists, skip monolithic DDL script to prevent table lock contention
-            const chkRes = await schemaClient.query("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users' LIMIT 1;");
-            if (!chkRes.rows || chkRes.rows.length === 0) {
-              systemLogger.info('database', 'İlk kurulum: PostgreSQL temel şeması yükleniyor...');
-              await schemaClient.query(this.getPostgresSchemaSQL());
-            }
-          } finally {
-            schemaClient.release();
-          }
-        } catch (schemaErr: any) {
-          systemLogger.warn('database', 'PostgreSQL Şema Kontrol Uyarısı:', schemaErr?.message || schemaErr);
-        }
-
         try {
           await this.postgresRepo.ensureTelemetrySchema();
         } catch (tErr: any) {
@@ -626,7 +618,13 @@ class LocalDatabase {
     if (this.postgresRepo && !this.postgresRepo.isReady()) {
       return false;
     }
-    return process.env.DB_ENGINE === 'postgres' || process.env.LOCAL_DB_ENABLED === 'false';
+    const engine = this.getActiveEngine();
+    const isEnginePg = engine === 'postgres' || engine === 'timescaledb';
+    return (
+      Boolean(this.postgresRepo?.isReady() && isEnginePg) ||
+      process.env.DB_ENGINE === 'postgres' ||
+      process.env.LOCAL_DB_ENABLED === 'false'
+    );
   }
 
   private ensureDirectory() {
@@ -2639,13 +2637,27 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
         let querySql = `SELECT * FROM "${safeTableName}"`;
         const params: any[] = [];
 
+        const timeColumn = ['telemetry_readings', 'simulation_telemetry_readings', 'audit_logs', 'device_commands', 'notifications', 'dispatch_logs'].includes(safeTableName)
+          ? 'created_at'
+          : null;
+
         if (search && search.trim()) {
-          countSql += ` WHERE CAST(row_to_json("${safeTableName}") AS text) ILIKE $1`;
-          querySql += ` WHERE CAST(row_to_json("${safeTableName}") AS text) ILIKE $1`;
-          params.push(`%${search.trim()}%`);
+          const term = `%${search.trim()}%`;
+          if (safeTableName === 'telemetry_readings') {
+            countSql += ` WHERE (device_id ILIKE $1 OR device_name ILIKE $1 OR metric ILIKE $1 OR unit ILIKE $1 OR id ILIKE $1)`;
+            querySql += ` WHERE (device_id ILIKE $1 OR device_name ILIKE $1 OR metric ILIKE $1 OR unit ILIKE $1 OR id ILIKE $1)`;
+          } else {
+            countSql += ` WHERE CAST(row_to_json("${safeTableName}") AS text) ILIKE $1`;
+            querySql += ` WHERE CAST(row_to_json("${safeTableName}") AS text) ILIKE $1`;
+          }
+          params.push(term);
         }
 
-        querySql += ` ORDER BY 1 DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        if (timeColumn) {
+          querySql += ` ORDER BY "${timeColumn}" DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        } else {
+          querySql += ` ORDER BY 1 DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        }
         const queryParams = [...params, limit, offset];
 
         const countRes = await pool.query(countSql, params);
@@ -2665,8 +2677,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
           isPostgres: true,
         };
       } catch (err: any) {
-        // Suppress timeout errors and gracefully fallback to memory database
-        this.postgresRepo.setConnected(false);
+        console.error(`[DatabaseExplorer Error on ${tableName}]:`, err?.message || err);
       }
     }
 
@@ -2849,6 +2860,22 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       dispatch_logs: this.data.dispatchLogs?.length || 0,
       dashboard_layouts: this.data.dashboards?.length || 0,
     };
+  }
+
+  public async getTableCountsAsync(): Promise<Record<string, number>> {
+    const baseCounts = this.getTableCounts();
+    const pool = this.getPgPool();
+    if (pool && this.isPostgresProductionMode()) {
+      try {
+        const telRes = await pool.query('SELECT COUNT(*)::int AS count FROM telemetry_readings');
+        if (telRes.rows?.[0]?.count !== undefined) {
+          baseCounts.telemetry_readings = telRes.rows[0].count;
+        }
+      } catch {
+        // Fallback to in-memory count on transient failure
+      }
+    }
+    return baseCounts;
   }
 
   // ==========================================

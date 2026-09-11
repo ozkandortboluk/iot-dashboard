@@ -114,7 +114,7 @@ describe('P1 - 2.2: Telemetry Database Integrity & Application Referential Polic
   });
 
   it('4. Unknown / Discovered device telemetry quarantine & staging policy', async () => {
-    const unregIp = '192.168.1.188';
+    const unregIp = '192.168.244.188';
     db.recordUnregisteredDevice({
       ip: unregIp,
       mac: 'AA:BB:CC:DD:EE:FF',

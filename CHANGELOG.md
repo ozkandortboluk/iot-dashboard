@@ -4,6 +4,44 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.7.4] - 2026-09-11
+
+### 🛡️ PostgreSQL Device Multi-Tenant Foreign Key Constraint Fix & Resilient Synchronization
+- **Elimination of `fk_devices_tenant_id` Foreign Key Violation:** Removed restrictive relational foreign key constraints (`fk_devices_tenant_id` and `fk_devices_user_id`) on the `devices` table across `schema.ts`, `timescaledb.sql`, and the live PostgreSQL database. This allows IoT devices to flexibly belong to organizational tenants, field operational units (e.g., `tenant_field_ops_01`), departments, or customer IDs without failing relational constraints when tenant codes are not direct user logins.
+- **Self-Healing Device FK Recovery in Query Handler:** Extended the automatic schema error detector (`isDevicesFkError`) in `postgres.ts` to detect both `tenant_id` and `user_id` foreign key violations, dynamically drop offending constraints, and retry device write operations seamlessly without service disruption.
+- **Bidirectional In-Memory / PostgreSQL Device & User Synchronization:** Enhanced database hydration in `db.ts` to merge any missing local memory devices and users into PostgreSQL upon connection establishment, ensuring customer accounts (`usr_cust_a`, `usr_cust_b`) and field devices are fully synchronized and available across both storage tiers.
+
+---
+
+## 🚀 [v1.7.3] - 2026-09-11
+
+### 🔍 Chronological Table Explorer Ordering & Live Device Data Visibility
+- **Chronological Time-Series Sorting in Table Explorer:** Refactored `getTableDataExplorer` to automatically sort time-series tables (`telemetry_readings`, `simulation_telemetry_readings`, `audit_logs`, `device_commands`, `notifications`, `dispatch_logs`) by `created_at DESC` instead of arbitrary primary key string ordering (`ORDER BY 1 DESC`). This ensures the newest live field device readings immediately appear on Page 1 instead of older historical records.
+- **Fast Column-Specific Telemetry Search:** Optimized the search filter on `telemetry_readings` to query indexed columns (`device_id`, `device_name`, `metric`, `unit`, `id`) rather than full JSON row scans, allowing instant sub-150ms search across 855,000+ records.
+- **Enhanced Column Visibility & Local Timestamp Formatting:** Updated `DatabaseDataView` so that `created_at`, `device_name`, `device_id`, `metric`, `metric_value`, and `unit` are prioritized as primary visible columns, complete with localized timestamps (`HH:mm:ss`) to make live telemetry arrival immediately evident.
+
+---
+
+## 🚀 [v1.7.2] - 2026-09-11
+
+### 📊 Physical Telemetry PostgreSQL Ingestion Visibility & Time-Series Windowing
+- **Database Explorer Live Telemetry Count (`getTableCountsAsync`):** Fixed `/api/database/explorer/tables` to asynchronously query live PostgreSQL counts from `telemetry_readings` instead of returning the transient memory buffer size (which was 0), correctly displaying all 854,000+ persistent records in the Database Management interface.
+- **Production Mode Recognition Resolution (`isPostgresProductionMode`):** Updated `isPostgresProductionMode()` to properly recognize active, healthy PostgreSQL connections (`postgresRepo.isReady()` && `isEnginePg`) even when `DB_ENGINE` is not explicitly declared as an environment variable.
+- **Table Data Explorer PostgreSQL Integration:** Restored native PostgreSQL pagination and search queries for `telemetry_readings` in `getTableDataExplorer`, allowing administrators to inspect, filter, and page through physical hardware readings directly.
+- **Time-Series Query Windowing Optimization (`getTelemetryAsync`):** Refactored queries when no `from` timestamp is specified (e.g., initial dashboard loads and widget history) to execute subqueries with `ORDER BY created_at DESC LIMIT $6` followed by chronological ordering (`ORDER BY timestamp ASC`), ensuring widgets display the latest live field data rather than the oldest records from initial setup.
+
+---
+
+## 🚀 [v1.7.1] - 2026-09-10
+
+### 🛡️ PostgreSQL Lock Contention Elimination & Event Log Stabilization
+- **Zero-Exclusive-Lock Schema Validation:** Replaced unconditional `ALTER TABLE` DDL executions in `ensureTelemetrySchema` with non-blocking single-query `information_schema.columns` checks. Columns are only altered if strictly absent, eliminating PostgreSQL `ACCESS EXCLUSIVE` table locks that blocked high-frequency telemetry ingestion and caused system lockups.
+- **Concurrent DDL Serialization (`schemaEnsuringPromise`):** Implemented concurrency locking for schema validation routines to prevent overlapping DDL runs across connection pool clients.
+- **Removal of Redundant DDL Invocations:** Removed recurring `ensureTelemetrySchema()` calls from `saveUser`, `saveDevice`, and `saveRule` operations, allowing standard data persistence to operate at full native speed without acquiring table locks.
+- **Event Log Management & In-App Confirmation:** Modernized `DatabaseAutoHealerPanel` with iframe-safe inline confirmation for clearing system event logs (eliminating `window.confirm` and `alert` restrictions), non-blocking notifications, and initialized a fresh, healthy event log status.
+
+---
+
 ## 🚀 [v1.7.0] - 2026-09-10
 
 ### 🛡️ Database Auto-Healing & System Event Logging Architecture

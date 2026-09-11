@@ -56,6 +56,8 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<SystemEvent | null>(null);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [panelNotification, setPanelNotification] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   const fetchHealth = async () => {
     setIsLoadingHealth(true);
@@ -75,6 +77,7 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
   const triggerRepair = async () => {
     setIsRepairing(true);
     setRepairSuccessMessage(null);
+    setPanelNotification(null);
     try {
       const res = await fetch('/api/database/auto-repair/run', { method: 'POST' });
       const data = await res.json();
@@ -85,10 +88,10 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
         );
         fetchEvents();
       } else {
-        alert('Onarım sırasında hata: ' + (data.error || 'Bilinmeyen hata'));
+        setPanelNotification({ type: 'error', text: 'Onarım sırasında hata: ' + (data.error || 'Bilinmeyen hata') });
       }
     } catch (err: any) {
-      alert('Onarım isteği başarısız oldu: ' + (err?.message || err));
+      setPanelNotification({ type: 'error', text: 'Onarım isteği başarısız oldu: ' + (err?.message || err) });
     } finally {
       setIsRepairing(false);
     }
@@ -116,17 +119,22 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
     }
   };
 
-  const clearEvents = async () => {
-    if (!window.confirm('Tüm sistem olay günlüğünü temizlemek istediğinize emin misiniz?')) return;
+  const executeClearEvents = async () => {
+    setConfirmingClear(false);
+    setPanelNotification(null);
     try {
       const res = await fetch('/api/system/events/clear', { method: 'POST' });
       if (res.ok) {
         setEvents([]);
         setTotalEvents(0);
+        setPanelNotification({ type: 'success', text: 'Sistem olay günlüğü başarıyla temizlendi.' });
         fetchEvents();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setPanelNotification({ type: 'error', text: 'Loglar temizlenemedi: ' + (d.message || res.statusText) });
       }
     } catch (err: any) {
-      alert('Loglar temizlenemedi: ' + err?.message);
+      setPanelNotification({ type: 'error', text: 'Loglar temizlenemedi: ' + err?.message });
     }
   };
 
@@ -462,14 +470,32 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
               <Download className="w-3.5 h-3.5" />
               <span>Dışa Aktar</span>
             </button>
-            <button
-              onClick={clearEvents}
-              disabled={events.length === 0}
-              className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Günlüğü Temizle</span>
-            </button>
+            {confirmingClear ? (
+              <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 p-1 rounded-lg border border-rose-200 dark:border-rose-900">
+                <span className="text-[11px] text-rose-700 dark:text-rose-300 font-medium px-1">Emin misiniz?</span>
+                <button
+                  onClick={executeClearEvents}
+                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded transition cursor-pointer"
+                >
+                  Evet, Temizle
+                </button>
+                <button
+                  onClick={() => setConfirmingClear(false)}
+                  className="px-2 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded transition cursor-pointer"
+                >
+                  İptal
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingClear(true)}
+                disabled={events.length === 0}
+                className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Günlüğü Temizle</span>
+              </button>
+            )}
             <button
               onClick={fetchEvents}
               disabled={isLoadingEvents}
@@ -480,6 +506,24 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {panelNotification && (
+          <div
+            className={`p-3 rounded-xl border flex items-center justify-between text-xs font-medium ${
+              panelNotification.type === 'error'
+                ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200'
+                : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
+            }`}
+          >
+            <span>{panelNotification.text}</span>
+            <button
+              onClick={() => setPanelNotification(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-3 cursor-pointer"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* FILTERS & SEARCH */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

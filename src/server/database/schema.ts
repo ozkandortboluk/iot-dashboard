@@ -150,26 +150,12 @@ BEGIN
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_rotated_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_api_key_hash VARCHAR(128);
 
-    -- Canonical data cleanup: resolve any null or orphaned references to usr_admin
-    UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id IS NULL OR tenant_id = '';
-    UPDATE devices SET user_id = tenant_id WHERE user_id IS NULL OR user_id = '';
-    UPDATE devices SET tenant_id = 'usr_admin' WHERE tenant_id NOT IN (SELECT id FROM users);
-    UPDATE devices SET user_id = tenant_id WHERE user_id NOT IN (SELECT id FROM users);
-
-    -- Enforce foreign keys with ON UPDATE CASCADE ON DELETE SET DEFAULT
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE table_name = 'devices' AND constraint_name = 'fk_devices_tenant_id'
-    ) THEN
-        ALTER TABLE devices ADD CONSTRAINT fk_devices_tenant_id FOREIGN KEY (tenant_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE table_name = 'devices' AND constraint_name = 'fk_devices_user_id'
-    ) THEN
-        ALTER TABLE devices ADD CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;
-    END IF;
+    -- Resilient Multi-Tenant Schema: Remove hard foreign key constraints on devices (tenant_id, user_id).
+    -- Devices can belong to organizations, departments, or custom tenant IDs without crashing ingestion/sync.
+    ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_tenant_id;
+    ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_user_id;
+    ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
+    ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_tenant_id_fkey;
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'devices table alter notice: %', SQLERRM;

@@ -55,9 +55,7 @@ CREATE TABLE IF NOT EXISTS devices (
     encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
     metrics JSONB DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_devices_tenant_id FOREIGN KEY (tenant_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT,
-    CONSTRAINT fk_devices_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET DEFAULT
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 3. Telemetry Table (Hypertable Base)
