@@ -1,0 +1,75 @@
+287:  public async waitForInitialization(timeoutMs?: number): Promise<boolean> {
+353:  public async initPostgresRepository(): Promise<boolean> {
+503:  public async syncAllToPostgres(): Promise<{ success: boolean; message: string; counts?: Record<string, number> }> {
+748:  public async createBackup(): Promise<{ success: boolean; filename: string; size: number }> {
+889:  public async getDatabasePerformanceStats() {
+987:  public async createSession(user: User): string { return await this.userRepository.createSession(user); }
+988:  public async deleteSession(token: string): boolean { return await this.userRepository.deleteSession(token); }
+991:  public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
+992:  public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }
+993:  public async updateUserRole(userId: string, newRole: User['role']): Promise<User> { return this.userRepository.updateUserRole(userId, newRole); }
+995:  public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
+996:  public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
+997:  public async checkDeviceStatuses(): Promise<boolean> { return await this.deviceRepository.checkDeviceStatuses(); }
+998:  public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> { return await this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
+1001:  public async assignDeviceOwner(deviceId: string, targetTenantId: string): Promise<Device | undefined> { return await this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }
+1003:  public async createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Promise<Device> { return await this.deviceRepository.createDevice(deviceData); }
+1004:  public async regenerateApiKey(deviceId: string): Promise<string> { return await this.deviceRepository.regenerateApiKey(deviceId); }
+1005:  public async rotateApiKey(deviceId: string, options?: { expiresDays?: number; scopes?: string[] }): Promise<any> { return await this.deviceRepository.rotateApiKey(deviceId, options); }
+1006:  public async revokeApiKey(deviceId: string, reason?: string): Promise<Device> { return await this.deviceRepository.revokeApiKey(deviceId, reason); }
+1026:  public async restoreApiKey(deviceId: string): Promise<Device> { return await this.deviceRepository.restoreApiKey(deviceId); }
+1027:  public async updateApiKeySettings(deviceId: string, settings: any, adminUserId?: string, adminUserName?: string): Promise<Device> { return await this.deviceRepository.updateApiKeySettings(deviceId, settings); }
+1028:  public async convertToPhysicalDevice(deviceId: string): Promise<Device> { return await this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
+1029:  public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> { return await this.deviceRepository.updateDevice(deviceId, updates); }
+1030:  public async deleteDevice(deviceId: string): Promise<void> { return await this.deviceRepository.deleteDevice(deviceId); }
+1035:  public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading { return await this.telemetryRepository.addTelemetryReading(reading); }
+1036:  public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return await this.telemetryRepository.addTelemetryReadingAsync(reading); }
+1037:  public async addTelemetryBatchAsync(readings: Omit<TelemetryReading, 'id' | 'timestamp'>[]): Promise<any> { return this.telemetryRepository.addTelemetryBatchAsync(readings); }
+1038:  public async flushTelemetryRetryQueue(): Promise<any> { return this.telemetryRepository.flushRetryQueue(); }
+1043:  public async getHistoryAsync(deviceId: string, metric: string): Promise<any> { return this.telemetryRepository.getHistoryAsync(deviceId, metric); }
+1044:  public async reconcileOrphanTelemetry(): Promise<any> { return this.telemetryRepository.reconcileOrphanTelemetry(); }
+1047:  public async getTelemetryAsync(deviceId?: string, metric?: string, limit: number = 1000, userId?: string, customerId?: string, from?: string, to?: string, resolution?: string): Promise<any[]> { return this.telemetryRepository.getTelemetryAsync(deviceId, metric, limit, userId, customerId, from, to, resolution); }
+1049:  public async getNotifications(requestingUserId?: string, targetCustomerId?: string): Promise<NotificationItem[]> {
+1056:  public async addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem { return await this.notificationRepository.addNotification(notif); }
+1057:  public async markNotificationRead(id: string, userId?: string) { return await this.notificationRepository.markNotificationRead(id, userId); }
+1058:  public async markAllNotificationsRead(userId?: string) { return await this.notificationRepository.markAllNotificationsRead(userId); }
+1059:  public async getDashboard(userId: string): DashboardLayout { return await this.notificationRepository.getDashboard(userId); }
+1060:  public async saveDashboardWidgets(userId: string, widgets: any[], title?: string): DashboardLayout { return await this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
+1062:  public async getAlarms(requestingUserId?: string, targetCustomerId?: string, options?: any): Promise<any> {
+1080:  public async createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): ThresholdRule { return await this.alarmRepository.createRule(ruleData, requestingUser); }
+1081:  public async updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return await this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
+1082:  public async deleteRule(id: string, requestingUser?: any): boolean { return await this.alarmRepository.deleteRule(id, requestingUser); }
+1118:  public async getAlarmEvents(requestingUserId?: string, targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
+1134:  public async toggleRule(id: string, enabled: boolean, requestingUser?: any): boolean { return await this.alarmRepository.toggleRule(id, enabled, requestingUser); }
+1137:  public async addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): void { return await this.userRepository.addAuditLog(userId, userName, action, severity); }
+1142:  public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
+1161:  public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
+1169:  public async addCommand(
+1306:  public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
+1355:  public async acknowledgeCommands(
+1419:  public async expireStaleCommands(timeoutSeconds = 600): Promise<DeviceCommand[]> {
+1448:  public async markCommandsDelivered(commandIds: string[]): Promise<void> {
+1474:  public async getCommandById(commandId: string, tenantId?: string): Promise<DeviceCommand | null> {
+1487:  public async cancelCommand(commandId: string, tenantId?: string): Promise<boolean> {
+1511:  public async testAndResetFirestoreQuota(): Promise<{ success: boolean; message: string }> {
+1515:  public async getDatabaseStats() {
+1738:  public async processQueue() {
+1928:  public async getDispatchLogs(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
+1991:  public async updateUserProfile(userId: string, data: Partial<User>): Promise<User> {
+2025:  public async testChannelDispatch(
+2126:  public async compressTimescaleChunksNow(): Promise<any> { return this.timescaleManager.compressTimescaleChunksNow(); }
+2129:  public async queryTimeBucketTelemetryAsync(params: {
+2286:  public async testPostgresConnection(customUrl?: string): Promise<{
+2383:  public async executePostgresMigration(customUrl?: string): Promise<{
+2554:  public async executeCustomSqlQuery(sql: string): Promise<{
+2594:  public async getTableDataExplorer(tableName: string, page = 1, limit = 50, search = ''): Promise<{
+2693:  public async updateTableRecord(tableName: string, recordId: string, updates: Record<string, any>): Promise<{ success: boolean; message: string }> {
+2739:  public async deleteTableRecord(tableName: string, recordId: string): Promise<{ success: boolean; message: string }> {
+2773:  public async insertTableRecord(tableName: string, record: Record<string, any>): Promise<{ success: boolean; message: string }> {
+2837:  public async getTableCountsAsync(): Promise<Record<string, number>> {
+2889:  public async executeDataRetentionCleanup(isAuto = false): Promise<RetentionCleanupResult> {
+3032:  public async executeSimulatedDataCleanup(): Promise<RetentionCleanupResult> {
+3110:  public async executeCategoryCleanup(category: string, daysOverride?: number): Promise<RetentionCleanupResult> {
+3366:  public async setDeviceMaintenanceMode(deviceId: string, enabled: boolean, reason?: string, until?: string, requestingUser?: any) {
+3370:  public async updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any) {
+3374:  public async replaceDeviceHardware(oldDeviceId: string, data: any, requestingUser: any) {

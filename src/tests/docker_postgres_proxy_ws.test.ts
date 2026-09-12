@@ -64,7 +64,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     const existingUsers = (db.data.users || []).filter((u) => u.id !== proxyAdminUser.id && u.email !== proxyAdminUser.email);
     db.data.users = [...existingUsers, { ...proxyAdminUser }];
 
-    sessionToken = db.createSession(proxyAdminUser);
+    sessionToken = await db.createSession(proxyAdminUser);
 
     if (db.postgresRepo?.isReady()) {
       await db.postgresRepo.saveDevice(proxyDevice).catch(() => {});

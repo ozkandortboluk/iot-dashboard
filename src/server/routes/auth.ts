@@ -123,7 +123,7 @@ router.post('/setup', async (req, res) => {
       db.seedDemoDataForUser(adminUser.id, name, companyName, email);
     }
 
-    const token = db.createSession(adminUser);
+    const token = await db.createSession(adminUser);
 
     // Set HttpOnly, Secure cookie
     setSessionCookie(res, token);
@@ -163,7 +163,7 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: emailRes.error || 'Geçersiz e-posta biçimi.' });
   }
 
-  const result = db.authenticate(emailRes.normalized, String(password));
+  const result = await db.authenticate(emailRes.normalized, String(password));
   if (!result) {
     return res.status(401).json({ error: 'Hatalı e-posta adresi veya şifre.' });
   }
@@ -208,7 +208,7 @@ router.post('/register', async (req, res) => {
   try {
     // Public registration ALWAYS assigns 'customer' role. Escalation to 'admin' via public API is forbidden.
     const user = await db.registerUser(name, email, password, 'customer', companyName);
-    const token = db.createSession(user);
+    const token = await db.createSession(user);
     setSessionCookie(res, token);
     res.json({ user, token, message: 'Hesap başarıyla oluşturuldu.' });
   } catch (err: unknown) {

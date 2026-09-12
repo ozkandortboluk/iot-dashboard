@@ -24,23 +24,26 @@ export const createPool = (): pg.Pool => {
     return getSharedPgPool(url)!;
   }
 
-  // Local fallback pool if no URL provided yet
-  const fallback = new pg.Pool({
-    host: process.env.SQL_HOST || process.env.PGHOST || 'localhost',
-    user: process.env.SQL_USER || process.env.PGUSER || 'postgres',
-    password: process.env.SQL_PASSWORD || process.env.PGPASSWORD || 'postgres',
-    database: process.env.SQL_DB_NAME || process.env.PGDATABASE || 'iot_dashboard_db',
-    port: Number(process.env.PGPORT) || 5432,
-    max: 10,
-    connectionTimeoutMillis: 15000,
-    ssl: getPostgresSslOption(process.env.DATABASE_URL || ''),
-  });
+  // Critical Change for P0: Fail fast if PostgreSQL is not configured.
+  // We no longer provide a fallback local pool because PostgreSQL is the Single Source of Truth.
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    // Only allow fallback in strictly test environments
+    console.warn('[Drizzle] Using fallback local pool for test environment.');
+    const fallback = new pg.Pool({
+      host: process.env.SQL_HOST || process.env.PGHOST || 'localhost',
+      user: process.env.SQL_USER || process.env.PGUSER || 'postgres',
+      password: process.env.SQL_PASSWORD || process.env.PGPASSWORD || 'postgres',
+      database: process.env.SQL_DB_NAME || process.env.PGDATABASE || 'iot_dashboard_db_test',
+      port: Number(process.env.PGPORT) || 5432,
+      max: 10,
+    });
+    fallback.on('error', (err: any) => {
+      console.warn('[Drizzle Fallback Pool Warning]:', err?.message || err);
+    });
+    return fallback;
+  }
 
-  fallback.on('error', (err: any) => {
-    console.warn('[Drizzle Fallback Pool Warning]:', err?.message || err);
-  });
-
-  return fallback;
+  throw new Error('DATABASE_URL or equivalent PostgreSQL connection string is required. PostgreSQL is the authoritative data source and cannot be bypassed.');
 };
 
 // Singleton pool and Drizzle DB instance backed by the shared application pool

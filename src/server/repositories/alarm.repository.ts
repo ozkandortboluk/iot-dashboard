@@ -259,7 +259,7 @@ export class AlarmRepository {
     };
   }
 
-  public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: { id: string; name: string; role: string }): ThresholdRule {
+  public async createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: { id: string; name: string; role: string }): Promise<ThresholdRule> {
     if (!this.db.data.rules) this.db.data.rules = [];
     let ownerId = ruleData.tenantId || 'usr_admin';
     let ownerName = ruleData.userName || 'Sistem Yöneticisi';
@@ -298,17 +298,17 @@ export class AlarmRepository {
     this.db.data.rules.push(newRule);
     this.db.addAuditLog(ownerId, ownerName, `Yeni eşik kuralı oluşturuldu: ${newRule.metricKey.toUpperCase()} ${newRule.operator} ${newRule.thresholdValue}`, 'medium');
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveRule(newRule).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(newRule).catch((e) => console.warn('[PG Error]', e.message)); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return newRule;
   }
 
-  public updateRule(
+  public async updateRule(
     id: string,
     updates: Partial<ThresholdRule>,
     requestingUser?: { id: string; role: string },
     incomingVersion?: number
-  ): UpdateRuleResult {
+  ): Promise<UpdateRuleResult> {
     if (!this.db.data.rules) this.db.data.rules = [];
     const r = this.db.data.rules.find((item: ThresholdRule) => item.id === id);
     if (!r) return { success: false, notFound: true };
@@ -337,12 +337,12 @@ export class AlarmRepository {
     r.updatedAt = new Date().toISOString();
     r.version = (r.version || 1) + 1;
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveRule(r).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch((e) => console.warn('[PG Error]', e.message)); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return { success: true, rule: r };
   }
 
-  public deleteRule(id: string, requestingUser?: { id: string; role: string }): boolean {
+  public async deleteRule(id: string, requestingUser?: { id: string; role: string }): Promise<boolean> {
     if (!this.db.data.rules) this.db.data.rules = [];
     const idx = this.db.data.rules.findIndex((r: ThresholdRule) => r.id === id);
     if (idx < 0) return false;
@@ -354,12 +354,12 @@ export class AlarmRepository {
 
     this.db.data.rules.splice(idx, 1);
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.deleteRule(id).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteRule(id).catch((e) => console.warn('[PG Error]', e.message)); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return true;
   }
 
-  public toggleRule(id: string, enabled: boolean, requestingUser?: { id: string; role: string }): boolean {
+  public async toggleRule(id: string, enabled: boolean, requestingUser?: { id: string; role: string }): Promise<boolean> {
     if (!this.db.data.rules) this.db.data.rules = [];
     const r = this.db.data.rules.find((item: ThresholdRule) => item.id === id);
     if (!r) return false;
@@ -372,7 +372,7 @@ export class AlarmRepository {
     r.updatedAt = new Date().toISOString();
     r.version = (r.version || 1) + 1;
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveRule(r).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch((e) => console.warn('[PG Error]', e.message)); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return true;
   }

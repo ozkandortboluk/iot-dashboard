@@ -1,3 +1,4 @@
+import 'express-async-errors';
 import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
@@ -119,6 +120,23 @@ app.use((req, res, next) => {
 // Global Health Check Endpoints (/health/live, /health/ready, /health)
 app.use(systemRouter);
 
+// PostgreSQL Availability Guard
+// Critical Change for P0: PostgreSQL is the single authoritative source of truth.
+// If PostgreSQL is offline, prevent critical CRUD operations to avoid split-brain with local RAM cache.
+import { db } from './src/server/db.js';
+
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET' && !req.path.startsWith('/auth') && !req.path.startsWith('/database') && !req.path.startsWith('/system') && !req.path.startsWith('/telemetry')) {
+    if (!db.postgresRepo?.isReady()) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are temporarily disabled to ensure data integrity.' 
+      });
+    }
+  }
+  next();
+});
+
 // Mount Modular API Routes
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);
@@ -159,7 +177,7 @@ app.all('/api/*', (req, res) => {
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (req.path.startsWith('/api/')) {
     console.error('[API Error]:', err);
-    res.status(500).json({ success: false, error: 'Sunucu hatası', details: err?.message || String(err) });
+    const isDbErr = err?.message?.includes('PostgreSQL') || err?.message?.includes('veritabanı') || err?.message?.includes('ECONNREFUSED'); res.status(isDbErr ? 503 : 500).json({ success: false, error: isDbErr ? 'Veritabanı Hizmet Dışı' : 'Sunucu hatası', details: err?.message || String(err) });
   } else {
     next(err);
   }
@@ -175,6 +193,13 @@ startCommandExpiryWorker();
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
+  console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
+  await db.waitForInitialization();
+  if (!db.postgresRepo?.isReady()) {
+    console.error("[Startup] PostgreSQL başlatılamadı. Uygulama başlatılamıyor.");
+    process.exit(1);
+  }
+  console.log("[Startup] DB Hazır. API trafiğe açılıyor...");
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

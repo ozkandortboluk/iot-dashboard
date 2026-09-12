@@ -35,10 +35,10 @@ export function generateDeviceKeyDetails(providedKey?: string): {
 export class DeviceRepository {
   constructor(private db: any) {}
 
-  public checkDeviceStatuses(): boolean {
+  public async checkDeviceStatuses(): Promise<boolean> {
     const now = Date.now();
     let hasChanges = false;
-    this.db.data.devices.forEach((dev: Device) => {
+    for (const dev of this.db.data.devices) {
       const prevStatus = dev.status;
       const evalResult = smartIntervalService.evaluateDeviceWatchdog(dev, now);
       if (evalResult.changed) {
@@ -68,13 +68,13 @@ export class DeviceRepository {
           });
         }
       }
-    });
+    }
 
     if (hasChanges) {
       this.db.saveData(this.db.data);
-      this.db.data.devices.forEach((dev: Device) => {
-        this.db.postgresRepo?.saveDevice(dev).catch(() => {});
-      });
+      for (const dev of this.db.data.devices) {
+        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
+      }
     }
     return hasChanges;
   }
@@ -121,12 +121,12 @@ export class DeviceRepository {
     return list;
   }
 
-  public assignDeviceOwner(
+  public async assignDeviceOwner(
     deviceId: string,
     targetTenantId: string,
     adminUserId = 'system',
     adminUserName = 'Yönetici'
-  ): Device | undefined {
+  ): Promise<Device | undefined> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) return undefined;
 
@@ -172,7 +172,7 @@ export class DeviceRepository {
     });
   }
 
-  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device {
+  public async createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Promise<Device> {
     let newId = (deviceData.id && deviceData.id.trim()) ? deviceData.id.trim() : `dev_${Date.now()}`;
     
     // Auto-recovery of historical data by MAC Address
@@ -252,12 +252,12 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    this.db.postgresRepo?.saveDevice(newDevice).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(newDevice).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return newDevice;
   }
 
-  public regenerateApiKey(deviceId: string): string {
+  public async regenerateApiKey(deviceId: string): Promise<string> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -273,15 +273,15 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev.apiKey;
   }
 
-  public rotateApiKey(
+  public async rotateApiKey(
     deviceId: string,
     options?: { expiresDays?: number; scopes?: string[] }
-  ): { apiKey: string; prefix: string; expiresAt?: string; scopes: string[]; rotatedAt: string } {
+  ): Promise<{ apiKey: string; prefix: string; expiresAt?: string; scopes: string[]; rotatedAt: string }> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -308,7 +308,7 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Rotasyonu Gerçekleştirildi: ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
 
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return {
       apiKey: dev.apiKey,
@@ -319,7 +319,7 @@ export class DeviceRepository {
     };
   }
 
-  public revokeApiKey(deviceId: string, reason = 'Manuel İptal'): Device {
+  public async revokeApiKey(deviceId: string, reason = 'Manuel İptal'): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -329,12 +329,12 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı İptal Edildi (Revoked): ${dev.name} (Neden: ${reason})`, 'high');
     this.db.saveData(this.db.data);
 
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
 
-  public restoreApiKey(deviceId: string): Device {
+  public async restoreApiKey(deviceId: string): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -343,15 +343,15 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Yeniden Aktifleştirildi: ${dev.name}`, 'medium');
     this.db.saveData(this.db.data);
 
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
 
-  public updateApiKeySettings(
+  public async updateApiKeySettings(
     deviceId: string,
     settings: { scopes?: string[]; expiresAt?: string }
-  ): Device {
+  ): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -365,12 +365,12 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API İzinleri ve Süresi Güncellendi: ${dev.name}`, 'medium');
     this.db.saveData(this.db.data);
 
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
 
-  public convertToPhysicalDevice(deviceId: string, adminUserId = 'system', adminUserName = 'Yönetici'): Device {
+  public async convertToPhysicalDevice(deviceId: string, adminUserId: string = 'system', adminUserName: string = 'System'): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
     if (!dev.isSimulated) throw new Error('Bu cihaz zaten fiziksel bir donanımdır.');
@@ -394,12 +394,12 @@ export class DeviceRepository {
 
     this.db.addAuditLog(adminUserId, adminUserName, `Sanal Cihaz Fiziksel Donanıma Dönüştürüldü (Yeni API Anahtarı Atandı): ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
 
-  public updateDevice(deviceId: string, updates: Partial<Device>): Device {
+  public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -530,12 +530,12 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
 
-  public deleteDevice(deviceId: string) {
+  public async deleteDevice(deviceId: string): Promise<void> {
     const index = this.db.data.devices.findIndex((d: Device) => d.id === deviceId);
     if (index !== -1) {
       const removed = this.db.data.devices.splice(index, 1)[0];
@@ -549,7 +549,7 @@ export class DeviceRepository {
       this.db.saveData(this.db.data);
 
       // Sync to PostgreSQL Repository
-      this.db.postgresRepo?.deleteDevice(deviceId).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteDevice(deviceId).catch((e) => console.warn('[PG Error]', e.message)); }
     }
   }
 
@@ -753,7 +753,7 @@ export class DeviceRepository {
    * 3. İki aktif paket arasındaki gerçek süre ölçülerek sistem veri gönderim sıklığını (expectedIntervalSeconds) otomatik belirler.
    * 4. Kullanıcı cihaz ayarlarından sıklığı manuel sabitlediyse, kullanıcının son ayarı KESİNLİKLE KORUNUR.
    */
-  public processDeviceTelemetryArrival(deviceId: string): Device | null {
+  public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) return null;
 
@@ -761,7 +761,7 @@ export class DeviceRepository {
     smartIntervalService.processDeviceTelemetryArrival(dev, now);
 
     this.db.saveData(this.db.data);
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -925,13 +925,13 @@ export class DeviceRepository {
   // MAINTENANCE MODE & TAGS
   // ==========================================
 
-  public setDeviceMaintenanceMode(
+  public async setDeviceMaintenanceMode(
     deviceId: string,
     enabled: boolean,
     reason?: string,
     until?: string,
     requestingUser?: any
-  ): Device {
+  ): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -940,7 +940,7 @@ export class DeviceRepository {
     dev.maintenanceUntil = enabled && until ? until : undefined;
 
     this.db.saveData(this.db.data);
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     const operator = requestingUser?.name || 'Kullanıcı';
     this.db.addAuditLog(
@@ -953,7 +953,7 @@ export class DeviceRepository {
     return dev;
   }
 
-  public updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any): Device {
+  public async updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -961,7 +961,7 @@ export class DeviceRepository {
     dev.tags = cleanTags;
 
     this.db.saveData(this.db.data);
-    this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     const operator = requestingUser?.name || 'Kullanıcı';
     this.db.addAuditLog(
@@ -978,7 +978,7 @@ export class DeviceRepository {
   // HARDWARE REPLACEMENT & AUDIT MIGRATION
   // ==========================================
 
-  public replaceDeviceHardware(
+  public async replaceDeviceHardware(
     oldDeviceId: string,
     data: {
       newDeviceId?: string;
@@ -990,7 +990,7 @@ export class DeviceRepository {
       notes?: string;
     },
     requestingUser: any
-  ): { device: Device; record: DeviceReplacementRecord } {
+  ): Promise<{ device: Device; record: DeviceReplacementRecord }> {
     const oldDev = this.db.data.devices.find((d: Device) => d.id === oldDeviceId);
     if (!oldDev) throw new Error('Değiştirilecek mevcut cihaz bulunamadı.');
 
@@ -1283,10 +1283,10 @@ export class DeviceRepository {
     }
   }
 
-  public pairDevice(
+  public async pairDevice(
     request: PairDeviceRequest,
     actor: { id: string; name: string; role: string }
-  ): { success: boolean; device?: Device; message: string; auditRecord: PairingAuditRecord } {
+  ): Promise<{ success: boolean; device?: Device; message: string; auditRecord: PairingAuditRecord }> {
     const isActorAdmin = actor.role === 'admin' || actor.id === 'usr_admin' || actor.id === 'admin';
     const targetTenantId = isActorAdmin ? (request.tenantId || actor.id) : actor.id;
     const targetTenant = (this.db.data.users || []).find((u: any) => u.id === targetTenantId);
@@ -1342,7 +1342,7 @@ export class DeviceRepository {
         }
       } else if (strategy === 'update_existing' && existingConflictingDev) {
         // Update the existing device with new connection parameters
-        const updated = this.updateDevice(existingConflictingDev.id, {
+        const updated = await this.updateDevice(existingConflictingDev.id, {
           ipAddress: request.ipAddress || existingConflictingDev.ipAddress,
           macAddress: request.macAddress || existingConflictingDev.macAddress,
           location: request.location || existingConflictingDev.location,
@@ -1377,7 +1377,7 @@ export class DeviceRepository {
       } else if (strategy === 'replace_hardware' && (request.targetDeviceIdToReplace || existingConflictingDev)) {
         const targetDevId = request.targetDeviceIdToReplace || existingConflictingDev?.id;
         if (targetDevId) {
-          const replaced = this.replaceDeviceHardware(
+          const replaced = await this.replaceDeviceHardware(
             targetDevId,
             {
               newMac: request.macAddress || 'Bilinmiyor',
@@ -1420,7 +1420,7 @@ export class DeviceRepository {
     }
 
     // Standard new device creation
-    const createdDev = this.createDevice({
+    const createdDev = await this.createDevice({
       name: resolvedDeviceName,
       type: request.type || 'ESP32',
       location: request.location || 'Merkez Tesis',

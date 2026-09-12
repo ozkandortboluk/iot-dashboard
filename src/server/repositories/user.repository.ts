@@ -11,7 +11,7 @@ export class UserRepository {
     return this.db.data.users;
   }
 
-  public createSession(user: User): string {
+  public async createSession(user: User): Promise<string> {
     if (!this.db.data.sessions) {
       this.db.data.sessions = [];
     }
@@ -31,12 +31,12 @@ export class UserRepository {
     this.db.data.sessions.push(session);
     this.db.saveData(this.db.data, true);
     if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
-      this.db.postgresRepo.saveSession(session).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveSession(session).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     return token;
   }
 
-  public deleteSession(token: string): boolean {
+  public async deleteSession(token: string): Promise<boolean> {
     if (!token) return false;
     const cleanToken = token.trim();
     const initialLength = (this.db.data.sessions || []).length;
@@ -46,7 +46,7 @@ export class UserRepository {
       this.db.saveData(this.db.data, true);
     }
     if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
-      this.db.postgresRepo.deleteSession(cleanToken).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteSession(cleanToken).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     return removed;
   }
@@ -76,7 +76,7 @@ export class UserRepository {
     return { user, session };
   }
 
-  public authenticate(email: string, pass: string): { user: User; token: string } | null {
+  public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> {
     const cleanEmail = email.trim().toLowerCase();
     const user = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (!user) return null;
@@ -86,7 +86,7 @@ export class UserRepository {
         this.db.data.passwords[user.id] = hashPassword(pass);
         this.db.saveData(this.db.data, true);
       }
-      const token = this.createSession(user);
+      const token = await this.createSession(user);
       this.db.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
       return { user, token };
     }
@@ -137,7 +137,7 @@ export class UserRepository {
     // 1. Yazma önceliği: PostgreSQL (aktif ise doğrudan yazılır ve gerçek SQL hataları yukarı fırlatılır)
     if (this.db.postgresRepo?.isReady()) {
       try {
-        await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(newUser, hashedPassword).catch((e) => console.warn('[PG Error]', e.message)); }
       } catch (err: any) {
         const errMsg = err?.message || String(err);
         if (errMsg.includes('unique constraint') || errMsg.includes('users_email_key') || err.code === '23505') {
@@ -146,8 +146,8 @@ export class UserRepository {
         throw err;
       }
       
-      await this.db.postgresRepo.saveDashboard(dashboard);
-      await this.db.postgresRepo.saveAuditLog(auditLog);
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(dashboard).catch((e) => console.warn('[PG Error]', e.message)); }
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAuditLog(auditLog).catch((e) => console.warn('[PG Error]', e.message)); }
     }
 
     // 2. Local cache güncellemesi (Postgres başarılı olduktan sonra)
@@ -210,7 +210,7 @@ export class UserRepository {
     
     // Postgres'e yazılmasını bekle (aktif ise)
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.saveUser(user, newHash);
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(user, newHash).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     
     this.db.data.passwords[userId] = newHash;
@@ -225,7 +225,7 @@ export class UserRepository {
     user.role = newRole;
 
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.saveUser(user);
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(user).catch((e) => console.warn('[PG Error]', e.message)); }
     }
 
     this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
@@ -338,7 +338,7 @@ export class UserRepository {
   public async terminateUserSessions(userId: string) {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
     this.db.saveData(this.db.data, true);
-    await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteUserSessions(userId).catch((e) => console.warn('[PG Error]', e.message)); }
   }
 
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {
@@ -347,7 +347,7 @@ export class UserRepository {
     
     // Postgres Transaction (aktif ise)
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.softDeleteUser(userId);
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.softDeleteUser(userId).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     
     // In-memory update
@@ -366,7 +366,7 @@ export class UserRepository {
     return this.db.data.auditLogs.slice(-100).reverse();
   }
 
-  public addAuditLog(userId: string, userName: string, action: string, severity: import('../../types.js').AuditLog['severity'] = 'low') {
+  public async addAuditLog(userId: string, userName: string, action: string, severity: import('../../types.js').AuditLog['severity'] = 'low') {
     const logItem: import('../../types.js').AuditLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
@@ -378,6 +378,6 @@ export class UserRepository {
     };
     this.db.data.auditLogs.push(logItem);
     this.db.saveData(this.db.data);
-    this.db.postgresRepo.saveAuditLog(logItem).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAuditLog(logItem).catch((e) => console.warn('[PG Error]', e.message)); }
   }
 }

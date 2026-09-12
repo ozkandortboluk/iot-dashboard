@@ -1,6 +1,23 @@
+## v1.9.8
+* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (catch(() => {})) giderilmeye devam edildi. (Telemetry ve upsert işlemleri için).
+
+## v1.9.7
+* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (`.catch(() => {})`) giderildi. Veri tabanına yazılamayan durumlarda servisler hata fırlatarak 503 yanıtına düşecek.
+* **Architecture Hardening:** Uygulamanın başlatılma sırası düzeltildi. Express sunucusu HTTP ve WebSocket isteklerini kabul etmeden önce veritabanının (`initPostgresRepository`) hazır olması mecburi kılındı.
+* **Error Handling:** `express-async-errors` entegre edilerek tüm asenkron hata yönetimlerinin Next işleyicisine düşmesi sağlandı.
+
 # 📦 Proje Sürüm Geçmişi & Değişiklik Günlüğü (Changelog)
 
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
+
+---
+
+## 🚀 [v1.9.6] - 2026-09-12
+
+### 🏗️ P0 Mimari Değişikliği: PostgreSQL "Single Source of Truth" (Tek Gerçek Kaynak) Olarak Ayarlandı
+- **Fallback İptali:** `src/db/index.ts` içerisinde URL bulunamadığında kullanılan `new pg.Pool()` lokal havuz yedeği üretim (production) ortamında tamamen devre dışı bırakıldı. Eğer veritabanı değişkenleri eksikse uygulama fail-fast prensibiyle anında hata fırlatacak. Lokal yedeği (fallback) sadece test ortamına (`VITEST` / `NODE_ENV=test`) sınırlandırıldı.
+- **Kritik API Koruması (Write Guard):** `server.ts` içerisine eklenen yeni bir koruma katmanı (middleware) sayesinde, eğer PostgreSQL bağlantısı koparsa (offline veya reconnecting durumunda) uygulamadaki **tüm CRUD yazma işlemleri (POST, PUT, DELETE, PATCH) otomatik olarak 503 Service Unavailable hatası dönecektir.** Sadece sistem, otoritasyon ve telemetry endpointleri esnek bırakıldı.
+- **Local JSON / Firestore Kapatıldı:** Uygulama daha önce DB koptuğunda "PostgreSQL yok ama ben yine `db.json` ve RAM ile çalışayım" mantığı güdüyordu. Bu *split-brain* riski tamamen engellendi. Artık `isPostgresProductionMode()` koşulsuz şartsız `true` dönecek şekilde sabitlendi ve Firestore senkronizasyonu dahil lokal diske `db.json` yazma/okuma mekanizmaları devreden çıkarıldı. Artık PostgreSQL veritabanı tek, kesin ve tartışmasız veri kaynağıdır.
 
 ---
 

@@ -115,7 +115,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('1. Müşteriler arası alarm/kural erişim izolasyonu', () => {
     it('Müşteri A sadece kendi kurallarını görmeli, Müşteri B veya Yöneticinin kurallarını görememeli', async () => {
-      const ruleA = db.createRule(
+      const ruleA = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -128,7 +128,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
         customerA
       );
 
-      const ruleB = db.createRule(
+      const ruleB = await db.createRule(
         {
           deviceId: deviceB.id,
           metricKey: 'pressure',
@@ -163,7 +163,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
     });
 
     it('Müşteri A başka bir müşterinin kuralını güncelleyememeli, silememeli veya açıp kapatamamalı', async () => {
-      const ruleB = db.createRule(
+      const ruleB = await db.createRule(
         {
           deviceId: deviceB.id,
           metricKey: 'pressure',
@@ -177,7 +177,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       );
 
       // Customer A attempts to update Customer B's rule
-      const updateResult = db.updateRule(ruleB.id, { thresholdValue: 20 }, customerA);
+      const updateResult = await db.updateRule(ruleB.id, { thresholdValue: 20 }, customerA);
       expect(updateResult.success).toBe(false);
       expect(updateResult.forbidden).toBe(true);
 
@@ -186,7 +186,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(toggleResult).toBe(false);
 
       // Customer A attempts to delete Customer B's rule
-      const deleteResult = db.deleteRule(ruleB.id, customerA);
+      const deleteResult = await db.deleteRule(ruleB.id, customerA);
       expect(deleteResult).toBe(false);
 
       // Rule B must remain intact
@@ -197,7 +197,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
 
     it('Müşteri A cihazından gelen telemetri sadece Müşteri A kurallarını tetiklemeli, Müşteri B kurallarını tetiklememeli', async () => {
       // Rule for Customer A
-      db.createRule(
+await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -211,7 +211,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       );
 
       // Rule for Customer B on temperature metric
-      db.createRule(
+await db.createRule(
         {
           deviceId: 'all',
           metricKey: 'temperature',
@@ -250,7 +250,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('2. Minimum ihlal süresi (Min Breach Duration)', () => {
     it('Minimum ihlal süresi dolana kadar alarm BREACH_PENDING kalmalı, süre dolunca ACTIVE olmalı', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -314,7 +314,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
     });
 
     it('BREACH_PENDING aşamasındayken değer normale dönerse alarm tetiklenmeden temizlenmeli/kapanmalı', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -362,7 +362,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   describe('3. Histerezisle normale dönüş (Hysteresis Band)', () => {
     it('Büyüktür (>) kuralında değer eşik altına inse bile histerezis bandı içindeyse alarm ACTIVE kalmalı, bandın altına inince RESOLVED olmalı', async () => {
       // Rule: > 80, Hysteresis: 5 (Recovery threshold: <= 80 - 5 = 75)
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -429,7 +429,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
 
     it('Küçüktür (<) kuralında histerezis bandı doğru değerlendirilmeli', async () => {
       // Rule: < 20, Hysteresis: 3 (Recovery threshold: >= 20 + 3 = 23)
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'pressure',
@@ -500,7 +500,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('4. Geceyi aşan çalışma saatleri (Overnight Schedule)', () => {
     it('Gece vardiyası (22:00 - 06:00) kuralı gece saatlerinde tetiklenmeli, gündüz saatlerinde yoksayılmalı', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'vibration',
@@ -580,7 +580,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('5. Türkiye saat dilimi (Europe/Istanbul)', () => {
     it('09:00 - 18:00 TRT kuralı UTC saat farkını doğru hesaplayarak değerlendirmeli', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'current',
@@ -636,7 +636,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('6. Alarm onaylandıktan sonra tekrar gönderilmemesi', () => {
     it('Alarm onaylandığında (acknowledged=true) repeatInterval süresi geçse bile yeni REPEAT bildirimleri engellenmeli', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -710,7 +710,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('7. Susturma süresi bitince davranış', () => {
     it('Susturma süresi boyunca bildirim gönderilmemeli; süre dolduğunda ihlal devam ediyorsa alarm aktifleşmeli', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -787,7 +787,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('8. Sırasız telemetri (Out-of-Order Telemetry)', () => {
     it('Eski zaman damgalı gecikmiş paket aktif alarm durumunu bozmamalı veya geriletmemeli', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'temperature',
@@ -845,7 +845,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   describe('9. Simülasyon alarmının dış bildirim kuyruğuna girmemesi', () => {
     it('Sanal/simülasyon cihazı eşiği aştığında panel bildirimi üretilmeli ancak WhatsApp/Email kuyruğuna ASLA girmemeli', async () => {
       // Create a rule with external notification channels
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: simDeviceA.id,
           metricKey: 'temperature',
@@ -949,7 +949,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   // =========================================================================
   describe('11. Bildirim tekilleştirme (Deduplication / Debounce)', () => {
     it('Aynı alarm süresince gelen ardışık telemetriler yeni bildirim satırları basmak yerine mevcut bildirimi yerinde güncellemelidir', async () => {
-      const rule = db.createRule(
+      const rule = await db.createRule(
         {
           deviceId: deviceA.id,
           metricKey: 'pressure',

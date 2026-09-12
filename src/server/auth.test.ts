@@ -11,12 +11,12 @@ import type { User } from '../types.js';
 
 describe('Authentication & Validation Security Tests', () => {
   describe('Email Normalization & RFC 5322 Validation', () => {
-    it('should normalize emails by trimming whitespace and converting to lowercase', () => {
+    it('should normalize emails by trimming whitespace and converting to lowercase', async () => {
       expect(normalizeEmail('  Admin@NexusIoT.Com  ')).toBe('admin@nexusiot.com');
       expect(normalizeEmail('USER.TEST+label@DOMAIN.CO.UK')).toBe('user.test+label@domain.co.uk');
     });
 
-    it('should validate standard RFC 5322 email formats', () => {
+    it('should validate standard RFC 5322 email formats', async () => {
       expect(validateEmail('admin@nexus.io').valid).toBe(true);
       expect(validateEmail('user.name+tag@sub.domain.org').valid).toBe(true);
       expect(validateEmail('').valid).toBe(false);
@@ -27,13 +27,13 @@ describe('Authentication & Validation Security Tests', () => {
   });
 
   describe('Password Policy & Strength Enforcement', () => {
-    it('should reject passwords shorter than 8 characters', () => {
+    it('should reject passwords shorter than 8 characters', async () => {
       const res = validatePassword('Pass1!');
       expect(res.valid).toBe(false);
       expect(res.error).toContain('en az 8 karakter');
     });
 
-    it('should reject common weak and leaked passwords', () => {
+    it('should reject common weak and leaked passwords', async () => {
       expect(validatePassword('12345678').valid).toBe(false);
       expect(validatePassword('password123').valid).toBe(false);
       expect(validatePassword('admin123').valid).toBe(false);
@@ -41,7 +41,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(validatePassword('welcome123').valid).toBe(false);
     });
 
-    it('should require a mix of letters and numbers/symbols', () => {
+    it('should require a mix of letters and numbers/symbols', async () => {
       expect(validatePassword('allletterspassword').valid).toBe(false);
       expect(validatePassword('123456789012').valid).toBe(false);
       expect(validatePassword('SecurePass2025!').valid).toBe(true);
@@ -50,7 +50,7 @@ describe('Authentication & Validation Security Tests', () => {
   });
 
   describe('Input Schemas (Setup & Registration)', () => {
-    it('should validate and sanitize setup input data', () => {
+    it('should validate and sanitize setup input data', async () => {
       const validBody = {
         name: '  Sistem Yöneticisi  ',
         email: ' ADMIN@EXAMPLE.COM ',
@@ -65,7 +65,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(result.data?.seedDemoData).toBe(true);
     });
 
-    it('should reject invalid setup input with weak password', () => {
+    it('should reject invalid setup input with weak password', async () => {
       const invalidBody = {
         name: 'Admin',
         email: 'admin@example.com',
@@ -76,7 +76,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(result.error).toBeDefined();
     });
 
-    it('should always force customer role on public registration', () => {
+    it('should always force customer role on public registration', async () => {
       const regBody = {
         name: 'Yeni Müşteri',
         email: 'musteri@sirket.com',
@@ -116,7 +116,7 @@ describe('Authentication & Validation Security Tests', () => {
       userRepo = new UserRepository(mockDb);
     });
 
-    it('should create and verify user sessions with 30-day expiration', () => {
+    it('should create and verify user sessions with 30-day expiration', async () => {
       const user: User = {
         id: 'usr_test_1',
         name: 'Test User',
@@ -126,7 +126,7 @@ describe('Authentication & Validation Security Tests', () => {
       };
       mockDb.data.users.push(user);
 
-      const token = userRepo.createSession(user);
+      const token = await userRepo.createSession(user);
       expect(token).toBeDefined();
       expect(typeof token).toBe('string');
       expect(token.length).toBeGreaterThan(20);
@@ -137,7 +137,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(verified?.session.token).toBe(token);
     });
 
-    it('should explicitly revoke session on server when deleteSession is called (Logout)', () => {
+    it('should explicitly revoke session on server when deleteSession is called (Logout)', async () => {
       const user: User = {
         id: 'usr_test_2',
         name: 'Logout Test User',
@@ -147,7 +147,7 @@ describe('Authentication & Validation Security Tests', () => {
       };
       mockDb.data.users.push(user);
 
-      const token = userRepo.createSession(user);
+      const token = await userRepo.createSession(user);
       expect(userRepo.verifySession(token)).not.toBeNull();
 
       // Perform server-side session revocation
@@ -158,7 +158,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(userRepo.verifySession(token)).toBeNull();
     });
 
-    it('should reject expired sessions', () => {
+    it('should reject expired sessions', async () => {
       const user: User = {
         id: 'usr_test_3',
         name: 'Expired Session User',
@@ -192,8 +192,8 @@ describe('Authentication & Validation Security Tests', () => {
       };
       mockDb.data.users.push(user);
 
-      const t1 = userRepo.createSession(user);
-      const t2 = userRepo.createSession(user);
+      const t1 = await userRepo.createSession(user);
+      const t2 = await userRepo.createSession(user);
       expect(userRepo.verifySession(t1)).not.toBeNull();
       expect(userRepo.verifySession(t2)).not.toBeNull();
 

@@ -492,7 +492,8 @@ export class TelemetryRepository {
           for (const line of chunkLines) {
             try {
               const packet: TelemetryPacket = JSON.parse(line);
-              const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
+              let txRes: any = null;
+              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
               if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
                 fileInsertedCount++;
                 totalReplayedPackets++;
@@ -592,7 +593,8 @@ export class TelemetryRepository {
           for (const line of chunk) {
              try {
                 const packet = JSON.parse(line);
-                const txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings);
+                let txRes: any = null;
+              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
                 if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
                    flushedPacketCount++;
                    flushedReadingCount += packet.readings.length;
@@ -685,7 +687,8 @@ export class TelemetryRepository {
       for (const packet of packetsToFlush) {
         try {
           // Strictly insert into simulation hypertable (simulation_telemetry_readings)
-          const txRes = await this.db.postgresRepo.saveSimulationTelemetryBatchInTransaction(packet.readings);
+          let txRes: any = null;
+          if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveSimulationTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
           if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
             flushedPacketCount++;
             flushedReadingCount += packet.readings.length;
@@ -888,7 +891,8 @@ export class TelemetryRepository {
 
     try {
       if (this.db.postgresRepo?.isReady()) {
-        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(readings);
+        let txRes: any = null;
+        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(readings).catch((e) => console.warn('[PG Error]', e.message)); }
         const success = txRes.success && (txRes.rowCount > 0 || !!txRes.duplicateSkipped);
         batch.forEach((item) => item.resolve(success));
       } else {
@@ -1034,7 +1038,8 @@ export class TelemetryRepository {
 
     if (isReady && (!isSimulated || saveSimulatedDataToDb)) {
       try {
-        const txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings);
+        let txRes: any = null;
+        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings).catch((e) => console.warn('[PG Error]', e.message)); }
         affectedRows = txRes.rowCount;
         duplicateSkipped = !!txRes.duplicateSkipped;
         engine = duplicateSkipped
@@ -1126,7 +1131,7 @@ export class TelemetryRepository {
     };
   }
 
-  public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading {
+  public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<TelemetryReading> {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isDevSim = dev?.isSimulated || false;
     const tenantId = reading.tenantId || reading.customerId || dev?.tenantId || '';
@@ -1155,7 +1160,7 @@ export class TelemetryRepository {
     }
 
     // Persist to PostgreSQL / TimescaleDB hypertable with safety net
-    this.writeTelemetryToPostgres(fullReading).catch((err) => {
+    await this.writeTelemetryToPostgres(fullReading).catch((err) => {
       console.warn(`[Telemetry Sync Catch] PostgreSQL yazması başarısız oldu: ${err?.message || err}. Sıraya eklendi.`);
       this.enqueueToRetryQueue(fullReading);
     });
@@ -1594,7 +1599,7 @@ export class TelemetryRepository {
 
               // Trigger background migration if column missing
               if (errStr.includes('column') || errStr.includes('does not exist')) {
-                this.db.postgresRepo?.ensureTelemetrySchema().catch(() => {});
+                // Runtime DDL removed due to race conditions
               }
 
               // Resilient fallback query
@@ -1703,7 +1708,7 @@ export class TelemetryRepository {
   }
 
   // Advanced Alarm Evaluation Engine
-  public upsertActiveAlarm(alarm: ActiveAlarm) {
+  public async upsertActiveAlarm(alarm: ActiveAlarm) {
     if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
     const idx = this.db.data.activeAlarms.findIndex((a: ActiveAlarm) => a.id === alarm.id);
     if (idx >= 0) {
@@ -1718,7 +1723,7 @@ export class TelemetryRepository {
 
     // Sync to PostgreSQL Repository ONLY if real physical device OR if saveSimulatedDataToDb is true
     if (!isSimulated || saveSimulatedDataToDb) {
-      this.db.postgresRepo?.saveAlarm(alarm).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAlarm(alarm).catch((e) => console.warn('[PG Error]', e.message)); }
     }
   }
 
@@ -2125,7 +2130,7 @@ export class TelemetryRepository {
               isSimulation: false,
               environment: 'production',
             };
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
           } else {
             const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
@@ -2154,7 +2159,7 @@ export class TelemetryRepository {
               isSimulation: false,
               environment: 'production',
             };
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
             this.emitAlarmNotification(
               existingAlarm,
               'OPEN',
@@ -2176,7 +2181,7 @@ export class TelemetryRepository {
             existingAlarm.source = 'physical';
             existingAlarm.isSimulation = false;
             existingAlarm.environment = 'production';
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
             this.emitAlarmNotification(
               existingAlarm,
@@ -2202,7 +2207,7 @@ export class TelemetryRepository {
           if (!existingAlarm.acknowledged && timeSinceLastNotifiedSec >= repeatIntervalSec) {
             existingAlarm.lastNotifiedAt = nowIso;
             existingAlarm.version = (existingAlarm.version || 1) + 1;
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
             this.emitAlarmNotification(
               existingAlarm,
@@ -2211,7 +2216,7 @@ export class TelemetryRepository {
             );
           } else {
             this.updateActiveNotificationDeduplicated(existingAlarm);
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
           }
         }
       } else if (
@@ -2229,7 +2234,7 @@ export class TelemetryRepository {
         existingAlarm.source = 'physical';
         existingAlarm.isSimulation = false;
         existingAlarm.environment = 'production';
-        this.upsertActiveAlarm(existingAlarm);
+        this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
         this.emitAlarmNotification(
           existingAlarm,
@@ -2423,7 +2428,7 @@ export class TelemetryRepository {
               isSimulation: true,
               environment: 'sandbox',
             };
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
           } else {
             const incidentId = `inc_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
             existingAlarm = {
@@ -2452,7 +2457,7 @@ export class TelemetryRepository {
               isSimulation: true,
               environment: 'sandbox',
             };
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
             this.emitAlarmNotification(
               existingAlarm,
               'OPEN',
@@ -2474,7 +2479,7 @@ export class TelemetryRepository {
             existingAlarm.source = 'simulator';
             existingAlarm.isSimulation = true;
             existingAlarm.environment = 'sandbox';
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
             this.emitAlarmNotification(
               existingAlarm,
@@ -2500,7 +2505,7 @@ export class TelemetryRepository {
           if (!existingAlarm.acknowledged && timeSinceLastNotifiedSec >= repeatIntervalSec) {
             existingAlarm.lastNotifiedAt = nowIso;
             existingAlarm.version = (existingAlarm.version || 1) + 1;
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
             this.emitAlarmNotification(
               existingAlarm,
@@ -2509,7 +2514,7 @@ export class TelemetryRepository {
             );
           } else {
             this.updateActiveNotificationDeduplicated(existingAlarm);
-            this.upsertActiveAlarm(existingAlarm);
+            this.upsertActiveAlarm(existingAlarm).catch(() => {});
           }
         }
       } else if (
@@ -2527,7 +2532,7 @@ export class TelemetryRepository {
         existingAlarm.source = 'simulator';
         existingAlarm.isSimulation = true;
         existingAlarm.environment = 'sandbox';
-        this.upsertActiveAlarm(existingAlarm);
+        this.upsertActiveAlarm(existingAlarm).catch(() => {});
 
         this.emitAlarmNotification(
           existingAlarm,

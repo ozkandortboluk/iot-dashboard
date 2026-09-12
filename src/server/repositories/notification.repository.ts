@@ -18,7 +18,7 @@ export class NotificationRepository {
     return this.db.data.notifications;
   }
 
-  public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem {
+  public async addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): Promise<NotificationItem> {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const fullNotif: NotificationItem = {
       ...notif,
@@ -38,12 +38,12 @@ export class NotificationRepository {
     const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
     if (!isSimulated || saveSimulatedDataToDb) {
-      this.db.postgresRepo.saveNotification(fullNotif).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveNotification(fullNotif).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     return fullNotif;
   }
 
-  public markNotificationRead(id: string, userId = 'usr_admin') {
+  public async markNotificationRead(id: string, userId = 'usr_admin') {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const notif = this.db.data.notifications.find((n: any) => n.id === id);
     if (notif) {
@@ -55,11 +55,11 @@ export class NotificationRepository {
       notif.read = true;
       this.db.scheduleSave();
       this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
-      this.db.postgresRepo.markNotificationRead(id).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.markNotificationRead(id).catch((e) => console.warn('[PG Error]', e.message)); }
     }
   }
 
-  public markAllNotificationsRead(userId = 'usr_admin') {
+  public async markAllNotificationsRead(userId = 'usr_admin') {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     let updated = false;
     this.db.data.notifications.forEach((n: any) => {
@@ -71,11 +71,11 @@ export class NotificationRepository {
     if (updated) {
       this.db.scheduleSave();
       this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
-      this.db.postgresRepo.markAllNotificationsRead(userId === 'usr_admin' ? undefined : userId).catch(() => {});
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.markAllNotificationsRead(userId === 'usr_admin' ? undefined : userId).catch((e) => console.warn('[PG Error]', e.message)); }
     }
   }
 
-  public getDashboard(userId: string): DashboardLayout {
+  public async getDashboard(userId: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
     const userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
@@ -95,11 +95,11 @@ export class NotificationRepository {
     };
     this.db.data.dashboards.push(newDash);
     this.db.scheduleSave();
-    this.db.postgresRepo.saveDashboard(newDash).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(newDash).catch((e) => console.warn('[PG Error]', e.message)); }
     return newDash;
   }
 
-  public saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): DashboardLayout {
+  public async saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
     let userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
@@ -111,11 +111,11 @@ export class NotificationRepository {
     if (title) userDash.title = title;
     userDash.updatedAt = new Date().toISOString();
     this.db.scheduleSave();
-    this.db.postgresRepo.saveDashboard(userDash).catch(() => {});
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(userDash).catch((e) => console.warn('[PG Error]', e.message)); }
     return userDash;
   }
 
-  public resetDashboard(userId: string): DashboardLayout {
+  public resetDashboard(userId: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
     const title = user

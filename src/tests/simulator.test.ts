@@ -106,7 +106,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
 
     it('should generate simulated telemetry strictly for isSimulated === true devices', async () => {
       // Create a test simulated device
-      const simDev = db.createDevice({
+      const simDev = await db.createDevice({
         id: 'sim_test_dev_01',
         name: 'Unit-Test Virtual ESP32',
         type: 'sensor',
@@ -123,7 +123,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
       });
 
       // Create a test physical hardware device
-      const physDev = db.createDevice({
+      const physDev = await db.createDevice({
         id: 'phys_test_dev_01',
         name: 'Real Physical Hardware Sensor',
         type: 'sensor',
@@ -158,14 +158,14 @@ describe('IoT Device Simulator Engine Test Suite', () => {
       expect(updatedPhysDev?.isSimulated).toBe(false);
 
       // Clean up
-      db.deleteDevice(simDev.id);
-      db.deleteDevice(physDev.id);
+      await db.deleteDevice(simDev.id);
+      await db.deleteDevice(physDev.id);
     });
   });
 
   describe('4. Simulation Channel & Telemetry Event Propagation', () => {
-    it('should route simulation telemetry correctly and isolate physical devices', () => {
-      const simDev = db.createDevice({
+    it('should route simulation telemetry correctly and isolate physical devices', async () => {
+      const simDev = await db.createDevice({
         id: 'sim_test_dev_02',
         name: 'Virtual Meter 02',
         type: 'meter',
@@ -192,7 +192,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
       expect(updatedSimDev?.isSimulated).toBe(true);
       expect(updatedSimDev?.status).toBe('online');
 
-      db.deleteDevice(simDev.id);
+      await db.deleteDevice(simDev.id);
     });
   });
 });

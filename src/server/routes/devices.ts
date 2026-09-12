@@ -173,7 +173,7 @@ router.get('/:id', authenticateUser, (req, res) => {
   res.json(existingDev);
 });
 
-router.post('/', authenticateUser, (req, res) => {
+router.post('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { id, userId, name, type, location, ipAddress, macAddress, rateLimitPerMin, encryptionMethod, apiKey, isSimulated, saveSimulatedDataToDb, heartbeatTimeoutSeconds, expectedIntervalSeconds, simulatedMetrics } = req.body;
@@ -200,7 +200,7 @@ router.post('/', authenticateUser, (req, res) => {
     }
   }
 
-  const device = db.createDevice({
+  const device = await db.createDevice({
     id: id && id.trim() ? id.trim() : undefined,
     tenantId: targetOwnerId,
     name,
@@ -233,7 +233,7 @@ router.post('/', authenticateUser, (req, res) => {
   res.status(201).json(device);
 });
 
-router.put('/:id', authenticateUser, (req, res) => {
+router.put('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -260,7 +260,7 @@ router.put('/:id', authenticateUser, (req, res) => {
   }
 
   try {
-    const updated = db.updateDevice(deviceId, req.body);
+    const updated = await db.updateDevice(deviceId, req.body);
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     broadcast('network:updated', db.getDiscoveredDevices());
@@ -274,13 +274,13 @@ router.put('/:id', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/convert-to-physical', authenticateUser, requireAdmin, (req, res) => {
+router.post('/:id/convert-to-physical', authenticateUser, requireAdmin, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
 
   try {
-    const updated = db.convertToPhysicalDevice(deviceId, currentUser.id, currentUser.name);
+    const updated = await db.convertToPhysicalDevice(deviceId, currentUser.id, currentUser.name);
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     broadcast('network:updated', db.getDiscoveredDevices());
@@ -454,7 +454,7 @@ router.put('/:id/credentials', authenticateUser, async (req, res) => {
   }
 });
 
-router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
+router.post('/:id/clear-metrics', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -473,7 +473,7 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
 
   try {
     const result = smartIntervalService.filterLiveMetricsCache(existingDev, isStaleOnly);
-    const updated = db.updateDevice(deviceId, { metrics: existingDev.metrics });
+    const updated = await db.updateDevice(deviceId, { metrics: existingDev.metrics });
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     res.json({
@@ -494,7 +494,7 @@ router.post('/:id/clear-metrics', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/replace', authenticateUser, (req, res) => {
+router.post('/:id/replace', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -528,7 +528,7 @@ router.post('/:id/replace', authenticateUser, (req, res) => {
     if (discovered.firmwareVersion) updates.firmwareVersion = discovered.firmwareVersion;
     if (discovered.hardwareModel) updates.hardwareModel = discovered.hardwareModel;
 
-    const updated = db.updateDevice(deviceId, updates);
+    const updated = await db.updateDevice(deviceId, updates);
 
     // Remove from discovered pool
     if (discovered.ip) db.removeUnregisteredDevice(discovered.ip);
@@ -567,7 +567,7 @@ router.get('/:id/health-summary', authenticateUser, (req, res) => {
   res.json(summary);
 });
 
-router.put('/:id/maintenance', authenticateUser, (req, res) => {
+router.put('/:id/maintenance', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -583,7 +583,7 @@ router.put('/:id/maintenance', authenticateUser, (req, res) => {
   }
 
   try {
-    const updated = db.setDeviceMaintenanceMode(deviceId, enabled, reason, until, currentUser);
+    const updated = await db.setDeviceMaintenanceMode(deviceId, enabled, reason, until, currentUser);
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     res.json({
@@ -601,7 +601,7 @@ router.put('/:id/maintenance', authenticateUser, (req, res) => {
   }
 });
 
-router.put('/:id/tags', authenticateUser, (req, res) => {
+router.put('/:id/tags', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -617,7 +617,7 @@ router.put('/:id/tags', authenticateUser, (req, res) => {
   }
 
   try {
-    const updated = db.updateDeviceTags(deviceId, Array.isArray(tags) ? tags : [], currentUser);
+    const updated = await db.updateDeviceTags(deviceId, Array.isArray(tags) ? tags : [], currentUser);
     broadcast('device:updated', updated);
     broadcast('devices:updated', db.getDevices());
     res.json({
@@ -631,7 +631,7 @@ router.put('/:id/tags', authenticateUser, (req, res) => {
   }
 });
 
-router.post('/:id/replace-hardware', authenticateUser, (req, res) => {
+router.post('/:id/replace-hardware', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -647,7 +647,7 @@ router.post('/:id/replace-hardware', authenticateUser, (req, res) => {
   }
 
   try {
-    const { device: updated, record } = db.replaceDeviceHardware(
+    const { device: updated, record } = await db.replaceDeviceHardware(
       deviceId,
       { newName, newIp, newMac, pairingCode, reason, notes },
       currentUser
@@ -673,7 +673,7 @@ router.post('/:deviceId/commands', authenticateUser, (req, res) => commandContro
 router.post('/:deviceId/command', authenticateUser, (req, res) => commandController.createCommand(req, res));
 router.get('/:deviceId/commands', authenticateUser, (req, res) => commandController.getDeviceCommands(req, res));
 
-router.delete('/:id', authenticateUser, (req, res) => {
+router.delete('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const deviceId = req.params.id;
@@ -688,7 +688,7 @@ router.delete('/:id', authenticateUser, (req, res) => {
     return res.status(403).json({ error: 'Yetkisiz erişim! Yalnızca yetkiniz dahilindeki cihazı silebilirsiniz.' });
   }
 
-  db.deleteDevice(deviceId);
+  await db.deleteDevice(deviceId);
   terminateDeviceSockets(deviceId, 'Cihaz sistemden silindi');
   broadcast('device:deleted', { id: deviceId });
   broadcast('devices:updated', db.getDevices());

@@ -177,7 +177,7 @@ systemRouter.get('/system/events', authenticateUser, requireAdmin, (req, res) =>
   res.json(result);
 });
 
-systemRouter.post('/system/events/clear', authenticateUser, requireAdmin, (req, res) => {
+systemRouter.post('/system/events/clear', authenticateUser, requireAdmin, async (req, res) => {
   systemLogger.clearEvents();
   res.json({ success: true, message: 'Sistem olay günlükleri başarıyla temizlendi.' });
 });
@@ -499,7 +499,7 @@ const handleSimulatorInject = async (req: any, res: any) => {
   const generatedReadings = [];
   for (const m of metricsToProcess) {
     const rawPayload = `[SIM_INJECT] Device: ${dev.name} | ${m.metric}:${m.value} ${m.unit || ''}`;
-    const reading = db.addTelemetryReading({
+    const reading = await db.addTelemetryReading({
       deviceId: dev.id,
       deviceName: dev.name,
       metric: m.metric,
@@ -587,7 +587,7 @@ simulatorRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   });
 });
 
-simulatorRouter.post('/batch', authenticateUser, requireAdmin, (req, res) => {
+simulatorRouter.post('/batch', authenticateUser, requireAdmin, async (req, res) => {
   const { count = 10, deviceId, metric, value, unit } = req.body;
   const numCount = Math.min(200, Math.max(1, Number(count)));
   
@@ -623,7 +623,7 @@ simulatorRouter.post('/batch', authenticateUser, requireAdmin, (req, res) => {
     const val = value !== undefined ? Number(value) : Number((20 + Math.random() * 60).toFixed(1));
 
     const rawPayload = `BATCH_GEN, ${dev.apiKey}, ${dev.name}, ${m}:${val}`;
-    const reading = db.addTelemetryReading({
+    const reading = await db.addTelemetryReading({
       deviceId: dev.id,
       deviceName: dev.name,
       metric: m,

@@ -79,7 +79,7 @@ export class PhysicalTelemetryController {
     if (hardwareModel) devUpdates.hardwareModel = hardwareModel.toString();
     if (firmwareVersion) devUpdates.firmwareVersion = firmwareVersion.toString();
 
-    const processedDev = db.processDeviceTelemetryArrival(device.id);
+    const processedDev = await db.processDeviceTelemetryArrival(device.id);
     if (processedDev) {
       devUpdates.status = processedDev.status;
       devUpdates.lastSeen = processedDev.lastSeen;
@@ -88,7 +88,7 @@ export class PhysicalTelemetryController {
       devUpdates.heartbeatTimeoutSeconds = processedDev.heartbeatTimeoutSeconds;
     }
 
-    const updatedDev = db.updateDevice(device.id, devUpdates);
+    const updatedDev = await await db.updateDevice(device.id, devUpdates);
 
     const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
@@ -196,9 +196,9 @@ export class PhysicalTelemetryController {
       const isPing = rawText.includes('ping') || rawText.includes('heartbeat') || rawText.includes('nabiz');
 
       if (isPing) {
-        const processedDev = db.processDeviceTelemetryArrival(device.id);
+        const processedDev = await db.processDeviceTelemetryArrival(device.id);
         const effectiveDev = processedDev || device;
-        db.updateDevice(device.id, {
+        await db.updateDevice(device.id, {
           lastSeen: effectiveDev.lastSeen,
           status: effectiveDev.status,
           expectedIntervalSeconds: effectiveDev.expectedIntervalSeconds,

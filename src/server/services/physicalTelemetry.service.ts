@@ -80,7 +80,7 @@ export class PhysicalTelemetryService {
     }
 
     // 5. Update Physical Device Status & Metrics via Intelligent Arrival Processor
-    const processedDev = db.processDeviceTelemetryArrival(device.id);
+    const processedDev = await db.processDeviceTelemetryArrival(device.id);
     if (processedDev) {
       device.status = processedDev.status;
       device.lastSeen = processedDev.lastSeen;

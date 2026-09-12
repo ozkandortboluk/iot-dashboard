@@ -277,7 +277,7 @@ class LocalDatabase {
     this.startQueueWorker();
     this.startAutoRetentionWorker();
     this.initPromise = this.initPostgresRepository().catch(() => false);
-    this.startPostgresAutoReconnect();
+    // this.startPostgresAutoReconnect(); // MÜŞTERİ TALEBİ ÜZERİNE İPTAL EDİLDİ - AutoHealer kullanılıyor
     this.startAutoBackupWorker();
     this.autoHealer.startWatchdog(30000);
   }
@@ -573,26 +573,7 @@ class LocalDatabase {
   }
 
   private async safeFirestoreWrite(op: () => Promise<any>, opName: string) {
-    this.recordWriteOp(1);
-    if (this.firestoreQuotaExceeded) return;
-    try {
-      await op();
-    } catch (err: any) {
-      const isQuota =
-        err?.code === 'resource-exhausted' ||
-        String(err).includes('Quota exceeded') ||
-        String(err).includes('8 RESOURCE_EXHAUSTED');
-      if (isQuota) {
-        if (!this.firestoreQuotaExceeded) {
-          this.firestoreQuotaExceeded = true;
-          this.firestoreUnsubscribers.forEach((unsub) => unsub());
-          this.firestoreUnsubscribers = [];
-          console.warn(`[Firestore] KOTA AŞILDI (Quota Exceeded) [${opName}]. Sistem otomatik yerel dosya veritabanı moduna (local db.json) geçti.`);
-        }
-      } else {
-        console.warn(`[Firestore] Yazma Uyarısı [${opName}]:`, err?.message || err);
-      }
-    }
+    // Firestore is completely disabled.
   }
 
   private getItemTime(item: any): number {
@@ -608,16 +589,8 @@ class LocalDatabase {
   }
 
   public isPostgresProductionMode(): boolean {
-    // If PostgreSQL repository exists but is marked as disconnected, fallback to memory
-    if (this.postgresRepo && !this.postgresRepo.isReady()) {
-      return false;
-    }
-    const engine = this.getActiveEngine();
-    const isEnginePg = engine === 'postgres' || engine === 'timescaledb';
-    return (
-      Boolean(this.postgresRepo?.isReady() && isEnginePg) ||
-      process.env.LOCAL_DB_ENABLED === 'false'
-    );
+    // Critical Change for P0: PostgreSQL is the single authoritative source.
+    return true;
   }
 
   private ensureDirectory() {
@@ -1011,26 +984,26 @@ class LocalDatabase {
 
   // User Auth & Session Management
   public getUsers(): User[] { return this.userRepository.getUsers(); }
-  public createSession(user: User): string { return this.userRepository.createSession(user); }
-  public deleteSession(token: string): boolean { return this.userRepository.deleteSession(token); }
+  public async createSession(user: User): Promise<string> { return await this.userRepository.createSession(user); }
+  public async deleteSession(token: string): Promise<boolean> { return await this.userRepository.deleteSession(token); }
   public verifySession(token: string): { user: User; session?: UserSession } | null { return this.userRepository.verifySession(token); }
-  public authenticate(email: string, pass: string): { user: User; token: string } | null { return this.userRepository.authenticate(email, pass); }
+  public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> { return await this.userRepository.authenticate(email, pass); }
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
   public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }
   public async updateUserRole(userId: string, newRole: User['role']): Promise<User> { return this.userRepository.updateUserRole(userId, newRole); }
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
   public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
-  public checkDeviceStatuses(): boolean { return this.deviceRepository.checkDeviceStatuses(); }
-  public processDeviceTelemetryArrival(deviceId: string): Device | null { return this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
+  public async checkDeviceStatuses(): Promise<boolean> { return await this.deviceRepository.checkDeviceStatuses(); }
+  public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> { return await this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
   public getDevices(tenantId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(tenantId, customerId); }
   public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
-  public assignDeviceOwner(deviceId: string, targetTenantId: string): Device | undefined { return this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }
+  public async assignDeviceOwner(deviceId: string, targetTenantId: string): Promise<Device | undefined> { return await this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
-  public createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Device { return this.deviceRepository.createDevice(deviceData); }
-  public regenerateApiKey(deviceId: string): string { return this.deviceRepository.regenerateApiKey(deviceId); }
-  public rotateApiKey(deviceId: string, options?: { expiresDays?: number; scopes?: string[] }) { return this.deviceRepository.rotateApiKey(deviceId, options); }
-  public revokeApiKey(deviceId: string, reason?: string): Device { return this.deviceRepository.revokeApiKey(deviceId, reason); }
+  public async createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Promise<Device> { return await this.deviceRepository.createDevice(deviceData); }
+  public async regenerateApiKey(deviceId: string): Promise<string> { return await this.deviceRepository.regenerateApiKey(deviceId); }
+  public async rotateApiKey(deviceId: string, options?: { expiresDays?: number; scopes?: string[] }): Promise<any> { return await this.deviceRepository.rotateApiKey(deviceId, options); }
+  public async revokeApiKey(deviceId: string, reason?: string): Promise<Device> { return await this.deviceRepository.revokeApiKey(deviceId, reason); }
   public addDevice(dev: any): Device {
     if (!this.data.devices) this.data.devices = [];
     const existingIndex = this.data.devices.findIndex((d: any) => d.id === dev.id);
@@ -1050,17 +1023,17 @@ class LocalDatabase {
   public getDeviceCommands(deviceId: string): any[] {
     return (this.data.commands || []).filter((c: any) => c.deviceId === deviceId);
   }
-  public restoreApiKey(deviceId: string): Device { return this.deviceRepository.restoreApiKey(deviceId); }
-  public updateApiKeySettings(deviceId: string, settings: { scopes?: string[]; expiresAt?: string }): Device { return this.deviceRepository.updateApiKeySettings(deviceId, settings); }
-  public convertToPhysicalDevice(deviceId: string, adminUserId?: string, adminUserName?: string): Device { return this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
-  public updateDevice(deviceId: string, updates: Partial<Device>): Device { return this.deviceRepository.updateDevice(deviceId, updates); }
-  public deleteDevice(deviceId: string): void { return this.deviceRepository.deleteDevice(deviceId); }
+  public async restoreApiKey(deviceId: string): Promise<Device> { return await this.deviceRepository.restoreApiKey(deviceId); }
+  public async updateApiKeySettings(deviceId: string, settings: any, adminUserId?: string, adminUserName?: string): Promise<Device> { return await this.deviceRepository.updateApiKeySettings(deviceId, settings); }
+  public async convertToPhysicalDevice(deviceId: string, adminUserId: string = 'system', adminUserName: string = 'System'): Promise<Device> { return await this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
+  public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> { return await this.deviceRepository.updateDevice(deviceId, updates); }
+  public async deleteDevice(deviceId: string): Promise<void> { return await this.deviceRepository.deleteDevice(deviceId); }
   public recordUnregisteredDevice(discDev: DiscoveredNetworkDevice): DiscoveredNetworkDevice | null { return this.deviceRepository.recordUnregisteredDevice(discDev); }
   public removeUnregisteredDevice(ipOrMacOrToken: string): void { return this.deviceRepository.removeUnregisteredDevice(ipOrMacOrToken); }
   public getDiscoveredDevices(requestingUserId?: string, targetCustomerId?: string): DiscoveredNetworkDevice[] { return this.deviceRepository.getDiscoveredDevices(requestingUserId, targetCustomerId); }
   // Telemetry
-  public addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): TelemetryReading { return this.telemetryRepository.addTelemetryReading(reading); }
-  public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return this.telemetryRepository.addTelemetryReadingAsync(reading); }
+  public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<TelemetryReading> { return await this.telemetryRepository.addTelemetryReading(reading); }
+  public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return await this.telemetryRepository.addTelemetryReadingAsync(reading); }
   public async addTelemetryBatchAsync(readings: Omit<TelemetryReading, 'id' | 'timestamp'>[]): Promise<any> { return this.telemetryRepository.addTelemetryBatchAsync(readings); }
   public async flushTelemetryRetryQueue(): Promise<any> { return this.telemetryRepository.flushRetryQueue(); }
   public getTelemetryRetryQueueStats(): any { return this.telemetryRepository.getRetryQueueStats(); }
@@ -1080,12 +1053,12 @@ class LocalDatabase {
     }
     return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId);
   }
-  public addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): NotificationItem { return this.notificationRepository.addNotification(notif); }
-  public markNotificationRead(id: string, userId?: string) { return this.notificationRepository.markNotificationRead(id, userId); }
-  public markAllNotificationsRead(userId?: string) { return this.notificationRepository.markAllNotificationsRead(userId); }
-  public getDashboard(userId: string): DashboardLayout { return this.notificationRepository.getDashboard(userId); }
-  public saveDashboardWidgets(userId: string, widgets: any[], title?: string): DashboardLayout { return this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
-  public resetDashboard(userId: string): DashboardLayout { return this.notificationRepository.resetDashboard(userId); }
+  public async addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): Promise<NotificationItem> { return await this.notificationRepository.addNotification(notif); }
+  public async markNotificationRead(id: string, userId?: string) { return await this.notificationRepository.markNotificationRead(id, userId); }
+  public async markAllNotificationsRead(userId?: string) { return await this.notificationRepository.markAllNotificationsRead(userId); }
+  public async getDashboard(userId: string): Promise<DashboardLayout> { return await this.notificationRepository.getDashboard(userId); }
+  public async saveDashboardWidgets(userId: string, widgets: any[], title?: string): Promise<DashboardLayout> { return await this.notificationRepository.saveDashboardWidgets(userId, widgets, title); }
+  public async resetDashboard(userId: string): Promise<DashboardLayout> { return await this.notificationRepository.resetDashboard(userId); }
   public async getAlarms(requestingUserId?: string, targetCustomerId?: string, options?: any): Promise<any> {
     if (!requestingUserId) return { data: [], total: 0 };
     if (this.isPostgresProductionMode()) {
@@ -1104,9 +1077,9 @@ class LocalDatabase {
   public silenceAlarm(alarmId: string, durationMinutes: number, currentUser: any): boolean { return this.alarmRepository.silenceAlarm(alarmId, durationMinutes, currentUser); }
   public resolveAlarm(alarmId: string, currentUser: any): boolean { return this.alarmRepository.resolveAlarm(alarmId, currentUser); }
   public getRules(requestingUserId?: string, targetCustomerId?: string, options?: any): any { return this.alarmRepository.getRules(requestingUserId, targetCustomerId, options); }
-  public createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): ThresholdRule { return this.alarmRepository.createRule(ruleData, requestingUser); }
-  public updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): any { return this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
-  public deleteRule(id: string, requestingUser?: any): boolean { return this.alarmRepository.deleteRule(id, requestingUser); }
+  public async createRule(ruleData: Omit<ThresholdRule, 'id'>, requestingUser?: any): Promise<ThresholdRule> { return await this.alarmRepository.createRule(ruleData, requestingUser); }
+  public async updateRule(id: string, updates: Partial<ThresholdRule>, requestingUser?: any, incomingVersion?: number): Promise<any> { return await this.alarmRepository.updateRule(id, updates, requestingUser, incomingVersion); }
+  public async deleteRule(id: string, requestingUser?: any): Promise<boolean> { return await this.alarmRepository.deleteRule(id, requestingUser); }
   
   // Automations
   public getAutomations(tenantId?: string): import('../types.js').Automation[] {
@@ -1158,10 +1131,10 @@ class LocalDatabase {
     return events.slice(-1000).reverse();
   }
 
-  public toggleRule(id: string, enabled: boolean, requestingUser?: any): boolean { return this.alarmRepository.toggleRule(id, enabled, requestingUser); }
+  public async toggleRule(id: string, enabled: boolean, requestingUser?: any): Promise<boolean> { return await this.alarmRepository.toggleRule(id, enabled, requestingUser); }
   // Audit Logs
   public getAuditLogs(): AuditLog[] { return this.userRepository.getAuditLogs(); }
-  public addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): void { return this.userRepository.addAuditLog(userId, userName, action, severity); }
+  public async addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): Promise<void> { return await this.userRepository.addAuditLog(userId, userName, action, severity); }
   
   // ==========================================
   // Device Downlink Commands (State Machine: Pending -> Claimed -> Acknowledged/Failed)
@@ -3390,16 +3363,16 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     return this.deviceRepository.deleteDeviceGroup(groupId, tenantId);
   }
 
-  public setDeviceMaintenanceMode(deviceId: string, enabled: boolean, reason?: string, until?: string, requestingUser?: any) {
-    return this.deviceRepository.setDeviceMaintenanceMode(deviceId, enabled, reason, until, requestingUser);
+  public async setDeviceMaintenanceMode(deviceId: string, enabled: boolean, reason?: string, until?: string, requestingUser?: any) {
+    return await this.deviceRepository.setDeviceMaintenanceMode(deviceId, enabled, reason, until, requestingUser);
   }
 
-  public updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any) {
-    return this.deviceRepository.updateDeviceTags(deviceId, tags, requestingUser);
+  public async updateDeviceTags(deviceId: string, tags: string[], requestingUser?: any) {
+    return await this.deviceRepository.updateDeviceTags(deviceId, tags, requestingUser);
   }
 
-  public replaceDeviceHardware(oldDeviceId: string, data: any, requestingUser: any) {
-    return this.deviceRepository.replaceDeviceHardware(oldDeviceId, data, requestingUser);
+  public async replaceDeviceHardware(oldDeviceId: string, data: any, requestingUser: any) {
+    return await this.deviceRepository.replaceDeviceHardware(oldDeviceId, data, requestingUser);
   }
 
   public getReplacementHistory(tenantId?: string, deviceId?: string) {
@@ -3430,8 +3403,8 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     return this.deviceRepository.updateDiscoveredLifecycle(target, state);
   }
 
-  public pairDevice(request: any, actor: any) {
-    return this.deviceRepository.pairDevice(request, actor);
+  public async pairDevice(request: any, actor: any) {
+    return await this.deviceRepository.pairDevice(request, actor);
   }
 
 }

@@ -140,11 +140,11 @@ rulesRouter.post('/', authenticateUser, (req, res) => {
   res.status(201).json(newRule);
 });
 
-rulesRouter.put('/:id', authenticateUser, (req, res) => {
+rulesRouter.put('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const incomingVersion = req.body.version !== undefined ? Number(req.body.version) : undefined;
-  const result = db.updateRule(req.params.id, req.body, currentUser, incomingVersion);
+  const result = await db.updateRule(req.params.id, req.body, currentUser, incomingVersion);
 
   if (result.conflict) {
     return res.status(409).json({
@@ -166,10 +166,10 @@ rulesRouter.put('/:id', authenticateUser, (req, res) => {
   res.json(result.rule);
 });
 
-rulesRouter.delete('/:id', authenticateUser, (req, res) => {
+rulesRouter.delete('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const deleted = db.deleteRule(req.params.id, currentUser);
+  const deleted = await db.deleteRule(req.params.id, currentUser);
   if (!deleted) return res.status(403).json({ error: 'Kural bulunamadı veya silme yetkiniz yok.' });
   broadcast('rules:updated', db.getRules());
   res.json({ success: true, message: 'Kural silindi.' });

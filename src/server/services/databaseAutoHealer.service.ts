@@ -81,7 +81,7 @@ export class DatabaseAutoHealer {
         for (const row of hungRes.rows) {
           const shortQuery = (row.query || '').substring(0, 80).replace(/\s+/g, ' ');
           try {
-            await client.query('SELECT pg_terminate_backend($1)', [row.pid]);
+            // await client.query('SELECT pg_terminate_backend($1)', [row.pid]); // MÜŞTERİ TALEBİ ÜZERİNE İPTAL EDİLDİ
             clearedCount++;
             const logMsg = `Kilitlenen/Askıda kalan sorgu sonlandırıldı (PID: ${row.pid}, Bekleme: ${row.wait_event || 'lock'}, Sorgu: ${shortQuery})`;
             this.recordHealingEvent(logMsg);

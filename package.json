@@ -1,7 +1,7 @@
 {
   "name": "nexusnode-iot",
   "private": true,
-  "version": "1.9.5",
+  "version": "1.9.9",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -34,6 +34,7 @@
     "drizzle-orm": "^0.45.2",
     "esbuild": "^0.25.0",
     "express": "^4.21.2",
+    "express-async-errors": "^3.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pg": "^8.23.0",

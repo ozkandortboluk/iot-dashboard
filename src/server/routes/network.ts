@@ -170,7 +170,7 @@ networkRouter.post('/check-duplicate', authenticateUser, (req, res) => {
 });
 
 // 7. POST /api/network/pair - Full Provisioning & Pairing Wizard Execution
-networkRouter.post('/pair', authenticateUser, (req, res) => {
+networkRouter.post('/pair', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   
@@ -202,7 +202,7 @@ networkRouter.post('/pair', authenticateUser, (req, res) => {
     role: currentUser.role,
   };
 
-  const result = db.pairDevice(
+  const result = await db.pairDevice(
     {
       name: name.trim(),
       type: type || 'ESP32',

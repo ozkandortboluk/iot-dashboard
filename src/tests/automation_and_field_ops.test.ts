@@ -274,7 +274,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
   });
 
   describe('3. Device Discovery, Pairing & Hardware Replacement', () => {
-    it('should replace a damaged device with a newly discovered hardware unit while preserving device ID and metadata', () => {
+    it('should replace a damaged device with a newly discovered hardware unit while preserving device ID and metadata', async () => {
       // 1. New replacement hardware unit connects to LAN and announces pairing code
       const newDiscoveredUnit: DiscoveredNetworkDevice = {
         id: 'disc_unit_99',
@@ -305,7 +305,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
         firmwareVersion: discovered!.firmwareVersion,
       };
 
-      const updatedDev = db.updateDevice(testDevice.id, updates);
+      const updatedDev = await db.updateDevice(testDevice.id, updates);
 
       // Verify device ID, apiKey, location, and tenantId remain unchanged
       expect(updatedDev.id).toBe(testDevice.id);

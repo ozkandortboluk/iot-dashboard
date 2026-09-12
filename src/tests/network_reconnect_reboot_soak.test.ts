@@ -65,7 +65,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     const existingUsers = (db.data.users || []).filter((u) => u.email !== soakOperator.email);
     db.data.users = [...existingUsers, { ...soakOperator }];
 
-    const token = db.createSession(soakOperator);
+    const token = await db.createSession(soakOperator);
     sessionCookie = `nexus_session_token=${token}`;
 
     if (db.postgresRepo?.isReady()) {
@@ -82,14 +82,14 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     if (!db.getDeviceById(testDeviceId)) {
       db.data.devices.push({ ...soakDevice });
     }
     if (!(db.data.users || []).some((u) => u.id === soakOperator.id)) {
       db.data.users.push({ ...soakOperator });
     }
-    const token = db.createSession(soakOperator);
+    const token = await db.createSession(soakOperator);
     sessionCookie = `nexus_session_token=${token}`;
   });
 

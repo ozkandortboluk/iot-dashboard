@@ -328,7 +328,7 @@ export class CommandController {
       }
 
       // Record Telemetry Reading for control signal feedback
-      const reading = db.addTelemetryReading({
+      const reading = await db.addTelemetryReading({
         deviceId: device.id,
         deviceName: device.name,
         metric: pinOrMetric,
