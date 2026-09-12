@@ -2,163 +2,214 @@
 
 > Merkezi backlog + hata düzeltme + mevcut özellik geliştirme + yeni özellik yol haritası.
 >
-> **Son inceleme:** 2026-09-09  
-> **Güncel uygulama sürümü:** `1.6.0`  
-> **Son HEAD:** `14b9ed30bf389896139f55e6c76b4147efaecdf1`
+> **Son inceleme:** 2026-09-12  
+> **Güncel uygulama sürümü:** `1.9.5`  
+> **Güncel HEAD:** `9ee91730f4f301a8e8be1600e8413995d6157834`
 
 ## Öncelik
-- 🔴 P0: production/site erişilebilirliği, veri kaybı veya kritik güvenlik
-- 🟠 P1: yüksek öncelik
-- 🟡 P2: planlı geliştirme
-- 🟢 P3: teknik borç/kalite
+- 🔴 **P0:** production/site erişilebilirliği, veri bütünlüğü, veritabanı mimarisi ve doğrudan çökme riski
+- 🟠 **P1:** yüksek öncelik / güvenlik / performans / operasyonel güvenilirlik
+- 🟡 **P2:** planlı mevcut özellik geliştirmeleri
+- 🟢 **P3:** teknik borç / kalite
 - ⭐⭐⭐⭐⭐: stratejik özellik
 
 ---
 
-# 1. 🔴 P0 — Site çökmesine neden olabilecek durumlar
+# 1. 🔴 P0 — ÖNCE VERİTABANI VE SITE STABİLİTESİ
 
-## P0.1 — Docker Compose DB healthcheck yanlış veritabanını kontrol ediyor
-**Bulgu:** `POSTGRES_DB` değişkeni özelleştirilebilirken TimescaleDB healthcheck sabit olarak `nexus_iot` veritabanını kontrol ediyor. Uygulama ise `DATABASE_URL` içinde `${POSTGRES_DB}` değerini kullanıyor. Dolayısıyla `.env` içinde `POSTGRES_DB=nexus_production` gibi farklı bir değer verilirse PostgreSQL doğru veritabanını çalıştırdığı halde healthcheck başarısız olabilir.
+## P0.1 — PostgreSQL tek gerçek veri kaynağı haline getirilmeli
+**Mevcut durum:** PostgreSQL ana hedef olarak kullanılıyor ancak uygulamada hâlâ `LocalDatabase.data`, `data/db.json`, RAM state ve PostgreSQL birlikte bulunuyor. PostgreSQL bağlantısı başarısız olduğunda uygulama yerel JSON/RAM ile çalışmaya devam edebiliyor. Bu nedenle PostgreSQL bugün kod açısından henüz %100 tek gerçek kaynak değildir.
 
-**Olası zincir:**
-`DB healthcheck FAIL → app depends_on service_healthy bekler → app başlamaz → proxy app healthy bekler → site açılmaz.`
+- [ ] PostgreSQL/TimescaleDB production'da **tek authoritative source of truth** olarak tanımlanmalı.
+- [ ] `LocalDatabase.data` kalıcı veri kaynağı olmaktan çıkarılmalı; yalnızca kontrollü cache/state olarak kullanılmalı.
+- [ ] PostgreSQL yokken kritik CRUD işlemlerinin başarılıymış gibi devam etmesi engellenmeli.
+- [ ] `db.json` yalnızca migration/bootstrap veya açıkça tanımlanmış geçici cache amacıyla tutulmalı.
+- [ ] PostgreSQL başarısızlıklarında kullanıcıya `DB unavailable / degraded` durumu gösterilmeli.
+- [ ] Firestore gerçek veri kaynağı/senkronizasyon mekanizması olarak tamamen devre dışı tutulmalı.
 
-**Risk:** 🔴 **P0 / doğrudan site downtime riski.** Özellikle temiz kurulum, migration, VPS taşıma veya `.env` değişikliğinde ortaya çıkabilir. fileciteturn90file0L2-L2
+## P0.2 — PostgreSQL bağlantı katmanı tamamen tekilleştirilmeli
+`src/server/database/connection.ts` birleşik pool sağlamaya başlamış durumda; `src/db/index.ts` de bu pool'u kullanıyor. Ancak `src/db/index.ts` içinde hâlâ URL bulunamazsa ayrı bir fallback `pg.Pool` oluşturulabiliyor.
 
-- [ ] Healthcheck `${POSTGRES_DB}` / aynı runtime DB bilgisi ile uyumlu hale getirilmeli.
-- [ ] Farklı DB adıyla CI/production compose startup testi eklenmeli.
-- [ ] `docker compose up -d` sonrası `timescaledb → app → proxy` health zinciri release gate olmalı.
-- [ ] DB restart sonrası app/proxy recovery testi yapılmalı.
+- [ ] Uygulamadaki bütün PostgreSQL erişimleri tek shared pool üzerinden geçmeli.
+- [ ] İkinci/fallback pool oluşturma yolu kaldırılmalı veya yalnızca test ortamında açıkça sınırlandırılmalı.
+- [ ] `DATABASE_URL` production için zorunlu hale getirilmeli.
+- [ ] `SQL_*`, `PG*`, `POSTGRES_*` gibi alternatif bağlantı değişkenlerinin öncelik sırası tek bir yerde tanımlanmalı.
+- [ ] Runtime'da farklı DB'ye bağlanabilecek belirsiz fallback zinciri bırakılmamalı.
 
-## P0.2 — Gerçek production outage testi
-- [ ] DB yeniden başlatma.
-- [ ] App container restart.
-- [ ] Nginx/proxy restart.
-- [ ] Disk doluluğu.
-- [ ] DB connection exhaustion.
-- [ ] WebSocket reconnect.
-- [ ] Host reboot sonrası otomatik toparlanma.
+## P0.3 — DB hataları kesinlikle sessizce yutulmamalı
+- [ ] PostgreSQL query/repository katmanındaki `catch → empty result` davranışları incelenmeli.
+- [ ] DB okuma hatası ile gerçekten `0 kayıt` sonucu birbirinden ayrılmalı.
+- [ ] Kritik yazma hatalarında `.catch(() => {})` kullanılmamalı.
+- [ ] Persistence başarısızlığı HTTP/API seviyesine anlamlı hata olarak aktarılmalı.
+- [ ] Loglarda hata kodu + sorgu işlemi + tenant/device context + correlation ID bulunmalı.
+- [ ] DB hatası olduğunda sistemin sahte `success` üretmesi engellenmeli.
+
+## P0.4 — Başlangıç sırası DB hazır olmadan uygulamayı hazır göstermemeli
+Mevcut kod constructor içinde local data'yı yükleyip PostgreSQL initialization'ı asenkron başlatıyor; hydration sonrasında PostgreSQL'e yazmalar yapılıyor. Bu yapı startup sırasında iki kaynağın yarışmasına yol açabilir.
+
+- [ ] Production readiness PostgreSQL bağlantısı + schema/migration doğrulaması tamamlanmadan `healthy/ready` olmamalı.
+- [ ] Startup hydration ve migration sırası deterministik olmalı.
+- [ ] İlk açılışta Local JSON'dan PostgreSQL'e otomatik ve kontrolsüz veri karıştırılması engellenmeli.
+- [ ] DB hazır değilse API'nin kritik endpoint'leri kontrollü olarak `503` dönebilmeli.
+- [ ] Health endpoint'leri `liveness` ve `readiness` olarak net ayrılmalı.
+
+## P0.5 — Runtime schema repair yerine versioned migration düzeni
+`src/server/database/schema.ts` içinde çok sayıda `CREATE TABLE`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, constraint silme ve Timescale işlemi runtime'da yürütülüyor.
+
+- [ ] Schema değişiklikleri versioned migration sistemi altında toplanmalı.
+- [ ] Her production migration için forward + rollback stratejisi tanımlanmalı.
+- [ ] Uygulama açılışında büyük DDL/backfill çalıştırılması engellenmeli.
+- [ ] Migration lock/advisory lock kullanılmalı; iki instance aynı migration'ı aynı anda çalıştırmamalı.
+- [ ] Migration başarısızsa uygulama `ready` olmamalı.
 
 ---
 
-# 2. 🔴 P0 — Production güvenilirliği
+# 2. 🔴 P0 — TELEMETRY / TIMESCALEDB VERİ BÜTÜNLÜĞÜ
 
+## P0.6 — Telemetry packet idempotency kesin olarak doğrulanmalı
+`telemetry_packets` için `(device_id, boot_id, sequence)` unique constraint mevcut ve ingest tarafında bu alanlarla conflict/dedup mantığı kullanılıyor.
+
+- [ ] Production DB'de constraint'in gerçekten mevcut olduğu startup/test ile doğrulanmalı.
+- [ ] `ON CONFLICT` hedefi ile gerçek DB constraint/index birebir eşleştirilmeli.
+- [ ] Duplicate packet testleri.
+- [ ] Aynı packet'in retry sonrası tek kayıt kalması.
+- [ ] Device reboot sonrası sequence/boot_id davranışı.
+- [ ] Out-of-order packet davranışı.
+- [ ] Concurrent ingest testleri.
+
+## P0.7 — `telemetry_readings` TimescaleDB modeli korunmalı
+- [ ] Composite primary key `(id, created_at)` korunmalı.
+- [ ] Hypertable yalnızca `created_at` üzerinden ve kontrollü chunk interval ile yönetilmeli.
+- [ ] Compression/retention policy migration ile yönetilmeli.
+- [ ] Production TimescaleDB sürümü ile migration uyumluluğu doğrulanmalı.
+- [ ] 5 saniyelik cihaz gönderim sıklığı ve yaklaşık 50 müşteri / 5 cihaz hedefi ile gerçek load testi yapılmalı.
+
+## P0.8 — Telemetry ingest sırasında veri kaybı / sahte başarı engellenmeli
+- [ ] DB down → RAM/WAL davranışı net bir sözleşmeye bağlanmalı.
+- [ ] WAL maksimum boyut, retry ve replay sınırları belirlenmeli.
+- [ ] WAL replay sırasında duplicate/partial commit test edilmeli.
+- [ ] RAM buffer taşması alarmı eklenmeli.
+- [ ] DB'ye yazılamayan paketlerin dashboard'da `persisted=false/degraded` durumu ayırt edilebilmeli.
+
+---
+
+# 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME
+
+- [ ] PostgreSQL restart → app recovery.
+- [ ] App restart → proxy recovery.
+- [ ] Proxy restart → HTTP + WebSocket recovery.
+- [ ] Host reboot → DB → app → proxy sıralı recovery.
+- [ ] DB connection exhaustion testi.
+- [ ] Disk full testi.
+- [ ] Network interruption testi.
+- [ ] WebSocket reconnect/backoff testi.
+- [ ] Uzun süreli telemetry soak testi.
 - [ ] Gerçek ESP8266/ESP32 ile `connect → telemetry → DB → dashboard → command → ACK → UI` zinciri.
-- [ ] En az birkaç saatlik gerçek telemetry/WS soak testi.
-- [ ] Backup/restore + migration + release upgrade birlikte doğrulanmalı.
-- [ ] Reverse proxy üzerinden gerçek HTTP + WS production testi.
 
 ---
 
-# 3. 🟠 P1 — Güncel yüksek öncelikler
+# 4. 🟠 P1 — DOCKER / PRODUCTION CONFIGURATION
 
-## 3.1 Version / lockfile
-- `package.json`: **1.6.0**. fileciteturn73file0L2-L2
-- `src/config/version.ts`: **1.6.0**. fileciteturn74file0L2-L2
-- `package-lock.json`: **1.4.0**. fileciteturn72file0L2-L2
-- [ ] Lockfile kesin olarak 1.6.0 ile senkronlanmalı.
-- [ ] CI `npm ci` öncesinde package/lock eşitliğini zorunlu kontrol etmeli.
+## P1.1 — Compose production ile gerçek sunucu aynı tanımı kullanmalı
+Mevcut `docker-compose.yml` hâlâ `timescale/timescaledb:latest-pg15`, `iot_admin` / `iot_dashboard_db` varsayılanları ve host'a açık `5432` portu kullanıyor. Gerçek üretim ortamı PostgreSQL 17 + TimescaleDB 2.29.1 ve farklı DB/user değerleriyle çalıştırıldı.
 
-## 3.2 Production secret/default değerleri
-Compose içinde default PostgreSQL password ve default session secret bulunuyor. fileciteturn90file0L2-L2
-- [ ] Production'da default değerlerle startup engellenmeli.
-- [ ] Secret yönetimi zorunlu hale getirilmeli.
-- [ ] Session secret rotation prosedürü eklenmeli.
-
-## 3.3 PostgreSQL erişim yüzeyi
-- Compose PostgreSQL portunu host'a publish ediyor. fileciteturn90file0L2-L2
-- [ ] Production'da DB'nin internete açık olmaması doğrulanmalı.
-- [ ] Firewall/allowlist kontrolü.
+- [ ] Production DB image sürümü pinlenmeli; `latest` kullanılmamalı.
+- [ ] Repo Compose ile gerçek VPS/home-server DB sürümü ve isimleri eşleştirilmeli.
+- [ ] Image digest pinleme prosedürü belirlenmeli.
+- [ ] PostgreSQL host portu dış erişim gerekmiyorsa publish edilmemeli.
 - [ ] DB yalnızca private Docker network üzerinden erişilebilir olmalı.
+- [ ] Firewall/allowlist doğrulanmalı.
 
-## 3.4 Telemetry DB integrity
-- [x] Deterministic batch ordering + deadlock/serialization retry.
-- [x] FK kaldırma ile ingest kilitlenmesi azaltıldı.
-- [ ] Orphan telemetry reconciliation'ın production davranışı doğrulanmalı.
-- [ ] Idempotency + retry yük testi.
-- [ ] Partial commit / duplicate packet regression testi.
+## P1.2 — Default secret'lar production'da kabul edilmemeli
+- [ ] Default PostgreSQL password engellenmeli.
+- [ ] Default JWT/session secret engellenmeli.
+- [ ] Secret rotation prosedürü.
+- [ ] Secret scanning CI kontrolü.
 
-## 3.5 WebSocket
-- [x] Auth/origin/tenant temel testleri.
-- [x] Telemetry schema ve command round-trip.
-- [ ] Credential revoke sonrası tüm aktif socket'lerin kapanması.
-- [ ] Reconnect/backoff/duplicate event.
-- [ ] Backpressure ve max payload soak testi.
+## P1.3 — Compose healthcheck / readiness zinciri
+- [ ] DB healthcheck gerçek runtime DB adı/user ile aynı kaynağı kontrol etmeli.
+- [ ] App healthcheck yalnızca process'in açık olduğunu değil kritik DB readiness durumunu da göstermeli.
+- [ ] Proxy healthcheck HTTP + gerekiyorsa WS yolu ile doğrulanmalı.
+- [ ] DB restart sonrası `depends_on` davranışı gerçek ortamda test edilmeli.
+
+---
+
+# 5. 🟠 P1 — DATABASE KOD TEMİZLİĞİ
+
+## P1.4 — Duplicate schema kaynakları azaltılmalı
+Projede `src/server/database/schema.ts`, `src/db/schema.ts`, `src/db/timescaledb.sql`, Drizzle schema/config ve repository tarafında schema/DDL mantığı bulunuyor.
+
+- [ ] Tek canonical schema/migration kaynağı belirlenmeli.
+- [ ] Aynı tablo/kolon için farklı tanımlar bırakılmamalı.
+- [ ] Runtime DDL ile migration DDL çakışması kaldırılmalı.
+- [ ] Schema drift CI testi eklenmeli.
+
+## P1.5 — Foreign key'lerin kaldırılması kontrollü hale getirilmeli
+- [ ] Ingest performansı için kaldırılan FK'lerin hangi tablolarda zorunlu olmadığı belgelenmeli.
+- [ ] Orphan device/telemetry kayıtlarını tespit eden reconciliation job eklenmeli.
+- [ ] Tenant/device referans bütünlüğü uygulama seviyesinde garanti edilmeli.
+- [ ] `DROP CONSTRAINT ... CASCADE` işlemleri migration dışında otomatik çalıştırılmamalı.
+
+## P1.6 — Auto-Healer güvenlik sınırları
+- [ ] Uzun süren Timescale bakım sorgularını normal uygulama sorgusundan ayırmalı.
+- [ ] `pg_terminate_backend` yalnızca güvenli koşullarda kullanılmalı.
+- [ ] Auto-Healer'ın connection recycle döngüsüne girmesi engellenmeli.
+- [ ] Her terminate/recycle işlemi audit log'a yazılmalı.
+- [ ] Auto-Healer kapalıyken sistemin normal çalışması test edilmeli.
+
+## P1.7 — Backup gerçek PostgreSQL backup olmalı
+v1.9.5 ile `pg_dump` yoksa JSON metadata fallback'i eklenmiş durumda. Bu çökme riskini azaltıyor ancak JSON metadata backup **veritabanı yedeği değildir**.
+
+- [ ] Production container'da uyumlu `pg_dump` bulunması garanti edilmeli.
+- [ ] Backup'ın gerçekten PostgreSQL/TimescaleDB restore edilebilir dump olduğu doğrulanmalı.
+- [ ] JSON fallback açıkça `metadata-only` olarak etiketlenmeli.
+- [ ] Otomatik backup retention.
+- [ ] Harici backup hedefi.
+- [ ] Periyodik gerçek restore drill.
+
+---
+
+# 6. 🟠 P1 — WEBSOCKET / COMMAND / DEVICE
+
+- [ ] Credential revoke → aktif socket termination.
+- [ ] Reconnect/backoff.
+- [ ] Duplicate command/event koruması.
+- [ ] Backpressure / max payload soak testi.
 - [ ] Query-string credential kullanımının tamamen kaldırılması.
-
-## 3.6 Multi-tenant
-- [x] REST/DB/WS için temel negatif izolasyon testleri.
-- [ ] Telemetry/history/command/alarm/notification/automation/dashboard/OTA/export için sürekli regression matrisi.
-
-## 3.7 OTA
-- [x] Signature/hash, compatibility, canary, rollback ve concurrent deployment korumaları.
-- [ ] Gerçek saha rollout testi.
-- [ ] Deployment timeout/recovery.
-- [ ] Firmware artifact retention.
-
----
-
-# 4. 🟡 P2 — CI/CD ve test
-
-CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. fileciteturn75file0L2-L2
-
-- [ ] Docker image build'i CI'da gerçek compose health zinciriyle doğrulamak.
-- [ ] Farklı `POSTGRES_DB` ile compose startup testi.
-- [ ] Production schema/migration parity.
-- [ ] Load/soak test.
-- [ ] Disk/DB connection exhaustion testi.
-- [ ] CI failure artifact kapsamını genişletmek.
-
----
-
-# 5. 🟡 P2 — Mevcut özellik geliştirmeleri
-
-## Canlı Dashboard
-- [x] Connected/Reconnecting/Offline.
-- [x] Widget freshness.
-- [x] Last data / age / latency.
-- [x] Command Pending/Applied/Failed/Timeout.
-- [ ] Büyük dashboardlarda render/memory optimizasyonunu sürekli ölçmek.
-- [ ] Offline/stale durumda kullanıcıya net operasyon mesajı.
-
-## Device Management
-- [x] Site/Bölge/Grup/Cihaz hiyerarşisi.
-- [x] Tags.
-- [x] Maintenance mode.
-- [x] Health/firmware/telemetry/command/alarm özeti.
-- [x] Device replacement history.
-- [ ] Toplu operasyonlar ve bakım planlama.
-
-## Discovery & Pairing
-- [x] QR + discovery provisioning.
-- [x] Lifecycle.
-- [x] Duplicate identity.
-- [x] Tenant/location assignment.
-- [x] Pairing audit.
-- [ ] Provisioning başarısızlık/recovery UX.
-
-## Generic Control Panel
-- [ ] Relay/digital/PWM/analog ortak command schema.
-- [ ] Button/toggle/slider/selector.
-- [ ] Kritik komut confirmation.
-- [ ] Result feedback/history.
-- [ ] Manual/automation ayrımı.
+- [ ] Command ID → ACK → final state zincirinin DB ile tutarlı olması.
+- [ ] Relay/digital/PWM/analog için tek command schema.
+- [ ] Manual/automation command ayrımı.
 - [ ] Fail-safe/default state.
 
+---
+
+# 7. 🟡 P2 — MEVCUT ÖZELLİKLERİN GELİŞTİRİLMESİ
+
+## Live Dashboard
+- [ ] Büyük dashboardlarda render/memory optimizasyonu.
+- [ ] Stale/offline için net operasyon mesajı.
+- [ ] Persisted vs live data görünürlüğü.
+
+## Device Management
+- [ ] Toplu operasyonlar.
+- [ ] Bakım planlama.
+- [ ] Health timeline.
+- [ ] Device replacement sonrası veri bütünlüğü.
+
 ## Telemetry
-- [ ] Metric catalog/unit normalization.
-- [ ] Aggregation + downsampling.
-- [ ] Data quality: duplicate/delayed/out-of-order.
+- [ ] Metric catalog + unit normalization.
+- [ ] Aggregation/downsampling.
+- [ ] Duplicate/delayed/out-of-order kalite göstergeleri.
 - [ ] Clock drift.
-- [ ] Ingest latency/retry/drop metrics.
-- [ ] Retention/compression.
+- [ ] Ingest latency/retry/drop metrikleri.
+- [ ] Retention/compression yönetimi.
 
 ## Alarm & Notification
-- [ ] Triggered → Acknowledged → Resolved.
+- [ ] Triggered → Acknowledged → Resolved lifecycle.
 - [ ] Severity/hysteresis/debounce/cooldown.
 - [ ] Escalation/flood protection.
 - [ ] Offline alarm.
-- [ ] Quiet hours/maintenance suppression.
+- [ ] Quiet hours / maintenance suppression.
 
 ## Automation
 - [ ] Visual builder.
@@ -185,7 +236,6 @@ CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. filecite�
 
 ## Mobile UX
 - [ ] Touch target standardı.
-- [ ] Widget drag/edit/swipe.
 - [ ] Alarm quick access.
 - [ ] Connection visibility.
 - [ ] QR pairing optimization.
@@ -193,21 +243,24 @@ CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. filecite�
 
 ---
 
-# 6. 🟢 P3 — Teknik borç / kalite
+# 8. 🟢 P3 — KALİTE / TEKNİK BORÇ
 
-- [ ] package/version/CHANGELOG/README/roadmap tam senkron.
-- [ ] OpenAPI ↔ gerçek API.
+- [ ] `package.json` / `package-lock.json` / version / CHANGELOG / README / roadmap senkronizasyonu.
+- [ ] OpenAPI ↔ gerçek API parity.
 - [ ] Versioned WebSocket protocol.
 - [ ] CSP/HSTS/security headers.
-- [ ] Request/body limits.
-- [ ] Dependency vulnerability + secret scanning.
-- [ ] Structured audit log.
-- [ ] Backup restore drill.
+- [ ] Dependency vulnerability scanning.
+- [ ] Secret scanning.
+- [ ] Structured audit logging.
+- [ ] Backup restore drill otomasyonu.
 - [ ] Production load/soak/capacity plan.
+- [ ] DB schema drift CI kontrolü.
 
 ---
 
-# 7. ⭐ Yeni özellikler — öncelik
+# 9. ⭐ STRATEJİK YENİ ÖZELLİKLER
+
+Yeni özelliklere geçmeden önce P0/P1 tamamlanmalıdır.
 
 1. ⭐⭐⭐⭐⭐ Command Center
 2. ⭐⭐⭐⭐⭐ Device Health Center 2.0
@@ -216,7 +269,7 @@ CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. filecite�
 5. ⭐⭐⭐⭐⭐ Device Credential Center
 6. ⭐⭐⭐⭐⭐ Audit & Security Center
 7. ⭐⭐⭐⭐ Telemetry Explorer
-8. ⭐⭐⭐⭐ Sites/Groups/Locations
+8. ⭐⭐⭐⭐ Sites / Groups / Locations
 9. ⭐⭐⭐⭐ Dashboard Templates
 10. ⭐⭐⭐⭐ System Observability Center
 11. ⭐⭐⭐⭐ Backup & Disaster Recovery Center
@@ -224,59 +277,101 @@ CI Node 20/22 + TimescaleDB + unit + smoke + E2E çalıştırıyor. filecite�
 
 ---
 
-# 8. 🏗️ Uygulama sırası
+# 10. 🏗️ UYGULAMA SIRASI
 
-### Faz 1 — Önce siteyi koru
-1. **P0.1 DB healthcheck riskini düzelt.**
-2. Secret/default değerlerini production-safe yap.
-3. DB port exposure'ını kontrol et.
-4. Docker → DB → App → Proxy recovery testleri.
-5. Version/lockfile senkronizasyonu.
+### Faz 0 — Siteyi ve veriyi koru
+1. **PostgreSQL'i tek gerçek kaynak yap.**
+2. DB fallback / split-brain davranışını kaldır.
+3. Tek shared PostgreSQL pool.
+4. Sessiz DB hata yutmalarını düzelt.
+5. Startup readiness + migration sırasını düzelt.
+6. Runtime DDL'yi versioned migration yapısına taşı.
+7. Telemetry idempotency/integrity testleri.
+8. Production DB image/version/secret/network ayarlarını sabitle.
+9. Backup/restore testini gerçek PostgreSQL dump ile doğrula.
+10. DB/app/proxy restart ve outage testleri.
 
-### Faz 2 — IoT çekirdeği
-6. Telemetry integrity/load.
-7. Command Center.
-8. Alarm lifecycle.
-9. Device Health.
+### Faz 1 — IoT çekirdeği
+11. Gerçek cihaz telemetry soak/load testi.
+12. Command Center ve command ACK/state doğruluğu.
+13. Alarm lifecycle.
+14. Device Health.
 
-### Faz 3 — Saha operasyonu
-10. OTA Deployment Manager.
-11. Canary/rollback.
-12. Maintenance + Sites/Groups.
+### Faz 2 — Saha operasyonu
+15. OTA Deployment Manager.
+16. Canary/rollback.
+17. Maintenance + Sites/Groups.
 
-### Faz 4 — Kurumsal
-13. Audit & Security.
-14. Device Credential Center.
-15. Tenant Management 2.0.
-16. Reporting.
+### Faz 3 — Kurumsal
+18. Audit & Security.
+19. Device Credential Center.
+20. Tenant Management 2.0.
+21. Reporting.
 
-### Faz 5 — Ölçek
-17. Observability.
-18. Backup/DR.
-19. Integrations.
-20. Load/soak/capacity planning.
-
----
-
-# 9. ✅ Definition of Done
-
-P0/P1 tamamlanmadan production'a alınmamalı:
-- [ ] Unit/integration test
-- [ ] Gerekirse E2E
-- [ ] Tenant isolation
-- [ ] WS etkisi
-- [ ] DB migration/rollback
-- [ ] Docker health chain
-- [ ] Reverse proxy
-- [ ] Gerçek cihaz/simülatör
-- [ ] Restart/recovery
-- [ ] Backup/restore
-- [ ] Version/lockfile/CHANGELOG senkronu
+### Faz 4 — Ölçek
+22. Observability.
+23. Backup/DR.
+24. Integrations.
+25. Load/soak/capacity planning.
 
 ---
 
-# 10. 🔄 Her incelemede
+# 11. ✅ DATABASE DEFINITION OF DONE
 
-HEAD/commitler, P0/P1/P2/P3, auth/CSRF/CORS, multi-tenant, WS, command, telemetry/TimescaleDB, alarm/notification, automation, OTA, Docker/CI/CD, dependency/lockfile, dashboard/mobile UX, API/OpenAPI, version consistency, mevcut özellikler ve yeni özellikler yeniden kontrol edilir.
+PostgreSQL/TimescaleDB için aşağıdakilerin tamamı sağlanmadan production stabil kabul edilmemeli:
 
-> Bu dosya ve GitHub Issue #1 merkezi kalite/backlog/yol haritasıdır. İnceleme sırasında kaynak kodu ve diğer proje dosyaları değiştirilmez; yalnızca bu dosya ve Issue #1 güncellenebilir.
+- [ ] Tek authoritative PostgreSQL/TimescaleDB.
+- [ ] Tek shared connection pool.
+- [ ] `DATABASE_URL` production zorunlu.
+- [ ] Local JSON kalıcı source değil.
+- [ ] Firestore source değil.
+- [ ] DB hataları sessizce yutulmuyor.
+- [ ] DB down durumunda sahte başarı yok.
+- [ ] Startup DB/migration readiness tamamlanmadan ready değil.
+- [ ] Tek canonical migration/schema kaynağı.
+- [ ] Telemetry dedup constraint + `ON CONFLICT` birebir uyumlu.
+- [ ] Hypertable/chunk/compression/retention production testli.
+- [ ] Tenant isolation DB + application katmanında testli.
+- [ ] Connection exhaustion testi.
+- [ ] Backup restore testi.
+- [ ] DB restart/recovery testi.
+- [ ] Gerçek cihaz telemetry soak testi.
+
+---
+
+# 12. 🔍 VERİTABANI İNCELEME CHECKLIST
+
+Her incelemede özellikle şu noktalar tekrar kontrol edilir:
+
+1. PostgreSQL bağlantı kaynağı ve tek pool.
+2. `DATABASE_URL` ve environment precedence.
+3. Local JSON/RAM fallback.
+4. Firestore/harici DB bağlantısı.
+5. Repository → DB çağrı zincirleri.
+6. Sessiz `catch` / swallowed DB errors.
+7. Transaction sınırları.
+8. Retry/idempotency.
+9. Connection pool exhaustion.
+10. Runtime DDL/migration.
+11. Schema drift.
+12. Tenant isolation/RLS.
+13. Timescale hypertable/chunk/compression/retention.
+14. Telemetry packet deduplication.
+15. WAL/replay/data-loss riski.
+16. Backup/restore.
+17. Auto-Healer ve connection recycle.
+18. DB health/readiness.
+19. Docker/PostgreSQL version parity.
+20. Production restart/recovery.
+
+---
+
+# 13. 📌 GÜNCEL İNCELEME NOTU — 2026-09-12
+
+- v1.9.5 ile `pg_dump` bulunamadığında uygulamanın backup fonksiyonunun çökmesini önleyen fallback eklendi. Bu **uygulama çökmesini azaltan** bir düzeltmedir; JSON metadata dosyası PostgreSQL verisinin tam yedeği değildir.
+- Birleşik PostgreSQL pool katmanı oluşturulmuş ve Drizzle bu shared pool'u kullanıyor; ancak `src/db/index.ts` içinde URL bulunamazsa ayrı fallback pool yolu hâlâ mevcut.
+- `LocalDatabase` hâlâ merkezi RAM/local state tutuyor ve PostgreSQL bağlantısı başarısız olduğunda Local JSON ile çalışmaya devam ediyor. Bu nedenle **PostgreSQL henüz kod seviyesinde tek gerçek veri kaynağı olarak tamamlanmış değildir.**
+- `src/server/database/schema.ts` hâlâ geniş runtime DDL/migration mantığı içeriyor.
+- `docker-compose.yml` repo tanımı ile gerçek production PostgreSQL/TimescaleDB sürümünün birebir aynı olduğu henüz garanti edilmemeli.
+
+> **Kritik karar:** Yeni özellik geliştirmelerine hız vermeden önce Faz 0 tamamlanmalıdır. Özellikle PostgreSQL source-of-truth, DB hata yönetimi, startup readiness, schema/migration ve telemetry integrity tamamlanmadan production yükü artırılmamalıdır.
