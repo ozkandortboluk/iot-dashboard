@@ -135,14 +135,14 @@ export function terminateDeviceSockets(deviceId: string, codeOrReason: number | 
 }
 
 // Push initial state data to authenticated client
-function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
+async function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
   try {
     const userDevices = user.role === 'admin'
       ? db.getDevices()
       : db.getDevices(user.id, user.id);
     safeSend(ws, JSON.stringify({ event: 'devices:updated', payload: userDevices }));
 
-    const userDashboard = db.getDashboard(user.id);
+    const userDashboard = await db.getDashboard(user.id);
     if (userDashboard) {
       safeSend(ws, JSON.stringify({ event: 'dashboard:layout', payload: userDashboard }));
     }

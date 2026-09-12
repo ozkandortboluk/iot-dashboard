@@ -859,7 +859,19 @@ class LocalDatabase {
       const content = fs.readFileSync(backupPath, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === 'object') {
-        this.data = { ...this.data, ...parsed };
+        let commands = parsed.commands || this.data.commands || [];
+        if (parsed.commands && this.data.commands) {
+          const parsedIds = new Set(parsed.commands.map((c: any) => c.id || c.commandId));
+          const inFlight = this.data.commands.filter((c: any) => !parsedIds.has(c.id) && !parsedIds.has(c.commandId));
+          commands = [...parsed.commands, ...inFlight];
+        }
+        let devices = parsed.devices || this.data.devices || [];
+        if (parsed.devices && this.data.devices) {
+          const parsedDevIds = new Set(parsed.devices.map((d: any) => d.id));
+          const activeDevs = this.data.devices.filter((d: any) => !parsedDevIds.has(d.id));
+          devices = [...parsed.devices, ...activeDevs];
+        }
+        this.data = { ...this.data, ...parsed, commands, devices };
         this.saveData(this.data);
         this.addAuditLog('system', 'Admin', `Veritabanı Yedeği Geri Yüklendi: ${path.basename(filename)}`, 'high');
         return true;
@@ -1143,10 +1155,14 @@ class LocalDatabase {
   // ==========================================
   public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
     if (this.isPostgresProductionMode()) {
-      if (deviceId && deviceId !== 'all') {
-         return await this.postgresRepo.getCommands(deviceId, tenantId, limit);
-      } else {
-         return [];
+      try {
+        if (deviceId && deviceId !== 'all') {
+           return await this.postgresRepo.getCommands(deviceId, tenantId, limit);
+        } else {
+           return [];
+        }
+      } catch (err) {
+        // Fallback to RAM cache if PostgreSQL query fails
       }
     }
     if (!this.data.commands) this.data.commands = [];
@@ -1252,7 +1268,18 @@ class LocalDatabase {
     };
 
     if (this.isPostgresProductionMode()) {
-      return await this.postgresRepo.saveCommand(cmd);
+      const saved = await this.postgresRepo.saveCommand(cmd);
+      if (!this.data.commands) this.data.commands = [];
+      const idx = this.data.commands.findIndex(c => c.id === saved.id || (saved.commandId && c.commandId === saved.commandId));
+      if (idx >= 0) {
+        this.data.commands[idx] = { ...this.data.commands[idx], ...saved };
+      } else {
+        this.data.commands.push(saved);
+        if (this.data.commands.length > 200) {
+          this.data.commands = this.data.commands.slice(-200);
+        }
+      }
+      return saved;
     } else {
       if (!this.data.commands) this.data.commands = [];
 
@@ -1312,40 +1339,44 @@ class LocalDatabase {
     let claimed: DeviceCommand[] = [];
 
     if (this.isPostgresProductionMode()) {
-      claimed = await this.postgresRepo.claimPendingCommands(deviceId, limit, leaseSeconds);
-      // Sync in-memory RAM cache
-      if (!this.data.commands) this.data.commands = [];
-      const claimedIds = new Set(claimed.map(c => c.id));
-      for (const cmd of this.data.commands) {
-        if (claimedIds.has(cmd.id)) {
-          cmd.status = 'claimed';
-          cmd.claimed_at = now;
-          cmd.delivered_at = now;
+      try {
+        claimed = await this.postgresRepo.claimPendingCommands(deviceId, limit, leaseSeconds);
+        // Sync in-memory RAM cache
+        if (!this.data.commands) this.data.commands = [];
+        const claimedIds = new Set(claimed.map(c => c.id));
+        for (const cmd of this.data.commands) {
+          if (claimedIds.has(cmd.id)) {
+            cmd.status = 'claimed';
+            cmd.claimed_at = now;
+            cmd.delivered_at = now;
+          }
         }
-      }
-    } else {
-      if (!this.data.commands) this.data.commands = [];
-      const matching = this.data.commands.filter((c) => {
-        if (c.deviceId !== deviceId) return false;
-        if (c.status === 'pending' || c.status === 'queued') return true;
-        if (c.status === 'claimed' && c.claimed_at) {
-          const claimedTime = new Date(c.claimed_at).getTime();
-          return nowMs - claimedTime > leaseMs;
-        }
-        return false;
-      }).slice(0, limit);
-
-      for (const cmd of matching) {
-        cmd.status = 'claimed';
-        cmd.claimed_at = now;
-        cmd.delivered_at = now;
-        claimed.push({ ...cmd });
-      }
-      if (claimed.length > 0) {
-        this.saveData(this.data);
+        return claimed;
+      } catch (err: any) {
+        console.warn(`[Command Sync Warning] claimPendingCommands Postgres failure, falling back to memory: ${err?.message || err}`);
       }
     }
 
+    if (!this.data.commands) this.data.commands = [];
+    const matching = this.data.commands.filter((c) => {
+      if (c.deviceId !== deviceId) return false;
+      if (c.status === 'pending' || c.status === 'queued') return true;
+      if (c.status === 'claimed' && c.claimed_at) {
+        const claimedTime = new Date(c.claimed_at).getTime();
+        return nowMs - claimedTime > leaseMs;
+      }
+      return false;
+    }).slice(0, limit);
+
+    for (const cmd of matching) {
+      cmd.status = 'claimed';
+      cmd.claimed_at = now;
+      cmd.delivered_at = now;
+      claimed.push({ ...cmd });
+    }
+    if (claimed.length > 0) {
+      this.saveData(this.data);
+    }
     return claimed;
   }
 

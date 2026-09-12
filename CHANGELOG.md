@@ -4,6 +4,48 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.11.4] - 2026-09-12
+
+### 🛠️ Dashboard Yükleme & Müşteri Görünürlük Düzeltmesi (User Dashboard Visibility Fix)
+- **Asenkron Promise Düzeltmesi (`src/server/routes/alarms.ts`)**:
+  - `/api/dashboard/widgets` (GET, PUT, POST reset) uç noktaları `async` yapılarak `db.getDashboard`, `db.saveDashboardWidgets` ve `db.resetDashboard` Promise çağrıları `await` ile çözümlendi.
+  - Önceden Promise çözümlenmeden `res.json(dash)` ile boş JSON nesnesi (`{}`) döndürülmesinden dolayı frontend tarafında widget dizisi boş algılanıyor ve "Dashboard'unuzda henüz widget bulunmuyor" durumu oluşuyordu; bu hata giderildi.
+- **WebSocket Bootstrap Senkronizasyonu (`src/server/services/websocket.ts`)**:
+  - `sendBootstrapData` fonksiyonu `async` hale getirildi ve `await db.getDashboard(user.id)` ile istemciye gerçek zamanlı bağlantıda doğrudan dolu widget dizisi aktarılması sağlandı.
+- **Depolama & Çoklu Kiracı Fallback Mekanizması (`src/server/repositories/notification.repository.ts`)**:
+  - `getDashboard` ve `saveDashboardWidgets` içerisinde kullanıcı ID aramaları (`tenantId`, `userId`, `id`) genişletildi; veritabanında boş veya geçersiz widget listesi bulunan kullanıcılara varsayılan widget seti (`defaultWidgets`) otomatik olarak sağlandı.
+- **Frontend Realtime Context İyileştirmesi (`src/context/RealtimeContext.tsx`)**:
+  - Admin kullanıcılar müşteri dashboard'ları arasında geçiş yaparken WebSocket closure gecikmelerini önlemek adına `selectedCustomerForAdminRef` kullanıldı.
+  - REST yükleme sonrasında boş yanıt dönmesi durumunda otomatik tohumlama (fallback reset) eklendi ve müşteri cihaz eşleştirmesi güçlendirildi.
+- **Güvenlik & İzolasyon Doğrulaması (1. Kural)**:
+  - Müşterilerin yalnızca kendi cihaz ve dashboard verilerini görebilmeleri, diğer müşterilerin verilerine erişememeleri ve simülatör/sanal cihaz işlemlerinin yalnızca yöneticiye ait olması güvenceye alındı.
+
+---
+
+## 🚀 [v1.11.3] - 2026-09-12
+
+### 🛠️ UI Fixes (Duplicate React Keys)
+- **HelpView.tsx Duplicate Key Fix**: 
+  - Fixed a React render warning (`Encountered two children with the same key, %s.`) caused by duplicated ID `"faq_8"` in the Help and Knowledge base component.
+  - Corrected the duplicate FAQ definition to ensure stable UI mapping and prevent rendering errors.
+
+---
+
+## 🚀 [v1.11.2] - 2026-09-12
+
+### 🛠️ E2E Test Port Isolation & Command Cache Resilience
+- **E2E & Subprocess Port Yapılandırması (`server.ts`, `e2e/security_e2e.test.ts`)**:
+  - `server.ts` içinde varsayılan 3000 portu korunurken, test runner'larının (`e2e/security_e2e.test.ts`) izole portlarda (ör. 3006) üretim sunucusu başlatabilmesi için `process.env.SERVER_PORT` desteği eklendi.
+  - `npm run build:server` ile `dist/server.cjs` güncellendi; 15/15 E2E güvenlik testi başarıyla tamamlandı.
+- **Komut Durum & Bellek Önbellek Senkronizasyonu (`src/server/db.ts`)**:
+  - `saveCommand` ve `claimPendingCommands` metodlarında PostgreSQL ile RAM önbelleği (`this.data.commands`) tam senkronize hale getirildi.
+  - PostgreSQL bağlantı dalgalanmalarında veya geçici sorgu gecikmelerinde in-memory fallback mekanizması devreye sokularak komut teslimatının kesintisiz devam etmesi sağlandı.
+- **Ağ Kesintisi & Soak Test İyileştirmesi (`src/tests/network_reconnect_reboot_soak.test.ts`)**:
+  - 10 döngülü hızlı telemetri, komut dağıtımı ve ACK doğrulama adımları hem `id` hem de `commandId` kontrolüyle güçlendirildi.
+  - Test paketinde foreign key doğrulamaları ve cihaz mevcudiyeti garanti altına alındı.
+
+---
+
 ## 🚀 [v1.11.1] - 2026-09-12
 
 ### 🛠️ Dev Server & PostgreSQL Asynchronous Startup Synchronization Fix

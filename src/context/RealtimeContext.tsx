@@ -151,7 +151,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       return rawDevices.filter((d) => d.tenantId === selectedCustomerForAdmin);
     }
-    return rawDevices.filter((d) => d.tenantId === user.id);
+    return rawDevices.filter((d) => d.tenantId === user.id || (d as any).customerId === user.id || (d as any).assignedUserId === user.id);
   }, [rawDevices, user, selectedCustomerForAdmin, customersList]);
 
   // Synchronous, flicker-free derived notifications list based on active customer filter
@@ -833,16 +833,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               fetchNotifications();
             } else if (data.event === 'dashboard:layout') {
               if (data.payload && Array.isArray(data.payload.widgets) && data.payload.widgets.length > 0) {
+                const currentSelectedCust = selectedCustomerForAdminRef.current;
                 const currentTarget =
-                  user?.role === 'admin' && selectedCustomerForAdmin !== 'all'
-                    ? selectedCustomerForAdmin
+                  user?.role === 'admin' && currentSelectedCust !== 'all'
+                    ? currentSelectedCust
                     : user?.id || 'usr_admin';
                 if (
                   !data.payload.tenantId ||
                   data.payload.tenantId === currentTarget ||
                   (user?.role === 'admin' && currentTarget === 'usr_admin' && (data.payload.tenantId === 'usr_admin' || !data.payload.tenantId))
                 ) {
-                  setWidgets(data.payload.widgets);
+                  const sanitized = validateAndSanitizeWidgets(data.payload.widgets);
+                  setWidgets(sanitized);
                   if (data.payload.title) setDashboardTitle(data.payload.title);
                 }
               }
@@ -992,6 +994,21 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const validated = validateAndSanitizeWidgets(data.widgets);
           setWidgets(validated);
           if (data.title) setDashboardTitle(data.title);
+        } else if (data && (!data.widgets || data.widgets.length === 0)) {
+          // If the backend returned an empty dashboard layout, trigger reset to default layout
+          fetch('/api/dashboard/widgets/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: targetUserId }),
+          })
+            .then((r) => safeJson<DashboardLayout | null>(r, null))
+            .then((seeded) => {
+              if (seeded && Array.isArray(seeded.widgets) && seeded.widgets.length > 0) {
+                setWidgets(validateAndSanitizeWidgets(seeded.widgets));
+                if (seeded.title) setDashboardTitle(seeded.title);
+              }
+            })
+            .catch(() => {});
         }
       })
       .catch((err) => {

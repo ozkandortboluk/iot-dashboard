@@ -21,7 +21,8 @@ export const migration003: Migration = {
         console.log('[Migration 003] Added Composite Primary Key (id, created_at) to telemetry_readings.');
       }
     } catch (err: any) {
-      console.warn('[Migration 003] Composite PK setup notice:', err?.message || err);
+      console.error('[Migration 003] Composite PK setup error:', err?.message || err);
+      throw err;
     }
 
     // 2. Ensure unique constraint on telemetry_packets (device_id, boot_id, sequence)
@@ -41,7 +42,8 @@ export const migration003: Migration = {
         console.log('[Migration 003] Added unique constraint unq_telemetry_device_boot_sequence to telemetry_packets.');
       }
     } catch (err: any) {
-      console.warn('[Migration 003] Unique constraint on telemetry_packets notice:', err?.message || err);
+      console.error('[Migration 003] Unique constraint on telemetry_packets error:', err?.message || err);
+      throw err;
     }
 
     // 3. Performance Indexes

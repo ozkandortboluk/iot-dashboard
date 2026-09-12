@@ -26,7 +26,8 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] telemetry_readings hypertable verified with 7-day chunk interval.');
     } catch (err: any) {
-      console.warn('[Migration 002] create_hypertable on telemetry_readings notice:', err?.message || err);
+      console.error('[Migration 002] create_hypertable on telemetry_readings error:', err?.message || err);
+      throw err;
     }
 
     // 3. Convert simulation_telemetry_readings into hypertable (1 day interval)
@@ -36,7 +37,8 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] simulation_telemetry_readings hypertable verified with 1-day chunk interval.');
     } catch (err: any) {
-      console.warn('[Migration 002] create_hypertable on simulation_telemetry_readings notice:', err?.message || err);
+      console.error('[Migration 002] create_hypertable on simulation_telemetry_readings error:', err?.message || err);
+      throw err;
     }
 
     // 4. Configure compression policies on TimescaleDB if supported
@@ -53,8 +55,10 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] Compression policy enabled on telemetry_readings (7 days).');
     } catch (err: any) {
-      // Compression might already be enabled or not supported in some PG configurations
-      console.log('[Migration 002] Notice on compression policy setup:', err?.message || err);
+      // If compression is not supported by the license/version, we can log it but maybe shouldn't throw?
+      // Wait, let's throw it to be strict as requested.
+      console.error('[Migration 002] Compression policy setup error:', err?.message || err);
+      throw err;
     }
   },
   down: async (client: pg.PoolClient) => {

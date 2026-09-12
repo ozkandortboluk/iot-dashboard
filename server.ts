@@ -69,7 +69,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 const app = express();
 app.set('trust proxy', true);
-const PORT = 3000;
+const PORT = process.env.SERVER_PORT ? parseInt(process.env.SERVER_PORT, 10) : 3000;
 const server = http.createServer(app);
 
 // Global Middleware & Body Parsers

@@ -55,6 +55,31 @@ describe('P0.1 & P0.9: PostgreSQL-Only Health and Readiness Contract', () => {
       db.postgresRepo.isReady = originalIsReady;
     }
   });
+
+  it('P0.12: should block selecting local engine in production', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    
+    // Create an isolated app for admin router
+    const { databaseRouter } = await import('../server/routes/system.js');
+    const testApp = express();
+    testApp.use(express.json());
+    testApp.use('/api/database', databaseRouter);
+
+    const originalVerify = db.verifySession;
+    db.verifySession = () => ({ user: { id: 'test_admin', role: 'admin' }, token: 'dummy', expiresAt: '2099' } as any);
+
+    const res = await request(testApp)
+      .post('/api/database/config')
+      .set('Authorization', 'Bearer dummy-token')
+      .send({ engine: 'local' });
+    
+    db.verifySession = originalVerify;
+    process.env.NODE_ENV = originalEnv;
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Production ortamında local veritabanı kullanımına izin verilmemektedir');
+  });
 });
 
 describe('P0.5: Versioned Migration System Architecture', () => {

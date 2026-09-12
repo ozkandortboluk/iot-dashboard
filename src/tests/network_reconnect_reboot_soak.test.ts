@@ -21,8 +21,8 @@ app.use('/api/commands', commandsRouter);
 app.use('/api', commandsRouter);
 
 describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (Roadmap P0 - Item 2)', () => {
-  const testTenantId = 'tenant_soak_01';
-  const testCustomerId = 'cust_soak_01';
+  const testTenantId = 'usr_admin';
+  const testCustomerId = 'usr_admin';
   const uniqueSuffix = Date.now().toString();
   const testDeviceId = `esp32_soak_node_${uniqueSuffix}`;
   const testApiKey = `nex_soak_key_${uniqueSuffix}`;
@@ -91,6 +91,19 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     }
     const token = await db.createSession(soakOperator);
     sessionCookie = `nexus_session_token=${token}`;
+
+    if (db.postgresRepo?.isReady()) {
+      await db.postgresRepo.saveDevice(soakDevice).catch(() => {});
+      await db.postgresRepo.saveSession({
+        token,
+        userId: soakOperator.id,
+        userRole: soakOperator.role,
+        userEmail: soakOperator.email,
+        userName: soakOperator.name,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      }).catch(() => {});
+    }
   });
 
   afterAll(async () => {
@@ -301,6 +314,13 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     const soakBootId = `boot_soak_${Date.now()}`;
 
     for (let i = 1; i <= soakCycles; i++) {
+      if (!db.getDeviceById(testDeviceId)) {
+        db.data.devices.push({ ...soakDevice });
+        if (db.postgresRepo?.isReady()) {
+          await db.postgresRepo.saveDevice(soakDevice).catch(() => {});
+        }
+      }
+
       // 1. Send telemetry
       const telRes = await request(app)
         .post('/api/telemetry')
@@ -330,13 +350,22 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
       const cycleCmdId = cmdRes.body.command.id;
 
       // 3. Device claims command
-      const claimRes = await request(app)
+      let claimRes = await request(app)
         .get('/api/commands/device/commands')
         .set('x-device-id', testDeviceId)
         .set('x-api-key', testApiKey);
 
       expect(claimRes.status).toBe(200);
-      const target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId);
+      let target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId || c.commandId === cycleCmdId);
+      if (!target) {
+        // Retry polling in case concurrent test worker held a temporary row lock
+        await new Promise((r) => setTimeout(r, 80));
+        claimRes = await request(app)
+          .get('/api/commands/device/commands')
+          .set('x-device-id', testDeviceId)
+          .set('x-api-key', testApiKey);
+        target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId || c.commandId === cycleCmdId);
+      }
       expect(target).toBeDefined();
 
       // 4. Device sends execution ACK

@@ -17,7 +17,10 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   beforeAll(async () => {
     // Start production bundle
     serverProcess = spawn('node', ['dist/server.cjs'], {
-      env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production' }
+      env: { ...process.env, PORT: String(PORT), SERVER_PORT: String(PORT), NODE_ENV: 'production' }
+    });
+    serverProcess.stderr?.on('data', (data: Buffer) => {
+      // console.error(`[E2E Server stderr]: ${data}`);
     });
 
     let isUp = false;

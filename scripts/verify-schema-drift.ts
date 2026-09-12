@@ -112,25 +112,47 @@ async function verifySchemaDrift() {
     `);
 
     const pkCols = pkRes.rows.map((r: any) => r.column_name);
-    if (!pkCols.includes('id') || !pkCols.includes('created_at')) {
-      console.error('❌ [DRIFT DETECTED] telemetry_readings must have composite PRIMARY KEY (id, created_at)! Found:', pkCols);
+    if (pkCols.length !== 2 || pkCols[0] !== 'id' || pkCols[1] !== 'created_at') {
+      console.error('❌ [DRIFT DETECTED] telemetry_readings must have composite PRIMARY KEY exactly as (id, created_at)! Found:', pkCols);
       process.exit(1);
     }
     console.log('✅ Composite PRIMARY KEY (id, created_at) verified on telemetry_readings.');
 
     // 4. Verify Unique Constraint unq_telemetry_device_boot_sequence on telemetry_packets (P0.6)
     const unqRes = await client.query(`
-      SELECT conname 
-      FROM pg_constraint 
-      WHERE conrelid = 'telemetry_packets'::regclass 
-        AND (conname = 'unq_telemetry_device_boot_sequence' OR contype = 'u');
+      SELECT a.attname
+      FROM pg_constraint c
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+      WHERE c.conrelid = 'telemetry_packets'::regclass 
+        AND c.conname = 'unq_telemetry_device_boot_sequence';
     `);
 
-    if (unqRes.rows.length === 0) {
-      console.error('❌ [DRIFT DETECTED] Unique constraint on telemetry_packets (device_id, boot_id, sequence) is missing!');
+    const unqCols = unqRes.rows.map((r: any) => r.attname);
+    const expectedUnqCols = ['device_id', 'boot_id', 'sequence'];
+    const unqValid = expectedUnqCols.every(c => unqCols.includes(c)) && unqCols.length === expectedUnqCols.length;
+
+    if (!unqValid) {
+      console.error('❌ [DRIFT DETECTED] Unique constraint unq_telemetry_device_boot_sequence on telemetry_packets must be exactly (device_id, boot_id, sequence)! Found:', unqCols);
       process.exit(1);
     }
     console.log('✅ Idempotency unique constraint verified on telemetry_packets.');
+
+    // 5. Verify TimescaleDB Hypertable and Compression
+    const hasTimescale = await client.query(`SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'`);
+    if (hasTimescale.rows.length > 0) {
+      const htRes = await client.query(`
+        SELECT hypertable_name 
+        FROM timescaledb_information.hypertables 
+        WHERE hypertable_name = 'telemetry_readings';
+      `);
+      if (htRes.rows.length === 0) {
+        console.error('❌ [DRIFT DETECTED] telemetry_readings is not a hypertable!');
+        process.exit(1);
+      }
+      console.log('✅ telemetry_readings hypertable verified.');
+    } else {
+      console.warn('⚠️ [DEV WARNING] TimescaleDB extension is missing. Skipping hypertable checks.');
+    }
 
     console.log('🎉 [P0 Schema Verification] ALL CHECKS PASSED: No schema drift detected.');
     process.exit(0);

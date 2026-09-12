@@ -147,11 +147,16 @@ systemRouter.get('/docs', (req, res) => {
 });
 
 systemRouter.get('/system/stats', authenticateUser, (req, res) => {
+  const engineConfig = db.getPostgresConfig();
+  const dbType = engineConfig?.isPostgresConnected 
+    ? (engineConfig.activeEngine === 'timescaledb' ? 'PostgreSQL / TimescaleDB' : 'PostgreSQL')
+    : 'Yalıtılmış Mod (Disconnected)';
+
   res.json({
     activeConnections: getWebSocketClientsCount(),
     requestsPerSec: Number((Math.random() * 12 + 4).toFixed(1)),
     telemetryIngestedTotal: telemetryIngestedCount,
-    dbType: 'SQLite (Development/Local)',
+    dbType: dbType,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     simulatorActive,
   });
@@ -257,6 +262,12 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   if (!engine || !['postgres', 'timescaledb', 'local'].includes(engine)) {
     return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi.' });
   }
+
+  // P0.12 Enforce production database policy
+  if (process.env.NODE_ENV === 'production' && engine === 'local') {
+    return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
+  }
+
   db.setActiveEngine(engine, postgresUrl);
   res.json({
     success: true,

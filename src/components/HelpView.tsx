@@ -2250,7 +2250,7 @@ Body:
       tags: ['çevrimdışı', 'gecikme', 'sinyal', 'uyarı', 'offline', 'otomatik takip'],
     },
     {
-      id: 'faq_8',
+      id: 'faq_9',
       category: 'Müşteri & Güvenlik',
       question: 'Sanal Simülatör cihazı ile Gerçek Donanım ayrımı ve izolasyonu nasıl çalışır?',
       answer: 'Sistem sanal ve fiziksel donanımları kesin sınırlarla izole eder. Gerçek telemetri API’sine (/api/v1/telemetry, /api/telemetry, /api/telemetry/ping) sanal cihaz anahtarıyla gelen istekler otomatik olarak 403 Forbidden (simulated_device_not_allowed) hatası ile reddedilir. Sanal bir cihaz ancak yönetici (Admin) tarafından "Gerçek Donanıma Dönüştür" işlemi ile fiziksel cihaza çevrilebilir ve bu işlem sonucunda yeni bir fiziksel API anahtarı atanır.',

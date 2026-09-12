@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../server/db.js';
@@ -7,6 +7,18 @@ import type { Device, User, TelemetryReading } from '../types.js';
 describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () => {
   const backupDir = path.join(process.cwd(), 'backups');
   let createdBackupFiles: string[] = [];
+  let originalDbDataSnapshot: any;
+
+  beforeAll(() => {
+    originalDbDataSnapshot = JSON.parse(JSON.stringify(db.data));
+  });
+
+  afterAll(() => {
+    if (originalDbDataSnapshot) {
+      db.data = originalDbDataSnapshot;
+      db.saveData(db.data);
+    }
+  });
 
   beforeEach(() => {
     if (!fs.existsSync(backupDir)) {

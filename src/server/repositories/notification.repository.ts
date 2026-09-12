@@ -78,8 +78,16 @@ export class NotificationRepository {
   public async getDashboard(userId: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    const userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
-    if (userDash) return userDash;
+    const userDash = this.db.data.dashboards.find(
+      (d: any) => d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId || d.id === `dash_${effectiveUserId}`
+    );
+    if (userDash) {
+      if (!userDash.widgets || !Array.isArray(userDash.widgets) || userDash.widgets.length === 0) {
+        userDash.widgets = [...defaultWidgets];
+        this.db.scheduleSave();
+      }
+      return userDash;
+    }
 
     const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
     const title = user
@@ -102,9 +110,11 @@ export class NotificationRepository {
   public async saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    let userDash = this.db.data.dashboards.find((d: any) => d.tenantId === effectiveUserId);
+    let userDash = this.db.data.dashboards.find(
+      (d: any) => d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId || d.id === `dash_${effectiveUserId}`
+    );
     if (!userDash) {
-      userDash = this.getDashboard(effectiveUserId);
+      userDash = await this.getDashboard(effectiveUserId);
     }
     const sanitized = validateAndSanitizeWidgets(widgets);
     userDash.widgets = sanitized.length > 0 ? sanitized : [...defaultWidgets];
@@ -115,12 +125,12 @@ export class NotificationRepository {
     return userDash;
   }
 
-  public resetDashboard(userId: string): Promise<DashboardLayout> {
+  public async resetDashboard(userId: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
     const title = user
       ? `${user.companyName || user.name} Özel Dashboard`
       : (effectiveUserId === 'usr_admin' ? 'Ana Analitik & Saha İzleme Dashboard' : 'Varsayılan Sistem Dashboard');
-    return this.saveDashboardWidgets(effectiveUserId, defaultWidgets, title);
+    return await this.saveDashboardWidgets(effectiveUserId, defaultWidgets, title);
   }
 }
