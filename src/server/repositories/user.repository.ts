@@ -338,7 +338,9 @@ export class UserRepository {
   public async terminateUserSessions(userId: string) {
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
     this.db.saveData(this.db.data, true);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteUserSessions(userId).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) { 
+      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e)); 
+    }
   }
 
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {
@@ -346,8 +348,8 @@ export class UserRepository {
     if (!user) throw new Error("Kullanıcı bulunamadı");
     
     // Postgres Transaction (aktif ise)
-    if (this.db.postgresRepo?.isReady()) {
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.softDeleteUser(userId).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
+      await this.db.postgresRepo.softDeleteUser(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
     }
     
     // In-memory update

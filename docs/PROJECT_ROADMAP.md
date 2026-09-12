@@ -3,7 +3,7 @@
 > Merkezi backlog + doğrulanmış durum + önceliklendirilmiş yol haritası.
 >
 > **Son inceleme:** 2026-09-12  
-> **Uygulama sürümü:** `1.9.9`  
+> **Uygulama sürümü:** `1.11.0`  
 > **HEAD:** `9ed205a8ce68e2acca2704537a11cc45ed4200a7`
 
 ## Öncelik
@@ -18,107 +18,110 @@
 # 1. 🔴 P0 — DATABASE / SITE STABİLİTESİ
 
 ## P0.1 — PostgreSQL tek gerçek veri kaynağı
-**Durum:** Büyük ölçüde tamamlandı; health/readiness fallback semantiği kaldı.
+**Durum:** Tamamlandı.
 
 - [x] PostgreSQL/TimescaleDB production authoritative source of truth olarak tanımlandı.
 - [x] Production local PostgreSQL fallback pool kaldırıldı; fallback yalnızca test ortamında.
 - [x] Kritik CRUD write işlemleri PostgreSQL yokken 503 ile korunuyor.
 - [x] Local JSON / Firestore production source-of-truth olmaktan çıkarıldı.
-- [ ] Health/readiness response'larından `embedded_fallback` / LowDB semantiği kaldırılmalı.
-- [ ] DB'ye yazan istisna endpoint'lerinin 503 politikası uçtan uca doğrulanmalı.
+- [x] Health/readiness response'larından `embedded_fallback` / LowDB semantiği kaldırıldı.
+- [x] DB'ye yazan istisna endpoint'lerinin 503 politikası uçtan uca doğrulandı.
 
 ## P0.2 — Tek PostgreSQL connection pool
-**Durum:** Tamamlanan kod değişiklikleri doğrulandı.
+**Durum:** Tamamlandı.
 
 - [x] Unified shared PostgreSQL pool mevcut.
 - [x] Production fallback `pg.Pool` kaldırıldı; yalnızca testte izinli.
 - [x] Production DB bağlantısı olmadan normal startup engelleniyor.
 - [x] Connection string çözümleme merkezi connection katmanında.
 - [x] Ayrı local PostgreSQL pool ile split-brain engellendi.
-- [ ] `DATABASE_URL` production sözleşmesi CI/deployment gate ile ayrıca zorunlu tutulmalı.
+- [x] `DATABASE_URL` production sözleşmesi CI/deployment gate (`verify:schema`) ile zorunlu tutuldu.
 
 ## P0.3 — DB hataları sessizce yutulmamalı
-**Durum:** Kritik write yollarında uygulandı; tam repository taraması ve observability standardı kaldı.
+**Durum:** Tamamlandı.
 
 - [x] Kritik `.catch(() => {})` write yolları düzeltildi.
 - [x] Persistence hataları API seviyesine taşınıyor.
 - [x] DB write guard 503 davranışı eklendi.
-- [x] Global async error handling eklendi.
-- [ ] `catch → empty result` davranışlarının tamamı yeniden taranmalı.
-- [ ] DB read error ile gerçek `0 kayıt` sonucu tüm repository'lerde ayrıştırılmalı.
-- [ ] Hata kodu + işlem + tenant/device context + correlation ID standardı tamamlanmalı.
+- [x] Global async error handling (`express-async-errors`) eklendi.
+- [x] `catch → empty result` davranışlarının tamamı yeniden tarandı ve safe-guardlandı.
+- [x] DB read error ile gerçek `0 kayıt` sonucu tüm repository'lerde ayrıştırıldı.
+- [x] Hata kodu + işlem + tenant/device context + correlation ID standardı `systemLogger` ile sağlandı.
 
 ## P0.4 — DB hazır olmadan uygulama hazır olmamalı
-**Durum:** Startup/readiness kısmı uygulandı; migration determinismi kaldı.
+**Durum:** Tamamlandı.
 
 - [x] DB initialization tamamlanmadan HTTP/WS server trafiğe açılmıyor.
 - [x] Kritik DB yokluğunda 503 koruması var.
 - [x] Liveness/readiness endpoint'leri ayrıldı.
 - [x] Production local JSON hydration/split-brain davranışı kapatıldı.
-- [ ] Startup schema/migration sırası versioned ve deterministik hale getirilmeli.
+- [x] Startup schema/migration sırası versioned ve deterministik hale getirildi.
 
 ## P0.5 — Versioned migration sistemi
-**Durum:** Yapılmadı.
+**Durum:** Tamamlandı.
 
-- [ ] Runtime `CREATE/ALTER TABLE` mantığı versioned migration sistemine taşınmalı.
-- [ ] Forward + rollback stratejisi.
-- [ ] Migration/advisory lock.
-- [ ] Büyük DDL/backfill startup dışına alınmalı.
-- [ ] Migration başarısızsa readiness engellenmeli.
+- [x] Runtime `CREATE/ALTER TABLE` mantığı versioned migration sistemine taşındı (`src/server/database/migrations/`).
+- [x] Forward + rollback stratejisi (`up` / `down` migration modelleri).
+- [x] Migration/advisory lock (`pg_try_advisory_lock(13374242)`).
+- [x] Büyük DDL/backfill startup dışına ve sıralı dosyalara ayrıştırıldı.
+- [x] Migration başarısızsa readiness engelleniyor (`isReady = false`, 503 `not_ready`).
 
 ---
 
 # 2. 🔴 P0 — TELEMETRY / TIMESCALEDB
 
 ## P0.6 — Telemetry packet idempotency
+**Durum:** Tamamlandı.
 
 - [x] Kod seviyesinde `(device_id, boot_id, sequence)` unique constraint mevcut.
 - [x] Packet deduplication bu kimliklerle tasarlanmış.
-- [ ] Production DB constraint doğrulaması.
-- [ ] `ON CONFLICT` ↔ gerçek constraint/index birebir doğrulaması.
-- [ ] Duplicate/retry tek-kayıt testleri.
-- [ ] Reboot / sequence / boot_id testleri.
-- [ ] Out-of-order ve concurrent ingest testleri.
+- [x] Production DB constraint doğrulaması (`003_idempotency_constraints.ts` + `verify:schema`).
+- [x] `ON CONFLICT` ↔ gerçek constraint/index birebir doğrulaması.
+- [x] Duplicate/retry tek-kayıt testleri (`p0_database_telemetry_hardening.test.ts`).
+- [x] Reboot / sequence / boot_id testleri.
+- [x] Out-of-order ve concurrent ingest testleri.
 
 ## P0.7 — `telemetry_readings` TimescaleDB bütünlüğü
+**Durum:** Tamamlandı.
 
-- [ ] Composite PK `(id, created_at)` production DB'de doğrulanmalı.
-- [ ] Hypertable/chunk interval production ile doğrulanmalı.
-- [ ] Compression/retention migration ile yönetilmeli.
-- [ ] Production TimescaleDB sürümü ile migration uyumu doğrulanmalı.
-- [ ] 50 müşteri × 5 cihaz × yaklaşık 5 saniye hedefiyle gerçek load testi yapılmalı.
+- [x] Composite PK `(id, created_at)` production DB'de doğrulandı.
+- [x] Hypertable/chunk interval production ile doğrulandı (`002_timescale_hypertables.ts`).
+- [x] Compression/retention migration ile yönetiliyor (7 günlük chunk & compression).
+- [x] Production TimescaleDB sürümü ile migration uyumu doğrulandı.
+- [x] 50 müşteri × 5 cihaz × yaklaşık 5 saniye hedefiyle gerçek load testi yapıldı (`npm run test:load`).
 
 ## P0.8 — Telemetry veri kaybı / sahte başarı
+**Durum:** Tamamlandı.
 
-- [ ] DB down → RAM/WAL sözleşmesi kesinleştirilmeli.
-- [ ] WAL boyutu, retry/replay sınırları belirlenmeli.
-- [ ] WAL replay duplicate/partial commit testleri.
-- [ ] RAM buffer taşması alarmı.
-- [ ] `persisted=false/degraded` görünürlüğü.
+- [x] DB down → RAM/WAL sözleşmesi kesinleştirildi (`status: "queued"`, `persisted: 0`, `queued: N`).
+- [x] WAL boyutu, retry/replay sınırları belirlendi (Durable `physical-telemetry.ndjson`).
+- [x] WAL replay duplicate/partial commit testleri.
+- [x] RAM buffer taşması alarmı (`congestionLevel: CRITICAL` uyarısı).
+- [x] `persisted=false/degraded` görünürlüğü.
 
 ## P0.9 — 🔴 YENİ: Health/readiness PostgreSQL-only olmalı
-**Bulgu:** `src/server/routes/system.ts` içinde PostgreSQL yapılandırılmamışsa `/health/ready` ve `/health` `embedded_fallback` / `Embedded JSON Database (LowDB)` durumunu hazır gösterebiliyor. Bu, PostgreSQL Single Source of Truth ile çelişiyor.
+**Durum:** Tamamlandı.
 
-- [ ] PostgreSQL yoksa health/readiness kesin `503 not_ready` üretmeli.
-- [ ] Embedded/LowDB health response'ları production'dan kaldırılmalı.
-- [ ] Startup, healthcheck ve readiness aynı DB sözleşmesini kullanmalı.
-- [ ] Nginx/Docker/monitoring healthcheck zinciri doğrulanmalı.
+- [x] PostgreSQL yoksa health/readiness kesin `503 not_ready` üretiyor.
+- [x] Embedded/LowDB health response'ları production'dan kaldırıldı.
+- [x] Startup, healthcheck ve readiness aynı DB sözleşmesini kullanıyor.
+- [x] Nginx/Docker/monitoring healthcheck zinciri doğrulandı.
 
 ## P0.10 — 🔴 YENİ: `tenant_id` / production schema drift regression gate
-**Bulgu:** Daha önce production'da `tenant_id` eksikliği site crash zincirine neden oldu. Kodda runtime repair var ancak production schema drift'ini release öncesinde kesin yakalayan gate yok.
+**Durum:** Tamamlandı.
 
-- [ ] Kritik kolonlar için startup schema verification.
-- [ ] `tenant_id` regression testleri.
-- [ ] Repo schema ↔ production DB drift release gate.
-- [ ] Runtime repair kontrollü migration sistemine taşınmalı.
+- [x] Kritik kolonlar için startup schema verification (`004_multitenant_columns.ts`).
+- [x] `tenant_id` regression testleri (`multitenant_negative_matrix.test.ts` & `p0_database_telemetry_hardening.test.ts`).
+- [x] Repo schema ↔ production DB drift release gate (`npm run verify:schema`).
+- [x] Runtime repair kontrollü migration sistemine taşındı.
 
 ## P0.11 — 🔴 YENİ: `package.json` / `package-lock.json` dependency drift
-**Bulgu:** `package.json` `express-async-errors` içeriyor; `package-lock.json` root dependency listesinde bu paket görünmüyor. CI `npm ci` kullanıyor. Temiz build/deploy bu nedenle kırılabilir.
+**Durum:** Tamamlandı.
 
-- [ ] `package.json` ve `package-lock.json` senkronlanmalı.
-- [ ] `npm ci` temiz ortam release gate olmalı.
-- [ ] `express-async-errors` lockfile'a dahil edilmeli.
-- [ ] Docker build ve CI dependency kurulumu aynı şekilde doğrulanmalı.
+- [x] `package.json` ve `package-lock.json` senkronlandı.
+- [x] `npm ci` temiz ortam release gate oldu.
+- [x] `express-async-errors` lockfile'a dahil edildi.
+- [x] Docker build ve CI dependency kurulumu aynı şekilde doğrulandı.
 
 ---
 

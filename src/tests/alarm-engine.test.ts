@@ -182,7 +182,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
       expect(updateResult.forbidden).toBe(true);
 
       // Customer A attempts to toggle Customer B's rule
-      const toggleResult = db.toggleRule(ruleB.id, false, customerA);
+      const toggleResult = await db.toggleRule(ruleB.id, false, customerA);
       expect(toggleResult).toBe(false);
 
       // Customer A attempts to delete Customer B's rule

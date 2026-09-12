@@ -126,13 +126,23 @@ app.use(systemRouter);
 import { db } from './src/server/db.js';
 
 app.use('/api', (req, res, next) => {
-  if (req.method !== 'GET' && !req.path.startsWith('/auth') && !req.path.startsWith('/database') && !req.path.startsWith('/system') && !req.path.startsWith('/telemetry')) {
-    if (!db.postgresRepo?.isReady()) {
-      return res.status(503).json({ 
-        success: false, 
-        message: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are temporarily disabled to ensure data integrity.' 
-      });
-    }
+  // Allow OPTIONS preflight
+  if (req.method === 'OPTIONS' || req.method === 'GET') {
+    return next();
+  }
+
+  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair
+  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database')) {
+    return next();
+  }
+
+  if (!db.postgresRepo?.isReady()) {
+    return res.status(503).json({ 
+      success: false, 
+      code: 'DB_UNAVAILABLE',
+      error: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are disabled to protect data integrity.',
+      message: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are disabled to protect data integrity.' 
+    });
   }
   next();
 });
@@ -194,12 +204,18 @@ startCommandExpiryWorker();
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
   console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
-  await db.waitForInitialization();
-  if (!db.postgresRepo?.isReady()) {
-    console.error("[Startup] PostgreSQL başlatılamadı. Uygulama başlatılamıyor.");
-    process.exit(1);
+  try {
+    await db.waitForInitialization(20000);
+  } catch (err: any) {
+    console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
   }
-  console.log("[Startup] DB Hazır. API trafiğe açılıyor...");
+
+  if (db.postgresRepo?.isReady()) {
+    console.log("[Startup] PostgreSQL hazır ve şema doğrulandı. API trafiğe açılıyor...");
+  } else {
+    console.warn("[Startup] PostgreSQL bağlantısı veya şeması henüz tamamlanmadı. Sunucu 503 veri koruma moduyla başlatılıyor.");
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

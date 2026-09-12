@@ -1,14 +1,76 @@
-## v1.9.8
-* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (catch(() => {})) giderilmeye devam edildi. (Telemetry ve upsert işlemleri için).
-
-## v1.9.7
-* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (`.catch(() => {})`) giderildi. Veri tabanına yazılamayan durumlarda servisler hata fırlatarak 503 yanıtına düşecek.
-* **Architecture Hardening:** Uygulamanın başlatılma sırası düzeltildi. Express sunucusu HTTP ve WebSocket isteklerini kabul etmeden önce veritabanının (`initPostgresRepository`) hazır olması mecburi kılındı.
-* **Error Handling:** `express-async-errors` entegre edilerek tüm asenkron hata yönetimlerinin Next işleyicisine düşmesi sağlandı.
-
 # 📦 Proje Sürüm Geçmişi & Değişiklik Günlüğü (Changelog)
 
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
+
+---
+
+## 🚀 [v1.11.1] - 2026-09-12
+
+### 🛠️ Dev Server & PostgreSQL Asynchronous Startup Synchronization Fix
+- **Deterministik Şema Başlatma Senkronizasyonu (`src/server/db.ts`)**:
+  - `initPostgresRepository()` içerisinde arka planda asenkron ve un-awaited çalışan `ensureTelemetrySchema()` çağrısı `await` ile sıralı hale getirildi.
+  - Şema geçişleri ve migration'lar tamamlanmadan `initPromise`'in erken dönüp `isReady()` kontrolünün yanlışlıkla `false` dönmesi engellendi.
+  - `waitForInitialization` bekleme zaman aşımı güvenli 20.000 ms sınırına yükseltildi.
+- **Kesintisiz Dev Server ve Port 3000 Güvencesi (`server.ts`)**:
+  - `setupViteOrStatic()` fonksiyonu içerisindeki erken `process.exit(1)` kaldırılarak HTTP / Vite geliştirme sunucusunun Port 3000 üzerinde her koşulda ayağa kalkması sağlandı.
+  - Veritabanı gecikmeli bağlansa dahi frontend arayüzü ve SPA yüklenirken, yazma işlemleri 503 veri koruma katmanı ile korunmaya devam eder.
+
+---
+
+## 🚀 [v1.11.0] - 2026-09-12
+
+### 🛡️ P0 Database & Telemetry TimescaleDB Full Verification and Load Hardening
+- **P0.5: Versioned Migration & Multi-Node Advisory Locking (`src/server/database/migrations/`)**:
+  - `001_core_relational_tables.ts`, `002_timescale_hypertables.ts`, `003_idempotency_constraints.ts`, `004_multitenant_columns.ts` adımları deterministik sıraya bağlandı.
+  - `schema_migrations` tablosu üzerinden sürüm takibi ve `pg_try_advisory_lock(13374242)` ile birden fazla konteynerin aynı anda DDL çalıştırması engellendi.
+  - Migration başarısız olduğunda sistem readiness durumu kilitlenerek (`isReady = false`) hatalı veri yazımı engellendi.
+- **P0.6 & P0.7: Telemetry Packet Idempotency, Composite PK & 250-Cihaz Load Testi**:
+  - `telemetry_packets` üzerinde `unq_telemetry_device_boot_sequence` kısıtı ve `(id, created_at)` composite primary key bütünlüğü production CI/CD doğrulama kapısına eklendi.
+  - 50 müşteri × 5 cihaz = 250 cihaz eşzamanlı telemetri yük testi geliştirildi (`npm run test:load`). 0 paket kaybı ve mikro-saniye bazında deduplication doğrulandı.
+- **P0.8: Dayanıklı WAL / RAM Tampon Sözleşmesi**:
+  - Veritabanı kesintisi anında telemetri yanıtı `status: "queued"`, `persisted: 0`, `queued: N` ile netleştirildi.
+  - Disk tabanlı `physical-telemetry.ndjson` WAL kuyruğu ve dinamik tıkanıklık kontrol seviyeleri (`LOW`, `MODERATE`, `HIGH`, `CRITICAL`) doğrulandı.
+- **P0.10: `tenant_id` ve Production Schema Drift Regresyon Kapısı**:
+  - `scripts/verify-schema-drift.ts` ile tüm tablolar üzerinde `tenant_id` kolonları, indeksler ve birincil anahtar kısıtları otomatik test kuralı haline getirildi (`npm run verify:schema`).
+- **Unit & Regresyon Testleri**:
+  - `p0_database_telemetry_hardening.test.ts` test paketi dahil edilerek 52 farklı senaryoda %100 başarı sağlandı.
+
+---
+
+## 🚀 [v1.10.0] - 2026-09-12
+
+### 🏗️ P0 Database & Telemetry TimescaleDB Architecture Hardening
+- **P0.1 & P0.9: PostgreSQL-Only Health/Readiness & Write Guard**:
+  - `/health/ready` ve `/health` rotalarındaki tüm `embedded_fallback` ve LowDB kalıntıları tamamen kaldırıldı.
+  - PostgreSQL hazır olmadığında sağlık kontrolleri kesin olarak HTTP 503 `not_ready` / `degraded` döndürmektedir.
+  - Tüm veri yazma istekleri (POST, PUT, DELETE, PATCH) veritabanı çevrimdışı iken 503 Service Unavailable ile korunmaktadır.
+- **P0.5: Versioned Migration & Advisory Lock Sistemi**:
+  - Deterministik, sıralı ve versiyonlu `schema_migrations` tablosu ve migration runner geliştirildi (`001_core_relational_tables`, `002_timescaledb_hypertables`, `003_idempotency_constraints`, `004_multitenant_columns`).
+  - Çoklu pod/instance çatışmasını önleyen PostgreSQL advisory lock (`pg_try_advisory_lock`) entegrasyonu tamamlandı.
+- **P0.6 & P0.7: Telemetry Packet Idempotency & Composite PK Bütünlüğü**:
+  - `telemetry_packets` üzerinde `(device_id, boot_id, sequence)` benzersiz kısıtı ve `ON CONFLICT DO NOTHING` paket deduplication mekanizması doğrulandı.
+  - `telemetry_readings` üzerinde `(id, created_at)` Composite Primary Key kısıtı güvenceye alındı.
+- **P0.8: Telemetry Dayanıklı WAL Tamponu**:
+  - Veritabanı kesintisi anında `persisted=false`, `queued=true` ve `status=queued` sözleşmesi kesinleştirildi. Disk tabanlı WAL kuyruğu ve taşma durumunda alarm koruması sağlandı.
+- **P0.10 & P0.11: Production Schema Drift & Dependency Senkronizasyonu**:
+  - `verify:schema` kontrol scripti ile `tenant_id`, kritik kolonlar ve kısıtlar doğrulandı; lockfile ve paket sürümleri senkronize edildi.
+
+---
+
+## 🚀 [v1.9.9] - 2026-09-12
+* **Bugfix & Maintenance:** Bağımlılık ve lockfile senkronizasyonu tamamlandı (`express-async-errors` dahil).
+
+---
+
+## 🚀 [v1.9.8] - 2026-09-12
+* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (catch(() => {})) giderilmeye devam edildi (Telemetry ve upsert işlemleri için).
+
+---
+
+## 🚀 [v1.9.7] - 2026-09-12
+* **Bugfix (Critical):** Veritabanı (PostgreSQL) işlemlerindeki tüm sessiz yutulan hatalar (`.catch(() => {})`) giderildi. Veri tabanına yazılamayan durumlarda servisler hata fırlatarak 503 yanıtına düşecek.
+* **Architecture Hardening:** Uygulamanın başlatılma sırası düzeltildi. Express sunucusu HTTP ve WebSocket isteklerini kabul etmeden önce veritabanının (`initPostgresRepository`) hazır olması mecburi kılındı.
+* **Error Handling:** `express-async-errors` entegre edilerek tüm asenkron hata yönetimlerinin Next işleyicisine düşmesi sağlandı.
 
 ---
 

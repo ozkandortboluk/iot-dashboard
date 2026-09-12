@@ -58,7 +58,7 @@ describe('ESP8266 & ESP32 Hardware E2E Pipeline (Roadmap P0 - Item 1)', () => {
     created_at: new Date().toISOString(),
   };
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Register test device and user in db
     const existingDevs = db.getDevices().filter((d) => d.id !== testDeviceId);
     db.data.devices = [...existingDevs, { ...hardwareDevice }];
@@ -67,7 +67,7 @@ describe('ESP8266 & ESP32 Hardware E2E Pipeline (Roadmap P0 - Item 1)', () => {
     db.data.users = [...existingUsers, { ...operatorUser }];
 
     // Directly generate valid session token
-    const token = db.createSession(operatorUser);
+    const token = await db.createSession(operatorUser);
     sessionCookie = `nexus_session_token=${token}`;
   });
 

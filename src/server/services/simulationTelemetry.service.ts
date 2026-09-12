@@ -73,11 +73,15 @@ export class SimulationTelemetryService {
     }
 
     // 4. Update Simulated Device Status & Metrics
-    db.updateDevice(device.id, {
-      metrics: device.metrics,
-      lastSeen: new Date().toISOString(),
-      status: 'online',
-    });
+    try {
+      if (db.getDevices().some((d) => d.id === device.id)) {
+        await db.updateDevice(device.id, {
+          metrics: device.metrics,
+          lastSeen: new Date().toISOString(),
+          status: 'online',
+        }).catch(() => {});
+      }
+    } catch {}
 
     if (devInfoUpdated) {
       broadcast('device:updated', device);

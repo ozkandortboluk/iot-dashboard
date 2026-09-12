@@ -34,19 +34,17 @@ systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
 });
 
 systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
-  const isPostgresConfigured = !!(process.env.DATABASE_URL || process.env.POSTGRES_HOST || process.env.PGHOST);
   const isPostgresReady = !!db.postgresRepo?.isReady();
-  const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
-  if (isDbReady) {
+  if (isPostgresReady) {
     return res.status(200).json({
       status: 'ready',
       ready: true,
       database: {
-        status: isPostgresReady ? 'connected' : 'embedded_fallback',
-        engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
+        status: 'connected',
+        engine: 'PostgreSQL / TimescaleDB',
         ready: true,
         pool: poolStats,
       },
@@ -65,7 +63,7 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
     ready: false,
     database: {
       status: 'disconnected',
-      engine: 'PostgreSQL',
+      engine: 'PostgreSQL / TimescaleDB',
       ready: false,
       pool: poolStats,
       error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya bağlantı hazır değil.',
@@ -82,20 +80,19 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
 });
 
 systemRouter.get('/health', (req, res) => {
-  const isPostgresConfigured = !!(process.env.DATABASE_URL || process.env.POSTGRES_HOST || process.env.PGHOST);
   const isPostgresReady = !!db.postgresRepo?.isReady();
-  const isDbReady = isPostgresConfigured ? isPostgresReady : true;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
-  const statusCode = isDbReady ? 200 : 503;
+  const statusCode = isPostgresReady ? 200 : 503;
   return res.status(statusCode).json({
-    status: isDbReady ? 'healthy' : 'degraded',
+    status: isPostgresReady ? 'healthy' : 'degraded',
     live: true,
-    ready: isDbReady,
+    ready: isPostgresReady,
     database: {
-      ready: isDbReady,
-      engine: isPostgresReady ? 'PostgreSQL / TimescaleDB' : 'Embedded JSON Database (LowDB)',
+      status: isPostgresReady ? 'connected' : 'disconnected',
+      engine: 'PostgreSQL / TimescaleDB',
+      ready: isPostgresReady,
       pool: poolStats,
     },
     retryQueue: {

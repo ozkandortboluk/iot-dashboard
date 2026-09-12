@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { getSharedPgPoolStats } from './connection.js';
+import { runAllMigrations, getMigrationStatus, getLatestMigrationRunStatus } from './migrations/migrationRunner.js';
 import type {
   User,
   Device,
@@ -42,8 +43,13 @@ export class PostgresRepository {
     this.isSchemaEnsured = false;
   }
 
-  public setConnected(connected: boolean) {
+  public setConnected(connected: boolean, schemaEnsured?: boolean) {
     this.isConnected = connected;
+    if (schemaEnsured !== undefined) {
+      this.isSchemaEnsured = schemaEnsured;
+    } else if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+      this.isSchemaEnsured = connected;
+    }
     if (connected) {
       this.connectionErrorNotified = false;
       this.lastTestedAt = new Date().toISOString();
@@ -66,6 +72,15 @@ export class PostgresRepository {
     // Block readiness until runtime schema migrations have successfully completed
     // Incoming telemetry will naturally fall back to resilient WAL during this period.
     return !!this.pool && this.isConnected && this.isSchemaEnsured;
+  }
+
+  public async getMigrationStatus() {
+    if (!this.pool) return null;
+    return getMigrationStatus(this.pool);
+  }
+
+  public getLatestMigrationRunStatus() {
+    return getLatestMigrationRunStatus();
   }
 
   public async getPoolAndPerformanceStats(): Promise<{
@@ -219,6 +234,20 @@ export class PostgresRepository {
 
     this.lastSchemaEnsureTime = now;
     this.schemaEnsuringPromise = (async () => {
+      // 1. Run versioned migrations
+      try {
+        const migRes = await runAllMigrations(this.pool!);
+        if (!migRes.success) {
+          this.isSchemaEnsured = false;
+          systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi başarısız: ${migRes.error}`);
+          return;
+        }
+      } catch (migErr: any) {
+        this.isSchemaEnsured = false;
+        systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi istisnası: ${migErr?.message || migErr}`);
+        return;
+      }
+
       let client: any = null;
       let hasLock = false;
       const SCHEMA_LOCK_ID = 13374242; // Distributed lock ID for schema migration

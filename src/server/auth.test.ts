@@ -151,7 +151,7 @@ describe('Authentication & Validation Security Tests', () => {
       expect(userRepo.verifySession(token)).not.toBeNull();
 
       // Perform server-side session revocation
-      const revoked = userRepo.deleteSession(token);
+      const revoked = await userRepo.deleteSession(token);
       expect(revoked).toBe(true);
 
       // Subsequent session checks must fail

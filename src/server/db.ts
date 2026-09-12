@@ -287,7 +287,7 @@ class LocalDatabase {
   public async waitForInitialization(timeoutMs?: number): Promise<boolean> {
     const effectiveTimeout = timeoutMs !== undefined
       ? timeoutMs
-      : (process.env.NODE_ENV === 'test' || process.env.VITEST ? 100 : 6000);
+      : (process.env.NODE_ENV === 'test' || process.env.VITEST ? 100 : 20000);
     if (!this.initPromise) return true;
     try {
       return await Promise.race([
@@ -480,14 +480,12 @@ class LocalDatabase {
         console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
       }
 
-      // 2. Asynchronous Schema & DDL Verification in Background (does not block API startup or authentication)
-      (async () => {
-        try {
-          await this.postgresRepo.ensureTelemetrySchema();
-        } catch (tErr: any) {
-          systemLogger.warn('database', 'PostgreSQL Telemetri Şema Kurulum Uyarısı:', tErr?.message || tErr);
-        }
-      })().catch(() => {});
+      // 2. Synchronous Schema & DDL Verification (ensures schema migration before readiness)
+      try {
+        await this.postgresRepo.ensureTelemetrySchema();
+      } catch (tErr: any) {
+        systemLogger.warn('database', 'PostgreSQL Telemetri Şema Kurulum Uyarısı:', tErr?.message || tErr);
+      }
 
       return true;
     } catch (err: any) {
@@ -589,7 +587,11 @@ class LocalDatabase {
   }
 
   public isPostgresProductionMode(): boolean {
-    // Critical Change for P0: PostgreSQL is the single authoritative source.
+    // Fallback only allowed in test runners (Vitest) when DB is not running
+    if ((process.env.VITEST || process.env.NODE_ENV === 'test') && !this.postgresRepo?.isReady()) {
+      return false;
+    }
+    // In production and real runtime, PostgreSQL is the single authoritative source.
     return true;
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "nexusnode-iot",
   "private": true,
-  "version": "1.9.9",
+  "version": "1.11.1",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -13,11 +13,13 @@
     "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
+    "verify:schema": "tsx scripts/verify-schema-drift.ts",
     "type-check": "tsc --noEmit",
     "lint": "eslint . && tsc --noEmit",
     "lint:fix": "eslint . --fix",
     "test": "vitest run src/",
     "test:watch": "vitest src/",
+    "test:load": "tsx scripts/telemetry-load-test.ts",
     "test:e2e": "vitest run e2e/",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:ci": "npm run lint && npm run type-check && npm run test && npm run build && npm run test:smoke && npm run test:e2e",
