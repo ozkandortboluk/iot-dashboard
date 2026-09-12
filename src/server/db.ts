@@ -790,6 +790,21 @@ class LocalDatabase {
         const { exec } = await import('node:child_process');
         const { promisify } = await import('node:util');
         const execAsync = promisify(exec);
+        
+        // Ensure pg_dump is available in the environment before executing
+        try {
+          await execAsync('pg_dump --version');
+        } catch (missingErr) {
+          console.warn('[BACKUP] pg_dump is not installed in this environment. Falling back to simple JSON metadata backup.');
+          const fallbackFilename = `db_metadata_backup_${timestamp}.json`;
+          const fallbackPath = path.join(this.BACKUP_DIR, fallbackFilename);
+          const serialized = JSON.stringify(this.data, null, 2);
+          await fs.promises.writeFile(fallbackPath, serialized, 'utf-8');
+          this.pruneBackups();
+          const stats = await fs.promises.stat(fallbackPath);
+          return { success: true, filename: fallbackFilename, size: stats.size };
+        }
+
         await execAsync(`pg_dump "${dbUrl}" > "${backupPath}"`);
         
         this.pruneBackups();

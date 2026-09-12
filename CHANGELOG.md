@@ -4,6 +4,14 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.9.5] - 2026-09-12
+
+### 🐛 Yedekleme Sistemi (pg_dump) Çökme Hatası Onarımı
+- **pg_dump Bulunamama Hatası (Command failed):** Docker ve sandboxed sunucu ortamlarında (Alpine, Cloud Run vs.) yerleşik olarak PostgreSQL istemci araçları (`pg_dump`) kurulu olmadığında, `createBackup()` metodu `pg_dump not found` fırlatarak yedekleme mekanizmasının komple çökmesine neden oluyordu. Bu hata loglarda sıkça tespit edildi.
+- **Güvenli Fallback (Geri Dönüş) Mekanizması:** Artık sistem yedekleme başlatmadan önce asenkron bir `pg_dump --version` komutu ile ortamın yeteneğini kontrol ediyor. Eğer araç sunucuda kurulu değilse (veya hata veriyorsa), sistem hata basıp çökmek yerine zarif bir şekilde (graceful degradation) `db_metadata_backup_*.json` formatında lokal konfigürasyon/metadata yedekleme rutinine düşüyor.
+
+---
+
 ## 🚀 [v1.9.4] - 2026-09-11
 
 ### 🛠️ Geriye Dönük Şema (Legacy v1.7.4) ve Auto-Healer Onarımları
