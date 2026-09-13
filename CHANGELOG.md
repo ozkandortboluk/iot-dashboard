@@ -4,7 +4,30 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
-## 🚀 [v1.11.4] - 2026-09-12
+## 🚀 [v1.11.5] - 2026-09-12
+
+### 🔴 P0 Roadmap & Kritik Üretim Düzeltmeleri (Production Stability & Schema Integrity)
+- **Schema Readiness & Distributed Lock Bypass Giderildi (P0.16)**:
+  - `src/server/database/postgres.ts`: Advisory lock alınamadığında 3 saniye sonra körü körüne `isSchemaEnsured=true` yapılması kaldırıldı. Bunun yerine 15 saniyeye kadar diğer container'ın DDL/migration'ı tamamlaması bekleniyor ve ardından `verifySchemaContract()` ile şemanın eksiksiz olduğu doğrulanıyor. Doğrulama başarısız olursa `isSchemaEnsured=false` kalarak `/health/ready` 503 döndürmeye devam ediyor.
+- **Migration Bypass Güvenlik Sözleşmesi (P0.17)**:
+  - `DISABLE_AUTO_MIGRATION=true` ortam değişkeni üretim modunda (`NODE_ENV=production`) doğrudan hazır kabul edilmiyor; öncesinde veritabanı şema sözleşmesi (`verifySchemaContract()`) zorunlu koşuluyor ve doğrulanmayan şemalarda trafik kabulü engelleniyor.
+- **Process Crash Shields & Graceful Exit Politikası (P0.18)**:
+  - `server.ts`: `uncaughtException` ve katı moddaki `unhandledRejection` durumlarında sistem logları yazıldıktan sonra process'in tutarsız bellek durumuyla asılı kalması engellendi; 1 saniyelik kontrollü log boşaltma ardından `process.exit(1)` ile konteyner yöneticisinin temiz bir container başlatması sağlandı.
+- **TimescaleDB Üretim Zorunluluğu & False-Success Engeli (P0.13, P0.3)**:
+  - `src/server/database/migrations/002_timescale_hypertables.ts`: Üretim ortamında (`NODE_ENV=production` veya `REQUIRE_TIMESCALE=true`) TimescaleDB uzantısı etkinleştirilemezse sessizce standart PostgreSQL'e düşmek yerine fatal hata fırlatarak migration durduruluyor.
+- **Şema Sözleşmesi & Drift Doğrulaması Güçlendirildi (P0.14, P0.6, P0.7)**:
+  - `scripts/verify-schema-drift.ts` ve `PostgresRepository.verifySchemaContract()`: `telemetry_packets` üzerindeki `unq_telemetry_device_boot_sequence` tekillik kısıtının tam olarak `(device_id, boot_id, sequence)` ordinal sırasında olduğu `unnest(c.conkey) WITH ORDINALITY` ile doğrulandı.
+  - TimescaleDB 7 günlük parça aralığı (`chunk_time_interval`), sıkıştırma politikası (`compression_settings`) ve uzantı sürüm kontrolleri eklendi.
+- **Migration Checksum & Drift Tespiti (P0.5)**:
+  - `src/server/database/migrations/migrationRunner.ts`: `schema_migrations` tablosuna SHA-256 tabanlı checksum kaydedilmesi ve mevcut migration kodları ile DB arasındaki olası farkların tespit edilmesi sağlandı.
+- **Bağlamsal Çoklu Kiracı (Multitenant) Veri Güvenliği (P0.15)**:
+  - `src/server/database/migrations/004_multitenant_columns.ts`: `tenant_id` sütunu geriye dönük doldurulurken tüm verilerin körü körüne `usr_admin` yapılması engellendi; cihaz, kullanıcı ve bildirim ilişkileri bağlamsal olarak analiz edilerek gerçek cihaz ve kullanıcı sahiplikleri korundu.
+- **Sessiz Veritabanı Yakalamaları Loglandı (P0.3)**:
+  - `src/server/db.ts`: `initPostgresRepository` hydration döngüsündeki ve `startAutoBackupWorker` içindeki tüm boş `.catch(() => {})` blokları `systemLogger.error` ile izlenebilir hale getirildi.
+- **Sürüm ve Paket Senkronizasyonu (P0.11, MANDATORY RULE 1)**:
+  - `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları `1.11.5` olarak tam senkronize edildi.
+
+---
 
 ### 🛠️ Dashboard Yükleme & Müşteri Görünürlük Düzeltmesi (User Dashboard Visibility Fix)
 - **Asenkron Promise Düzeltmesi (`src/server/routes/alarms.ts`)**:

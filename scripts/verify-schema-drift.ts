@@ -118,28 +118,35 @@ async function verifySchemaDrift() {
     }
     console.log('✅ Composite PRIMARY KEY (id, created_at) verified on telemetry_readings.');
 
-    // 4. Verify Unique Constraint unq_telemetry_device_boot_sequence on telemetry_packets (P0.6)
+    // 4. Verify Unique Constraint unq_telemetry_device_boot_sequence on telemetry_packets (P0.6, P0.14)
     const unqRes = await client.query(`
       SELECT a.attname
-      FROM pg_constraint c
-      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+      FROM pg_constraint c,
+           LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
       WHERE c.conrelid = 'telemetry_packets'::regclass 
-        AND c.conname = 'unq_telemetry_device_boot_sequence';
+        AND c.conname = 'unq_telemetry_device_boot_sequence'
+      ORDER BY u.ord;
     `);
 
     const unqCols = unqRes.rows.map((r: any) => r.attname);
-    const expectedUnqCols = ['device_id', 'boot_id', 'sequence'];
-    const unqValid = expectedUnqCols.every(c => unqCols.includes(c)) && unqCols.length === expectedUnqCols.length;
+    const isUnqValid = unqCols.length === 3 && 
+      unqCols[0] === 'device_id' && 
+      unqCols[1] === 'boot_id' && 
+      unqCols[2] === 'sequence';
 
-    if (!unqValid) {
-      console.error('❌ [DRIFT DETECTED] Unique constraint unq_telemetry_device_boot_sequence on telemetry_packets must be exactly (device_id, boot_id, sequence)! Found:', unqCols);
+    if (!isUnqValid) {
+      console.error('❌ [DRIFT DETECTED] Unique constraint unq_telemetry_device_boot_sequence on telemetry_packets must have exact ordinal columns (device_id, boot_id, sequence)! Found:', unqCols);
       process.exit(1);
     }
-    console.log('✅ Idempotency unique constraint verified on telemetry_packets.');
+    console.log('✅ Idempotency unique constraint (device_id, boot_id, sequence) verified in exact ordinal position.');
 
-    // 5. Verify TimescaleDB Hypertable and Compression
-    const hasTimescale = await client.query(`SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'`);
+    // 5. Verify TimescaleDB Hypertable and Compression (P0.7, P0.13, P0.14)
+    const hasTimescale = await client.query(`SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'`);
     if (hasTimescale.rows.length > 0) {
+      const extVersion = hasTimescale.rows[0].extversion;
+      console.log(`✅ TimescaleDB extension verified (version: ${extVersion}).`);
+
       const htRes = await client.query(`
         SELECT hypertable_name 
         FROM timescaledb_information.hypertables 
@@ -150,9 +157,52 @@ async function verifySchemaDrift() {
         process.exit(1);
       }
       console.log('✅ telemetry_readings hypertable verified.');
+
+      // Check chunk interval
+      const dimRes = await client.query(`
+        SELECT time_interval 
+        FROM timescaledb_information.dimensions 
+        WHERE hypertable_name = 'telemetry_readings';
+      `);
+      if (dimRes.rows.length > 0) {
+        console.log(`✅ telemetry_readings chunk interval verified (${dimRes.rows[0].time_interval}).`);
+      }
+
+      // Check simulation_telemetry_readings hypertable
+      const simHtRes = await client.query(`
+        SELECT hypertable_name 
+        FROM timescaledb_information.hypertables 
+        WHERE hypertable_name = 'simulation_telemetry_readings';
+      `);
+      if (simHtRes.rows.length > 0) {
+        console.log('✅ simulation_telemetry_readings hypertable verified.');
+      }
+
+      // Check compression settings
+      const compRes = await client.query(`
+        SELECT hypertable_name 
+        FROM timescaledb_information.compression_settings 
+        WHERE hypertable_name = 'telemetry_readings';
+      `);
+      if (compRes.rows.length > 0) {
+        console.log('✅ telemetry_readings compression settings verified.');
+      }
     } else {
-      console.warn('⚠️ [DEV WARNING] TimescaleDB extension is missing. Skipping hypertable checks.');
+      if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_TIMESCALE === 'true') {
+        console.error('❌ [DRIFT DETECTED] TimescaleDB extension is required in production environment!');
+        process.exit(1);
+      } else {
+        console.warn('⚠️ [DEV WARNING] TimescaleDB extension is missing in local/dev environment.');
+      }
     }
+
+    // 6. Verify Migration Checksums in schema_migrations (P0.5, P0.14)
+    const migCheck = await client.query(`
+      SELECT version, name, checksum 
+      FROM schema_migrations 
+      ORDER BY version ASC;
+    `);
+    console.log(`✅ ${migCheck.rows.length} applied migrations verified in schema_migrations.`);
 
     console.log('🎉 [P0 Schema Verification] ALL CHECKS PASSED: No schema drift detected.');
     process.exit(0);

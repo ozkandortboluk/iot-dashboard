@@ -12,10 +12,15 @@ export const migration002: Migration = {
       hasTimescale = true;
     } catch (err: any) {
       console.warn('[Migration 002] TimescaleDB extension could not be enabled:', err?.message || err);
+      if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_TIMESCALE === 'true') {
+        const fatalErr = new Error(`[Migration 002 FATAL] Production environment requires TimescaleDB extension, but enabling it failed: ${err?.message || err}`);
+        console.error(fatalErr.message);
+        throw fatalErr;
+      }
     }
 
     if (!hasTimescale) {
-      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB unavailable).');
+      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB unavailable in non-production environment).');
       return;
     }
 

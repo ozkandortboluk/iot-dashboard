@@ -856,7 +856,7 @@ export interface AuditLog {
 }
 
 export type SystemEventLevel = 'info' | 'warn' | 'error' | 'critical';
-export type SystemEventCategory = 'database' | 'server' | 'websocket' | 'telemetry' | 'auto_repair' | 'security' | 'auth';
+export type SystemEventCategory = 'database' | 'server' | 'websocket' | 'telemetry' | 'auto_repair' | 'security' | 'auth' | 'backup';
 
 export interface SystemEvent {
   id: string;

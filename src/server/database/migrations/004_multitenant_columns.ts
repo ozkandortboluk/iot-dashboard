@@ -41,7 +41,29 @@ export const migration004: Migration = {
           ALTER TABLE ${item.table} ADD COLUMN IF NOT EXISTS ${item.column} VARCHAR(64);
         `);
         
-        // Backfill existing rows that have NULL tenant_id
+        // Contextual backfill existing rows that have NULL tenant_id
+        if (item.table === 'devices') {
+          await client.query(`
+            UPDATE devices 
+            SET tenant_id = COALESCE(NULLIF(user_id, ''), 'usr_admin') 
+            WHERE tenant_id IS NULL;
+          `);
+        } else if (['telemetry_readings', 'simulation_telemetry_readings', 'active_alarms', 'alarm_events', 'threshold_rules', 'device_commands'].includes(item.table)) {
+          await client.query(`
+            UPDATE ${item.table} t
+            SET tenant_id = COALESCE(d.tenant_id, d.user_id, 'usr_admin')
+            FROM devices d
+            WHERE t.device_id = d.id AND t.tenant_id IS NULL;
+          `);
+        } else if (['notifications', 'audit_logs'].includes(item.table)) {
+          await client.query(`
+            UPDATE ${item.table} t
+            SET tenant_id = COALESCE(NULLIF(t.user_id, ''), 'usr_admin')
+            WHERE t.tenant_id IS NULL;
+          `);
+        }
+
+        // Final fallback for any unmatched or orphaned rows
         await client.query(`
           UPDATE ${item.table} SET ${item.column} = 'usr_admin' WHERE ${item.column} IS NULL;
         `);

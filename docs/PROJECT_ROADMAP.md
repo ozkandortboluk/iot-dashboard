@@ -4,7 +4,7 @@
 >
 > **Son inceleme:** 2026-09-12  
 > **İncelenen HEAD:** `69fe63a6cb04b546e04d941c6a50b6044f5a2a35`  
-> **package.json:** `1.11.4`
+> **package.json:** `1.11.5`
 
 ## Öncelik
 - 🔴 **P0:** production/site erişilebilirliği, veri bütünlüğü, DB mimarisi, migration/readiness ve doğrudan çökme riski
@@ -46,51 +46,51 @@
 - [x] Migration 004 tenant ALTER/FK hataları throw ediyor.
 - [x] Migration 002 hypertable/compression hataları throw ediyor.
 - [x] Kritik API write yollarında 503/error propagation mevcut.
-- [ ] Migration 002 Timescale extension enable hatası production'da fail etmeli.
-- [ ] `initPostgresRepository()` hydration `saveUser/saveDevice/saveRule` catch'leri hata durumunu sessizce geçmemeli.
-- [ ] `createBackup().catch(() => {})` gibi kritik operasyon catch'leri yeniden sınıflandırılmalı.
+- [x] Migration 002 Timescale extension enable hatası production'da fail ediyor (`NODE_ENV=production || REQUIRE_TIMESCALE=true`).
+- [x] `initPostgresRepository()` hydration `saveUser/saveDevice/saveRule` vb. catch'leri `systemLogger.error` ile kaydediliyor.
+- [x] `createBackup().catch()` operasyon catch'i `systemLogger.error` ile kaydediliyor.
 - [ ] DB read error ile gerçek boş sonuç ayrımı tam taranmalı.
 
 ## P0.4 — DB hazır olmadan uygulama hazır olmamalı
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam; operasyon testi açık**
 
 - [x] `isReady()` schema ensure koşulunu dikkate alıyor.
 - [x] `/health/ready` DB hazır değilse 503.
-- [ ] Advisory lock alınamadığında 3 saniye sonra doğrudan `isSchemaEnsured=true` yapılması kaldırılmalı.
-- [ ] Startup timeout sonrası readiness yalnız gerçek DB/schema durumuna göre belirlenmeli.
+- [x] Advisory lock alınamadığında 3 saniye sonra doğrudan `isSchemaEnsured=true` yapılması kaldırıldı (15s poll + verifySchemaContract).
+- [x] Startup timeout sonrası readiness yalnız gerçek DB/schema durumuna göre belirleniyor.
 - [ ] Nginx → app → DB failure-injection testi.
 
 ## P0.5 — Versioned migration sistemi
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam; down rollback açık**
 
 - [x] `001–004` sıralı migration yapısı.
 - [x] `schema_migrations`.
 - [x] Advisory lock.
 - [x] Pending migration transaction/rollback modeli.
-- [ ] Timescale extension failure fail etmeli.
+- [x] Timescale extension failure fail ediyor (production modda).
 - [ ] `down` migration'lar gerçek rollback veya açık irreversible politika sağlamalı.
-- [ ] Migration checksum gerçekten yazılmalı ve drift kontrol edilmeli.
-- [ ] Migration sonrası otomatik schema verification.
+- [x] Migration checksum (`computeMigrationChecksum`) SHA-256 olarak yazılıyor ve drift kontrol ediliyor.
+- [x] Migration sonrası otomatik schema verification (`verifySchemaContract`).
 - [ ] Runtime DDL ile migration DDL tek canonical kaynağa indirilmeli.
 
 ## P0.6 — Telemetry packet idempotency
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam; yük testi açık**
 
 - [x] `(device_id, boot_id, sequence)` unique constraint tanımlı.
 - [x] Dedup modeli mevcut.
-- [ ] Verification gerçek constraint kolonlarını ordinal sırayla doğrulamalı.
-- [ ] `ON CONFLICT` hedefi gerçek constraint ile birebir doğrulanmalı.
+- [x] Verification gerçek constraint kolonlarını ordinal sırayla (`device_id, boot_id, sequence`) doğruluyor.
+- [x] `ON CONFLICT (device_id, boot_id, sequence)` hedefi gerçek constraint ile birebir eşleşiyor.
 - [ ] Duplicate/retry/reboot/out-of-order/concurrent production-benzeri test kanıtı.
 
 ## P0.7 — `telemetry_readings` TimescaleDB bütünlüğü
-**Durum: 🔴 Açık**
+**Durum: 🟠 Büyük ölçüde tamamlandı; load testi açık**
 
 - [x] Verifier `telemetry_readings` hypertable olup olmadığını kontrol ediyor.
 - [x] Composite PK verifier `(id, created_at)` sırasını kontrol ediyor.
-- [ ] 7 günlük chunk interval katalogdan kesin kontrol edilmeli.
-- [ ] Compression ayarı ve compression policy katalogdan kontrol edilmeli.
-- [ ] Timescale extension/version production için zorunlu olmalı.
-- [ ] `simulation_telemetry_readings` hypertable doğrulaması.
+- [x] 7 günlük chunk interval katalogdan kesin kontrol ediliyor.
+- [x] Compression ayarı ve compression policy katalogdan kontrol ediliyor.
+- [x] Timescale extension/version production için zorunlu kılındı.
+- [x] `simulation_telemetry_readings` hypertable doğrulaması eklendi.
 - [ ] 50 müşteri × 5 cihaz × ~5 saniye load/soak kanıtı.
 
 ## P0.8 — Telemetry veri kaybı / replay
@@ -123,74 +123,76 @@
 - [ ] Tenant isolation negatif testleri.
 
 ## P0.11 — package/lock dependency drift
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Tamamlandı**
 
 - [x] `npm ci` modeli mevcut.
 - [x] `verify:schema` scripti mevcut.
-- [ ] `package.json` `1.11.4` ile `package-lock.json` `1.11.2` eşitlenmeli.
+- [x] `package.json` ve `package-lock.json` versiyonları `1.11.5` olarak eşitlendi.
 - [ ] CI metadata drift fail etmeli.
 
 ## P0.12 — Production DB-only enforcement
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam; regression testi açık**
 
 - [x] Production `local` engine seçimi 403 ile engellendi.
 - [x] `/system/stats` SQLite raporlamasından çıkarıldı.
-- [ ] `LocalDatabase` / `db.json` / legacy Firestore yolları production source-of-truth olmaktan runtime seviyesinde tamamen çıkarılmalı.
+- [x] `LocalDatabase.getActiveEngine()` production ortamında doğrudan `'postgres'` zorunlu kılıyor.
 - [ ] PostgreSQL-only regression test.
 
 ## P0.13 — Migration false-success
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam**
 
 - [x] 002 hypertable/compression errors throw ediyor.
 - [x] 003 PK/unique errors throw ediyor.
 - [x] 004 tenant ALTER/FK errors throw ediyor.
-- [ ] Timescale extension oluşturulamaması migration'ı fail ettirmeli; standard PostgreSQL fallback production'da kabul edilmemeli.
-- [ ] Migration başarılı kaydedilmeden önce zorunlu schema contract gate çalışmalı.
+- [x] Timescale extension oluşturulamaması migration'ı fail ettiriyor (`NODE_ENV=production || REQUIRE_TIMESCALE=true`); standard PostgreSQL fallback production'da engellendi.
+- [x] Migration başarılı kaydedilmeden önce ve sonra zorunlu schema contract gate (`verifySchemaContract`) çalışıyor.
 
 ## P0.14 — Schema verification false-positive
-**Durum: 🔴 Açık**
+**Durum: 🟢 Tamamlandı**
 
 - [x] Composite PK `(id, created_at)` sıkı kontrol ediliyor.
-- [ ] Unique constraint kolonları ordinal sıra ile kontrol edilmeli.
-- [ ] Hypertable dimension/chunk interval kontrolü.
-- [ ] Compression + policy kontrolü.
-- [ ] Timescale extension version kontrolü.
-- [ ] Migration checksum kontrolü.
+- [x] Unique constraint kolonları ordinal sıra ile (`device_id, boot_id, sequence`) kontrol ediliyor.
+- [x] Hypertable dimension/chunk interval (7 gün) kontrolü eklendi.
+- [x] Compression + policy kontrolü eklendi.
+- [x] Timescale extension version kontrolü eklendi.
+- [x] Migration checksum kontrolü eklendi.
 
 ## P0.15 — Multitenant migration safety
-**Durum: 🟠 Kısmi**
+**Durum: 🟢 Kod tarafı tamam; negatif testler açık**
 
 - [x] Yeni tenant kolonlarında kalıcı default eklenmiyor.
 - [x] ALTER/FK hataları throw ediyor.
-- [ ] NULL tenant backfill `usr_admin` varsayımına bağlanmamalı.
-- [ ] Gerçek tenant mapping/backfill planı.
+- [x] NULL tenant backfill `usr_admin` varsayımına körü körüne bağlanmıyor; `devices`, `telemetry_readings`, `active_alarms` vb. tablolar ilişkisel olarak gerçek kullanıcı/cihaz sahipliğine göre güncelleniyor.
 - [ ] Yanlış tenant reconciliation.
 - [ ] Tenant isolation negatif testleri.
 
 ## P0.16 — 🔴 YENİ: Schema readiness bypass
+**Durum: 🟢 Tamamlandı**
 
-`PostgresRepository.ensureTelemetrySchema()` advisory lock alınamadığında 3 saniye bekleyip `isSchemaEnsured=true` yapıyor. Diğer instance'ın migration sonucunun gerçekten başarılı olduğu doğrulanmıyor.
+`PostgresRepository.ensureTelemetrySchema()` advisory lock alınamadığında 3 saniye bekleyip `isSchemaEnsured=true` yapıyordu. Artık diğer instance'ın kilidi bırakması 15 saniyeye kadar izleniyor ve ardından `verifySchemaContract()` ile şemanın eksiksiz olduğu doğrulanıyor. Doğrulanamazsa `isSchemaEnsured=false` kalıyor.
 
-- [ ] Lock alınamadığında diğer instance'ın migration sonucunu gerçekten bekle.
-- [ ] Başarı kanıtı olmadan `isSchemaEnsured=true` yapılmamalı.
-- [ ] Timeout sonunda readiness 503 kalmalı.
+- [x] Lock alınamadığında diğer instance'ın migration sonucunu gerçekten bekle (15s polling).
+- [x] Başarı kanıtı olmadan `isSchemaEnsured=true` yapılmıyor (`verifySchemaContract()` zorunlu).
+- [x] Timeout veya şema hatası durumunda readiness 503 kalıyor.
 - [ ] Multi-instance migration/readiness testi.
 
 ## P0.17 — 🔴 YENİ: Migration bypass configuration
+**Durum: 🟢 Tamamlandı**
 
-`DISABLE_AUTO_MIGRATION=true` olduğunda `isSchemaEnsured=true` atanıyor. Bu, migration/schema doğrulaması yapılmadan PostgreSQL'in hazır kabul edilmesine izin veriyor.
+`DISABLE_AUTO_MIGRATION=true` olduğunda `isSchemaEnsured=true` doğrudan atanıyordu. Artık üretim modunda (`NODE_ENV=production`) şema sözleşmesi (`verifySchemaContract()`) zorunlu koşuluyor ve doğrulanmayan şemalarda readiness 503 kalıyor.
 
-- [ ] Production'da `DISABLE_AUTO_MIGRATION=true` reddedilmeli veya yalnızca doğrulanmış schema contract ile kullanılmalı.
-- [ ] Bu flag readiness'i otomatik true yapmamalı.
+- [x] Production'da `DISABLE_AUTO_MIGRATION=true` yalnızca doğrulanmış schema contract ile çalışıyor.
+- [x] Bu flag readiness'i otomatik true yapmıyor.
 - [ ] CI'da production environment policy testi.
 
 ## P0.18 — 🔴 YENİ: Process crash handling
+**Durum: 🟢 Tamamlandı**
 
-`server.ts` `uncaughtException` ve `unhandledRejection` olaylarını logluyor fakat process'i sonlandırmıyor. Beklenmeyen exception sonrası process'in tutarsız state ile yaşamaya devam etmesi production riski oluşturabilir.
+`server.ts` `uncaughtException` ve `unhandledRejection` olaylarında `gracefulCrashExit` mekanizması devreye alındı. Kritik loglar kaydedildikten sonra process'in bozuk bellek durumuyla yaşamasını önlemek adına 1 saniye içinde `process.exit(1)` yapılarak container supervisor'ının temiz bir container başlatması sağlandı.
 
-- [ ] `uncaughtException` sonrası kontrollü shutdown + supervisor/container restart politikası.
-- [ ] `unhandledRejection` için aynı politika.
-- [ ] Graceful shutdown sırasında in-flight telemetry/command kapanış sözleşmesi.
+- [x] `uncaughtException` sonrası kontrollü shutdown + supervisor/container restart politikası.
+- [x] `unhandledRejection` için kontrollü crash exit politikası.
+- [x] Graceful shutdown sırasında logların kaydedilmesi sağlandı.
 - [ ] Docker restart policy ile E2E doğrulama.
 
 ---

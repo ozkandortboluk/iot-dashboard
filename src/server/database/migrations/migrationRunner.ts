@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import crypto from 'crypto';
 import { migration001 } from './001_core_relational_tables.js';
 import { migration002 } from './002_timescale_hypertables.js';
 import { migration003 } from './003_idempotency_constraints.js';
@@ -6,6 +7,11 @@ import { migration004 } from './004_multitenant_columns.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
+
+export function computeMigrationChecksum(migration: Migration): string {
+  const content = `${migration.version}:${migration.name}:${migration.up.toString()}`;
+  return crypto.createHash('sha256').update(content).digest('hex').substring(0, 32);
+}
 
 export const ALL_MIGRATIONS: Migration[] = [
   migration001,
@@ -72,8 +78,23 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
     await ensureMigrationsTable(client);
 
     // 3. Get applied migrations
-    const appliedRes = await client.query('SELECT version FROM schema_migrations;');
-    const appliedVersions = new Set<string>(appliedRes.rows.map((r: any) => r.version));
+    const appliedRes = await client.query('SELECT version, name, checksum FROM schema_migrations;');
+    const appliedMap = new Map<string, any>(appliedRes.rows.map((r: any) => [r.version, r]));
+    const appliedVersions = new Set<string>(appliedMap.keys());
+
+    // Check drift on already applied migrations
+    for (const migration of ALL_MIGRATIONS) {
+      const existing = appliedMap.get(migration.version);
+      if (existing) {
+        const expectedChecksum = computeMigrationChecksum(migration);
+        if (existing.checksum && existing.checksum !== expectedChecksum) {
+          console.warn(`[Migration Drift Warning] Migration ${migration.version} checksum mismatch (DB: ${existing.checksum}, Code: ${expectedChecksum})`);
+        } else if (!existing.checksum) {
+          // Backfill checksum if missing
+          await client.query('UPDATE schema_migrations SET checksum = $1 WHERE version = $2;', [expectedChecksum, migration.version]);
+        }
+      }
+    }
 
     let appliedThisRun = 0;
 
@@ -85,9 +106,10 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
         await client.query('BEGIN');
         try {
           await migration.up(client);
+          const checksum = computeMigrationChecksum(migration);
           await client.query(
-            'INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, CURRENT_TIMESTAMP);',
-            [migration.version, migration.name]
+            'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES ($1, $2, CURRENT_TIMESTAMP, $3);',
+            [migration.version, migration.name, checksum]
           );
           await client.query('COMMIT');
           console.log(`[Migration Runner] ✅ Successfully applied migration ${migration.version}: ${migration.name}`);

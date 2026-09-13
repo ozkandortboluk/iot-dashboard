@@ -303,7 +303,9 @@ class LocalDatabase {
   private startAutoBackupWorker(): void {
     if (this.autoBackupInterval) return;
     this.autoBackupInterval = setInterval(() => {
-      this.createBackup().catch(() => {});
+      this.createBackup().catch((err: any) => {
+        systemLogger.error('backup', `Otomatik yedekleme hatası: ${err?.message || err}`);
+      });
     }, 3600 * 1000);
   }
 
@@ -392,11 +394,15 @@ class LocalDatabase {
             this.data.users = [...hydrated.users, ...missingUsers];
             this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
             for (const u of missingUsers) {
-              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch(() => {});
+              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
+                systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
+              });
             }
           } else {
             for (const u of this.data.users) {
-              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch(() => {});
+              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
+                systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -405,11 +411,15 @@ class LocalDatabase {
             const missingDevices = this.data.devices.filter(d => !existingDeviceIds.has(d.id));
             this.data.devices = [...hydrated.devices, ...missingDevices];
             for (const d of missingDevices) {
-              await this.postgresRepo.saveDevice(d).catch(() => {});
+              await this.postgresRepo.saveDevice(d).catch((err: any) => {
+                systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
+              });
             }
           } else {
             for (const d of this.data.devices) {
-              await this.postgresRepo.saveDevice(d).catch(() => {});
+              await this.postgresRepo.saveDevice(d).catch((err: any) => {
+                systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -417,7 +427,9 @@ class LocalDatabase {
             this.data.rules = hydrated.rules;
           } else {
             for (const r of this.data.rules) {
-              await this.postgresRepo.saveRule(r).catch(() => {});
+              await this.postgresRepo.saveRule(r).catch((err: any) => {
+                systemLogger.error('database', `Kural PostgreSQL hydration hatası (${r.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -425,7 +437,9 @@ class LocalDatabase {
             this.data.dashboards = hydrated.dashboards;
           } else {
             for (const dash of this.data.dashboards) {
-              await this.postgresRepo.saveDashboard(dash).catch(() => {});
+              await this.postgresRepo.saveDashboard(dash).catch((err: any) => {
+                systemLogger.error('database', `Dashboard PostgreSQL hydration hatası (${dash.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -442,7 +456,9 @@ class LocalDatabase {
             this.data.sessions = Array.from(sessionMap.values());
           } else if (this.data.sessions && this.data.sessions.length > 0) {
             for (const s of this.data.sessions) {
-              await this.postgresRepo.saveSession(s).catch(() => {});
+              await this.postgresRepo.saveSession(s).catch((err: any) => {
+                systemLogger.error('database', `Oturum PostgreSQL hydration hatası (${s.token}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -451,11 +467,15 @@ class LocalDatabase {
             const missingFw = (this.data.firmwares || []).filter(f => !existingFwIds.has(f.id));
             this.data.firmwares = [...hydrated.firmwares, ...missingFw];
             for (const f of missingFw) {
-              await this.postgresRepo.saveFirmware(f).catch(() => {});
+              await this.postgresRepo.saveFirmware(f).catch((err: any) => {
+                systemLogger.error('database', `Firmware PostgreSQL hydration hatası (${f.id}): ${err?.message || err}`);
+              });
             }
           } else if (this.data.firmwares && this.data.firmwares.length > 0) {
             for (const f of this.data.firmwares) {
-              await this.postgresRepo.saveFirmware(f).catch(() => {});
+              await this.postgresRepo.saveFirmware(f).catch((err: any) => {
+                systemLogger.error('database', `Firmware PostgreSQL hydration hatası (${f.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -464,11 +484,15 @@ class LocalDatabase {
             const missingJobs = (this.data.otaJobs || []).filter(j => !existingJobIds.has(j.id));
             this.data.otaJobs = [...hydrated.otaJobs, ...missingJobs];
             for (const j of missingJobs) {
-              await this.postgresRepo.saveOtaJob(j).catch(() => {});
+              await this.postgresRepo.saveOtaJob(j).catch((err: any) => {
+                systemLogger.error('database', `OTA İş PostgreSQL hydration hatası (${j.id}): ${err?.message || err}`);
+              });
             }
           } else if (this.data.otaJobs && this.data.otaJobs.length > 0) {
             for (const j of this.data.otaJobs) {
-              await this.postgresRepo.saveOtaJob(j).catch(() => {});
+              await this.postgresRepo.saveOtaJob(j).catch((err: any) => {
+                systemLogger.error('database', `OTA İş PostgreSQL hydration hatası (${j.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -1205,7 +1229,17 @@ class LocalDatabase {
       opts = deviceIdOrOptions;
     }
 
-    const dev = this.data.devices?.find((d) => d.id === opts.deviceId);
+    let dev = this.data.devices?.find((d) => d.id === opts.deviceId) || this.getDeviceById(opts.deviceId);
+    if (!dev && this.postgresRepo?.isReady()) {
+      try {
+        const pgDev = await this.postgresRepo.getDeviceById(opts.deviceId);
+        if (pgDev) {
+          dev = pgDev;
+          if (!this.data.devices) this.data.devices = [];
+          this.data.devices.push(pgDev);
+        }
+      } catch {}
+    }
     if (!dev) {
       throw new Error(`Cihaz bulunamadı (${opts.deviceId})`);
     }
@@ -2110,6 +2144,9 @@ class LocalDatabase {
 
   // Database Engine & PostgreSQL / TimescaleDB Management Methods
   public getActiveEngine(): DatabaseEngineType {
+    if (process.env.NODE_ENV === 'production') {
+      return 'postgres';
+    }
     if (this.data?.databaseSettings?.activeEngine) {
       return this.data.databaseSettings.activeEngine;
     }

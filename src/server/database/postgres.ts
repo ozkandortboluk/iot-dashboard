@@ -212,6 +212,102 @@ export class PostgresRepository {
     }
   }
 
+  /**
+   * Verifies that the database schema satisfies all critical production contracts (P0.14, P0.16, P0.17)
+   */
+  public async verifySchemaContract(clientInstance?: any): Promise<boolean> {
+    if (!this.pool) return false;
+    let client = clientInstance;
+    let shouldRelease = false;
+    if (!client) {
+      try {
+        client = await this.pool.connect();
+        shouldRelease = true;
+      } catch (connErr) {
+        console.error('[Schema Contract Check] DB connection failed:', connErr);
+        return false;
+      }
+    }
+
+    try {
+      // 1. Verify schema_migrations table exists
+      const migTable = await client.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'schema_migrations';
+      `);
+      if (migTable.rows.length === 0) {
+        console.error('[Schema Contract Check] schema_migrations table is missing!');
+        return false;
+      }
+
+      // 2. Verify critical tables exist
+      const requiredTables = ['users', 'devices', 'telemetry_readings', 'telemetry_packets', 'active_alarms', 'threshold_rules', 'device_commands'];
+      const tablesRes = await client.query(`
+        SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';
+      `);
+      const existingTables = new Set<string>(tablesRes.rows.map((r: any) => r.table_name));
+      const missingTables = requiredTables.filter(t => !existingTables.has(t));
+      if (missingTables.length > 0) {
+        console.error('[Schema Contract Check] Missing required tables:', missingTables);
+        return false;
+      }
+
+      // 3. Verify Composite Primary Key on telemetry_readings (id, created_at)
+      const pkRes = await client.query(`
+        SELECT kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu 
+          ON tc.constraint_name = kcu.constraint_name 
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.table_name = 'telemetry_readings' AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY kcu.ordinal_position;
+      `);
+      const pkCols = pkRes.rows.map((r: any) => r.column_name);
+      if (pkCols.length !== 2 || pkCols[0] !== 'id' || pkCols[1] !== 'created_at') {
+        console.error('[Schema Contract Check] Composite PK on telemetry_readings mismatch. Found:', pkCols);
+        return false;
+      }
+
+      // 4. Verify Unique Constraint on telemetry_packets in exact ordinal order (device_id, boot_id, sequence)
+      const unqRes = await client.query(`
+        SELECT a.attname
+        FROM pg_constraint c,
+             LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
+        WHERE c.conrelid = 'telemetry_packets'::regclass 
+          AND c.conname = 'unq_telemetry_device_boot_sequence'
+        ORDER BY u.ord;
+      `);
+      const unqCols = unqRes.rows.map((r: any) => r.attname);
+      if (unqCols.length !== 3 || unqCols[0] !== 'device_id' || unqCols[1] !== 'boot_id' || unqCols[2] !== 'sequence') {
+        console.error('[Schema Contract Check] Unique constraint on telemetry_packets mismatch. Found:', unqCols);
+        return false;
+      }
+
+      // 5. Verify tenant_id column exists on core tables
+      const colsRes = await client.query(`
+        SELECT table_name, column_name FROM information_schema.columns 
+        WHERE table_schema = 'public' AND column_name = 'tenant_id';
+      `);
+      const tablesWithTenant = new Set<string>(colsRes.rows.map((r: any) => r.table_name));
+      const criticalTenantTables = ['devices', 'telemetry_readings', 'active_alarms', 'device_commands'];
+      const missingTenant = criticalTenantTables.filter(t => !tablesWithTenant.has(t));
+      if (missingTenant.length > 0) {
+        console.error('[Schema Contract Check] Missing tenant_id on tables:', missingTenant);
+        return false;
+      }
+
+      return true;
+    } catch (checkErr: any) {
+      console.error('[Schema Contract Check] Validation error:', checkErr?.message || checkErr);
+      return false;
+    } finally {
+      if (shouldRelease && client) {
+        client.release();
+      }
+    }
+  }
+
   private isSchemaEnsured = false;
   private isRecoveringSchema = false;
   private schemaEnsuringPromise: Promise<void> | null = null;
@@ -219,6 +315,15 @@ export class PostgresRepository {
 
   public async ensureTelemetrySchema(force = false): Promise<void> {
     if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
+      if (process.env.NODE_ENV === 'production') {
+        console.warn('[PostgreSQL] DISABLE_AUTO_MIGRATION set in production. Verifying schema contract strictly...');
+        const isContractValid = await this.verifySchemaContract();
+        this.isSchemaEnsured = isContractValid;
+        if (!isContractValid) {
+          console.error('[PostgreSQL] Production schema contract failed! Readiness will remain 503.');
+        }
+        return;
+      }
       this.isSchemaEnsured = true;
       return;
     }
@@ -260,10 +365,30 @@ export class PostgresRepository {
         
         if (!hasLock) {
           console.log('[PostgreSQL Schema] Başka bir instance (container) schema kontrolünü yürütüyor. İşlemin tamamlanması bekleniyor...');
-          // Simply wait and yield without running DDL. 
-          // After 3 seconds, assume the other instance has finished or is progressing.
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          this.isSchemaEnsured = true;
+          // Poll up to 15 seconds for the other instance to finish and release the advisory lock
+          let waited = 0;
+          let otherInstanceFinished = false;
+          while (waited < 15000) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            waited += 1000;
+            const checkLock = await client.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEMA_LOCK_ID]);
+            if (checkLock.rows[0]?.acquired) {
+              await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_LOCK_ID]);
+              otherInstanceFinished = true;
+              break;
+            }
+          }
+          if (!otherInstanceFinished) {
+            console.warn('[PostgreSQL Schema] Diğer instance advisory kilidi 15 saniye içinde bırakmadı. Şema doğrulanıyor...');
+          }
+          // Do NOT blindly set isSchemaEnsured = true! Verify the schema contract:
+          const isContractValid = await this.verifySchemaContract(client);
+          this.isSchemaEnsured = isContractValid;
+          if (!isContractValid) {
+            console.error('[PostgreSQL Schema] Diğer instance tamamlandıktan sonra şema doğrulanamadı. Readiness 503 kalacak.');
+          } else {
+            console.log('[PostgreSQL Schema] Diğer instance tarafından tamamlanan şema başarıyla doğrulandı.');
+          }
           return;
         }
 
@@ -857,9 +982,16 @@ export class PostgresRepository {
           ON CONFLICT (id) DO NOTHING;
         `).catch(() => {});
 
-        this.isSchemaEnsured = true;
+        const contractValid = await this.verifySchemaContract(client);
+        this.isSchemaEnsured = contractValid;
+        if (!contractValid) {
+          console.error('[PostgreSQL ensureTelemetrySchema FATAL] Schema contract verification failed! Readiness 503 kalacak.');
+        } else {
+          console.log('[PostgreSQL ensureTelemetrySchema] Schema and contract successfully verified.');
+        }
       } catch (err: any) {
-        console.warn('[PostgreSQL ensureTelemetrySchema Warning]:', err?.message || err);
+        this.isSchemaEnsured = false;
+        console.error('[PostgreSQL ensureTelemetrySchema Error]:', err?.message || err);
       } finally {
         if (client) {
           try {

@@ -44,6 +44,18 @@ import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
 
 // Global Process Crash Shields
+let isShuttingDown = false;
+function gracefulCrashExit(errType: string, err: any) {
+  if (isShuttingDown) return;
+  if (process.env.NODE_ENV === 'production' && process.env.DISABLE_CRASH_EXIT !== 'true') {
+    isShuttingDown = true;
+    console.error(`[CRITICAL PROCESS CRASH] ${errType} encountered in production. Initiating graceful shutdown...`);
+    setTimeout(() => {
+      process.exit(1);
+    }, 1000);
+  }
+}
+
 process.on('uncaughtException', (err: any) => {
   const errMsg = err?.message || String(err);
   console.error('[CRITICAL][uncaughtException]:', errMsg, err?.stack || '');
@@ -54,6 +66,7 @@ process.on('uncaughtException', (err: any) => {
       code: err?.code,
     });
   } catch {}
+  gracefulCrashExit('uncaughtException', err);
 });
 
 process.on('unhandledRejection', (reason: any) => {
@@ -65,6 +78,9 @@ process.on('unhandledRejection', (reason: any) => {
       name: reason?.name,
     });
   } catch {}
+  if (process.env.STRICT_UNHANDLED_REJECTION === 'true') {
+    gracefulCrashExit('unhandledRejection', reason);
+  }
 });
 
 const app = express();
