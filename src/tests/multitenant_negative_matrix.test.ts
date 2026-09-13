@@ -21,7 +21,7 @@ describe('P1 - 2.4: Multi-Tenant Negative Security Matrix (Rule 1 Enforcement)',
   };
 
   const adminUser: User = {
-    id: 'usr_admin',
+    id: 'usr_test_admin',
     email: 'admin@example.com',
     name: 'Platform Root Admin',
     role: 'admin',

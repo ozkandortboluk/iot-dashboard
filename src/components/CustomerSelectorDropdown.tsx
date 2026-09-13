@@ -70,14 +70,28 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
 
   // Filtered customer list
   const filteredCustomers = useMemo(() => {
-    if (!searchQuery.trim()) return customers;
-    const query = searchQuery.toLocaleLowerCase('tr-TR');
-    return customers.filter((c) => {
-      const company = (c.companyName || '').toLocaleLowerCase('tr-TR');
-      const name = (c.name || '').toLocaleLowerCase('tr-TR');
-      const email = (c.email || '').toLocaleLowerCase('tr-TR');
-      const id = (c.id || '').toLocaleLowerCase('tr-TR');
-      return company.includes(query) || name.includes(query) || email.includes(query) || id.includes(query);
+    let result = customers;
+    
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLocaleLowerCase('tr-TR');
+      result = customers.filter((c) => {
+        const company = (c.companyName || '').toLocaleLowerCase('tr-TR');
+        const name = (c.name || '').toLocaleLowerCase('tr-TR');
+        const email = (c.email || '').toLocaleLowerCase('tr-TR');
+        const id = (c.id || '').toLocaleLowerCase('tr-TR');
+        return company.includes(query) || name.includes(query) || email.includes(query) || id.includes(query);
+      });
+    }
+    
+    return [...result].sort((a, b) => {
+      const aIsAdmin = a.id === 'usr_admin' || a.id === 'usr_test_admin';
+      const bIsAdmin = b.id === 'usr_admin' || b.id === 'usr_test_admin';
+      if (aIsAdmin && !bIsAdmin) return -1;
+      if (!aIsAdmin && bIsAdmin) return 1;
+      
+      const aName = (a.companyName || a.name || '').toLocaleLowerCase('tr-TR');
+      const bName = (b.companyName || b.name || '').toLocaleLowerCase('tr-TR');
+      return aName.localeCompare(bName, 'tr-TR');
     });
   }, [customers, searchQuery]);
 

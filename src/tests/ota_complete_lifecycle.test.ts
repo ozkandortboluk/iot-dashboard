@@ -28,7 +28,7 @@ describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', (
       hardwareModel: 'ESP32_WROOM_32',
       hardwareRevision: 'v2.0',
       firmwareVersion: '1.3.0',
-      tenantId: 'usr_admin',
+      tenantId: 'usr_test_admin',
       apiKey: `key_ota_test_${Date.now()}`,
       status: 'online',
     } as any);
@@ -53,7 +53,7 @@ describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', (
       keyId,
       binarySize: mockBin.length,
       isActive: true,
-      uploadedBy: 'usr_admin',
+      uploadedBy: 'usr_test_admin',
       created_at: new Date().toISOString(),
     };
 
@@ -93,7 +93,7 @@ describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', (
       firmwareId: testFirmwareId,
       firmwareVersion: '2.0.0',
       firmwareName: 'Test Controller Firmware',
-      initiatedBy: 'usr_admin',
+      initiatedBy: 'usr_test_admin',
       status: 'FLASHING',
       attemptCount: 1,
       maxAttempts: 3,

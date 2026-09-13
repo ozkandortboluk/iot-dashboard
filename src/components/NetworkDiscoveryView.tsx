@@ -134,9 +134,9 @@ export const NetworkDiscoveryView: React.FC<{
   const fetchHierarchyData = async () => {
     try {
       const [sRes, zRes, gRes] = await Promise.all([
-        fetch('/api/hierarchy/sites'),
-        fetch('/api/hierarchy/zones'),
-        fetch('/api/hierarchy/groups'),
+        fetch('/api/devices/hierarchy/sites'),
+        fetch('/api/devices/hierarchy/zones'),
+        fetch('/api/devices/hierarchy/groups'),
       ]);
       if (sRes.ok) setSites(await sRes.json());
       if (zRes.ok) setZones(await zRes.json());

@@ -13,7 +13,7 @@ describe('P1 - 2.3: WebSocket Protocol Integrity & Hardening', () => {
       id: testDevId,
       name: 'Hardened WS Field Node',
       type: 'ESP32',
-      tenantId: 'usr_admin',
+      tenantId: 'usr_test_admin',
       apiKey: testApiKey,
       status: 'online',
       metrics: {},

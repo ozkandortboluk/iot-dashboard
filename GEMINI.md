@@ -34,3 +34,16 @@
 2. **Synchronization on Any API/Backend Modification**:
    - Whenever any API endpoint, telemetry payload format, device control signature, heartbeat mechanism, or authentication header in the system is updated or introduced, the agent **MUST SIMULTANEOUSLY UPDATE all code snippets in `HelpView.tsx`** to reflect the new functionality.
    - Any new platform feature (such as new metrics, token schemas, or WebSocket protocols) MUST immediately receive a working hardware/software code template in `HelpView.tsx`.
+
+
+---
+
+## MANDATORY RULE 3: Strict Usage of Canonical Test Account & Device (Sadece Belirlenen Test Hesabının Kullanımı)
+
+1. **No Unnecessary Data Generation**: The AI agent MUST NOT create new test users, random accounts, or disposable test devices during its own verification, debugging, or code generation phases.
+2. **Canonical Test Credentials**: All testing, simulation, API interaction, and script examples MUST use the permanent test account and device:
+   - **User ID**: `usr_test_admin`
+   - **Email**: `test@nexusnodeiot.com.tr`
+   - **Password**: `test1234`
+   - **Device ID**: `dev_test_01`
+   - **Device API Key**: `dev_key_test_0000000000000000`

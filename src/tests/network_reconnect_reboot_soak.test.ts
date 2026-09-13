@@ -21,8 +21,8 @@ app.use('/api/commands', commandsRouter);
 app.use('/api', commandsRouter);
 
 describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (Roadmap P0 - Item 2)', () => {
-  const testTenantId = 'usr_admin';
-  const testCustomerId = 'usr_admin';
+  const testTenantId = 'usr_test_admin';
+  const testCustomerId = 'usr_test_admin';
   const uniqueSuffix = Date.now().toString();
   const testDeviceId = `esp32_soak_node_${uniqueSuffix}`;
   const testApiKey = `nex_soak_key_${uniqueSuffix}`;
@@ -51,7 +51,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
   };
 
   const soakOperator: User = {
-    id: 'usr_admin',
+    id: 'usr_test_admin',
     name: 'Özkan Dörtbölük',
     email: 'admin@dashboard.io',
     role: 'admin',

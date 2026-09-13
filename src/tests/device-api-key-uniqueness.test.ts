@@ -16,7 +16,7 @@ describe('Device API Key Collision & PostgreSQL Constraint Resilience Test', () 
   });
 
   const baseDeviceFields = {
-    tenantId: 'usr_admin',
+    tenantId: 'usr_test_admin',
     status: 'online' as const,
     location: 'Lab',
     ipAddress: '192.168.1.50',

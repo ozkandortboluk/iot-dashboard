@@ -31,7 +31,7 @@ describe('Industrial IoT Production Alarm Engine & Notification Test Suite', () 
   };
 
   const adminUser: User = {
-    id: 'usr_admin',
+    id: 'usr_test_admin',
     name: 'Sistem Yöneticisi',
     email: 'admin@iot.local',
     role: 'admin',

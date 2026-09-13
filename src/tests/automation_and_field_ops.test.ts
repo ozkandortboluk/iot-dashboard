@@ -293,7 +293,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
       db.recordUnregisteredDevice(newDiscoveredUnit as any);
 
       // Verify discovered pool contains the unit
-      const discovered = db.getDiscoveredDevices('usr_admin').find(d => d.mac === 'FF:EE:DD:CC:BB:AA' || (d as any).pairingCode === 'PAIR-8844');
+      const discovered = db.getDiscoveredDevices('usr_test_admin').find(d => d.mac === 'FF:EE:DD:CC:BB:AA' || (d as any).pairingCode === 'PAIR-8844');
       expect(discovered).toBeDefined();
       expect(discovered?.mac).toBe('FF:EE:DD:CC:BB:AA');
 

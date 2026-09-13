@@ -997,6 +997,39 @@ export class PostgresRepository {
           ON CONFLICT (id) DO NOTHING;
         `).catch(() => {});
 
+        // 7. Seed Permanent Test Admin & Device (usr_test_admin)
+        await client.query(`
+          INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+          VALUES (
+            'usr_test_admin',
+            'Test Kullanıcısı',
+            'test@nexusnodeiot.com.tr',
+            '$2b$10$l6m4lLoiQaRgmgd1SlQy8.ofgjjxdXfTkaNKVoJayHYX1G6BSSPne',
+            'admin',
+            'Test Laboratuvarı',
+            'active',
+            CURRENT_TIMESTAMP
+          )
+          ON CONFLICT (id) DO NOTHING;
+        `).catch(() => {});
+
+        await client.query(`
+          INSERT INTO devices (id, name, type, api_key, status, location, is_simulated, tenant_id, user_id, created_at)
+          VALUES (
+            'dev_test_01',
+            'Test Simülasyon Cihazı',
+            'sensor',
+            'dev_key_test_0000000000000000',
+            'online',
+            'Sanal Test Odası',
+            true,
+            'usr_test_admin',
+            'usr_test_admin',
+            CURRENT_TIMESTAMP
+          )
+          ON CONFLICT (id) DO NOTHING;
+        `).catch(() => {});
+
         const contractValid = await this.verifySchemaContract(client);
         this.isSchemaEnsured = contractValid;
         if (!contractValid) {

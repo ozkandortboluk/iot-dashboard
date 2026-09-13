@@ -68,7 +68,7 @@ import { dispatchMessageToChannel, defaultNotificationConfig } from './notificat
 import { PostgresRepository } from './database/postgres.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_FILE = process.env.NODE_ENV === 'test' ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
 
 interface DatabaseSchema {
   users: User[];
@@ -683,6 +683,52 @@ class LocalDatabase {
         console.error('Error reading db.json, re-initializing empty database:', err);
         parsed = emptyData;
       }
+    }
+
+    // Add persistent test admin user if it doesn't exist
+    const hasTestAdmin = parsed.users.some(u => u.id === 'usr_test_admin');
+    if (!hasTestAdmin) {
+      const testAdminId = 'usr_test_admin';
+      parsed.users.push({
+        id: testAdminId,
+        name: 'Test Kullanıcısı',
+        email: 'test@nexusnodeiot.com.tr',
+        phone: '+905550000000',
+        notificationEmail: 'test@nexusnodeiot.com.tr',
+        whatsappNumber: '+905550000000',
+        role: 'admin',
+        companyName: 'Test Laboratuvarı',
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      });
+      parsed.passwords[testAdminId] = hashPassword('test1234');
+      parsed.dashboards.push({
+        id: `dash_${testAdminId}`,
+        tenantId: testAdminId,
+        title: `Test Laboratuvarı Özel Dashboard`,
+        widgets: [...defaultWidgets],
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    // Add persistent test device if it doesn't exist
+    const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
+    if (!hasTestDevice) {
+      parsed.devices.push({
+        id: 'dev_test_01',
+        tenantId: 'usr_test_admin',
+        name: 'Test Simülasyon Cihazı',
+        type: 'sensor',
+        apiKey: 'dev_key_test_0000000000000000',
+        status: 'online',
+        location: 'Sanal Test Odası',
+        ipAddress: '127.0.0.1',
+        lastSeen: new Date().toISOString(),
+        rateLimitPerMin: 100,
+        encryptionMethod: 'AES-256-GCM',
+        isSimulated: true,
+        metrics: { temperature: 24.5, humidity: 55.0 }
+      });
     }
 
     // Check if there are any admin users

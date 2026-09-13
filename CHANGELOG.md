@@ -4,6 +4,32 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.7] - 2026-09-13
+
+### 📌 Kapsamlı Test İzolasyonu (Test Kirliliği Önleme)
+- **Tüm Testlerin `usr_test_admin`e Bağlanması**: Sistemin içerisindeki tüm otomatik (Integration, E2E, Unit) test senaryoları (cihaz API key çakışması, websocket entegrasyonu, bildirim motoru vb.) incelenerek, eski kurgularda yeni cihazlar ve tenant'lar (`usr_admin_test`, `test_dev_col` vb.) türeten kod parçaları temizlendi.
+- Artık testlerin tamamı, varlıkları (`createDevice`, `registerUser`) yeniden türetmek yerine, doğrudan önceden oluşturduğumuz `usr_test_admin` ve `dev_test_01` havuzunu veya testler için ayrılmış izole `test_db.json` dosyasını (eğer test ortamındaysa) hedef alacak şekilde değiştirildi.
+- `data/db.json` üzerindeki birikmiş tüm test/sahte hesaplar derinlemesine (deep clean) temizlendi ve canlı veritabanı saf haline getirildi.
+
+## 🚀 [v1.17.6] - 2026-09-13
+
+### 📌 Müşteri Seçici (Tenant Selector) UI İyileştirmesi
+- **Admin Hesaplarının Sabitlenmesi**: Üst barda (TopBar) bulunan "Tüm Müşteriler" (Müşteri Seçici) menüsü açıldığında, Merkez Yönetim (Admin / Test Admin) hesaplarının liste içinde alfabetik kaybolmasını önlemek için `usr_admin` ve `usr_test_admin` hesaplarının her zaman listenin en tepesinde (ilk sırada) gösterilmesi sağlandı.
+
+## 🚀 [v1.17.5] - 2026-09-13
+
+### 📌 Test Süreçleri Standardizasyonu (AI Agent Kuralları)
+- **Zorunlu Kural 3 (Test İzolasyonu)** eklendi: AI Asistan'ın kendi testlerini, senaryolarını veya veritabanı denemelerini yaparken ekstra/geçici kullanıcılar veya cihazlar üretmesi yasaklandı.
+- Tüm testlerin sadece kalıcı `test@nexusnodeiot.com.tr` hesabıyla ve `dev_test_01` cihazıyla yapılması kuralı `AGENTS.md` ve `GEMINI.md` dosyalarına sistem talimatı olarak işlendi.
+
+## 🚀 [v1.17.4] - 2026-09-13
+
+### 📌 Kalıcı Test Kullanıcısı ve Veritabanı Temizliği
+- **Kalıcı Test Ortamı**: 
+  - Sistem kirliliğini önlemek ve her seferinde demo verisi üretmemek adına `test@nexusnodeiot.com.tr` (Şifre: `test1234`) e-posta adresiyle kalıcı, tüm yetkilere sahip bir Yönetici (Admin) kullanıcı eklendi.
+  - Bu kullanıcıya atanmış `dev_test_01` ID'li kalıcı bir test cihazı (`dev_key_test_0000000000000000`) tanımlandı. Hem PostgreSQL hem de Memory DB tarafında başlangıçta eksikse otomatik üretilecek şekilde ayarlandı.
+  - Sürekli yeni kullanıcı oluşturmaya gerek kalmadan tüm testlerin bu hesap üzerinden izole ve temiz biçimde yapılması sağlandı.
+
 ## 🚀 [v1.17.3] - 2026-09-13
 
 ### 📌 PostgreSQL ve Tenant Kapsamı Düzenlemeleri

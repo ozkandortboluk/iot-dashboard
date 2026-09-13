@@ -72,11 +72,11 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   });
 
   describe('2. Login, HttpOnly Cookie, and Session State', () => {
-    it('Should register and set an HttpOnly & SameSite=Lax cookie', async () => {
-      const res = await fetch(`${BASE_URL}/api/auth/register`, {
+    it('Should login and set an HttpOnly & SameSite=Lax cookie', async () => {
+      const res = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'E2E User', email: testEmail, password: 'StrongPassword123!' })
+        body: JSON.stringify({ email: 'test@nexusnodeiot.com.tr', password: 'test1234' })
       });
       
       expect(res.status).toBe(200);
@@ -93,7 +93,7 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       const res = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'StrongPassword123!' })
+        body: JSON.stringify({ email: 'test@nexusnodeiot.com.tr', password: 'test1234' })
       });
       expect(res.status).toBe(200);
       const setCookie = res.headers.get('set-cookie');

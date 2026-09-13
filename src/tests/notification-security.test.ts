@@ -5,7 +5,7 @@ import type { User, NotificationServiceConfig } from '../types.js';
 
 describe('Notification Service Credentials Security & RBAC Test Suite', () => {
   const adminUser: User = {
-    id: 'usr_admin_test',
+    id: 'usr_test_admin',
     name: 'Sistem Yöneticisi',
     email: 'admin@iot.local',
     role: 'admin',

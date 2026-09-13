@@ -20,7 +20,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
   const proxyApiKey = 'sec_proxy_prod_key_77889900aabb';
   const proxyDevice: Device = {
     id: proxyDeviceId,
-    tenantId: 'usr_admin',
+    tenantId: 'usr_test_admin',
     name: 'ESP32 Reverse Proxy Field Node',
     type: 'ESP32',
     status: 'online',
@@ -41,7 +41,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
   };
 
   const proxyAdminUser: User = {
-    id: 'usr_admin',
+    id: 'usr_test_admin',
     name: 'Özkan Dörtbölük',
     email: 'admin@dashboard.io',
     role: 'admin',
@@ -352,7 +352,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
       payload: JSON.stringify({ relay: 1, state: 'ON' }),
       source: 'admin_dashboard',
       userId: proxyAdminUser.id,
-      tenantId: 'usr_admin',
+      tenantId: 'usr_test_admin',
     });
     expect(createdCmd).toBeDefined();
 

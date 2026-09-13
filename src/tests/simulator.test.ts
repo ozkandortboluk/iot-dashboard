@@ -106,7 +106,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
 
     it('should generate simulated telemetry strictly for isSimulated === true devices', async () => {
       // Create a test simulated device
-      const simDev = await db.createDevice({
+      const simDev = await db.createDevice({ 
         id: 'sim_test_dev_01',
         name: 'Unit-Test Virtual ESP32',
         type: 'sensor',
@@ -114,7 +114,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
         isSimulated: true,
         dataFlowActive: true,
         simulatedMetrics: ['temperature', 'humidity', 'pressure'],
-        tenantId: 'usr_admin',
+        tenantId: 'usr_test_admin',
         status: 'online',
         ipAddress: '192.168.1.100',
         rateLimitPerMin: 60,
@@ -123,14 +123,14 @@ describe('IoT Device Simulator Engine Test Suite', () => {
       });
 
       // Create a test physical hardware device
-      const physDev = await db.createDevice({
+      const physDev = await db.createDevice({ 
         id: 'phys_test_dev_01',
         name: 'Real Physical Hardware Sensor',
         type: 'sensor',
         location: 'Factory Floor',
         isSimulated: false,
         dataFlowActive: true,
-        tenantId: 'usr_admin',
+        tenantId: 'usr_test_admin',
         status: 'online',
         ipAddress: '192.168.1.101',
         rateLimitPerMin: 60,
@@ -165,7 +165,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
 
   describe('4. Simulation Channel & Telemetry Event Propagation', () => {
     it('should route simulation telemetry correctly and isolate physical devices', async () => {
-      const simDev = await db.createDevice({
+      const simDev = await db.createDevice({ 
         id: 'sim_test_dev_02',
         name: 'Virtual Meter 02',
         type: 'meter',
@@ -173,7 +173,7 @@ describe('IoT Device Simulator Engine Test Suite', () => {
         isSimulated: true,
         dataFlowActive: true,
         simulatedMetrics: ['voltage', 'current'],
-        tenantId: 'usr_admin',
+        tenantId: 'usr_test_admin',
         status: 'online',
         ipAddress: '192.168.1.102',
         rateLimitPerMin: 60,
