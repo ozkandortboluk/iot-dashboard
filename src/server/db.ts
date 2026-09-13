@@ -1090,8 +1090,13 @@ class LocalDatabase {
     // Notifications
   public async getNotifications(requestingUserId?: string, targetCustomerId?: string): Promise<NotificationItem[]> {
     if (!requestingUserId) return [];
-    if (this.isPostgresProductionMode()) {
-       return await this.postgresRepo.getNotifications(targetCustomerId || requestingUserId);
+    if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
+       const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
+       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const pgTenantId = isAdmin 
+           ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
+           : requestingUserId;
+       return await this.postgresRepo.getNotifications(pgTenantId);
     }
     return this.notificationRepository.getNotifications(requestingUserId, targetCustomerId);
   }
@@ -1103,8 +1108,13 @@ class LocalDatabase {
   public async resetDashboard(userId: string): Promise<DashboardLayout> { return await this.notificationRepository.resetDashboard(userId); }
   public async getAlarms(requestingUserId?: string, targetCustomerId?: string, options?: any): Promise<any> {
     if (!requestingUserId) return { data: [], total: 0 };
-    if (this.isPostgresProductionMode()) {
-       let list = await this.postgresRepo.getAlarms(targetCustomerId || requestingUserId);
+    if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
+       const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
+       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const pgTenantId = isAdmin 
+           ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
+           : requestingUserId;
+       let list = await this.postgresRepo.getAlarms(pgTenantId);
        if (options?.status && options.status !== 'all') {
          list = list.filter((a: any) => options.status === 'resolved' ? a.state === 'RESOLVED' : a.state !== 'RESOLVED');
        }
@@ -1159,11 +1169,17 @@ class LocalDatabase {
 
   public async getAlarmEvents(requestingUserId?: string, targetCustomerId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
     if (!requestingUserId) return [];
-    if (this.isPostgresProductionMode()) {
-       return await this.postgresRepo.getAlarmEvents(targetCustomerId || requestingUserId, incidentId, alarmId, deviceId);
+    
+    const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const effectiveTenant = isAdmin 
+        ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
+        : requestingUserId;
+
+    if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
+       return await this.postgresRepo.getAlarmEvents(effectiveTenant, incidentId, alarmId, deviceId);
     }
     let events = this.data.alarmEvents || [];
-    const effectiveTenant = targetCustomerId || requestingUserId;
     if (effectiveTenant && effectiveTenant !== 'usr_admin' && effectiveTenant !== 'all') {
       events = events.filter((e) => e.tenantId === effectiveTenant);
     }
@@ -1998,8 +2014,13 @@ class LocalDatabase {
 
   public async getDispatchLogs(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
     if (!requestingUserId) return options ? { data: [], total: 0, limit: options.limit || 50, hasMore: false } : { data: [], total: 0 };
-    if (this.isPostgresProductionMode()) {
-       let list = await this.postgresRepo.getDispatchLogs(targetCustomerId || requestingUserId);
+    if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
+       const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
+       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const pgTenantId = isAdmin 
+           ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
+           : requestingUserId;
+       let list = await this.postgresRepo.getDispatchLogs(pgTenantId);
        if (options?.status && options.status !== 'all') list = list.filter((l: any) => l.status === options.status);
        if (options?.channel && options.channel !== 'all') list = list.filter((l: any) => l.channel === options.channel);
        return { data: list, total: list.length, limit: options?.limit || 50, hasMore: false };

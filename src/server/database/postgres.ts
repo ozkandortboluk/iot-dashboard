@@ -956,6 +956,11 @@ export class PostgresRepository {
           CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);
           CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);
           CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
+          CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id ON notifications (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_dispatch_logs_tenant_id ON dispatch_logs (tenant_id);
+          UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
+          UPDATE dispatch_logs SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
         `).catch(() => {});
 
         // 5.1 Enforce telemetry packet deduplication constraint retroactively for legacy deployments
@@ -2197,22 +2202,32 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    const tenantId = n.tenantId || (n as any).userId || 'usr_admin';
     const sql = `
       INSERT INTO notifications (
-        id, user_id, title, message, severity, device_id, device_name,
+        id, user_id, tenant_id, type, title, message, severity, device_id, device_name,
         is_read, alarm_id, rule_id, alarm_state, acknowledged,
         acknowledged_at, acknowledged_by, repeat_count, current_value, threshold_value, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       ON CONFLICT (id) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id,
+        user_id = EXCLUDED.user_id,
+        type = EXCLUDED.type,
+        title = EXCLUDED.title,
         is_read = EXCLUDED.is_read,
         message = EXCLUDED.message,
+        severity = EXCLUDED.severity,
         alarm_state = EXCLUDED.alarm_state,
         acknowledged = EXCLUDED.acknowledged,
+        acknowledged_at = EXCLUDED.acknowledged_at,
+        acknowledged_by = EXCLUDED.acknowledged_by,
         repeat_count = EXCLUDED.repeat_count;
     `;
     await this.query(sql, [
       n.id,
-      n.tenantId,
+      tenantId,
+      tenantId,
+      (n as any).type || 'alert',
       n.title,
       n.message,
       n.severity || 'info',
@@ -2232,11 +2247,17 @@ export class PostgresRepository {
     ]);
   }
 
-  public async markNotificationRead(id: string): Promise<void> {
+  public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<void> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
-    await this.query(`UPDATE notifications SET is_read = TRUE WHERE id = $1;`, [id]);
+    let sql = `UPDATE notifications SET is_read = TRUE WHERE id = $1`;
+    const params: any[] = [id];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (tenant_id = $2 OR user_id = $2)`;
+      params.push(userId);
+    }
+    await this.query(sql, params);
   }
 
   public async markAllNotificationsRead(userId?: string): Promise<void> {
@@ -2244,49 +2265,76 @@ export class PostgresRepository {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
     if (userId && userId !== 'usr_admin') {
-      await this.query(`UPDATE notifications SET is_read = TRUE WHERE user_id = $1;`, [userId]);
+      await this.query(`UPDATE notifications SET is_read = TRUE WHERE (user_id = $1 OR tenant_id = $1);`, [userId]);
     } else {
       await this.query(`UPDATE notifications SET is_read = TRUE;`);
     }
   }
 
-  public async deleteNotification(id: string): Promise<void> {
-    if (!this.pool || !this.isConnected) return;
-    await this.query(`DELETE FROM notifications WHERE id = $1;`, [id]);
-  }
-
-  public async bulkDeleteNotifications(ids: string[]): Promise<void> {
-    if (!this.pool || !this.isConnected || !ids.length) return;
-    await this.query(`DELETE FROM notifications WHERE id = ANY($1::text[]);`, [ids]);
-  }
-
-  public async deleteAllNotifications(userId?: string): Promise<void> {
-    if (!this.pool || !this.isConnected) return;
-    if (userId && userId !== 'usr_admin') {
-      await this.query(`DELETE FROM notifications WHERE user_id = $1;`, [userId]);
-    } else {
-      await this.query(`DELETE FROM notifications;`);
+  public async deleteNotification(id: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    let sql = `DELETE FROM notifications WHERE id = $1`;
+    const params: any[] = [id];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (tenant_id = $2 OR user_id = $2)`;
+      params.push(userId);
     }
+    const res = await this.query(sql, params);
+    return (res?.rowCount || 0) > 0;
   }
 
-  public async deleteDispatchLog(id: string): Promise<void> {
-    if (!this.pool || !this.isConnected) return;
-    await this.query(`DELETE FROM dispatch_logs WHERE id = $1;`, [id]);
+  public async bulkDeleteNotifications(ids: string[], userId?: string, isAdmin: boolean = true): Promise<number> {
+    if (!this.pool || !this.isConnected || !ids.length) return 0;
+    let sql = `DELETE FROM notifications WHERE id = ANY($1::text[])`;
+    const params: any[] = [ids];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (tenant_id = $2 OR user_id = $2)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return res?.rowCount || 0;
   }
 
-  public async bulkDeleteDispatchLogs(ids: string[]): Promise<void> {
-    if (!this.pool || !this.isConnected || !ids.length) return;
-    await this.query(`DELETE FROM dispatch_logs WHERE id = ANY($1::text[]);`, [ids]);
+  public async deleteAllNotifications(userId?: string, isAdmin: boolean = true): Promise<number> {
+    if (!this.pool || !this.isConnected) return 0;
+    let sql = `DELETE FROM notifications`;
+    const params: any[] = [];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` WHERE (tenant_id = $1 OR user_id = $1)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return res?.rowCount || 0;
+  }
+
+  public async deleteDispatchLog(id: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    let sql = `DELETE FROM dispatch_logs WHERE id = $1`;
+    const params: any[] = [id];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (tenant_id = $2 OR user_id = $2)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return (res?.rowCount || 0) > 0;
+  }
+
+  public async bulkDeleteDispatchLogs(ids: string[], userId?: string, isAdmin: boolean = true): Promise<number> {
+    if (!this.pool || !this.isConnected || !ids.length) return 0;
+    let sql = `DELETE FROM dispatch_logs WHERE id = ANY($1::text[])`;
+    const params: any[] = [ids];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (tenant_id = $2 OR user_id = $2)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return res?.rowCount || 0;
   }
 
   public async clearDispatchLogs(tenantId?: string): Promise<void> {
     if (!this.pool || !this.isConnected) return;
     if (tenantId && tenantId !== 'usr_admin') {
-      try {
-        await this.query(`DELETE FROM dispatch_logs WHERE tenant_id = $1 OR user_id = $1;`, [tenantId]);
-      } catch {
-        await this.query(`DELETE FROM dispatch_logs WHERE user_id = $1;`, [tenantId]).catch(() => {});
-      }
+      await this.query(`DELETE FROM dispatch_logs WHERE tenant_id = $1 OR user_id = $1;`, [tenantId]).catch(() => {});
     } else {
       await this.query(`DELETE FROM dispatch_logs;`);
     }
@@ -3655,24 +3703,34 @@ export class PostgresRepository {
     let sql = `SELECT * FROM notifications`;
     const params: any[] = [];
     if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
-      sql += ` WHERE tenant_id = $1`;
+      sql += ` WHERE (tenant_id = $1 OR user_id = $1)`;
       params.push(tenantId);
     }
-    sql += ` ORDER BY created_at DESC LIMIT 100`;
+    sql += ` ORDER BY created_at DESC LIMIT 500`;
     try {
       const res = await this.query(sql, params);
       return res.rows.map(r => ({
         id: r.id,
-        tenantId: r.tenant_id,
-        userId: r.user_id,
-        type: r.type,
+        tenantId: r.tenant_id || r.user_id || 'usr_admin',
+        userId: r.user_id || r.tenant_id || 'usr_admin',
+        type: r.type || 'alert',
         title: r.title,
         message: r.message,
-        read: r.is_read,
+        severity: r.severity || 'info',
+        read: Boolean(r.is_read),
+        timestamp: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
         createdAt: r.created_at,
         alarmId: r.alarm_id,
         ruleId: r.rule_id,
-        alarmState: r.alarm_state
+        alarmState: r.alarm_state,
+        deviceId: r.device_id,
+        deviceName: r.device_name,
+        acknowledged: Boolean(r.acknowledged),
+        acknowledgedAt: r.acknowledged_at,
+        acknowledgedBy: r.acknowledged_by,
+        repeatCount: r.repeat_count || 0,
+        currentValue: r.current_value,
+        thresholdValue: r.threshold_value,
       }));
     } catch {
       return [];
@@ -3684,24 +3742,24 @@ export class PostgresRepository {
     let sql = `SELECT * FROM dispatch_logs`;
     const params: any[] = [];
     if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
-      sql += ` WHERE tenant_id = $1`;
+      sql += ` WHERE (tenant_id = $1 OR user_id = $1)`;
       params.push(tenantId);
     }
-    sql += ` ORDER BY sent_at DESC LIMIT 100`;
+    sql += ` ORDER BY sent_at DESC LIMIT 500`;
     try {
       const res = await this.query(sql, params);
       return res.rows.map(r => ({
         id: r.id,
         ruleId: r.rule_id,
         alarmId: r.alarm_id,
-        tenantId: r.tenant_id,
-        userId: r.user_id,
+        tenantId: r.tenant_id || r.user_id || 'usr_admin',
+        userId: r.user_id || r.tenant_id || 'usr_admin',
         userName: r.user_name,
         channel: r.channel,
         recipient: r.recipient,
         status: r.status,
         error: r.error,
-        sentAt: r.sent_at
+        sentAt: r.sent_at ? new Date(r.sent_at).toISOString() : new Date().toISOString(),
       }));
     } catch {
       return [];

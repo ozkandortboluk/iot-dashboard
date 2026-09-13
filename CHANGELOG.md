@@ -4,6 +4,15 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.3] - 2026-09-13
+
+### 📌 PostgreSQL ve Tenant Kapsamı Düzenlemeleri
+- **PostgreSQL İle Tenant ID Sorgu Optimizasyonları**:
+  - PostgreSQL aktifken `getNotifications`, `getDispatchLogs`, `getAlarms` ve `getAlarmEvents` fonksiyonlarındaki eksik Admin ve Customer scope (tenant_id) kontrolleri düzeltildi.
+  - Admin yetkisine sahip kullanıcıların veritabanı loglarında veya bildirim ekranlarında eksik/yanlış kayıt görmesine sebep olan Tenant filtreleme hataları giderildi.
+  - Toplu bildirim veya log silme işlemlerindeki erişim yetkileri memory DB ve Postgres DB üzerinde standardize edildi.
+  - Bildirim veritabanı şemasında tanımlanmayan ancak veritabanına yazılmaya çalışılan `type` özelliği TypeScript'te güvenli hale getirildi (`(n as any).type`).
+
 ## 🚀 [v1.17.2] - 2026-09-13
 
 ### 📌 PostgreSQL Cihaz API Anahtarı Kısıt Hatası & Yabancı Anahtar Çakışma Düzeltmesi

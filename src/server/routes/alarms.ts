@@ -269,10 +269,10 @@ notificationsRouter.get('/', authenticateUser, async (req, res) => {
   res.json(await db.getNotifications(targetUserId, currentUser.role === 'admin' ? targetCustomerId : currentUser.id));
 });
 
-notificationsRouter.put('/:id/read', authenticateUser, (req, res) => {
+notificationsRouter.put('/:id/read', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  db.markNotificationRead(req.params.id, currentUser.id);
+  await db.markNotificationRead(req.params.id, currentUser.id);
   res.json({ success: true });
 });
 
@@ -302,17 +302,17 @@ notificationsRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
 notificationsRouter.post('/delete-all', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const deletedCount = await db.alarmRepository.deleteAllNotifications(currentUser.id);
+  const deletedCount = await db.alarmRepository.deleteAllNotifications(currentUser.id, currentUser);
   res.json({ success: true, count: deletedCount, message: 'Tüm bildirimler silindi.' });
 });
 
-notificationsRouter.post('/clear', authenticateUser, (req, res) => {
+notificationsRouter.post('/clear', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const { userId } = req.body;
   const targetUserId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
 
-  db.markAllNotificationsRead(targetUserId);
+  await db.markAllNotificationsRead(targetUserId);
   res.json({ success: true });
 });
 

@@ -44,35 +44,49 @@ export class NotificationRepository {
   }
 
   public async markNotificationRead(id: string, userId = 'usr_admin') {
+    const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
+    const isAdmin = reqUser?.role === 'admin' || userId === 'usr_admin';
+
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const notif = this.db.data.notifications.find((n: any) => n.id === id);
     if (notif) {
-      const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
-      if (reqUser && reqUser.role === 'customer' && notif.tenantId !== userId) {
+      if (!isAdmin && notif.tenantId !== userId && (notif as any).userId !== userId) {
         return; // Forbidden: Customer cannot mark another user's notification
       }
-
       notif.read = true;
       this.db.scheduleSave();
-      this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.markNotificationRead(id).catch((e) => console.warn('[PG Error]', e.message)); }
     }
+
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.markNotificationRead(id, userId, isAdmin).catch((e: any) => console.warn('[PG Error markNotificationRead]', e.message));
+    }
+
+    const remaining = await this.db.getNotifications(userId);
+    this.db.notifyNotificationListeners('notifications:updated', remaining);
   }
 
   public async markAllNotificationsRead(userId = 'usr_admin') {
+    const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
+    const isAdmin = reqUser?.role === 'admin' || userId === 'usr_admin';
+
     if (!this.db.data.notifications) this.db.data.notifications = [];
     let updated = false;
     this.db.data.notifications.forEach((n: any) => {
-      if (!n.read && (userId === 'usr_admin' || n.tenantId === userId)) {
+      if (!n.read && (isAdmin || n.tenantId === userId || (n as any).userId === userId)) {
         n.read = true;
         updated = true;
       }
     });
     if (updated) {
       this.db.scheduleSave();
-      this.db.getNotifications().then(n => this.db.notifyNotificationListeners('notifications:updated', n));
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.markAllNotificationsRead(userId === 'usr_admin' ? undefined : userId).catch((e) => console.warn('[PG Error]', e.message)); }
     }
+
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.markAllNotificationsRead(isAdmin ? undefined : userId).catch((e: any) => console.warn('[PG Error markAllNotificationsRead]', e.message));
+    }
+
+    const remaining = await this.db.getNotifications(userId);
+    this.db.notifyNotificationListeners('notifications:updated', remaining);
   }
 
   public async getDashboard(userId: string): Promise<DashboardLayout> {

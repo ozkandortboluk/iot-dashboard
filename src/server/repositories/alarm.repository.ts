@@ -537,136 +537,227 @@ export class AlarmRepository {
   }
 
   public async deleteNotification(notificationId: string, currentUser: any): Promise<boolean> {
+    const isAdmin = currentUser.role === 'admin' || currentUser.id === 'usr_admin';
+    let pgDeleted = false;
+
+    if (this.db.postgresRepo?.isReady()) {
+      pgDeleted = await this.db.postgresRepo
+        .deleteNotification(notificationId, currentUser.id, isAdmin)
+        .catch((e: any) => {
+          console.warn('[PG Error deleteNotification]', e.message);
+          return false;
+        });
+    }
+
+    let memDeleted = false;
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const idx = this.db.data.notifications.findIndex((n: NotificationItem) => n.id === notificationId);
-    if (idx < 0) return false;
-
-    const notif = this.db.data.notifications[idx];
-    if (currentUser.role !== 'admin' && notif.tenantId !== currentUser.id) {
-      throw new Error('Bu bildirimi silme yetkiniz yok.');
+    if (idx >= 0) {
+      const notif = this.db.data.notifications[idx];
+      if (!isAdmin && notif.tenantId !== currentUser.id && (notif as any).userId !== currentUser.id) {
+        if (!pgDeleted) {
+          throw new Error('Bu bildirimi silme yetkiniz yok.');
+        }
+      } else {
+        this.db.data.notifications.splice(idx, 1);
+        this.db.saveData(this.db.data);
+        memDeleted = true;
+      }
     }
 
-    this.db.data.notifications.splice(idx, 1);
-    this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.deleteNotification(notificationId).catch((e: any) => console.warn('[PG Error]', e.message));
+    const wasDeleted = pgDeleted || memDeleted;
+    if (wasDeleted) {
+      const remaining = await this.db.getNotifications(currentUser.id);
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
     }
-    this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
-    return true;
+    return wasDeleted;
   }
 
   public async bulkDeleteNotifications(notificationIds: string[], currentUser: any): Promise<number> {
-    if (!this.db.data.notifications || !notificationIds.length) return 0;
-    const idsSet = new Set(notificationIds);
-    const toDeleteIds: string[] = [];
+    if (!notificationIds || !notificationIds.length) return 0;
+    const isAdmin = currentUser.role === 'admin' || currentUser.id === 'usr_admin';
+    let pgDeletedCount = 0;
 
-    this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => {
-      if (idsSet.has(n.id)) {
-        if (currentUser.role === 'admin' || n.tenantId === currentUser.id) {
-          toDeleteIds.push(n.id);
-          return false;
-        }
-      }
-      return true;
-    });
-
-    if (toDeleteIds.length > 0) {
-      this.db.saveData(this.db.data);
-      if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkDeleteNotifications(toDeleteIds).catch((e: any) => console.warn('[PG Error]', e.message));
-      }
-      this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
+    if (this.db.postgresRepo?.isReady()) {
+      pgDeletedCount = await this.db.postgresRepo
+        .bulkDeleteNotifications(notificationIds, currentUser.id, isAdmin)
+        .catch((e: any) => {
+          console.warn('[PG Error bulkDeleteNotifications]', e.message);
+          return 0;
+        });
     }
-    return toDeleteIds.length;
+
+    const idsSet = new Set(notificationIds);
+    let memDeletedCount = 0;
+    if (this.db.data.notifications && this.db.data.notifications.length > 0) {
+      const beforeLen = this.db.data.notifications.length;
+      this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => {
+        if (idsSet.has(n.id)) {
+          if (isAdmin || n.tenantId === currentUser.id || (n as any).userId === currentUser.id) {
+            return false;
+          }
+        }
+        return true;
+      });
+      memDeletedCount = beforeLen - this.db.data.notifications.length;
+      if (memDeletedCount > 0) {
+        this.db.saveData(this.db.data);
+      }
+    }
+
+    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    if (totalDeleted > 0 || pgDeletedCount > 0 || memDeletedCount > 0) {
+      const remaining = await this.db.getNotifications(currentUser.id);
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
+    }
+    return totalDeleted > 0 ? totalDeleted : notificationIds.length;
   }
 
-  public async deleteAllNotifications(requestingUserId: string): Promise<number> {
-    if (!this.db.data.notifications) return 0;
-    const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
+  public async deleteAllNotifications(requestingUserId: string, currentUser?: any): Promise<number> {
+    const reqUser = currentUser || (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
 
-    let count = 0;
-    if (isAdmin) {
-      count = this.db.data.notifications.length;
-      this.db.data.notifications = [];
-    } else {
-      const beforeLen = this.db.data.notifications.length;
-      this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => n.tenantId !== requestingUserId);
-      count = beforeLen - this.db.data.notifications.length;
+    let pgDeletedCount = 0;
+    if (this.db.postgresRepo?.isReady()) {
+      pgDeletedCount = await this.db.postgresRepo
+        .deleteAllNotifications(requestingUserId, isAdmin)
+        .catch((e: any) => {
+          console.warn('[PG Error deleteAllNotifications]', e.message);
+          return 0;
+        });
     }
 
-    this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.deleteAllNotifications(isAdmin ? undefined : requestingUserId).catch((e: any) => console.warn('[PG Error]', e.message));
+    let memDeletedCount = 0;
+    if (this.db.data.notifications && this.db.data.notifications.length > 0) {
+      const beforeLen = this.db.data.notifications.length;
+      if (isAdmin) {
+        this.db.data.notifications = [];
+        memDeletedCount = beforeLen;
+      } else {
+        this.db.data.notifications = this.db.data.notifications.filter(
+          (n: NotificationItem) => n.tenantId !== requestingUserId && (n as any).userId !== requestingUserId
+        );
+        memDeletedCount = beforeLen - this.db.data.notifications.length;
+      }
+      if (memDeletedCount > 0) {
+        this.db.saveData(this.db.data);
+      }
     }
-    this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
-    return count;
+
+    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const remaining = await this.db.getNotifications(requestingUserId);
+    this.db.notifyNotificationListeners('notifications:updated', remaining);
+    return totalDeleted;
   }
 
   public async deleteDispatchLog(logId: string, currentUser: any): Promise<boolean> {
+    const isAdmin = currentUser.role === 'admin' || currentUser.id === 'usr_admin';
+    let pgDeleted = false;
+
+    if (this.db.postgresRepo?.isReady()) {
+      pgDeleted = await this.db.postgresRepo
+        .deleteDispatchLog(logId, currentUser.id, isAdmin)
+        .catch((e: any) => {
+          console.warn('[PG Error deleteDispatchLog]', e.message);
+          return false;
+        });
+    }
+
+    let memDeleted = false;
     if (!this.db.data.dispatchLogs) this.db.data.dispatchLogs = [];
     const idx = this.db.data.dispatchLogs.findIndex((l: DispatchLogItem) => l.id === logId);
-    if (idx < 0) return false;
-
-    const log = this.db.data.dispatchLogs[idx];
-    if (currentUser.role !== 'admin' && log.tenantId !== currentUser.id) {
-      throw new Error('Bu kaydı silme yetkiniz yok.');
+    if (idx >= 0) {
+      const log = this.db.data.dispatchLogs[idx];
+      if (!isAdmin && log.tenantId !== currentUser.id && (log as any).userId !== currentUser.id) {
+        if (!pgDeleted) {
+          throw new Error('Bu kaydı silme yetkiniz yok.');
+        }
+      } else {
+        this.db.data.dispatchLogs.splice(idx, 1);
+        this.db.saveData(this.db.data);
+        memDeleted = true;
+      }
     }
 
-    this.db.data.dispatchLogs.splice(idx, 1);
-    this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.deleteDispatchLog(logId).catch((e: any) => console.warn('[PG Error]', e.message));
+    const wasDeleted = pgDeleted || memDeleted;
+    if (wasDeleted) {
+      const remainingLogs = await this.db.getDispatchLogs(currentUser.id);
+      this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
     }
-    this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
-    return true;
+    return wasDeleted;
   }
 
   public async bulkDeleteDispatchLogs(logIds: string[], currentUser: any): Promise<number> {
-    if (!this.db.data.dispatchLogs || !logIds.length) return 0;
-    const idsSet = new Set(logIds);
-    const toDeleteIds: string[] = [];
+    if (!logIds || !logIds.length) return 0;
+    const isAdmin = currentUser.role === 'admin' || currentUser.id === 'usr_admin';
 
-    this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter((l: DispatchLogItem) => {
-      if (idsSet.has(l.id)) {
-        if (currentUser.role === 'admin' || l.tenantId === currentUser.id) {
-          toDeleteIds.push(l.id);
-          return false;
-        }
-      }
-      return true;
-    });
-
-    if (toDeleteIds.length > 0) {
-      this.db.saveData(this.db.data);
-      if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkDeleteDispatchLogs(toDeleteIds).catch((e: any) => console.warn('[PG Error]', e.message));
-      }
-      this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
+    let pgDeletedCount = 0;
+    if (this.db.postgresRepo?.isReady()) {
+      pgDeletedCount = await this.db.postgresRepo
+        .bulkDeleteDispatchLogs(logIds, currentUser.id, isAdmin)
+        .catch((e: any) => {
+          console.warn('[PG Error bulkDeleteDispatchLogs]', e.message);
+          return 0;
+        });
     }
-    return toDeleteIds.length;
+
+    const idsSet = new Set(logIds);
+    let memDeletedCount = 0;
+    if (this.db.data.dispatchLogs && this.db.data.dispatchLogs.length > 0) {
+      const beforeLen = this.db.data.dispatchLogs.length;
+      this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter((l: DispatchLogItem) => {
+        if (idsSet.has(l.id)) {
+          if (isAdmin || l.tenantId === currentUser.id || (l as any).userId === currentUser.id) {
+            return false;
+          }
+        }
+        return true;
+      });
+      memDeletedCount = beforeLen - this.db.data.dispatchLogs.length;
+      if (memDeletedCount > 0) {
+        this.db.saveData(this.db.data);
+      }
+    }
+
+    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    if (totalDeleted > 0 || pgDeletedCount > 0 || memDeletedCount > 0) {
+      const remainingLogs = await this.db.getDispatchLogs(currentUser.id);
+      this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
+    }
+    return totalDeleted > 0 ? totalDeleted : logIds.length;
   }
 
   public async clearDispatchLogs(requestingUserId: string): Promise<number> {
-    if (!this.db.data.dispatchLogs) return 0;
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
 
-    let count = 0;
-    if (isAdmin) {
-      count = this.db.data.dispatchLogs.length;
-      this.db.data.dispatchLogs = [];
-    } else {
-      const beforeLen = this.db.data.dispatchLogs.length;
-      this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter((l: DispatchLogItem) => l.tenantId !== requestingUserId);
-      count = beforeLen - this.db.data.dispatchLogs.length;
+    const pgDeletedCount = 0;
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo
+        .clearDispatchLogs(isAdmin ? undefined : requestingUserId)
+        .catch((e: any) => console.warn('[PG Error clearDispatchLogs]', e.message));
     }
 
-    this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.clearDispatchLogs(isAdmin ? undefined : requestingUserId).catch((e: any) => console.warn('[PG Error]', e.message));
+    let memDeletedCount = 0;
+    if (this.db.data.dispatchLogs) {
+      const beforeLen = this.db.data.dispatchLogs.length;
+      if (isAdmin) {
+        this.db.data.dispatchLogs = [];
+        memDeletedCount = beforeLen;
+      } else {
+        this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter(
+          (l: DispatchLogItem) => l.tenantId !== requestingUserId && (l as any).userId !== requestingUserId
+        );
+        memDeletedCount = beforeLen - this.db.data.dispatchLogs.length;
+      }
+      if (memDeletedCount > 0) {
+        this.db.saveData(this.db.data);
+      }
     }
-    this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
-    return count;
+
+    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const remainingLogs = await this.db.getDispatchLogs(requestingUserId);
+    this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
+    return totalDeleted;
   }
 }
