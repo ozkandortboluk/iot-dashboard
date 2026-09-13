@@ -271,8 +271,8 @@ export class PostgresRepository {
       // 4. Verify Unique Constraint on telemetry_packets in exact ordinal order (device_id, boot_id, sequence)
       const unqRes = await client.query(`
         SELECT a.attname
-        FROM pg_constraint c,
-             LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+        FROM pg_constraint c
+        CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
         WHERE c.conrelid = 'telemetry_packets'::regclass 
           AND c.conname = 'unq_telemetry_device_boot_sequence'

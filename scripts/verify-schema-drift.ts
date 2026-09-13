@@ -121,8 +121,8 @@ async function verifySchemaDrift() {
     // 4. Verify Unique Constraint unq_telemetry_device_boot_sequence on telemetry_packets (P0.6, P0.14)
     const unqRes = await client.query(`
       SELECT a.attname
-      FROM pg_constraint c,
-           LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+      FROM pg_constraint c
+      CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
       WHERE c.conrelid = 'telemetry_packets'::regclass 
         AND c.conname = 'unq_telemetry_device_boot_sequence'

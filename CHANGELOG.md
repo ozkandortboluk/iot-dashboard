@@ -4,6 +4,17 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.11.7] - 2026-09-13
+
+### 🐛 Şema Doğrulama Sözleşmesi SQL Düzeltmesi (Schema Contract Check Fix)
+- **`pg_constraint` CROSS JOIN LATERAL Düzeltmesi (`src/server/database/postgres.ts`, `scripts/verify-schema-drift.ts`)**:
+  - Şema sözleşmesi doğrulama sorgusundaki (`verifySchemaContract`) `pg_constraint` ve `LATERAL unnest(c.conkey)` arasındaki SQL birleştirme sözdizimi düzeltildi (`FROM pg_constraint c CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)`).
+  - SQL ayrıştırıcısının ürettiği `invalid reference to FROM-clause entry for table "c"` hatası giderildi; böylece `ensureTelemetrySchema` ve `/health/ready` kontrollerinin başarılı şekilde yeşile dönmesi (`isSchemaEnsured=true`) sağlandı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları `v1.11.7` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.11.6] - 2026-09-12
 
 ### 🛡️ Veritabanı Dayanıklılığı & Hata Yönetimi İyileştirmeleri (Database Resilience & Error Shielding)
