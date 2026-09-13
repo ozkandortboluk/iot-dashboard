@@ -1,6 +1,9 @@
+import zlib from 'zlib';
 import crypto from 'crypto';
 import type {
   Device,
+  ArchivedDevice,
+  TelemetryCompressionStats,
   DiscoveredNetworkDevice,
   TelemetryReading,
   Site,
@@ -118,7 +121,22 @@ export class DeviceRepository {
       );
     }
 
-    return list;
+    const statusPriority: Record<string, number> = {
+      online: 1,
+      warning: 2,
+      degraded: 2,
+      maintenance: 3,
+      offline: 4,
+    };
+
+    return [...list].sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+      return tsB - tsA;
+    });
   }
 
   public async assignDeviceOwner(
@@ -535,22 +553,435 @@ export class DeviceRepository {
     return dev;
   }
 
-  public async deleteDevice(deviceId: string): Promise<void> {
+  private createArchivedRecord(
+    device: Device,
+    deletedBy?: string,
+    deletedByName?: string,
+    deleteReason?: string
+  ): ArchivedDevice {
+    const now = new Date().toISOString();
+
+    // 1. Gather historical telemetry for this device
+    let rawReadings: any[] = [];
+    try {
+      if (this.db.telemetryRepository) {
+        rawReadings = this.db.telemetryRepository.getTelemetry(device.id, undefined, 2000) || [];
+      }
+    } catch (e) {
+      console.warn('[Archive] Could not collect telemetry readings for compression:', e);
+    }
+
+    // 2. Compress telemetry payload with Gzip
+    const jsonStr = JSON.stringify(rawReadings);
+    const rawSizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+    let compressedBase64 = '';
+    let compressedSizeBytes = 0;
+    let ratioPercent = 0;
+
+    try {
+      const compressedBuffer = zlib.gzipSync(Buffer.from(jsonStr, 'utf8'), { level: 9 });
+      compressedBase64 = compressedBuffer.toString('base64');
+      compressedSizeBytes = compressedBuffer.length;
+      ratioPercent = rawSizeBytes > 0 ? Math.max(0, Math.round(((rawSizeBytes - compressedSizeBytes) / rawSizeBytes) * 100)) : 0;
+    } catch (err) {
+      console.warn('[Archive] Gzip compression fallback:', err);
+      compressedBase64 = Buffer.from(jsonStr).toString('base64');
+      compressedSizeBytes = Buffer.byteLength(compressedBase64, 'utf8');
+    }
+
+    const stats: TelemetryCompressionStats = {
+      originalPointsCount: rawReadings.length,
+      compressedPointsCount: rawReadings.length,
+      rawSizeBytes,
+      compressedSizeBytes,
+      compressionRatioPercent: ratioPercent,
+      algorithm: 'gzip-base64',
+      compressedAt: now,
+    };
+
+    const archivedRecord: ArchivedDevice = {
+      id: device.id,
+      device: { ...device, deletedAt: now },
+      deletedAt: now,
+      deletedBy: deletedBy || 'system',
+      deletedByName: deletedByName || 'Yönetici',
+      deleteReason: deleteReason || 'Kullanıcı veya Sistem Tarafından Silindi',
+      tenantId: device.tenantId || 'usr_admin',
+      telemetrySnapshot: {
+        stats,
+        compressedData: compressedBase64,
+        recentReadings: rawReadings.slice(0, 10),
+      },
+      preservedSettings: {
+        name: device.name,
+        apiKey: device.apiKey,
+        apiKeyScopes: device.apiKeyScopes,
+        type: device.type,
+        roleKey: device.roleKey,
+        hardwareModel: device.hardwareModel,
+        firmwareVersion: device.firmwareVersion,
+        outputDefinitions: device.outputDefinitions,
+        metrics: device.metrics,
+        tags: device.tags,
+        siteId: device.siteId,
+        zoneId: device.zoneId,
+        groupId: device.groupId,
+        location: device.location,
+        ipAddress: device.ipAddress,
+        macAddress: device.macAddress,
+        rateLimitPerMin: device.rateLimitPerMin,
+        encryptionMethod: device.encryptionMethod,
+      },
+    };
+
+    return archivedRecord;
+  }
+
+  public async deleteDevice(
+    deviceId: string,
+    requestingUser?: { id: string; role: string; name?: string }
+  ): Promise<void> {
     const index = this.db.data.devices.findIndex((d: Device) => d.id === deviceId);
     if (index !== -1) {
       const removed = this.db.data.devices.splice(index, 1)[0];
       
-      // Store in archivedDevices for MAC-based recovery
+      // Store in archivedDevices with compressed telemetry & full configuration
       if (!this.db.data.archivedDevices) this.db.data.archivedDevices = [];
-      removed.deletedAt = new Date().toISOString();
-      this.db.data.archivedDevices.push(removed);
+      const archivedRecord = this.createArchivedRecord(
+        removed,
+        requestingUser?.id,
+        requestingUser?.name,
+        'Cihaz Yönetim Ekranından Silindi'
+      );
+      this.db.data.archivedDevices = [
+        archivedRecord,
+        ...this.db.data.archivedDevices.filter((a: any) => (a.id || a.device?.id) !== removed.id),
+      ];
 
-      this.db.addAuditLog('system', 'API Manager', `Cihaz Silindi: ${removed.name}`, 'medium');
+      this.db.addAuditLog(
+        requestingUser?.id || 'system',
+        requestingUser?.name || 'API Manager',
+        `Cihaz Arşive Taşındı & Silindi: ${removed.name} (ID: ${removed.id}, Telemetri sıkıştırıldı: ${archivedRecord.telemetrySnapshot?.stats.compressionRatioPercent || 0}% tasarruf)`,
+        'medium'
+      );
       this.db.saveData(this.db.data);
 
       // Sync to PostgreSQL Repository
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteDevice(deviceId).catch((e) => console.warn('[PG Error]', e.message)); }
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.deleteDevice(deviceId).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
     }
+  }
+
+  public async bulkDeleteDevices(deviceIds: string[], requestingUser?: { id: string; role: string; name?: string }): Promise<number> {
+    if (!this.db.data.devices || !deviceIds.length) return 0;
+    const idsSet = new Set(deviceIds);
+    const removedIds: string[] = [];
+
+    if (!this.db.data.archivedDevices) this.db.data.archivedDevices = [];
+    const newArchivedRecords: ArchivedDevice[] = [];
+
+    this.db.data.devices = this.db.data.devices.filter((d: Device) => {
+      if (idsSet.has(d.id)) {
+        if (!requestingUser || requestingUser.role === 'admin' || d.tenantId === requestingUser.id || d.userId === requestingUser.id) {
+          const archivedRecord = this.createArchivedRecord(
+            d,
+            requestingUser?.id,
+            requestingUser?.name,
+            'Toplu Cihaz Silme İşlemi'
+          );
+          removedIds.push(d.id);
+          newArchivedRecords.push(archivedRecord);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (removedIds.length > 0) {
+      const removedIdSet = new Set(removedIds);
+      this.db.data.archivedDevices = [
+        ...newArchivedRecords,
+        ...this.db.data.archivedDevices.filter((a: any) => !removedIdSet.has(a.id || a.device?.id)),
+      ];
+      const userName = requestingUser?.name || requestingUser?.id || 'API Manager';
+      this.db.addAuditLog(
+        requestingUser?.id || 'system',
+        userName,
+        `Toplu Cihaz Arşive Taşındı & Silindi: ${removedIds.length} adet cihaz ayarları ve telemetrisiyle arşivlendi`,
+        'high'
+      );
+      this.db.saveData(this.db.data);
+
+      // Sync to PostgreSQL
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkDeleteDevices(removedIds).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+    }
+    return removedIds.length;
+  }
+
+  public getArchivedDevices(requestingUserId?: string, targetTenantId?: string): ArchivedDevice[] {
+    const list: any[] = this.db.data.archivedDevices || [];
+    
+    // Normalize older archive entries that might just be Device objects
+    const normalized: ArchivedDevice[] = list.map((item: any) => {
+      if (item.device && item.preservedSettings) {
+        return item as ArchivedDevice;
+      }
+      // Convert legacy raw Device into ArchivedDevice
+      const dev: Device = item.device || item;
+      return {
+        id: dev.id,
+        device: dev,
+        deletedAt: dev.deletedAt || item.deletedAt || new Date().toISOString(),
+        deletedBy: item.deletedBy || 'system',
+        deletedByName: item.deletedByName || 'Sistem',
+        deleteReason: item.deleteReason || 'Silindi',
+        tenantId: dev.tenantId || 'usr_admin',
+        preservedSettings: {
+          name: dev.name,
+          apiKey: dev.apiKey,
+          apiKeyScopes: dev.apiKeyScopes,
+          type: dev.type,
+          roleKey: dev.roleKey,
+          hardwareModel: dev.hardwareModel,
+          firmwareVersion: dev.firmwareVersion,
+          outputDefinitions: dev.outputDefinitions,
+          metrics: dev.metrics,
+          tags: dev.tags,
+          siteId: dev.siteId,
+          zoneId: dev.zoneId,
+          groupId: dev.groupId,
+          location: dev.location,
+          ipAddress: dev.ipAddress,
+          macAddress: dev.macAddress,
+          rateLimitPerMin: dev.rateLimitPerMin,
+          encryptionMethod: dev.encryptionMethod,
+        },
+        telemetrySnapshot: item.telemetrySnapshot || {
+          stats: {
+            originalPointsCount: 0,
+            compressedPointsCount: 0,
+            rawSizeBytes: 0,
+            compressedSizeBytes: 0,
+            compressionRatioPercent: 0,
+            algorithm: 'gzip-base64',
+            compressedAt: dev.deletedAt || new Date().toISOString(),
+          },
+          compressedData: '',
+          recentReadings: [],
+        },
+      };
+    });
+
+    let isAdmin = !requestingUserId || requestingUserId === 'usr_admin';
+    if (requestingUserId) {
+      const user = this.db.data.users?.find((u: any) => u.id === requestingUserId);
+      if (user?.role === 'admin') isAdmin = true;
+    }
+
+    let filtered = normalized;
+    if (!isAdmin) {
+      const allowedTenants = requestingUserId ? this.getUserTenants(requestingUserId) : [];
+      filtered = normalized.filter((a) => allowedTenants.includes(a.tenantId));
+    } else if (targetTenantId && targetTenantId !== 'all') {
+      filtered = normalized.filter((a) => a.tenantId === targetTenantId);
+    }
+
+    const sorted = filtered.sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime());
+    const dedupedMap = new Map<string, ArchivedDevice>();
+    for (const item of sorted) {
+      if (!dedupedMap.has(item.id)) {
+        dedupedMap.set(item.id, item);
+      }
+    }
+    return Array.from(dedupedMap.values());
+  }
+
+  public getArchivedDeviceById(deviceId: string, requestingUserId?: string): ArchivedDevice | null {
+    const all = this.getArchivedDevices(requestingUserId);
+    return all.find((a) => a.id === deviceId) || null;
+  }
+
+  public getArchivedTelemetry(deviceId: string, requestingUserId?: string): any[] {
+    const archive = this.getArchivedDeviceById(deviceId, requestingUserId);
+    if (!archive || !archive.telemetrySnapshot?.compressedData) {
+      return archive?.telemetrySnapshot?.recentReadings || [];
+    }
+
+    try {
+      const buffer = Buffer.from(archive.telemetrySnapshot.compressedData, 'base64');
+      const decompressed = zlib.gunzipSync(buffer).toString('utf8');
+      return JSON.parse(decompressed);
+    } catch (e) {
+      console.warn('[Archive] Could not decompress archived telemetry:', e);
+      return archive.telemetrySnapshot.recentReadings || [];
+    }
+  }
+
+  public async restoreArchivedDevice(
+    deviceId: string,
+    requestingUserId?: string,
+    requestingUserName?: string
+  ): Promise<Device | null> {
+    if (!this.db.data.archivedDevices) return null;
+
+    const index = this.db.data.archivedDevices.findIndex((a: any) => {
+      const id = a.id || a.device?.id;
+      return id === deviceId;
+    });
+
+    if (index === -1) return null;
+
+    const archivedItem = this.db.data.archivedDevices.splice(index, 1)[0];
+    const rawDev: Device = archivedItem.device || archivedItem;
+    const preserved = archivedItem.preservedSettings;
+
+    // Check if device ID already exists in active devices, if so remove stale instance
+    const existingIndex = this.db.data.devices.findIndex((d: Device) => d.id === deviceId);
+    if (existingIndex !== -1) {
+      this.db.data.devices.splice(existingIndex, 1);
+    }
+
+    // Reconstruct fully restored Device with all original configurations
+    const restoredDevice: Device = {
+      ...rawDev,
+      ...(preserved || {}),
+      id: rawDev.id || deviceId,
+      name: preserved?.name || rawDev.name || `Restored Device ${deviceId}`,
+      apiKey: preserved?.apiKey || rawDev.apiKey,
+      tenantId: rawDev.tenantId || preserved?.siteId || 'usr_admin',
+      status: 'offline', // Will turn online when live heartbeat/telemetry arrives
+      deletedAt: undefined,
+      lastSeen: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!this.db.data.devices) this.db.data.devices = [];
+    this.db.data.devices.push(restoredDevice);
+
+    // Decompress and restore past telemetry records into telemetry repository
+    if (archivedItem.telemetrySnapshot?.compressedData) {
+      try {
+        const buffer = Buffer.from(archivedItem.telemetrySnapshot.compressedData, 'base64');
+        const decompressed = zlib.gunzipSync(buffer).toString('utf8');
+        const pastReadings: TelemetryReading[] = JSON.parse(decompressed);
+        if (Array.isArray(pastReadings) && pastReadings.length > 0 && this.db.telemetryRepository) {
+          await this.db.telemetryRepository.addTelemetryBatchAsync(pastReadings).catch((e: any) => console.warn('[Restore Telemetry Batch Error]', e));
+        }
+      } catch (err) {
+        console.warn('[Restore] Could not restore decompressed telemetry history:', err);
+      }
+    }
+
+    const userName = requestingUserName || requestingUserId || 'Sistem Yöneticisi';
+    this.db.addAuditLog(
+      requestingUserId || 'system',
+      userName,
+      `Cihaz Arşivden Geri Yüklendi ve Sisteme Entegre Edildi: ${restoredDevice.name} (${restoredDevice.id})`,
+      'medium'
+    );
+
+    this.db.saveData(this.db.data);
+
+    // Sync to PostgreSQL Repository
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.saveDevice(restoredDevice).catch((e: any) => console.warn('[PG Error Restore]', e.message));
+    }
+
+    return restoredDevice;
+  }
+
+  public async permanentlyDeleteArchivedDevice(
+    deviceId: string,
+    requestingUserId?: string,
+    requestingUserName?: string
+  ): Promise<boolean> {
+    if (!this.db.data.archivedDevices) return false;
+
+    const initialLen = this.db.data.archivedDevices.length;
+    this.db.data.archivedDevices = this.db.data.archivedDevices.filter((a: any) => {
+      const id = a.id || a.device?.id;
+      return id !== deviceId;
+    });
+
+    if (this.db.data.archivedDevices.length < initialLen) {
+      const userName = requestingUserName || requestingUserId || 'Sistem Yöneticisi';
+      this.db.addAuditLog(
+        requestingUserId || 'system',
+        userName,
+        `Arşivdeki Cihaz Kalıcı Olarak Silindi: ID ${deviceId}`,
+        'high'
+      );
+      this.db.saveData(this.db.data);
+      return true;
+    }
+    return false;
+  }
+
+  public async bulkDeleteArchivedDevices(
+    deviceIds: string[],
+    requestingUserId?: string,
+    requestingUserName?: string
+  ): Promise<number> {
+    if (!this.db.data.archivedDevices || !Array.isArray(deviceIds) || deviceIds.length === 0) return 0;
+    const initialLen = this.db.data.archivedDevices.length;
+    const toDeleteSet = new Set(deviceIds);
+
+    this.db.data.archivedDevices = this.db.data.archivedDevices.filter((a: any) => {
+      const id = a.id || a.device?.id;
+      return !toDeleteSet.has(id);
+    });
+
+    const deletedCount = initialLen - this.db.data.archivedDevices.length;
+    if (deletedCount > 0) {
+      const userName = requestingUserName || requestingUserId || 'Sistem Yöneticisi';
+      this.db.addAuditLog(
+        requestingUserId || 'system',
+        userName,
+        `Arşivdeki ${deletedCount} Cihaz Kalıcı Olarak Silindi (Toplu İşlem)`,
+        'high'
+      );
+      this.db.saveData(this.db.data);
+    }
+    return deletedCount;
+  }
+
+  public async bulkRestoreArchivedDevices(
+    deviceIds: string[],
+    requestingUserId?: string,
+    requestingUserName?: string
+  ): Promise<Device[]> {
+    if (!this.db.data.archivedDevices || !Array.isArray(deviceIds) || deviceIds.length === 0) return [];
+    const restoredDevices: Device[] = [];
+
+    for (const id of deviceIds) {
+      const restored = await this.restoreArchivedDevice(id, requestingUserId, requestingUserName);
+      if (restored) {
+        restoredDevices.push(restored);
+      }
+    }
+
+    return restoredDevices;
+  }
+
+  public async clearArchivedDevices(requestingUserId?: string, targetTenantId?: string): Promise<number> {
+    if (!this.db.data.archivedDevices) return 0;
+    const initialLen = this.db.data.archivedDevices.length;
+    
+    if (targetTenantId && targetTenantId !== 'all') {
+      this.db.data.archivedDevices = this.db.data.archivedDevices.filter((a: any) => {
+        const tId = a.tenantId || a.device?.tenantId;
+        return tId !== targetTenantId;
+      });
+    } else {
+      this.db.data.archivedDevices = [];
+    }
+
+    const count = initialLen - (this.db.data.archivedDevices?.length || 0);
+    this.db.saveData(this.db.data);
+    return count;
   }
 
   // Network Discovery & Unregistered Devices
@@ -615,10 +1046,23 @@ export class DeviceRepository {
       if (d.ip && d.ip.toLowerCase().trim() === target) return false;
       if (d.mac && d.mac.toLowerCase().trim() === target) return false;
       if (d.hostname && d.hostname.toLowerCase().trim() === target) return false;
+      if (d.pairingCode && d.pairingCode.toLowerCase().trim() === target) return false;
       if (d.tokenProvided && d.tokenProvided !== 'Yok' && d.tokenProvided.toLowerCase().trim() === target) return false;
       return true;
     });
     this.db.saveData(this.db.data);
+  }
+
+  public clearUnregisteredDevices(targetTenantId?: string): number {
+    if (!this.db.data.unregisteredDevices) return 0;
+    const initialCount = this.db.data.unregisteredDevices.length;
+    if (targetTenantId && targetTenantId !== 'all') {
+      this.db.data.unregisteredDevices = this.db.data.unregisteredDevices.filter((d: any) => d.tenantId !== targetTenantId);
+    } else {
+      this.db.data.unregisteredDevices = [];
+    }
+    this.db.saveData(this.db.data);
+    return initialCount - (this.db.data.unregisteredDevices?.length || 0);
   }
 
   public getDiscoveredDevices(requestingUserId?: string, targetCustomerId?: string): DiscoveredNetworkDevice[] {
@@ -633,14 +1077,14 @@ export class DeviceRepository {
       }
     }
 
-    // Filter devices based on tenant permission
-    let allowedDevices = allDevices;
+    // Filter devices based on tenant permission, excluding simulated virtual generators from physical discovery
+    let allowedDevices = allDevices.filter((d: Device) => !d.isSimulated);
     if (!isAdmin) {
       // Non-admin users ONLY see devices from their assigned tenants
       const allowedTenants = requestingUserId ? this.getUserTenants(requestingUserId) : [];
-      allowedDevices = allDevices.filter((d: Device) => allowedTenants.includes(d.tenantId));
+      allowedDevices = allowedDevices.filter((d: Device) => allowedTenants.includes(d.tenantId));
     } else if (targetCustomerId && targetCustomerId !== 'all') {
-      allowedDevices = allDevices.filter((d: Device) => d.tenantId === targetCustomerId);
+      allowedDevices = allowedDevices.filter((d: Device) => d.tenantId === targetCustomerId);
     }
 
     const registeredDiscovered: DiscoveredNetworkDevice[] = allowedDevices.map((d: Device) => {
@@ -672,11 +1116,14 @@ export class DeviceRepository {
         .filter((mac) => mac && mac !== '—')
     );
 
-    // Filter unregistered devices matching visibility
+    // Filter unregistered devices matching visibility, removing hardcoded/mock fake nodes
     const unregList = (this.db.data.unregisteredDevices || [])
       .filter((d: DiscoveredNetworkDevice) => {
-        // Exclude any legacy fake gateway mock entries
+        // Exclude legacy mock or fake demo entries
         if (d.hostname === 'Fiber-Modem-Gateway' || (d.ip === '192.168.1.1' && d.vendor?.includes('Zyxel'))) {
+          return false;
+        }
+        if (d.mac === 'AA:BB:CC:DD:EE:FF' || d.hostname === 'esp32-unreg' || d.pairingCode === 'PAIR99' || d.ip === '192.168.244.188') {
           return false;
         }
 
@@ -705,7 +1152,27 @@ export class DeviceRepository {
         };
       });
 
-    return [...registeredDiscovered, ...unregList];
+    const combined: DiscoveredNetworkDevice[] = [...registeredDiscovered, ...unregList];
+
+    const statusPriority: Record<string, number> = {
+      transmitting: 1,
+      active: 1,
+      online: 1,
+      pending: 2,
+      discovered: 3,
+      unregistered: 3,
+      idle: 4,
+      offline: 5,
+    };
+
+    return combined.sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+      return tsB - tsA;
+    });
   }
 
   public processHistory(reading: TelemetryReading, isSimulated: boolean) {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sliders,
   Plus,
@@ -19,9 +19,13 @@ import {
   Shield,
   Activity,
   User as UserIcon,
+  CheckSquare,
+  Square,
+  RefreshCw,
 } from 'lucide-react';
 import type { ThresholdRule, Device, Customer, NotificationChannel } from '../../types';
 import { METRIC_DICTIONARY } from './types';
+import { BulkDeleteModal } from '../common/BulkDeleteModal';
 
 interface AlarmRuleListProps {
   rules: ThresholdRule[];
@@ -30,8 +34,11 @@ interface AlarmRuleListProps {
   currentUserRole?: string;
   onOpenNewRule: () => void;
   onEditRule: (rule: ThresholdRule) => void;
-  onRequestDeleteRule: (rule: ThresholdRule) => void;
+  onDelete?: (ruleId: string) => Promise<void>;
+  onRequestDeleteRule?: (rule: ThresholdRule) => void;
   onToggleRule: (ruleId: string, enabled: boolean) => Promise<void>;
+  onBulkDelete?: (ruleIds: string[]) => Promise<void>;
+  onBulkDeleteRules?: (ruleIds: string[]) => Promise<void>;
 }
 
 export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
@@ -41,12 +48,39 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
   currentUserRole,
   onOpenNewRule,
   onEditRule,
+  onDelete,
   onRequestDeleteRule,
   onToggleRule,
+  onBulkDelete,
+  onBulkDeleteRules,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDeviceFilter, setSelectedDeviceFilter] = useState('all');
-  const [selectedSeverityFilter, setSelectedSeverityFilter] = useState('all');
+  const effectiveBulkDelete = onBulkDelete || onBulkDeleteRules;
+
+  // Filters with persistence
+  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('rules_filter_search') || '');
+  const [selectedDeviceFilter, setSelectedDeviceFilter] = useState(() => localStorage.getItem('rules_filter_device') || 'all');
+  const [selectedSeverityFilter, setSelectedSeverityFilter] = useState(() => localStorage.getItem('rules_filter_severity') || 'all');
+
+  useEffect(() => {
+    localStorage.setItem('rules_filter_search', searchTerm);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    localStorage.setItem('rules_filter_device', selectedDeviceFilter);
+  }, [selectedDeviceFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('rules_filter_severity', selectedSeverityFilter);
+  }, [selectedSeverityFilter]);
+
+  // Bulk Selection States
+  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Single Delete State
+  const [ruleToDelete, setRuleToDelete] = useState<ThresholdRule | null>(null);
+  const [isSingleDeleting, setIsSingleDeleting] = useState(false);
 
   const filteredRules = rules.filter((r) => {
     if (searchTerm.trim()) {
@@ -64,6 +98,57 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
     }
     return true;
   });
+
+  const handleToggleSelectRule = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedRuleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedRuleIds.size === filteredRules.length && filteredRules.length > 0) {
+      setSelectedRuleIds(new Set());
+    } else {
+      setSelectedRuleIds(new Set(filteredRules.map((r) => r.id)));
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (!effectiveBulkDelete || selectedRuleIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      await effectiveBulkDelete(Array.from(selectedRuleIds));
+      setSelectedRuleIds(new Set());
+      setShowBulkDeleteModal(false);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const handleConfirmSingleDelete = async () => {
+    if (!ruleToDelete) return;
+    setIsSingleDeleting(true);
+    try {
+      if (onDelete) {
+        await onDelete(ruleToDelete.id);
+      } else if (onRequestDeleteRule) {
+        onRequestDeleteRule(ruleToDelete);
+      }
+      setRuleToDelete(null);
+    } finally {
+      setIsSingleDeleting(false);
+    }
+  };
+
+  const selectedRulesList = filteredRules.filter((r) => selectedRuleIds.has(r.id));
+  const selectedRulePreviews = selectedRulesList.map((r) => `${r.metricKey} ${r.operator} ${r.thresholdValue} (${r.deviceId === 'all' ? 'Global' : r.deviceId})`);
 
   const getChannelIcon = (ch: NotificationChannel) => {
     switch (ch) {
@@ -181,6 +266,37 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
             </select>
           </div>
         </div>
+
+        {/* Bulk Action Bar */}
+        {selectedRuleIds.size > 0 && (
+          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/60 rounded-xl flex items-center justify-between flex-wrap gap-2.5 animate-in fade-in">
+            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-900 dark:text-indigo-200">
+              <CheckSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span>
+                <strong>{selectedRuleIds.size}</strong> / {filteredRules.length} kural seçildi.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="px-2.5 py-1 text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:underline cursor-pointer"
+              >
+                {selectedRuleIds.size === filteredRules.length ? 'Seçimi Temizle' : 'Tümünü Seç'}
+              </button>
+              {effectiveBulkDelete && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Seçilenleri Sil ({selectedRuleIds.size})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Rules List / Table */}
@@ -208,7 +324,16 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[10px]">
                 <tr>
-                  <th className="py-3 px-4 w-12 text-center">Durum</th>
+                  <th className="py-3 px-4 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredRules.length > 0 && selectedRuleIds.size === filteredRules.length}
+                      onChange={handleToggleSelectAll}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                      title="Tümünü Seç / Kaldır"
+                    />
+                  </th>
+                  <th className="py-3 px-3 w-12 text-center">Durum</th>
                   <th className="py-3 px-4">Koşul & Metrik</th>
                   <th className="py-3 px-4">Hedef Cihaz</th>
                   <th className="py-3 px-4">Bekleme / Histerezis</th>
@@ -218,19 +343,30 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {filteredRules.map((rule) => {
+                {filteredRules.map((rule, idx) => {
                   const targetDev = devices.find((d) => d.id === rule.deviceId);
                   const unit = METRIC_DICTIONARY[rule.metricKey?.toLowerCase()]?.unit || '';
+                  const isChecked = selectedRuleIds.has(rule.id);
 
                   return (
                     <tr
-                      key={rule.id}
+                      key={`rule_desk_${rule.id}_${idx}`}
                       className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
-                        !rule.enabled ? 'opacity-60 bg-slate-50/40 dark:bg-slate-900/40' : ''
+                        isChecked ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : !rule.enabled ? 'opacity-60 bg-slate-50/40 dark:bg-slate-900/40' : ''
                       }`}
                     >
-                      {/* Durum Toggle */}
+                      {/* Checkbox */}
                       <td className="py-3.5 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => handleToggleSelectRule(rule.id, e as any)}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                        />
+                      </td>
+
+                      {/* Durum Toggle */}
+                      <td className="py-3.5 px-3 text-center">
                         <button
                           type="button"
                           onClick={() => onToggleRule(rule.id, !rule.enabled)}
@@ -329,9 +465,9 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => onRequestDeleteRule(rule)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 transition-colors cursor-pointer"
-                            title="Sil"
+                            onClick={() => setRuleToDelete(rule)}
+                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                            title="Kuralı Sil"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -346,17 +482,30 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
 
           {/* Mobile Card View (lg altı) */}
           <div className="block lg:hidden divide-y divide-slate-100 dark:divide-slate-800">
-            {filteredRules.map((rule) => {
+            {filteredRules.map((rule, idx) => {
               const targetDev = devices.find((d) => d.id === rule.deviceId);
               const unit = METRIC_DICTIONARY[rule.metricKey?.toLowerCase()]?.unit || '';
+              const isChecked = selectedRuleIds.has(rule.id);
 
               return (
                 <div
-                  key={rule.id}
-                  className={`p-4 space-y-3 ${!rule.enabled ? 'opacity-60 bg-slate-50/40 dark:bg-slate-900/40' : ''}`}
+                  key={`rule_mob_${rule.id}_${idx}`}
+                  className={`p-4 space-y-3 ${
+                    isChecked
+                      ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
+                      : !rule.enabled
+                      ? 'opacity-60 bg-slate-50/40 dark:bg-slate-900/40'
+                      : ''
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => handleToggleSelectRule(rule.id, e as any)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                      />
                       <button
                         type="button"
                         onClick={() => onToggleRule(rule.id, !rule.enabled)}
@@ -376,15 +525,15 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => onEditRule(rule)}
-                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                         title="Düzenle"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => onRequestDeleteRule(rule)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                        title="Sil"
+                        onClick={() => setRuleToDelete(rule)}
+                        className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 cursor-pointer"
+                        title="Kuralı Sil"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -427,6 +576,43 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
           </div>
         </>
       )}
+
+      {/* Single Rule Delete Modal */}
+      {ruleToDelete && (
+        <BulkDeleteModal
+          isOpen={Boolean(ruleToDelete)}
+          title="Alarm Kuralını Silme Onayı"
+          itemCount={1}
+          itemLabel="alarm kuralını"
+          itemsPreview={[`${ruleToDelete.metricKey} ${ruleToDelete.operator} ${ruleToDelete.thresholdValue} (${ruleToDelete.deviceId === 'all' ? 'Global' : ruleToDelete.deviceId})`]}
+          isDeleting={isSingleDeleting}
+          onClose={() => setRuleToDelete(null)}
+          onConfirm={handleConfirmSingleDelete}
+          description={
+            <p>
+              <strong>"{ruleToDelete.metricKey} {ruleToDelete.operator} {ruleToDelete.thresholdValue}"</strong> kuralı kalıcı olarak silinecektir. Bu kurala bağlı telemetri kontrolü ve alarm tetikleme derhal sonlandırılacaktır.
+            </p>
+          }
+        />
+      )}
+
+      {/* Bulk Delete Rules Modal */}
+      <BulkDeleteModal
+        isOpen={showBulkDeleteModal}
+        title="Toplu Alarm Kuralı Silme Onayı"
+        itemCount={selectedRuleIds.size}
+        itemLabel="alarm kuralını"
+        itemsPreview={selectedRulePreviews}
+        isDeleting={isBulkDeleting}
+        onClose={() => setShowBulkDeleteModal(false)}
+        onConfirm={handleConfirmBulkDelete}
+        description={
+          <p>
+            Seçilen <strong>{selectedRuleIds.size}</strong> adet alarm kuralı sistemden tamamen silinecektir. Silinen kurallar için telemetri eşik kontrolü ve otomatik bildirim gönderimi derhal durdurulacaktır.
+          </p>
+        }
+      />
     </div>
   );
 };
+

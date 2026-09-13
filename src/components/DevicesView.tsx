@@ -10,6 +10,8 @@ import { DeviceTagsEditor } from './devices/DeviceTagsEditor';
 import { DeviceMaintenanceModal } from './devices/DeviceMaintenanceModal';
 import { DeviceReplacementModal } from './devices/DeviceReplacementModal';
 import { HierarchyManagementModal } from './devices/HierarchyManagementModal';
+import { BulkDeleteModal } from './common/BulkDeleteModal';
+import { ToastNotification } from './common/ToastNotification';
 import {
   Cpu,
   Plus,
@@ -60,6 +62,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     createNewDevice,
     updateDevice,
     deleteDevice,
+    bulkDeleteDevices,
     regenerateApiKey,
     convertToPhysicalDevice,
     triggerTestTelemetry,
@@ -70,6 +73,12 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Bulk Selection State
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
   // Hierarchy Data & Filter State
   const [sites, setSites] = useState<Site[]>([]);
@@ -126,14 +135,31 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     return Array.from(set).sort();
   }, [devices]);
 
-  // Filtered devices based on Site, Zone, Group, Tag, and Customer
+  // Filtered devices based on Site, Zone, Group, Tag, and Customer (strictly sorted online first)
   const filteredDevices = useMemo(() => {
-    return devices.filter((d) => {
+    const list = devices.filter((d) => {
       if (selectedSiteId !== 'all' && d.siteId !== selectedSiteId) return false;
       if (selectedZoneId !== 'all' && d.zoneId !== selectedZoneId) return false;
       if (selectedGroupId !== 'all' && d.groupId !== selectedGroupId) return false;
       if (selectedTag !== 'all' && !(d.tags || []).includes(selectedTag)) return false;
       return true;
+    });
+
+    const statusPriority: Record<string, number> = {
+      online: 1,
+      warning: 2,
+      degraded: 2,
+      maintenance: 3,
+      offline: 4,
+    };
+
+    return [...list].sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+      return tsB - tsA;
     });
   }, [devices, selectedSiteId, selectedZoneId, selectedGroupId, selectedTag]);
 
@@ -715,13 +741,73 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const handleConfirmDelete = async () => {
     if (!deletingDevice) return;
     try {
+      const devName = deletingDevice.name || deletingDevice.id;
       await deleteDevice(deletingDevice.id);
       if (selectedDevice?.id === deletingDevice.id) {
         setSelectedDeviceId(null);
       }
+      setSelectedDeviceIds((prev) => {
+        const next = new Set(prev);
+        next.delete(deletingDevice.id);
+        return next;
+      });
       setDeletingDevice(null);
-    } catch (err) {
-      alert('Cihaz silinemedi.');
+      setToast({
+        message: `"${devName}" cihazı başarıyla silindi ve arşiv havuzuna aktarıldı.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      setToast({
+        message: err.message || 'Cihaz silinemedi.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleToggleDeviceSelection = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedDeviceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllDevices = () => {
+    if (selectedDeviceIds.size === filteredDevices.length && filteredDevices.length > 0) {
+      setSelectedDeviceIds(new Set());
+    } else {
+      setSelectedDeviceIds(new Set(filteredDevices.map((d) => d.id)));
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedDeviceIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const idsToDelete = Array.from(selectedDeviceIds);
+      const count = idsToDelete.length;
+      await bulkDeleteDevices(idsToDelete);
+      if (selectedDeviceId && idsToDelete.includes(selectedDeviceId)) {
+        setSelectedDeviceId(null);
+      }
+      setSelectedDeviceIds(new Set());
+      setShowBulkDeleteModal(false);
+      setToast({
+        message: `Seçilen ${count} adet cihaz başarıyla silindi ve geçmiş telemetrileriyle arşive aktarıldı.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      setToast({
+        message: err.message || 'Toplu cihaz silme işlemi başarısız oldu.',
+        type: 'error',
+      });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -1144,21 +1230,57 @@ void sendHeartbeat() {
 
       {/* 1. Device List Table */}
       <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
-            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <Cpu className="w-4 h-4 text-indigo-500 shrink-0" />
-                <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider truncate">
-                  Kayıtlı Saha Cihazları ({filteredDevices.length} / {devices.length})
-                </h3>
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={filteredDevices.length > 0 && selectedDeviceIds.size === filteredDevices.length}
+                  onChange={handleToggleSelectAllDevices}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                  title="Tümünü Seç / Kaldır"
+                />
+                <div className="flex items-center gap-2 min-w-0">
+                  <Cpu className="w-4 h-4 text-indigo-500 shrink-0" />
+                  <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider truncate">
+                    Kayıtlı Saha Cihazları ({filteredDevices.length} / {devices.length})
+                  </h3>
+                </div>
               </div>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Yeni Cihaz Ekle</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {selectedDeviceIds.size > 0 && (
+                  <button
+                    onClick={() => setShowBulkDeleteModal(true)}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 animate-fadeIn"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Seçilenleri Sil ({selectedDeviceIds.size})</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Yeni Cihaz Ekle</span>
+                </button>
+              </div>
             </div>
+
+            {selectedDeviceIds.size > 0 && (
+              <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-200/50 dark:border-indigo-800/40 px-4 py-2.5 flex items-center justify-between text-xs text-indigo-900 dark:text-indigo-200">
+                <span className="font-medium">
+                  <strong>{selectedDeviceIds.size}</strong> cihaz seçildi.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleToggleSelectAllDevices}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    {selectedDeviceIds.size === filteredDevices.length ? 'Seçimi Temizle' : 'Tüm Filtrelenenleri Seç'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="divide-y divide-slate-100 dark:divide-slate-800/80 overflow-x-auto">
               {filteredDevices.length === 0 ? (
@@ -1168,6 +1290,7 @@ void sendHeartbeat() {
               ) : (
                 filteredDevices.map((dev, idx) => {
                   const isSelected = activeDevice?.id === dev.id;
+                  const isChecked = selectedDeviceIds.has(dev.id);
                   const colors = getStatusColor(dev.status);
                   const devSite = sites.find((s) => s.id === dev.siteId);
                   const devZone = zones.find((z) => z.id === dev.zoneId);
@@ -1185,6 +1308,13 @@ void sendHeartbeat() {
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => handleToggleDeviceSelection(dev.id, e as any)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shrink-0"
+                        />
                         <span className="relative flex h-3 w-3 shrink-0">
                           {dev.status === 'online' && !dev.maintenanceMode && (
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -2770,43 +2900,39 @@ void sendHeartbeat() {
 
       {/* Delete Device Confirmation Modal */}
       {deletingDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-rose-500/30 space-y-4">
-            <div className="flex items-center gap-3 text-rose-500">
-              <div className="p-3 bg-rose-500/10 rounded-2xl">
-                <AlertTriangle className="w-6 h-6 text-rose-500" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Cihaz Silme Onayı
-                </h3>
-                <p className="text-xs text-rose-400 font-semibold mt-0.5">Yönetici Onayı Gereklidir</p>
-              </div>
-            </div>
+        <BulkDeleteModal
+          isOpen={!!deletingDevice}
+          title="Cihaz Silme Onayı"
+          description={`"${deletingDevice.name || deletingDevice.id}" cihazı sistemden silinecek, API anahtarı geçersiz kılınacak ve tüm ayarları ile telemetri geçmişi "Silinen Cihazlar & Arşiv" havuzuna aktarılacaktır.`}
+          count={1}
+          itemType="Cihaz"
+          itemNames={[deletingDevice.name || deletingDevice.id]}
+          onConfirm={handleConfirmDelete}
+          onClose={() => setDeletingDevice(null)}
+        />
+      )}
 
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              <strong>"{deletingDevice.name}"</strong> cihazını sistemden tamamen silmek istediğinizden emin misiniz? Bu işlem cihazın X-API-Key anahtarını iptal edecek ve veri akışını durduracaktır.
-            </p>
+      {/* Bulk Delete Devices Modal */}
+      {showBulkDeleteModal && (
+        <BulkDeleteModal
+          isOpen={showBulkDeleteModal}
+          title="Toplu Cihaz Silme Onayı"
+          description="Seçilen cihazlar sistemden kaldırılarak API anahtarları iptal edilecek ve tüm geçmiş kayıtlarıyla birlikte arşiv havuzuna aktarılacaktır."
+          count={selectedDeviceIds.size}
+          itemType="Cihaz"
+          onConfirm={handleConfirmBulkDelete}
+          onClose={() => setShowBulkDeleteModal(false)}
+          isDeleting={isBulkDeleting}
+        />
+      )}
 
-            <div className="pt-3 flex justify-end gap-2.5">
-              <button
-                type="button"
-                onClick={() => setDeletingDevice(null)}
-                className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
-              >
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDelete}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Evet, Cihazı Sil</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Toast Notification */}
+      {toast && (
+        <ToastNotification
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
 
       {/* Replace Hardware Modal */}

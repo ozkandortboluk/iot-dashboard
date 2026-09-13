@@ -107,6 +107,51 @@ router.post('/:id/resolve', authenticateUser, async (req, res) => {
   }
 });
 
+router.delete('/:id', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  try {
+    const success = await db.alarmRepository.deleteAlarm(req.params.id, currentUser);
+    if (!success) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    res.json({ success: true, message: 'Alarm kaydı silindi.' });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
+  }
+});
+
+router.post('/bulk-delete', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { alarmIds } = req.body;
+  if (!Array.isArray(alarmIds) || alarmIds.length === 0) {
+    return res.status(400).json({ error: 'Silinecek alarm listesi (alarmIds) belirtilmedi.' });
+  }
+  const deletedCount = await db.alarmRepository.bulkDeleteAlarms(alarmIds, currentUser);
+  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet alarm kaydı silindi.` });
+});
+
+router.post('/bulk-acknowledge', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { alarmIds } = req.body;
+  if (!Array.isArray(alarmIds) || alarmIds.length === 0) {
+    return res.status(400).json({ error: 'Onaylanacak alarm listesi (alarmIds) belirtilmedi.' });
+  }
+  const ackCount = await db.alarmRepository.bulkAcknowledgeAlarms(alarmIds, currentUser);
+  res.json({ success: true, count: ackCount, message: `${ackCount} adet alarm onaylandı.` });
+});
+
+router.post('/bulk-resolve', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { alarmIds } = req.body;
+  if (!Array.isArray(alarmIds) || alarmIds.length === 0) {
+    return res.status(400).json({ error: 'Çözümlenecek alarm listesi (alarmIds) belirtilmedi.' });
+  }
+  const resCount = await db.alarmRepository.bulkResolveAlarms(alarmIds, currentUser);
+  res.json({ success: true, count: resCount, message: `${resCount} adet alarm çözümlendi ve arşive kaldırıldı.` });
+});
+
 export const alarmsRouter = router;
 
 // Threshold Rules Router
@@ -138,6 +183,30 @@ rulesRouter.post('/', authenticateUser, (req, res) => {
   const newRule = db.createRule(req.body, currentUser);
   broadcast('rules:updated', db.getRules());
   res.status(201).json(newRule);
+});
+
+rulesRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { ruleIds } = req.body;
+  if (!Array.isArray(ruleIds) || ruleIds.length === 0) {
+    return res.status(400).json({ error: 'Silinecek kural listesi (ruleIds) belirtilmedi.' });
+  }
+  const deletedCount = await db.alarmRepository.bulkDeleteRules(ruleIds, currentUser);
+  broadcast('rules:updated', db.getRules());
+  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet alarm kuralı silindi.` });
+});
+
+rulesRouter.post('/bulk-toggle', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { ruleIds, enabled } = req.body;
+  if (!Array.isArray(ruleIds) || ruleIds.length === 0) {
+    return res.status(400).json({ error: 'Kural listesi (ruleIds) belirtilmedi.' });
+  }
+  const toggledCount = await db.alarmRepository.bulkToggleRules(ruleIds, Boolean(enabled), currentUser);
+  broadcast('rules:updated', db.getRules());
+  res.json({ success: true, count: toggledCount, message: `${toggledCount} adet kural güncellendi.` });
 });
 
 rulesRouter.put('/:id', authenticateUser, async (req, res) => {
@@ -205,6 +274,36 @@ notificationsRouter.put('/:id/read', authenticateUser, (req, res) => {
   const currentUser = authReq.user!;
   db.markNotificationRead(req.params.id, currentUser.id);
   res.json({ success: true });
+});
+
+notificationsRouter.delete('/:id', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  try {
+    const success = await db.alarmRepository.deleteNotification(req.params.id, currentUser);
+    if (!success) return res.status(404).json({ error: 'Bildirim bulunamadı.' });
+    res.json({ success: true, message: 'Bildirim silindi.' });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
+  }
+});
+
+notificationsRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { notificationIds } = req.body;
+  if (!Array.isArray(notificationIds) || notificationIds.length === 0) {
+    return res.status(400).json({ error: 'Silinecek bildirim listesi (notificationIds) belirtilmedi.' });
+  }
+  const deletedCount = await db.alarmRepository.bulkDeleteNotifications(notificationIds, currentUser);
+  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet bildirim silindi.` });
+});
+
+notificationsRouter.post('/delete-all', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deletedCount = await db.alarmRepository.deleteAllNotifications(currentUser.id);
+  res.json({ success: true, count: deletedCount, message: 'Tüm bildirimler silindi.' });
 });
 
 notificationsRouter.post('/clear', authenticateUser, (req, res) => {
@@ -284,6 +383,37 @@ dispatchLogsRouter.get('/', authenticateUser, async (req, res) => {
   const logs = await db.getDispatchLogs(currentUser.id, targetCustomerId, hasOptions ? options : undefined);
   res.json(logs);
 });
+
+dispatchLogsRouter.delete('/:id', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  try {
+    const success = await db.alarmRepository.deleteDispatchLog(req.params.id, currentUser);
+    if (!success) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    res.json({ success: true, message: 'İletim kaydı silindi.' });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
+  }
+});
+
+dispatchLogsRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { logIds } = req.body;
+  if (!Array.isArray(logIds) || logIds.length === 0) {
+    return res.status(400).json({ error: 'Silinecek iletim kayıtları (logIds) belirtilmedi.' });
+  }
+  const deletedCount = await db.alarmRepository.bulkDeleteDispatchLogs(logIds, currentUser);
+  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet iletim kaydı silindi.` });
+});
+
+dispatchLogsRouter.post('/clear', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const deletedCount = await db.alarmRepository.clearDispatchLogs(currentUser.id);
+  res.json({ success: true, count: deletedCount, message: 'Tüm iletim geçmişi temizlendi.' });
+});
+
 export { dispatchLogsRouter };
 
 // Notification Services Router (Admin-Only and Secret Masked)

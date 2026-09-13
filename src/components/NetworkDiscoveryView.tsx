@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
@@ -14,6 +14,16 @@ import {
   Activity,
   Layers,
   Filter,
+  Trash2,
+  Archive,
+  LayoutGrid,
+  List,
+  ArrowRight,
+  Clock,
+  CheckCircle2,
+  Wifi,
+  WifiOff,
+  Cpu,
 } from 'lucide-react';
 import type {
   DiscoveredNetworkDevice,
@@ -25,6 +35,7 @@ import type {
 import { DiscoveredDeviceCard } from './discovery/DiscoveredDeviceCard';
 import { PairingAuditTable } from './discovery/PairingAuditTable';
 import { ProvisioningWizardModal } from './discovery/ProvisioningWizardModal';
+import { ArchivedDevicesTab } from './discovery/ArchivedDevicesTab';
 
 export const NetworkDiscoveryView: React.FC<{
   onNavigateToDevices?: () => void;
@@ -33,8 +44,21 @@ export const NetworkDiscoveryView: React.FC<{
   const { devices, refreshDevices, customersList } = useRealtime();
   const { user } = useAuth();
 
-  // Navigation / Tabs
-  const [activeTab, setActiveTab] = useState<'discovered' | 'scan' | 'audit'>('discovered');
+  // Navigation / Tabs with Persistence
+  const [activeTab, setActiveTab] = useState<'discovered' | 'scan' | 'audit' | 'archived'>(
+    () => (localStorage.getItem('discovery_active_tab') as 'discovered' | 'scan' | 'audit' | 'archived') || 'discovered'
+  );
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(
+    () => (localStorage.getItem('discovery_view_mode') as 'grid' | 'list') || 'grid'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('discovery_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('discovery_view_mode', viewMode);
+  }, [viewMode]);
 
   // Discovery State
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredNetworkDevice[]>([]);
@@ -182,19 +206,77 @@ export const NetworkDiscoveryView: React.FC<{
     setIsWizardOpen(true);
   };
 
-  // Filter Discovered Devices
-  const filteredDiscovered = discoveredDevices.filter((d) => {
-    const matchSearch =
-      (d.hostname && d.hostname.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (d.ip && d.ip.includes(searchQuery)) ||
-      (d.mac && d.mac.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (d.pairingCode && d.pairingCode.includes(searchQuery));
+  // Delete / Remove individual discovered device from pool
+  const handleDeleteDiscovered = async (device: DiscoveredNetworkDevice) => {
+    const target = device.mac && device.mac !== '—' ? device.mac : device.ip && device.ip !== '—' ? device.ip : device.hostname || device.pairingCode;
+    if (!target) return;
+    
+    if (window.confirm(`"${device.hostname || target}" cihazını keşif havuzundan kaldırmak istediğinize emin misiniz?`)) {
+      try {
+        const res = await fetch(`/api/network/discovered/${encodeURIComponent(target)}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          setDiscoveredDevices((prev) => prev.filter((d) => d.mac !== device.mac && d.ip !== device.ip && d.hostname !== device.hostname));
+        }
+      } catch (err) {
+        console.error('Cihaz silinemedi:', err);
+      }
+    }
+  };
 
-    const state = d.lifecycleState || (d.status === 'unregistered' ? 'discovered' : 'active');
-    const matchLifecycle = lifecycleFilter === 'all' || state === lifecycleFilter;
+  // Clear all unregistered / simulated mock devices from discovery pool
+  const handleClearPool = async () => {
+    if (window.confirm('Keşif havuzundaki eşleşmemiş/sahte tüm kayıtları temizlemek istediğinize emin misiniz?')) {
+      try {
+        const res = await fetch('/api/network/discovered/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (res.ok) {
+          await fetchDiscovered();
+        }
+      } catch (err) {
+        console.error('Havuz temizlenemedi:', err);
+      }
+    }
+  };
 
-    return matchSearch && matchLifecycle;
-  });
+  // Filter & Strictly Sort Discovered Devices (Online / Active nodes always at the top)
+  const filteredDiscovered = useMemo(() => {
+    const list = discoveredDevices.filter((d) => {
+      const matchSearch =
+        (d.hostname && d.hostname.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (d.ip && d.ip.includes(searchQuery)) ||
+        (d.mac && d.mac.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (d.pairingCode && d.pairingCode.includes(searchQuery));
+
+      const state = d.lifecycleState || (d.status === 'unregistered' ? 'discovered' : 'active');
+      const matchLifecycle = lifecycleFilter === 'all' || state === lifecycleFilter;
+
+      return matchSearch && matchLifecycle;
+    });
+
+    const statusPriority: Record<string, number> = {
+      transmitting: 1,
+      active: 1,
+      online: 1,
+      pending: 2,
+      discovered: 3,
+      unregistered: 3,
+      idle: 4,
+      offline: 5,
+    };
+
+    return [...list].sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+      return tsB - tsA;
+    });
+  }, [discoveredDevices, searchQuery, lifecycleFilter]);
 
   const activeCount = devices.length;
   const discoveredPoolCount = discoveredDevices.length;
@@ -223,6 +305,16 @@ export const NetworkDiscoveryView: React.FC<{
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDiscovered ? 'animate-spin' : ''}`} />
             <span>Yenile</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClearPool}
+            title="Eşleşmemiş ve sahte keşif kayıtlarını temizle"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Havuzu Temizle</span>
           </button>
 
           <button
@@ -300,12 +392,21 @@ export const NetworkDiscoveryView: React.FC<{
           <ShieldCheck className="w-4 h-4" />
           <span>Eşleştirme Denetim Günlüğü</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('archived')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'archived' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <Archive className="w-4 h-4" />
+          <span>Silinen & Arşivlenen Cihazlar</span>
+        </button>
       </div>
 
-      {/* TAB 1: DISCOVERED CARDS */}
+      {/* TAB 1: DISCOVERED CARDS / LIST */}
       {activeTab === 'discovered' && (
         <div className="space-y-4">
-          {/* Filter / Search Bar */}
+          {/* Filter / Search Bar & View Mode Toggle */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
             <div className="relative flex-1 min-w-[240px]">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -332,10 +433,40 @@ export const NetworkDiscoveryView: React.FC<{
                 <option value="assigned">Atandı (Assigned)</option>
                 <option value="active">Canlı & Aktif (Active)</option>
               </select>
+
+              {/* View Mode Toggle: Karo vs Tek Satır */}
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 ml-1">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/80 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Karo Görünüm (Grid)"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Karo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    viewMode === 'list'
+                      ? 'bg-cyan-950 text-cyan-400 border border-cyan-800/80 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Tek Satır / Liste Görünüm"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Tek Satır</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Cards Grid */}
+          {/* Empty State */}
           {filteredDiscovered.length === 0 ? (
             <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
               <div className="w-12 h-12 mx-auto rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
@@ -354,17 +485,157 @@ export const NetworkDiscoveryView: React.FC<{
                 <span>Manuel / PIN ile Eşleştir</span>
               </button>
             </div>
-          ) : (
+          ) : viewMode === 'grid' ? (
+            /* KARO / GRID VIEW */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredDiscovered.map((dev) => (
+              {filteredDiscovered.map((dev, idx) => (
                 <DiscoveredDeviceCard
-                  key={dev.mac || dev.ip}
+                  key={`disc_card_${dev.id || dev.mac || dev.ip || 'dev'}_${idx}`}
                   device={dev}
                   onSelectForPairing={handleOpenWizardForDevice}
                   onPingTest={handlePingTest}
+                  onDelete={handleDeleteDiscovered}
                   isPinging={pingingIp === dev.ip}
                 />
               ))}
+            </div>
+          ) : (
+            /* TEK SATIR / LIST VIEW */
+            <div className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-950/70 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                      <th className="py-3 px-4">Durum / Aşama</th>
+                      <th className="py-3 px-4">Cihaz / Hostname</th>
+                      <th className="py-3 px-4">Ağ Adresi (IP & MAC)</th>
+                      <th className="py-3 px-4">Donanım & Sürüm</th>
+                      <th className="py-3 px-4">PIN / Kod</th>
+                      <th className="py-3 px-4">Sinyal / Ping</th>
+                      <th className="py-3 px-4 text-right">Eylemler</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-xs">
+                    {filteredDiscovered.map((dev, idx) => {
+                      const lifecycle = dev.lifecycleState || (dev.status === 'unregistered' ? 'discovered' : 'active');
+                      const isRssiGood = dev.rssi ? dev.rssi > -65 : true;
+
+                      return (
+                        <tr
+                          key={`disc_row_${dev.id || dev.mac || dev.ip || 'dev'}_${idx}`}
+                          className="hover:bg-slate-800/40 transition-colors"
+                        >
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            {lifecycle === 'discovered' && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <Sparkles className="w-3 h-3" /> Keşfedildi
+                              </span>
+                            )}
+                            {lifecycle === 'pending' && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                <Clock className="w-3 h-3 animate-pulse" /> Eşleşme Bekliyor
+                              </span>
+                            )}
+                            {lifecycle === 'assigned' && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                <Layers className="w-3 h-3" /> Atandı
+                              </span>
+                            )}
+                            {lifecycle === 'active' && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <CheckCircle2 className="w-3 h-3" /> Canlı & Aktif
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                                <Cpu className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-100 text-xs truncate max-w-[180px] flex items-center gap-1">
+                                  {dev.hostname || dev.name || 'İsimsiz IoT Düğümü'}
+                                  {dev.hasAuthToken && (
+                                    <span title="Yetkilendirilmiş API Anahtarı Mevcut">
+                                      <ShieldCheck className="w-3 h-3 text-emerald-400 inline shrink-0" />
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  Protokol: {dev.protocol || 'HTTP/REST'}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap font-mono text-xs">
+                            <div className="text-slate-200 font-semibold">{dev.ip || '—'}</div>
+                            <div className="text-[10px] text-slate-400">{dev.mac || '—'}</div>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap font-mono text-xs">
+                            <div className="text-slate-200">{dev.hardwareModel || dev.vendor || 'Standart ESP32'}</div>
+                            <div className="text-[10px] text-slate-400">{dev.firmwareVersion || 'v1.0.0-PROD'}</div>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            {dev.pairingCode ? (
+                              <span className="text-cyan-400 font-mono font-bold tracking-wider bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/60 text-xs">
+                                {dev.pairingCode}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 text-xs font-mono">—</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap font-mono text-xs">
+                            <div className="flex items-center gap-1.5 text-slate-300">
+                              {isRssiGood ? (
+                                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+                              )}
+                              <span>{dev.rssi ? `${dev.rssi} dBm` : '-55 dBm'}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                              <Activity className="w-3 h-3 text-cyan-400" />
+                              <span>{dev.pingMs !== undefined ? `${dev.pingMs} ms` : '< 5 ms'}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handlePingTest(dev.ip)}
+                                disabled={pingingIp === dev.ip}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700/60 transition-colors disabled:opacity-50"
+                                title="Ping Testi Yap"
+                              >
+                                {pingingIp === dev.ip ? 'Ping...' : 'Ping'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenWizardForDevice(dev)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-sm transition-all"
+                                title="Provizyon Sihirbazında Eşleştir"
+                              >
+                                <span>Eşleştir</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                              {handleDeleteDiscovered && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteDiscovered(dev)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                                  title="Havuzdan Sil"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -448,6 +719,16 @@ export const NetworkDiscoveryView: React.FC<{
           records={auditRecords}
           onRefresh={fetchAuditHistory}
           isLoading={isLoadingAudit}
+        />
+      )}
+
+      {/* TAB 4: ARCHIVED & DELETED DEVICES */}
+      {activeTab === 'archived' && (
+        <ArchivedDevicesTab
+          onDeviceRestored={() => {
+            refreshDevices();
+            fetchDiscovered();
+          }}
         />
       )}
 

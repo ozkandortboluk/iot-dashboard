@@ -54,6 +54,8 @@ interface RealtimeContextType {
   refreshDevices: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   clearAllNotifications: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  deleteAllNotifications: () => Promise<void>;
   saveWidgets: (newWidgets: WidgetConfig[], title?: string) => Promise<void>;
   resetWidgetsToDefault: () => Promise<void>;
   toggleSimulator: () => Promise<void>;
@@ -61,6 +63,7 @@ interface RealtimeContextType {
   createNewDevice: (data: Partial<Device>) => Promise<Device>;
   updateDevice: (id: string, updates: Partial<Device>) => Promise<Device>;
   deleteDevice: (id: string) => Promise<void>;
+  bulkDeleteDevices: (ids: string[]) => Promise<number>;
   regenerateApiKey: (id: string) => Promise<string>;
   convertToPhysicalDevice: (id: string) => Promise<{ device: Device; apiKey: string }>;
   sendControlCommand: (
@@ -124,34 +127,57 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [pendingCommands]
   );
 
-  // Synchronous, flicker-free derived devices list based on active customer filter
+  // Synchronous, flicker-free derived devices list based on active customer filter (sorted online first)
   const devices = useMemo(() => {
     if (!user) return [];
+    let list: Device[] = [];
     if (user.role === 'admin') {
-      if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') return rawDevices;
-      const targetUser = customersList.find((c) => c.id === selectedCustomerForAdmin);
-      const isTargetAdmin =
-        selectedCustomerForAdmin === 'usr_admin' ||
-        selectedCustomerForAdmin === 'admin' ||
-        selectedCustomerForAdmin === user.id ||
-        (targetUser && targetUser.role === 'admin');
+      if (!selectedCustomerForAdmin || selectedCustomerForAdmin === 'all') {
+        list = rawDevices;
+      } else {
+        const targetUser = customersList.find((c) => c.id === selectedCustomerForAdmin);
+        const isTargetAdmin =
+          selectedCustomerForAdmin === 'usr_admin' ||
+          selectedCustomerForAdmin === 'admin' ||
+          selectedCustomerForAdmin === user.id ||
+          (targetUser && targetUser.role === 'admin');
 
-      if (isTargetAdmin) {
-        const adminIds = new Set(
-          customersList
-            .filter((c) => c.role === 'admin' || c.id === 'usr_admin' || c.id === 'admin')
-            .map((c) => c.id)
-        );
-        adminIds.add('usr_admin');
-        adminIds.add('admin');
-        if (user.id) adminIds.add(user.id);
-        if (selectedCustomerForAdmin) adminIds.add(selectedCustomerForAdmin);
+        if (isTargetAdmin) {
+          const adminIds = new Set(
+            customersList
+              .filter((c) => c.role === 'admin' || c.id === 'usr_admin' || c.id === 'admin')
+              .map((c) => c.id)
+          );
+          adminIds.add('usr_admin');
+          adminIds.add('admin');
+          if (user.id) adminIds.add(user.id);
+          if (selectedCustomerForAdmin) adminIds.add(selectedCustomerForAdmin);
 
-        return rawDevices.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
+          list = rawDevices.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
+        } else {
+          list = rawDevices.filter((d) => d.tenantId === selectedCustomerForAdmin);
+        }
       }
-      return rawDevices.filter((d) => d.tenantId === selectedCustomerForAdmin);
+    } else {
+      list = rawDevices.filter((d) => d.tenantId === user.id || (d as any).customerId === user.id || (d as any).assignedUserId === user.id);
     }
-    return rawDevices.filter((d) => d.tenantId === user.id || (d as any).customerId === user.id || (d as any).assignedUserId === user.id);
+
+    const statusPriority: Record<string, number> = {
+      online: 1,
+      warning: 2,
+      degraded: 2,
+      maintenance: 3,
+      offline: 4,
+    };
+
+    return [...list].sort((a, b) => {
+      const pA = statusPriority[a.status] || 99;
+      const pB = statusPriority[b.status] || 99;
+      if (pA !== pB) return pA - pB;
+      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+      return tsB - tsA;
+    });
   }, [rawDevices, user, selectedCustomerForAdmin, customersList]);
 
   // Synchronous, flicker-free derived notifications list based on active customer filter
@@ -1035,6 +1061,24 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  const deleteNotification = useCallback(async (id: string) => {
+    setRawNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await fetch(`/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error('deleteNotification error:', e);
+    }
+  }, []);
+
+  const deleteAllNotifications = useCallback(async () => {
+    setRawNotifications([]);
+    try {
+      await fetch('/api/notifications/delete-all', { method: 'POST' });
+    } catch (e) {
+      console.error('deleteAllNotifications error:', e);
+    }
+  }, []);
+
   const saveWidgets = useCallback(async (newWidgets: WidgetConfig[], title?: string) => {
     const validated = validateAndSanitizeWidgets(newWidgets);
     setWidgets(validated);
@@ -1246,6 +1290,28 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [rawDevices, user]);
 
+  const bulkDeleteDevices = useCallback(async (ids: string[]): Promise<number> => {
+    if (!ids || ids.length === 0) return 0;
+    try {
+      const res = await fetch('/api/devices/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceIds: ids }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Toplu cihaz silme başarısız oldu');
+      }
+      const data = await res.json();
+      const idSet = new Set(ids);
+      setRawDevices((prev) => prev.filter((d) => !idSet.has(d.id)));
+      return data.count || ids.length;
+    } catch (e: any) {
+      console.error('bulkDeleteDevices error:', e);
+      throw new Error(e.message || 'Toplu cihaz silme başarısız', { cause: e });
+    }
+  }, []);
+
   const regenerateApiKey = useCallback(async (id: string): Promise<string> => {
     const dev = rawDevices.find((d) => d.id === id);
     if (!dev) throw new Error('Cihaz bulunamadı');
@@ -1440,6 +1506,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       refreshDevices,
       markNotificationRead,
       clearAllNotifications,
+      deleteNotification,
+      deleteAllNotifications,
       saveWidgets,
       resetWidgetsToDefault,
       toggleSimulator,
@@ -1447,6 +1515,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createNewDevice,
       updateDevice,
       deleteDevice,
+      bulkDeleteDevices,
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,
@@ -1483,6 +1552,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       refreshDevices,
       markNotificationRead,
       clearAllNotifications,
+      deleteNotification,
+      deleteAllNotifications,
       saveWidgets,
       resetWidgetsToDefault,
       toggleSimulator,
@@ -1490,6 +1561,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createNewDevice,
       updateDevice,
       deleteDevice,
+      bulkDeleteDevices,
       regenerateApiKey,
       convertToPhysicalDevice,
       sendControlCommand,

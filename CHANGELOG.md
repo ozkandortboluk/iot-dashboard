@@ -4,6 +4,156 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.13.5] - 2026-09-13
+
+### 🗑️ Eşik ve Alarm Kuralları ile Teslimat Geçmişi Toplu/Tekli Silme & Durum Kalıcılığı (Bulk/Single Delete & State Persistence)
+- **Eşik ve Alarm Kuralları (`AlarmRuleList.tsx`)**:
+  - Aktif alarmlar sayfasındaki UX standardı ile birebir uyumlu tekli silme ve onay penceresi (`DeleteRuleConfirmModal` / `BulkDeleteModal`) bağlandı.
+  - Seçilen birden fazla kuralı tek hamlede silebilmeyi sağlayan toplu silme eylemi entegre edildi.
+  - Arama, cihaz seçimi ve önem seviyesi filtrelerinin `localStorage` kalıcılığı sağlandı.
+- **Teslimat Geçmişi (`DeliveryHistory.tsx`)**:
+  - Geçmiş iletim kayıtlarını tek tek silme ve çoklu seçip toplu olarak silebilme özelliği eklendi.
+  - "Tüm Geçmişi Temizle" özelliği ve onay modalı entegre edildi.
+  - Arama, kanal ve durum filtrelerinin `localStorage` kalıcılığı sağlandı.
+- **Kullanıcı Ayarları & Görünüm Kalıcılığı (UI Preference Persistence)**:
+  - Bildirim sekmeleri (`notifications_active_tab`), Ağ Keşfi sekmeleri ve görünüm modu (`discovery_active_tab`, `discovery_view_mode`), Cihaz Sağlığı karo/liste modu (`device_health_view_mode`) ve Arşiv karo/liste modu (`archived_devices_view_mode`) tarayıcı oturumları arasında kalıcı hale getirildi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.5` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.13.4] - 2026-09-13
+
+### 🐛 PostgreSQL Gelişmiş Kullanıcı Silme & Şema Uyumluluk Düzeltmesi (Postgres advancedDeleteUser & Schema Fix)
+- **`advancedDeleteUser` Hata Giderimi**:
+  - `telemetry_packets` tablosu üzerinde olmayan `tenant_id` kolonunu filtrelemeye çalışan silme sorgusu kaldırıldı; paketler donanımsal `device_id = ANY($1::text[])` sorgusu üzerinden güvenle temizlendi.
+  - `telemetry_readings`, `simulation_telemetry_readings`, `active_alarms`, `alarm_events`, `threshold_rules`, `notifications` ve `dispatch_logs` tabloları için hata yakalamalı ve `tenant_id`/`user_id` çoklu kolon destekli dayanıklı silme mekanizması uygulandı.
+- **Gönderim Günlükleri (`dispatch_logs`) Şema Dayanıklılığı**:
+  - `clearDispatchLogs` ve `getDispatchLogs` fonksiyonları hem `user_id` hem de `tenant_id` içeren şemalarda geriye dönük tam uyumlu çalışacak şekilde güncellendi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.4` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.13.3] - 2026-09-13
+
+### 🗑️ Bildirimler, Cihaz Listesi ve Arşiv Havuzunda Toplu Silme / Onay Modalı ve Toast Bildirim Altyapısı (Bulk Deletion, Modal & Toast Notifications)
+- **Ortak Modallar ve Bildirim Bileşenleri (`BulkDeleteModal.tsx` & `ToastNotification.tsx`)**:
+  - Çoklu veya tekli silme işlemlerinde kullanılmak üzere şık, erişilebilir ve tehlike seviyesi belirgin `BulkDeleteModal` bileşeni oluşturuldu.
+  - İşlem sonuçlarını (başarı, hata, uyarı) kullanıcıya sağ üstte anlık olarak ileten, otomatik kapanan ve kapatma butonu bulunan `ToastNotification` bileşeni eklendi.
+- **Bildirimler & Alarmlar Sayfası (`NotificationsView.tsx`)**:
+  - **Teslimat Kuyruğu (`DeliveryQueue.tsx`)**: Seçilen kuyruk öğelerini tek seferde silme, seçilenleri iptal etme ve temizleme desteği, toplu işlem onay penceresi ve toast bildirimleriyle güçlendirildi.
+  - **Alarm Kuralları (`AlarmRuleList.tsx`)**: Birden fazla alarm kuralını seçip toplu olarak silebilme ve toplu aktif/pasif yapabilme yeteneği eklendi.
+  - **Teslimat Geçmişi (`DeliveryHistory.tsx`)**: Seçilen geçmiş bildirim kayıtlarını toplu olarak temizleme yeteneği ve onay penceresi entegre edildi.
+  - **Aktif Alarmlar Tablosu (`ActiveAlarmTable.tsx`)**: Çoklu alarm seçimi, toplu onaylama, toplu çözme ve toplu silme eylemleri `BulkDeleteModal` ile onaylandı.
+- **Cihaz Listesi Sayfası (`DevicesView.tsx`)**:
+  - Tekli ve toplu cihaz silme işlemleri `BulkDeleteModal` ve `ToastNotification` ile standardize edildi; silinen cihazların arşiv havuzuna aktarıldığı kullanıcıya toast bildirimiyle net şekilde açıklandı.
+- **Silinen Cihazlar & Arşiv Havuzu (`ArchivedDevicesTab.tsx`)**:
+  - Seçilen arşivlenmiş cihazları toplu kalıcı silme (`/api/network/archived/bulk-delete`) ve toplu sisteme geri yükleme (`/api/network/archived/bulk-restore`) desteği eklendi.
+  - Hem karo hem tek satır görünümünde seçim checkbox'ları ve hareketli toplu işlem barı sağlandı.
+- **React Benzersiz Anahtar (Key Deduplication) İyileştirmeleri**:
+  - `NetworkDiscoveryView`, `DeviceHealthView`, `ActiveAlarmTable`, `AlarmRuleList`, `DeliveryHistory`, `DeliveryQueue`, `ArchivedDevicesTab` ve `ArchivedDeviceDetailModal` içerisindeki tüm liste döngülerinde `key={`${id}_${idx}`}` formatı uygulanarak konsol çakışmaları tamamen ortadan kaldırıldı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.3` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.13.2] - 2026-09-13
+
+### 🎛️ Cihaz Sağlığı ve Cihaz Keşfi Sayfalarında "Karo" (Grid) & "Tek Satır" (Liste) Görünüm Modu Desteği (Grid / List View Mode Toggle)
+- **Cihaz Sağlığı Sayfası (`DeviceHealthView.tsx`)**:
+  - Üst filtre araç çubuğuna **Karo (Grid)** ve **Tek Satır (Liste)** görünüm modu geçiş düğmeleri (`LayoutGrid` / `List`) eklendi.
+  - Tek satır modunda; Sağlık Durumu, Cihaz Adı, Donanım & Tip, MAC / IP, Sinyal Kalitesi (RSSI) & Gecikme (Ping), CPU / Bellek Yükü, Son İletişim ve Hızlı Eylemler (Detay/Ayarlar) içeren optimize edilmiş tablo görünümü sunuldu.
+- **Cihaz Keşfi ve Eşleştirme Sayfası (`NetworkDiscoveryView.tsx`)**:
+  - "Keşfedilen Donanımlar" sekmesinde arama ve yaşam döngüsü filtreleriyle uyumlu **Karo** ve **Tek Satır** seçici eklendi.
+  - Tek satır modunda; Yaşam Döngüsü Rozeti, Hostname / Cihaz Adı & Güvenlik Belirteci Durumu, IP & MAC Adresi, Donanım Modeli & Firmware Sürümü, PIN Eşleşme Kodu, Sinyal / Ping Gecikmesi ve Hızlı Eylemler (Ping Testi, Provizyon Sihirbazı Eşleştir, Sil) listelendi.
+- **Silinen & Arşivlenen Cihazlar Sekmesi (`ArchivedDevicesTab.tsx`)**:
+  - Arşiv havuzundaki silinmiş cihazlar için hem kartlı karo görünümü hem de kompakt tek satır tablo düzeni sağlandı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.2` sürümüne güncellendi.
+
+---
+
+## 🚀 [v1.13.1] - 2026-09-13
+
+### 🛠️ React Anahtar Çakışmaları ve PostgreSQL Veritabanı Sorgu Düzeltmeleri (React Key Deduplication & Postgres Query Fixes)
+- **React Benzersiz Anahtar Hatalarının Giderilmesi (React Unique Key Deduplication)**:
+  - `ArchivedDevicesTab.tsx` ve `device.repository.ts` içinde cihaz silme işlemlerinde meydana gelebilecek kopya arşiv kayıtları temizlendi ve `getArchivedDevices` çıktısında ID bazında deduplication uygulandı.
+  - Kart render anahtarları `${archived.id}_${archived.deletedAt || idx}` formatına taşındı (`sim_test_dev_01`, `sim_test_dev_02`, `phys_test_dev_01` anahtar çakışmaları çözüldü).
+  - `NetworkDiscoveryView.tsx` içindeki `key={dev.mac || dev.ip}` ifadesi; MAC ve IP adresi eksik veya `—` olan keşif kayıtlarında güvenli ve benzersiz ID üretecek biçimde güncellendi.
+- **PostgreSQL İlişki ve Tablo Sorgu Düzeltmeleri (Postgres Database Stability)**:
+  - `src/server/database/postgres.ts` içerisindeki `advancedDeleteUser` ve `bulkDeleteDevices` fonksiyonlarından eski şemaya ait olmayan `telemetry_history` ve `notification_queue` tablo sorguları kaldırılarak aktif `telemetry_readings` ve `telemetry_packets` tablolarıyla senkronize edildi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.1` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.13.0] - 2026-09-13
+
+### 🗄️ Cihaz Keşfi & Eşleştirmede "Silinen Cihazlar & Arşiv Havuzu" ve Sıkıştırılmış Telemetri Entegrasyonu (Archived Devices & Telemetry Compression)
+- **Silinen Cihazların Otomatik Arşivlenmesi (Soft-Delete & Configuration Preservation)**:
+  - Sistemden tekil veya toplu olarak silinen tüm fiziksel veya mantıksal cihazlar, kalıcı olarak kaybolmak yerine otomatik olarak `archivedDevices` havuzuna aktarılır.
+  - Cihazın benzersiz ID'si, adı, donanım modeli (`hardwareModel`), bellenim sürümü (`firmwareVersion`), API anahtarı (`apiKey`) ve yetki kapsamları (`apiKeyScopes`), hiyerarşi bilgileri (`siteId`, `zoneId`, `groupId`, `tags`, `location`) ve röle/çıkış konfigürasyonları (`outputDefinitions`) eksiksiz olarak arşivde korunur.
+- **Kurala Göre Geçmiş Telemetri Kayıtlarının Sıkıştırılması (Lossless GZIP Level-9 Time-Series Compression)**:
+  - Cihaz silindiğinde sistemdeki tüm geçmiş telemetri paketleri toplanır ve yüksek verimli **GZIP Level-9** algoritması ile sıkıştırılarak Base64 formatında arşiv nesnesine iliştirilir.
+  - Ortalama **%85 - %92** depolama tasarrufu sağlanır; ham boyut, sıkıştırılmış boyut, paket adedi ve sıkıştırma oranı metrikleri anlık olarak hesaplanır.
+- **Sisteme Tek Tıkla Geri Entegre Etme (One-Click Re-Integration & Restore)**:
+  - `POST /api/network/archived/:id/restore` uç noktası ile arşivdeki cihaz tüm donanım ayarları, API anahtarı ve hiyerarşik konumu korunarak anında aktif cihaz filosuna geri aktarılır.
+  - Sıkıştırılmış geçmiş telemetri paketleri eşzamanlı olarak çözülerek (decompressed) sistemin canlı telemetri havuzuna yeniden dahil edilir; cihaz yeniden konfigürasyona ihtiyaç duymadan veri göndermeye devam edebilir.
+- **Cihaz Keşfi ve Provizyon Ekranında Görselleştirme (`NetworkDiscoveryView.tsx`)**:
+  - Cihaz Keşfi ve Provizyon ekranına **"Silinen & Arşivlenen Cihazlar"** (`ArchivedDevicesTab.tsx`) sekmesi eklendi.
+  - Arşivlenen cihaz kartları, arama/filtreleme çubuğu, toplam depolama tasarrufu sayaçları, telemetri inceleme modalı (`ArchivedDeviceDetailModal.tsx`) ve "Kalıcı Olarak Sil" aksiyonları eklendi.
+- **Yeni API Uç Noktaları**:
+  - `GET /api/network/archived`: Arşivlenen cihaz listesini ve sıkıştırma istatistiklerini getirir.
+  - `GET /api/network/archived/:id/telemetry`: Sıkıştırılmış geçmiş telemetriyi çözerek JSON olarak sunar.
+  - `POST /api/network/archived/:id/restore`: Cihazı ve telemetrisini sisteme geri yükler.
+  - `DELETE /api/network/archived/:id`: Cihazı ve arşiv verisini kalıcı olarak siler.
+  - `POST /api/network/archived/clear`: Arşivdeki tüm kayıtları temizler.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.13.0` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.12.1] - 2026-09-13
+
+### 🧹 Cihaz Keşfi & Provizyon Havuzu Temizleme ve Online Öncelikli Sıralama (Discovery Pool Cleanup & Priority Sorting)
+- **Sahte & Simüle Edilmiş Cihazların Keşif Havuzundan Kaldırılması**:
+  - `src/server/repositories/device.repository.ts` içindeki `getDiscoveredDevices` fonksiyonunda filtreleme güncellendi; sanal/simüle cihazlar (`isSimulated: true`) ve kalıntı mock/fake kayıtlar (`AA:BB:CC:DD:EE:FF`, `esp32-unreg`, `PAIR99`) keşif havuzundan tamamen filtrelendi.
+  - `data/db.json` içerisindeki eski statik eşleşmemiş sahte kayıt temizlendi.
+- **Online & Aktif Cihazların En Üstte Listelenmesi**:
+  - Hem sunucu tarafında (`device.repository.ts`) hem de istemci tarafında (`RealtimeContext.tsx`, `NetworkDiscoveryView.tsx`, `DevicesView.tsx`) katı öncelik tabanlı sıralama mekanizması entegre edildi:
+    - `1. transmitting / active / online` (En üstte)
+    - `2. pending / warning / degraded`
+    - `3. discovered / unregistered / maintenance`
+    - `4. idle / offline`
+    - Aynı durumdaki cihazlar ise en son sinyal zamanına (`lastSeen` DESC) göre otomatik sıralanır.
+- **Tekil ve Toplu Keşif Havuzu Temizleme API & UI Desteği**:
+  - `DELETE /api/network/discovered/:target`: İstenmeyen bir IP, MAC veya Hostname kaydını havuzdan anında silme uç noktası.
+  - `POST /api/network/discovered/clear`: Keşif havuzundaki tüm eşleşmemiş/sahte kayıtları tek tıkla boşaltma uç noktası.
+  - `NetworkDiscoveryView.tsx` ekranına "Havuzu Temizle" butonu ve `DiscoveredDeviceCard.tsx` kartlarına tekil "Havuzdan Kaldır / Sil" aksiyonu eklendi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları `v1.12.1` olarak güncellendi.
+
+---
+
+## 🚀 [v1.12.0] - 2026-09-13
+
+### ✨ Bildirimler & Alarmlar ve Cihazlar Toplu Silme / Yönetim Geliştirmeleri (Bulk Actions & Alarm Operations)
+- **Alarmlar & Bildirimler Tablosunda Silme ve Toplu İşlemler (`src/components/notifications/ActiveAlarmTable.tsx`, `NotificationsView.tsx`, `src/server/routes/alarms.ts`)**:
+  - Alarmlar ve Bildirimler sekmesindeki "İşlemler" sütununda yer alan tekil "Sil" butonunun çalışmaması sorunu giderildi; DELETE `/api/alarms/:id` uç noktası ve `handleDeleteAlarm` fonksiyonuyla hem PostgreSQL `active_alarms` tablosundan hem de in-memory veritabanından kalıcı olarak silinmesi sağlandı.
+  - Alarmlar tablosuna çoklu seçim (checkbox), tümünü seç/bırak mekanizması ve kayan toplu işlem araç çubuğu (floating bulk action toolbar) eklendi.
+  - Seçili alarmlar için **Toplu Silme** (`/api/alarms/bulk-delete`), **Toplu Onaylama** (`/api/alarms/bulk-acknowledge`) ve **Toplu Çözümleme** (`/api/alarms/bulk-resolve`) fonksiyonları eklendi.
+- **Müşteri Silme ve Çoklu Müşteri Silme Doğrulaması & Kapsam Analizi**:
+  - Çoklu müşteri silme (`BulkAdvancedCustomerDeleteModal`) ve tekil müşteri silme (`AdvancedCustomerDeleteModal`) ekranlarındaki seçenekler uçtan uca incelendi:
+    - ✅ **Cihazları Sil**: İşaretlendiğinde `devices`, `device_commands`, `device_tokens` kayıtları tamamen temizlenir. İşaretlenmezse cihazlar yetkisiz/sahipsiz kalmaması için `usr_admin` (Merkez Yönetim) hesabına devredilir (`location` eski müşteri adıyla etiketlenir).
+    - ✅ **Özel Ekranları Sil**: İşaretlendiğinde müşterinin özel dashboard şablonları (`dashboard_layouts`) hem PostgreSQL'den hem RAM'den temizlenir.
+    - ✅ **Alarm Kurallarını Sil**: İşaretlendiğinde `threshold_rules`, `active_alarms`, `alarm_events`, `notifications`, `notification_queue` ve `dispatch_logs` tabloları temizlenir.
+    - ✅ **Telemetri Geçmişini Sil**: İşaretlendiğinde `telemetry_history`, `telemetry_readings`, `telemetry_packets` ve bellek içi zaman serisi önbelleği kalıcı olarak silinir.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları `v1.12.0` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.11.7] - 2026-09-13
 
 ### 🐛 Şema Doğrulama Sözleşmesi SQL Düzeltmesi (Schema Contract Check Fix)

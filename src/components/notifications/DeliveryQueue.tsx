@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { NotificationQueueItem, NotificationChannel } from '../../types';
 import { formatDateTime } from '../../lib/utils';
+import { BulkDeleteModal } from '../common/BulkDeleteModal';
 
 interface DeliveryQueueProps {
   queueItems: NotificationQueueItem[];
@@ -39,6 +40,7 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
   const [selectedChannelFilter, setSelectedChannelFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   // Pagination states
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -125,43 +127,33 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
     }
   };
 
+  const handleConfirmClearQueue = async () => {
+    setIsClearing(true);
+    try {
+      await onClearQueue();
+      setShowClearConfirm(false);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
       {/* Clear Queue Confirm Modal */}
-      {showClearConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 mx-auto flex items-center justify-center">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <h4 className="text-base font-bold text-slate-900 dark:text-white">
-              Gönderim Kuyruğunu Temizle
-            </h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Kuyruktaki tüm bekleyen ve başarısız iletiler silinecektir. Devam etmek istiyor musunuz?
-            </p>
-            <div className="flex items-center justify-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setShowClearConfirm(false);
-                  await onClearQueue();
-                }}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-xs"
-              >
-                Kuyruğu Temizle
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <BulkDeleteModal
+        isOpen={showClearConfirm}
+        title="Gönderim Kuyruğunu Temizle"
+        itemCount={queueItems.length}
+        itemLabel="kuyruk iletisini"
+        isDeleting={isClearing}
+        onClose={() => setShowClearConfirm(false)}
+        onConfirm={handleConfirmClearQueue}
+        description={
+          <p>
+            Kuyruktaki tüm bekleyen, yeniden denenmeyi bekleyen ve başarısız <strong>{queueItems.length}</strong> adet ileti silinecektir. Devam etmek istiyor musunuz?
+          </p>
+        }
+      />
 
       {/* Header Bar */}
       <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 space-y-3.5">
@@ -276,10 +268,10 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {currentItems.map((item) => {
+                {currentItems.map((item, idx) => {
                   const isActionLoading = loadingAction === item.id;
                   return (
-                    <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                    <tr key={`queue_desk_${item.id}_${idx}`} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -339,8 +331,8 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
 
           {/* Mobile Card View */}
           <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800">
-            {currentItems.map((item) => (
-              <div key={item.id} className="p-4 space-y-2.5">
+            {currentItems.map((item, idx) => (
+              <div key={`queue_mob_${item.id}_${idx}`} className="p-4 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     {getChannelIcon(item.channel)}

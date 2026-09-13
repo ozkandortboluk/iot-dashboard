@@ -1063,7 +1063,16 @@ class LocalDatabase {
   public async deleteDevice(deviceId: string): Promise<void> { return await this.deviceRepository.deleteDevice(deviceId); }
   public recordUnregisteredDevice(discDev: DiscoveredNetworkDevice): DiscoveredNetworkDevice | null { return this.deviceRepository.recordUnregisteredDevice(discDev); }
   public removeUnregisteredDevice(ipOrMacOrToken: string): void { return this.deviceRepository.removeUnregisteredDevice(ipOrMacOrToken); }
+  public clearUnregisteredDevices(targetTenantId?: string): number { return this.deviceRepository.clearUnregisteredDevices(targetTenantId); }
   public getDiscoveredDevices(requestingUserId?: string, targetCustomerId?: string): DiscoveredNetworkDevice[] { return this.deviceRepository.getDiscoveredDevices(requestingUserId, targetCustomerId); }
+  public getArchivedDevices(requestingUserId?: string, targetTenantId?: string): any[] { return this.deviceRepository.getArchivedDevices(requestingUserId, targetTenantId); }
+  public getArchivedDeviceById(deviceId: string, requestingUserId?: string): any { return this.deviceRepository.getArchivedDeviceById(deviceId, requestingUserId); }
+  public getArchivedTelemetry(deviceId: string, requestingUserId?: string): any[] { return this.deviceRepository.getArchivedTelemetry(deviceId, requestingUserId); }
+  public async restoreArchivedDevice(deviceId: string, requestingUserId?: string, requestingUserName?: string): Promise<any> { return await this.deviceRepository.restoreArchivedDevice(deviceId, requestingUserId, requestingUserName); }
+  public async bulkRestoreArchivedDevices(deviceIds: string[], requestingUserId?: string, requestingUserName?: string): Promise<any[]> { return await this.deviceRepository.bulkRestoreArchivedDevices(deviceIds, requestingUserId, requestingUserName); }
+  public async permanentlyDeleteArchivedDevice(deviceId: string, requestingUserId?: string, requestingUserName?: string): Promise<boolean> { return await this.deviceRepository.permanentlyDeleteArchivedDevice(deviceId, requestingUserId, requestingUserName); }
+  public async bulkDeleteArchivedDevices(deviceIds: string[], requestingUserId?: string, requestingUserName?: string): Promise<number> { return await this.deviceRepository.bulkDeleteArchivedDevices(deviceIds, requestingUserId, requestingUserName); }
+  public async clearArchivedDevices(requestingUserId?: string, targetTenantId?: string): Promise<number> { return await this.deviceRepository.clearArchivedDevices(requestingUserId, targetTenantId); }
   // Telemetry
   public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<TelemetryReading> { return await this.telemetryRepository.addTelemetryReading(reading); }
   public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return await this.telemetryRepository.addTelemetryReadingAsync(reading); }

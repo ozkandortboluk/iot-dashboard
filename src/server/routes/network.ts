@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { authenticateUser, AuthenticatedRequest } from '../middleware/auth.js';
 import { db } from '../db.js';
+import { broadcast } from '../services/websocket.js';
 import { NetworkScanJob, NetworkPingResult, NetworkAgent } from '../../types.js';
 
 export const networkRouter = Router();
@@ -249,5 +250,138 @@ networkRouter.patch('/lifecycle', authenticateUser, requireNetworkAdminOrOperato
 
   db.updateDiscoveredLifecycle(target, state);
   res.json({ success: true, message: `Cihaz yaşam döngüsü durumu ${state} olarak güncellendi.` });
+});
+
+// 10. DELETE /api/network/discovered/:target - Removes a specific node from the discovered pool
+networkRouter.delete('/discovered/:target', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
+  const { target } = req.params;
+  if (!target) {
+    return res.status(400).json({ error: 'Hedef (IP, MAC veya Kod) belirtilmelidir.' });
+  }
+
+  db.removeUnregisteredDevice(decodeURIComponent(target));
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.json({ success: true, message: 'Cihaz keşif havuzundan kaldırıldı.' });
+});
+
+// 11. POST /api/network/discovered/clear - Clears all unassigned/mock nodes from discovered pool
+networkRouter.post('/discovered/clear', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const targetTenant = currentUser.role === 'admin' ? (req.body.tenantId as string | undefined) : currentUser.id;
+  
+  const clearedCount = db.clearUnregisteredDevices(targetTenant);
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.json({ success: true, count: clearedCount, message: `Keşif havuzu temizlendi (${clearedCount} adet kayıt silindi).` });
+});
+
+// 12. GET /api/network/archived - Returns all deleted/archived devices with preserved settings and compression stats
+networkRouter.get('/archived', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const targetTenant = currentUser.role === 'admin' ? (req.query.tenantId as string | undefined) : currentUser.id;
+
+  const archived = db.getArchivedDevices(currentUser.id, targetTenant);
+  res.json(archived);
+});
+
+// 13. GET /api/network/archived/:id/telemetry - Decompresses and returns preserved historical telemetry points
+networkRouter.get('/archived/:id/telemetry', authenticateUser, (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { id } = req.params;
+
+  const telemetry = db.getArchivedTelemetry(id, currentUser.id);
+  res.json(telemetry);
+});
+
+// 14. POST /api/network/archived/:id/restore - Restores archived device back to active system with original configurations & telemetry
+networkRouter.post('/archived/:id/restore', authenticateUser, requireNetworkAdminOrOperator, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { id } = req.params;
+
+  try {
+    const restored = await db.restoreArchivedDevice(id, currentUser.id, currentUser.name);
+    if (!restored) {
+      return res.status(404).json({ error: 'Arşivde belirtilen ID ile cihaz bulunamadı.' });
+    }
+
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+    res.json({ success: true, device: restored, message: `"${restored.name}" cihazı tüm ayarları ve telemetrisiyle sisteme başarıyla geri yüklendi.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Cihaz geri yüklenirken hata oluştu.' });
+  }
+});
+
+// 15. DELETE /api/network/archived/:id - Permanently deletes the device and its compressed archives
+networkRouter.delete('/archived/:id', authenticateUser, requireNetworkAdminOrOperator, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { id } = req.params;
+
+  try {
+    const deleted = await db.permanentlyDeleteArchivedDevice(id, currentUser.id, currentUser.name);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Arşivde silinecek cihaz bulunamadı.' });
+    }
+
+    res.json({ success: true, message: 'Cihaz ve tüm arşiv verileri kalıcı olarak silindi.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Cihaz kalıcı olarak silinirken hata oluştu.' });
+  }
+});
+
+// 15b. POST /api/network/archived/bulk-delete - Permanently deletes multiple archived devices
+networkRouter.post('/archived/bulk-delete', authenticateUser, requireNetworkAdminOrOperator, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Silinecek cihaz ID listesi geçerli değil.' });
+  }
+
+  try {
+    const count = await db.bulkDeleteArchivedDevices(ids, currentUser.id, currentUser.name);
+    res.json({ success: true, count, message: `Seçilen ${count} adet arşivlenmiş cihaz kalıcı olarak silindi.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Toplu silme işlemi sırasında hata oluştu.' });
+  }
+});
+
+// 15c. POST /api/network/archived/bulk-restore - Restores multiple archived devices
+networkRouter.post('/archived/bulk-restore', authenticateUser, requireNetworkAdminOrOperator, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Geri yüklenecek cihaz ID listesi geçerli değil.' });
+  }
+
+  try {
+    const restored = await db.bulkRestoreArchivedDevices(ids, currentUser.id, currentUser.name);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+    res.json({ success: true, count: restored.length, devices: restored, message: `Seçilen ${restored.length} cihaz tüm ayarları ve telemetrisiyle başarıyla sisteme geri yüklendi.` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Toplu geri yükleme işlemi sırasında hata oluştu.' });
+  }
+});
+
+// 16. POST /api/network/archived/clear - Clears all archived devices
+networkRouter.post('/archived/clear', authenticateUser, requireNetworkAdminOrOperator, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const targetTenant = currentUser.role === 'admin' ? (req.body.tenantId as string | undefined) : currentUser.id;
+
+  try {
+    const count = await db.clearArchivedDevices(currentUser.id, targetTenant);
+    res.json({ success: true, count, message: `Arşiv temizlendi (${count} adet kayıt tamamen kaldırıldı).` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Arşiv temizlenirken hata oluştu.' });
+  }
 });
 

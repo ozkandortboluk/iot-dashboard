@@ -696,6 +696,25 @@ router.delete('/:id', authenticateUser, async (req, res) => {
   res.json({ message: 'Cihaz silindi.' });
 });
 
+router.post('/bulk-delete', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const { deviceIds } = req.body;
+
+  if (!Array.isArray(deviceIds) || deviceIds.length === 0) {
+    return res.status(400).json({ error: 'Silinecek cihaz listesi (deviceIds) belirtilmedi.' });
+  }
+
+  const deletedCount = await db.deviceRepository.bulkDeleteDevices(deviceIds, currentUser);
+  for (const id of deviceIds) {
+    terminateDeviceSockets(id, 'Cihaz sistemden toplu olarak silindi');
+    broadcast('device:deleted', { id });
+  }
+  broadcast('devices:updated', db.getDevices());
+  broadcast('network:updated', db.getDiscoveredDevices());
+  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet cihaz başarıyla silindi.` });
+});
+
 export const devicesRouter = router;
 
 // Device Commands Router (v1 API)

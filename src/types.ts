@@ -230,8 +230,54 @@ export interface Device {
   websocketConnected?: boolean;
   lastMessageAt?: string;
 
+  deletedAt?: string;
   updatedAt?: string;
   version?: number;
+}
+
+export interface TelemetryCompressionStats {
+  originalPointsCount: number;
+  compressedPointsCount: number;
+  rawSizeBytes: number;
+  compressedSizeBytes: number;
+  compressionRatioPercent: number;
+  algorithm: 'gzip-base64' | 'delta-rollup' | 'deflate' | 'json-pack';
+  compressedAt: string;
+}
+
+export interface ArchivedDevice {
+  id: string;
+  device: Device;
+  deletedAt: string;
+  deletedBy?: string;
+  deletedByName?: string;
+  deleteReason?: string;
+  tenantId: string;
+  telemetrySnapshot?: {
+    stats: TelemetryCompressionStats;
+    compressedData: string; // Base64 gzipped JSON payload
+    recentReadings?: any[];
+  };
+  preservedSettings?: {
+    name: string;
+    apiKey: string;
+    apiKeyScopes?: string[];
+    type: string;
+    roleKey?: string;
+    hardwareModel?: string;
+    firmwareVersion?: string;
+    outputDefinitions?: DeviceOutputDefinition[];
+    metrics?: Record<string, any>;
+    tags?: string[];
+    siteId?: string;
+    zoneId?: string;
+    groupId?: string;
+    location?: string;
+    ipAddress?: string;
+    macAddress?: string;
+    rateLimitPerMin?: number;
+    encryptionMethod?: string;
+  };
 }
 
 export interface Firmware {

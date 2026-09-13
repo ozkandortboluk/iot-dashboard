@@ -21,6 +21,7 @@ import {
   ChevronRight,
   ChevronLeft,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import type { ActiveAlarm, Device, Customer } from '../../types';
 import { formatDateTime } from '../../lib/utils';
@@ -35,6 +36,10 @@ interface ActiveAlarmTableProps {
   onAcknowledge: (alarmId: string) => Promise<void>;
   onSilence: (alarmId: string, durationMinutes: number) => Promise<void>;
   onResolve: (alarmId: string) => Promise<void>;
+  onDelete?: (alarmId: string) => Promise<void>;
+  onBulkDelete?: (alarmIds: string[]) => Promise<void>;
+  onBulkAcknowledge?: (alarmIds: string[]) => Promise<void>;
+  onBulkResolve?: (alarmIds: string[]) => Promise<void>;
   onRefresh?: () => void;
 }
 
@@ -47,6 +52,10 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
   onAcknowledge,
   onSilence,
   onResolve,
+  onDelete,
+  onBulkDelete,
+  onBulkAcknowledge,
+  onBulkResolve,
   onRefresh,
 }) => {
   // Filters State
@@ -55,6 +64,12 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedState, setSelectedState] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
+  // Bulk Selection States
+  const [selectedAlarmIds, setSelectedAlarmIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkActionLoading, setIsBulkActionLoading] = useState(false);
+  const [alarmToDelete, setAlarmToDelete] = useState<ActiveAlarm | null>(null);
 
   // Pagination states
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -107,6 +122,61 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
         return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
       });
   }, [alarms, searchTerm, selectedDevice, selectedSeverity, selectedState, sortOrder]);
+
+  const handleToggleAlarmSelect = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedAlarmIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedAlarmIds.size === filteredAlarms.length && filteredAlarms.length > 0) {
+      setSelectedAlarmIds(new Set());
+    } else {
+      setSelectedAlarmIds(new Set(filteredAlarms.map((a) => a.id)));
+    }
+  };
+
+  const handleExecuteBulkDelete = async () => {
+    if (!onBulkDelete || selectedAlarmIds.size === 0) return;
+    setIsBulkActionLoading(true);
+    try {
+      await onBulkDelete(Array.from(selectedAlarmIds));
+      setSelectedAlarmIds(new Set());
+      setShowBulkDeleteModal(false);
+    } finally {
+      setIsBulkActionLoading(false);
+    }
+  };
+
+  const handleExecuteBulkAcknowledge = async () => {
+    if (!onBulkAcknowledge || selectedAlarmIds.size === 0) return;
+    setIsBulkActionLoading(true);
+    try {
+      await onBulkAcknowledge(Array.from(selectedAlarmIds));
+      setSelectedAlarmIds(new Set());
+    } finally {
+      setIsBulkActionLoading(false);
+    }
+  };
+
+  const handleExecuteBulkResolve = async () => {
+    if (!onBulkResolve || selectedAlarmIds.size === 0) return;
+    setIsBulkActionLoading(true);
+    try {
+      await onBulkResolve(Array.from(selectedAlarmIds));
+      setSelectedAlarmIds(new Set());
+    } finally {
+      setIsBulkActionLoading(false);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(filteredAlarms.length / itemsPerPage));
   const currentAlarms = filteredAlarms.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -281,6 +351,56 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
         </div>
       </div>
 
+      {/* Bulk Action Toolbar */}
+      {selectedAlarmIds.size > 0 && (
+        <div className="bg-indigo-50/90 dark:bg-indigo-950/60 border-b border-indigo-200 dark:border-indigo-800 px-4 py-3 flex items-center justify-between flex-wrap gap-2.5 text-xs animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-indigo-900 dark:text-indigo-200">
+              {selectedAlarmIds.size} adet alarm seçildi
+            </span>
+            <button
+              onClick={handleToggleSelectAll}
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium cursor-pointer ml-2"
+            >
+              {selectedAlarmIds.size === filteredAlarms.length ? 'Seçimi Temizle' : 'Tümünü Seç'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {onBulkAcknowledge && (
+              <button
+                onClick={handleExecuteBulkAcknowledge}
+                disabled={isBulkActionLoading}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                <span>Seçilenleri Onayla</span>
+              </button>
+            )}
+            {onBulkResolve && (
+              <button
+                onClick={handleExecuteBulkResolve}
+                disabled={isBulkActionLoading}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Seçilenleri Çöz</span>
+              </button>
+            )}
+            {onBulkDelete && (
+              <button
+                onClick={() => setShowBulkDeleteModal(true)}
+                disabled={isBulkActionLoading}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Seçilenleri Sil ({selectedAlarmIds.size})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       {filteredAlarms.length === 0 ? (
         <div className="py-12 px-4 text-center">
@@ -299,29 +419,51 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[10px]">
                 <tr>
+                  <th className="py-3 px-4 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredAlarms.length > 0 && selectedAlarmIds.size === filteredAlarms.length}
+                      onChange={handleToggleSelectAll}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                      title="Tümünü Seç / Kaldır"
+                    />
+                  </th>
                   <th className="py-3 px-4">Önem & Durum</th>
                   <th className="py-3 px-4">Cihaz & Konum</th>
                   <th className="py-3 px-4">İhlal Değeri / Eşik</th>
                   <th className="py-3 px-4">Mesaj & Şablon</th>
                   <th className="py-3 px-4">Tetiklenme Zamanı</th>
-                  <th className="py-3 px-4 text-right">Hızlı Müdahale</th>
+                  <th className="py-3 px-4 text-right">Hızlı Müdahale & İşlemler</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                {currentAlarms.map((alarm) => {
+                {currentAlarms.map((alarm, idx) => {
                   const unit = METRIC_DICTIONARY[alarm.metricKey?.toLowerCase()]?.unit || '';
-                  const isActionLoading = loadingAction === alarm.id;
+                  const isActionLoading = loadingAction === alarm.id || loadingAction === `del_${alarm.id}`;
                   const isCritical = alarm.severity === 'critical';
+                  const isChecked = selectedAlarmIds.has(alarm.id);
 
                   return (
                     <tr
-                      key={alarm.id}
+                      key={`alarm_desk_${alarm.id}_${idx}`}
                       className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
-                        isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
+                        isChecked
+                          ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
+                          : isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
                           ? 'bg-rose-50/30 dark:bg-rose-950/10'
                           : ''
                       }`}
                     >
+                      {/* Checkbox */}
+                      <td className="py-3.5 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => handleToggleAlarmSelect(alarm.id, e as any)}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                        />
+                      </td>
+
                       {/* Önem & Durum */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="space-y-1">
@@ -382,53 +524,65 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
 
                       {/* Hızlı İşlemler */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {alarm.state === 'RESOLVED' ? (
-                          <span className="text-[11px] text-slate-400 italic">Kapatıldı</span>
-                        ) : (
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            {/* Onayla Butonu */}
-                            {!alarm.acknowledged && (
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {alarm.state !== 'RESOLVED' && (
+                            <>
+                              {/* Onayla Butonu */}
+                              {!alarm.acknowledged && (
+                                <button
+                                  onClick={() => onAcknowledge(alarm.id)}
+                                  disabled={isActionLoading}
+                                  className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold border border-amber-200 dark:border-amber-500/20 text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+                                  title="Alarmı Onayla (Farkındayım)"
+                                >
+                                  Onayla
+                                </button>
+                              )}
+
+                              {/* 15 Dk Sustur */}
                               <button
-                                onClick={() => onAcknowledge(alarm.id)}
+                                onClick={() => onSilence(alarm.id, 15)}
                                 disabled={isActionLoading}
-                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/10 dark:hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold border border-amber-200 dark:border-amber-500/20 text-[11px] transition-colors cursor-pointer disabled:opacity-50"
-                                title="Alarmı Onayla (Farkındayım)"
+                                className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium text-[11px] border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+                                title="Bildirimleri 15 dakika sustur"
                               >
-                                Onayla
+                                15 dk
                               </button>
-                            )}
 
-                            {/* 15 Dk Sustur */}
-                            <button
-                              onClick={() => onSilence(alarm.id, 15)}
-                              disabled={isActionLoading}
-                              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium text-[11px] border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-                              title="Bildirimleri 15 dakika sustur"
-                            >
-                              15 dk
-                            </button>
+                              {/* 1 Saat Sustur */}
+                              <button
+                                onClick={() => onSilence(alarm.id, 60)}
+                                disabled={isActionLoading}
+                                className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium text-[11px] border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+                                title="Bildirimleri 1 saat sustur"
+                              >
+                                1 saat
+                              </button>
 
-                            {/* 1 Saat Sustur */}
-                            <button
-                              onClick={() => onSilence(alarm.id, 60)}
-                              disabled={isActionLoading}
-                              className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium text-[11px] border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-                              title="Bildirimleri 1 saat sustur"
-                            >
-                              1 saat
-                            </button>
+                              {/* Çöz Butonu */}
+                              <button
+                                onClick={() => onResolve(alarm.id)}
+                                disabled={isActionLoading}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                title="Alarmı manuel olarak çözüldü olarak işaretle"
+                              >
+                                Çöz
+                              </button>
+                            </>
+                          )}
 
-                            {/* Çöz Butonu */}
+                          {/* Sil Butonu */}
+                          {onDelete && (
                             <button
-                              onClick={() => onResolve(alarm.id)}
+                              onClick={() => setAlarmToDelete(alarm)}
                               disabled={isActionLoading}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-                              title="Alarmı manuel olarak çözüldü olarak işaretle"
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 border border-transparent hover:border-rose-200 dark:hover:border-rose-900/50 transition-colors cursor-pointer disabled:opacity-50"
+                              title="Alarmı Sil"
                             >
-                              Çöz
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -439,28 +593,48 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
 
           {/* Mobile Card View (md altı ekranlar) */}
           <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800">
-            {currentAlarms.map((alarm) => {
+            {currentAlarms.map((alarm, idx) => {
               const unit = METRIC_DICTIONARY[alarm.metricKey?.toLowerCase()]?.unit || '';
-              const isActionLoading = loadingAction === alarm.id;
+              const isActionLoading = loadingAction === alarm.id || loadingAction === `del_${alarm.id}`;
               const isCritical = alarm.severity === 'critical';
+              const isChecked = selectedAlarmIds.has(alarm.id);
 
               return (
                 <div
-                  key={alarm.id}
+                  key={`alarm_mob_${alarm.id}_${idx}`}
                   className={`p-4 space-y-3 ${
-                    isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
+                    isChecked
+                      ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
+                      : isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
                       ? 'bg-rose-50/40 dark:bg-rose-950/20'
                       : ''
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => handleToggleAlarmSelect(alarm.id, e as any)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer"
+                      />
                       {getSeverityBadge(alarm.severity)}
                       {getStateBadge(alarm)}
                     </div>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {formatDateTime(alarm.triggeredAt || alarm.updatedAt)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {formatDateTime(alarm.triggeredAt || alarm.updatedAt)}
+                      </span>
+                      {onDelete && (
+                        <button
+                          onClick={() => setAlarmToDelete(alarm)}
+                          className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg cursor-pointer"
+                          title="Alarmı Sil"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div>
@@ -569,6 +743,101 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
             </div>
           )}
         </>
+      )}
+
+      {/* Single Alarm Delete Modal */}
+      {alarmToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-rose-500/30 space-y-4 animate-scaleUp">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="p-3 bg-rose-500/10 rounded-2xl">
+                <Trash2 className="w-6 h-6 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Alarm Kaydını Sil</h3>
+                <p className="text-xs text-rose-400 font-semibold mt-0.5">Kalıcı Olarak Kaldırma</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              <strong>"{alarmToDelete.deviceName || alarmToDelete.deviceId}"</strong> cihazına ait (
+              <em>{alarmToDelete.metricKey}</em>) alarm kaydını sistemden silmek istediğinizden emin misiniz?
+            </p>
+
+            <div className="pt-3 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setAlarmToDelete(null)}
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onDelete && alarmToDelete) {
+                    await onDelete(alarmToDelete.id);
+                    setAlarmToDelete(null);
+                  }
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Evet, Alarmı Sil</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Alarms Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-rose-500/30 space-y-4 animate-scaleUp">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="p-3 bg-rose-500/10 rounded-2xl">
+                <Trash2 className="w-6 h-6 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Toplu Alarm Silme Onayı</h3>
+                <p className="text-xs text-rose-400 font-semibold mt-0.5">Kritik İşlem</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Seçilen <strong>{selectedAlarmIds.size}</strong> adet alarm kaydını sistemden tamamen silmek istediğinizden emin misiniz?
+            </p>
+
+            <div className="pt-3 flex justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isBulkActionLoading}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={isBulkActionLoading}
+                onClick={handleExecuteBulkDelete}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isBulkActionLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Siliniyor...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Evet, {selectedAlarmIds.size} Alarmı Sil</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

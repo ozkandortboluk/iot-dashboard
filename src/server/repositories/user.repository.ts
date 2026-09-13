@@ -320,6 +320,46 @@ export class UserRepository {
       }
     }
 
+    const ownedDeviceIds = new Set<string>(ownedDevices.map((d: any) => String(d.id)));
+
+    if (options.deleteTelemetry) {
+      this.db.data.telemetry = (this.db.data.telemetry || []).filter(
+        (t: any) => !ownedDeviceIds.has(t.deviceId) && t.userId !== userId && t.tenantId !== userId
+      );
+      if (this.db.data.history) {
+        for (const devId of ownedDeviceIds) {
+          delete (this.db.data.history as Record<string, any>)[devId];
+        }
+      }
+    }
+
+    if (options.deleteDashboards) {
+      this.db.data.dashboards = (this.db.data.dashboards || []).filter(
+        (d: any) => d.userId !== userId && d.tenantId !== userId && d.id !== userId
+      );
+    }
+
+    if (options.deleteAlarms) {
+      this.db.data.rules = (this.db.data.rules || []).filter(
+        (r: any) => r.userId !== userId && r.tenantId !== userId && !ownedDeviceIds.has(r.deviceId)
+      );
+      this.db.data.activeAlarms = (this.db.data.activeAlarms || []).filter(
+        (a: any) => a.userId !== userId && a.tenantId !== userId && !ownedDeviceIds.has(a.deviceId)
+      );
+      this.db.data.alarmEvents = (this.db.data.alarmEvents || []).filter(
+        (e: any) => e.tenantId !== userId && !ownedDeviceIds.has(e.deviceId)
+      );
+      this.db.data.notifications = (this.db.data.notifications || []).filter(
+        (n: any) => n.userId !== userId && n.tenantId !== userId && !ownedDeviceIds.has(n.deviceId)
+      );
+      this.db.data.notificationQueue = (this.db.data.notificationQueue || []).filter(
+        (q: any) => q.tenantId !== userId && !ownedDeviceIds.has(q.deviceId)
+      );
+      this.db.data.dispatchLogs = (this.db.data.dispatchLogs || []).filter(
+        (l: any) => l.tenantId !== userId && !ownedDeviceIds.has(l.deviceId)
+      );
+    }
+
     // Kullanıcıyı ve oturumları kaldır
     this.db.data.users.splice(index, 1);
     delete this.db.data.passwords[userId];
@@ -333,6 +373,14 @@ export class UserRepository {
         console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
       });
     }
+
+    // Real-time broadcast updates
+    this.db.notifyNotificationListeners('devices:updated', this.db.data.devices);
+    this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
+    this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
+    this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
+    this.db.notifyNotificationListeners('notification-queue:updated', this.db.data.notificationQueue);
+    this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
   }
 
   public async terminateUserSessions(userId: string) {

@@ -610,6 +610,7 @@ CREATE INDEX IF NOT EXISTS idx_device_commands_idempotency ON device_commands(id
 
 CREATE TABLE IF NOT EXISTS dispatch_logs (
     id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64),
     user_id VARCHAR(64),
     user_name VARCHAR(128),
     channel VARCHAR(32) NOT NULL,

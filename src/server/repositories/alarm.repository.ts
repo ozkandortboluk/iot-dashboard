@@ -376,4 +376,297 @@ export class AlarmRepository {
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return true;
   }
+
+  public async deleteAlarm(alarmId: string, currentUser: any): Promise<boolean> {
+    if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
+    const idx = this.db.data.activeAlarms.findIndex((a: ActiveAlarm) => a.id === alarmId);
+    if (idx < 0) return false;
+
+    const alarm = this.db.data.activeAlarms[idx];
+    if (currentUser.role !== 'admin' && alarm.tenantId !== currentUser.id) {
+      throw new Error('Bu alarma erişim yetkiniz yok.');
+    }
+
+    this.db.data.activeAlarms.splice(idx, 1);
+    this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.deleteActiveAlarm(alarmId).catch((e: any) => console.warn('[PG Error]', e.message));
+    }
+    this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
+    return true;
+  }
+
+  public async bulkDeleteAlarms(alarmIds: string[], currentUser: any): Promise<number> {
+    if (!this.db.data.activeAlarms || !alarmIds.length) return 0;
+    const idsSet = new Set(alarmIds);
+    const toDeleteIds: string[] = [];
+
+    this.db.data.activeAlarms = this.db.data.activeAlarms.filter((a: ActiveAlarm) => {
+      if (idsSet.has(a.id)) {
+        if (currentUser.role === 'admin' || a.tenantId === currentUser.id) {
+          toDeleteIds.push(a.id);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (toDeleteIds.length > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkDeleteActiveAlarms(toDeleteIds).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
+    }
+    return toDeleteIds.length;
+  }
+
+  public async bulkAcknowledgeAlarms(alarmIds: string[], currentUser: any): Promise<number> {
+    if (!this.db.data.activeAlarms || !alarmIds.length) return 0;
+    const idsSet = new Set(alarmIds);
+    let count = 0;
+    const ackedIds: string[] = [];
+    const now = new Date().toISOString();
+    const ackBy = currentUser.name || currentUser.id;
+
+    for (const alarm of this.db.data.activeAlarms) {
+      if (idsSet.has(alarm.id)) {
+        if (currentUser.role === 'admin' || alarm.tenantId === currentUser.id) {
+          alarm.acknowledged = true;
+          alarm.acknowledgedAt = now;
+          alarm.acknowledgedBy = ackBy;
+          alarm.updatedAt = now;
+          alarm.version = (alarm.version || 1) + 1;
+          ackedIds.push(alarm.id);
+          count++;
+        }
+      }
+    }
+
+    if (count > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkAcknowledgeAlarms(ackedIds, ackBy).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
+    }
+    return count;
+  }
+
+  public async bulkResolveAlarms(alarmIds: string[], currentUser: any): Promise<number> {
+    if (!this.db.data.activeAlarms || !alarmIds.length) return 0;
+    const idsSet = new Set(alarmIds);
+    let count = 0;
+    const resolvedIds: string[] = [];
+    const now = new Date().toISOString();
+    const resBy = currentUser.name || currentUser.id;
+
+    for (const alarm of this.db.data.activeAlarms) {
+      if (idsSet.has(alarm.id)) {
+        if (currentUser.role === 'admin' || alarm.tenantId === currentUser.id) {
+          alarm.state = 'RESOLVED';
+          alarm.resolvedAt = now;
+          alarm.updatedAt = now;
+          alarm.version = (alarm.version || 1) + 1;
+          resolvedIds.push(alarm.id);
+          count++;
+        }
+      }
+    }
+
+    if (count > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkResolveAlarms(resolvedIds, resBy).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
+    }
+    return count;
+  }
+
+  public async bulkDeleteRules(ruleIds: string[], requestingUser?: { id: string; role: string }): Promise<number> {
+    if (!this.db.data.rules || !ruleIds.length) return 0;
+    const idsSet = new Set(ruleIds);
+    const deletedIds: string[] = [];
+
+    this.db.data.rules = this.db.data.rules.filter((r: ThresholdRule) => {
+      if (idsSet.has(r.id)) {
+        if (!requestingUser || requestingUser.role === 'admin' || r.tenantId === requestingUser.id) {
+          deletedIds.push(r.id);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (deletedIds.length > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkDeleteRules(deletedIds).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
+    }
+    return deletedIds.length;
+  }
+
+  public async bulkToggleRules(ruleIds: string[], enabled: boolean, requestingUser?: { id: string; role: string }): Promise<number> {
+    if (!this.db.data.rules || !ruleIds.length) return 0;
+    const idsSet = new Set(ruleIds);
+    let count = 0;
+    const now = new Date().toISOString();
+
+    for (const r of this.db.data.rules) {
+      if (idsSet.has(r.id)) {
+        if (!requestingUser || requestingUser.role === 'admin' || r.tenantId === requestingUser.id) {
+          r.enabled = enabled;
+          r.updatedAt = now;
+          r.version = (r.version || 1) + 1;
+          count++;
+          if (this.db.postgresRepo?.isReady()) {
+            this.db.postgresRepo.saveRule(r).catch((e: any) => console.warn('[PG Error]', e.message));
+          }
+        }
+      }
+    }
+
+    if (count > 0) {
+      this.db.saveData(this.db.data);
+      this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
+    }
+    return count;
+  }
+
+  public async deleteNotification(notificationId: string, currentUser: any): Promise<boolean> {
+    if (!this.db.data.notifications) this.db.data.notifications = [];
+    const idx = this.db.data.notifications.findIndex((n: NotificationItem) => n.id === notificationId);
+    if (idx < 0) return false;
+
+    const notif = this.db.data.notifications[idx];
+    if (currentUser.role !== 'admin' && notif.tenantId !== currentUser.id) {
+      throw new Error('Bu bildirimi silme yetkiniz yok.');
+    }
+
+    this.db.data.notifications.splice(idx, 1);
+    this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.deleteNotification(notificationId).catch((e: any) => console.warn('[PG Error]', e.message));
+    }
+    this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
+    return true;
+  }
+
+  public async bulkDeleteNotifications(notificationIds: string[], currentUser: any): Promise<number> {
+    if (!this.db.data.notifications || !notificationIds.length) return 0;
+    const idsSet = new Set(notificationIds);
+    const toDeleteIds: string[] = [];
+
+    this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => {
+      if (idsSet.has(n.id)) {
+        if (currentUser.role === 'admin' || n.tenantId === currentUser.id) {
+          toDeleteIds.push(n.id);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (toDeleteIds.length > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkDeleteNotifications(toDeleteIds).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
+    }
+    return toDeleteIds.length;
+  }
+
+  public async deleteAllNotifications(requestingUserId: string): Promise<number> {
+    if (!this.db.data.notifications) return 0;
+    const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+
+    let count = 0;
+    if (isAdmin) {
+      count = this.db.data.notifications.length;
+      this.db.data.notifications = [];
+    } else {
+      const beforeLen = this.db.data.notifications.length;
+      this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => n.tenantId !== requestingUserId);
+      count = beforeLen - this.db.data.notifications.length;
+    }
+
+    this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.deleteAllNotifications(isAdmin ? undefined : requestingUserId).catch((e: any) => console.warn('[PG Error]', e.message));
+    }
+    this.db.notifyNotificationListeners('notifications:updated', this.db.data.notifications);
+    return count;
+  }
+
+  public async deleteDispatchLog(logId: string, currentUser: any): Promise<boolean> {
+    if (!this.db.data.dispatchLogs) this.db.data.dispatchLogs = [];
+    const idx = this.db.data.dispatchLogs.findIndex((l: DispatchLogItem) => l.id === logId);
+    if (idx < 0) return false;
+
+    const log = this.db.data.dispatchLogs[idx];
+    if (currentUser.role !== 'admin' && log.tenantId !== currentUser.id) {
+      throw new Error('Bu kaydı silme yetkiniz yok.');
+    }
+
+    this.db.data.dispatchLogs.splice(idx, 1);
+    this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.deleteDispatchLog(logId).catch((e: any) => console.warn('[PG Error]', e.message));
+    }
+    this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
+    return true;
+  }
+
+  public async bulkDeleteDispatchLogs(logIds: string[], currentUser: any): Promise<number> {
+    if (!this.db.data.dispatchLogs || !logIds.length) return 0;
+    const idsSet = new Set(logIds);
+    const toDeleteIds: string[] = [];
+
+    this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter((l: DispatchLogItem) => {
+      if (idsSet.has(l.id)) {
+        if (currentUser.role === 'admin' || l.tenantId === currentUser.id) {
+          toDeleteIds.push(l.id);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (toDeleteIds.length > 0) {
+      this.db.saveData(this.db.data);
+      if (this.db.postgresRepo?.isReady()) {
+        await this.db.postgresRepo.bulkDeleteDispatchLogs(toDeleteIds).catch((e: any) => console.warn('[PG Error]', e.message));
+      }
+      this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
+    }
+    return toDeleteIds.length;
+  }
+
+  public async clearDispatchLogs(requestingUserId: string): Promise<number> {
+    if (!this.db.data.dispatchLogs) return 0;
+    const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
+    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+
+    let count = 0;
+    if (isAdmin) {
+      count = this.db.data.dispatchLogs.length;
+      this.db.data.dispatchLogs = [];
+    } else {
+      const beforeLen = this.db.data.dispatchLogs.length;
+      this.db.data.dispatchLogs = this.db.data.dispatchLogs.filter((l: DispatchLogItem) => l.tenantId !== requestingUserId);
+      count = beforeLen - this.db.data.dispatchLogs.length;
+    }
+
+    this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.clearDispatchLogs(isAdmin ? undefined : requestingUserId).catch((e: any) => console.warn('[PG Error]', e.message));
+    }
+    this.db.notifyNotificationListeners('dispatch-logs:updated', this.db.data.dispatchLogs);
+    return count;
+  }
 }

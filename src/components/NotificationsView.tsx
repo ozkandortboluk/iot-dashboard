@@ -36,15 +36,20 @@ import { DeliveryQueue } from './notifications/DeliveryQueue';
 import { DeliveryHistory } from './notifications/DeliveryHistory';
 import { ChannelConfiguration } from './notifications/ChannelConfiguration';
 import { ContactPreferences } from './notifications/ContactPreferences';
+import { ToastNotification } from './common/ToastNotification';
 
 export const NotificationsView: React.FC = () => {
   const { user } = useAuth();
   const { devices, customersList, isConnected, subscribeWsEvent, selectedCustomerForAdmin } = useRealtime();
 
-  // Active Navigation Tab
+  // Active Navigation Tab with Persistence
   const [activeTab, setActiveTab] = useState<
     'alarms' | 'rules' | 'queue' | 'history' | 'channels' | 'preferences'
-  >('alarms');
+  >(() => (localStorage.getItem('notifications_active_tab') as any) || 'alarms');
+
+  useEffect(() => {
+    localStorage.setItem('notifications_active_tab', activeTab);
+  }, [activeTab]);
 
   // Core Data States
   const [activeAlarms, setActiveAlarms] = useState<ActiveAlarm[]>([]);
@@ -66,17 +71,13 @@ export const NotificationsView: React.FC = () => {
 
   // Status & Feedback Messages
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
-  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
   const showNotificationMsg = (msg: string, isError = false) => {
-    if (isError) {
-      setActionErrorMsg(msg);
-      setTimeout(() => setActionErrorMsg(null), 4500);
-    } else {
-      setActionSuccessMsg(msg);
-      setTimeout(() => setActionSuccessMsg(null), 4500);
-    }
+    setToast({
+      message: msg,
+      type: isError ? 'error' : 'success',
+    });
   };
 
   const ensureSuccess = async (res: Response) => {
@@ -309,6 +310,68 @@ export const NotificationsView: React.FC = () => {
     }
   };
 
+  const handleDeleteAlarm = async (alarmId: string) => {
+    setLoadingAction(`del_${alarmId}`);
+    try {
+      const res = await fetch(`/api/alarms/${alarmId}`, { method: 'DELETE' });
+      await ensureSuccess(res);
+      showNotificationMsg('Alarm kaydı başarıyla silindi.');
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Alarm silinirken hata oluştu.', true);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleBulkDeleteAlarms = async (alarmIds: string[]) => {
+    if (alarmIds.length === 0) return;
+    try {
+      const res = await fetch('/api/alarms/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alarmIds }),
+      });
+      await ensureSuccess(res);
+      showNotificationMsg(`${alarmIds.length} adet alarm başarıyla silindi.`);
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Toplu silme işleminde hata oluştu.', true);
+    }
+  };
+
+  const handleBulkAcknowledgeAlarms = async (alarmIds: string[]) => {
+    if (alarmIds.length === 0) return;
+    try {
+      const res = await fetch('/api/alarms/bulk-acknowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alarmIds }),
+      });
+      await ensureSuccess(res);
+      showNotificationMsg(`${alarmIds.length} adet alarm başarıyla onaylandı.`);
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Toplu onaylama işleminde hata oluştu.', true);
+    }
+  };
+
+  const handleBulkResolveAlarms = async (alarmIds: string[]) => {
+    if (alarmIds.length === 0) return;
+    try {
+      const res = await fetch('/api/alarms/bulk-resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alarmIds }),
+      });
+      await ensureSuccess(res);
+      showNotificationMsg(`${alarmIds.length} adet alarm başarıyla çözüldü.`);
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Toplu çözümleme işleminde hata oluştu.', true);
+    }
+  };
+
   // ================= RULE ACTIONS (WITH OCC) =================
   const handleToggleRule = async (ruleId: string, enabled: boolean) => {
     try {
@@ -368,6 +431,20 @@ export const NotificationsView: React.FC = () => {
     }
   };
 
+  const handleDeleteRule = async (ruleId: string) => {
+    setLoadingAction(`del_rule_${ruleId}`);
+    try {
+      const res = await fetch(`/api/rules/${ruleId}`, { method: 'DELETE' });
+      await ensureSuccess(res);
+      showNotificationMsg('Alarm kuralı başarıyla silindi.');
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Kural silinirken hata oluştu.', true);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const handleConfirmDeleteRule = async () => {
     if (!ruleToDelete) return;
     try {
@@ -379,6 +456,63 @@ export const NotificationsView: React.FC = () => {
       showNotificationMsg(err.message || 'Kural silinirken hata oluştu.', true);
     } finally {
       setRuleToDelete(null);
+    }
+  };
+
+  const handleBulkDeleteRules = async (ruleIds: string[]) => {
+    if (ruleIds.length === 0) return;
+    try {
+      const res = await fetch('/api/rules/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleIds }),
+      });
+      await ensureSuccess(res);
+      showNotificationMsg(`${ruleIds.length} adet alarm kuralı başarıyla silindi.`);
+      fetchPrimaryData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Toplu kural silme işleminde hata oluştu.', true);
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    setLoadingAction(`del_log_${logId}`);
+    try {
+      const res = await fetch(`/api/dispatch-logs/${logId}`, { method: 'DELETE' });
+      await ensureSuccess(res);
+      showNotificationMsg('İletim kaydı başarıyla silindi.');
+      fetchLogsData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'İletim kaydı silinirken hata oluştu.', true);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleBulkDeleteLogs = async (logIds: string[]) => {
+    if (logIds.length === 0) return;
+    try {
+      const res = await fetch('/api/dispatch-logs/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logIds }),
+      });
+      await ensureSuccess(res);
+      showNotificationMsg(`${logIds.length} adet iletim kaydı başarıyla silindi.`);
+      fetchLogsData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'Toplu iletim kaydı silme işleminde hata oluştu.', true);
+    }
+  };
+
+  const handleClearAllLogs = async () => {
+    try {
+      const res = await fetch('/api/dispatch-logs/clear', { method: 'POST' });
+      await ensureSuccess(res);
+      showNotificationMsg('Tüm iletim geçmişi temizlendi.');
+      fetchLogsData();
+    } catch (err: any) {
+      showNotificationMsg(err.message || 'İletim geçmişi temizlenirken hata oluştu.', true);
     }
   };
 
@@ -484,20 +618,8 @@ export const NotificationsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Toast Feedback Messages */}
-      {actionSuccessMsg && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-2xl flex items-center gap-3 text-xs font-semibold shadow-md animate-in fade-in">
-          <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          <span>{actionSuccessMsg}</span>
-        </div>
-      )}
-
-      {actionErrorMsg && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 rounded-2xl flex items-center gap-3 text-xs font-semibold shadow-md animate-in fade-in">
-          <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 dark:text-rose-400" />
-          <span>{actionErrorMsg}</span>
-        </div>
-      )}
+      {/* Toast Notification Container */}
+      <ToastNotification toast={toast} onClose={() => setToast(null)} />
 
       {/* Top Banner & Customer Scope (Linked to Top Bar) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -639,6 +761,10 @@ export const NotificationsView: React.FC = () => {
           onAcknowledge={handleAcknowledgeAlarm}
           onSilence={handleSilenceAlarm}
           onResolve={handleResolveAlarm}
+          onDelete={handleDeleteAlarm}
+          onBulkDelete={handleBulkDeleteAlarms}
+          onBulkAcknowledge={handleBulkAcknowledgeAlarms}
+          onBulkResolve={handleBulkResolveAlarms}
           onRefresh={fetchPrimaryData}
         />
       )}
@@ -657,8 +783,10 @@ export const NotificationsView: React.FC = () => {
             setEditingRule(rule);
             setIsWizardOpen(true);
           }}
+          onDelete={handleDeleteRule}
           onRequestDeleteRule={(rule) => setRuleToDelete(rule)}
           onToggleRule={handleToggleRule}
+          onBulkDelete={handleBulkDeleteRules}
         />
       )}
 
@@ -673,7 +801,13 @@ export const NotificationsView: React.FC = () => {
       )}
 
       {activeTab === 'history' && (
-        <DeliveryHistory logs={dispatchLogs} onRefresh={fetchLogsData} />
+        <DeliveryHistory
+          logs={dispatchLogs}
+          onRefresh={fetchLogsData}
+          onDelete={handleDeleteLog}
+          onBulkDelete={handleBulkDeleteLogs}
+          onClearHistory={handleClearAllLogs}
+        />
       )}
 
       {activeTab === 'channels' && user?.role === 'admin' && (

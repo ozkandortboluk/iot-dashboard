@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Layers,
   Activity,
+  Trash2,
 } from 'lucide-react';
 import type { DiscoveredNetworkDevice } from '../../types';
 
@@ -17,6 +18,7 @@ interface DiscoveredDeviceCardProps {
   device: DiscoveredNetworkDevice;
   onSelectForPairing: (device: DiscoveredNetworkDevice) => void;
   onPingTest: (ip: string) => void;
+  onDelete?: (device: DiscoveredNetworkDevice) => void;
   isPinging?: boolean;
 }
 
@@ -24,6 +26,7 @@ export const DiscoveredDeviceCard: React.FC<DiscoveredDeviceCardProps> = ({
   device,
   onSelectForPairing,
   onPingTest,
+  onDelete,
   isPinging = false,
 }) => {
   const lifecycle = device.lifecycleState || (device.status === 'unregistered' ? 'discovered' : 'active');
@@ -155,6 +158,17 @@ export const DiscoveredDeviceCard: React.FC<DiscoveredDeviceCardProps> = ({
           <span>Sihirbazda Eşleştir</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
+
+        {onDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(device)}
+            title="Havuzdan Kaldır / Sil"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );

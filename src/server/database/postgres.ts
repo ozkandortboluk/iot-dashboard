@@ -1230,33 +1230,44 @@ export class PostgresRepository {
     try {
       await client.query('BEGIN');
 
+      // Find user devices first
+      const devRes = await client.query('SELECT id FROM devices WHERE tenant_id = $1 OR user_id = $1', [userId]);
+      const deviceIds: string[] = devRes.rows.map((r: any) => r.id);
+
       if (options.deleteTelemetry) {
-        // Find user devices first
-        const devRes = await client.query('SELECT id FROM devices WHERE tenant_id = $1 OR user_id = $1', [userId]);
-        const deviceIds = devRes.rows.map(r => r.id);
         if (deviceIds.length > 0) {
-          // Delete telemetry directly (this is usually handled by ON DELETE CASCADE, but we want to be sure if deleteDevices is false)
-          const placeholders = deviceIds.map((_, i) => `$${i + 2}`).join(',');
-          await client.query(`DELETE FROM telemetry_history WHERE device_id IN (${placeholders})`, [userId, ...deviceIds]);
+          await client.query(`DELETE FROM telemetry_readings WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+          await client.query(`DELETE FROM simulation_telemetry_readings WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+          await client.query(`DELETE FROM telemetry_packets WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
         }
+        await client.query(`DELETE FROM telemetry_readings WHERE tenant_id = $1 OR user_id = $1 OR customer_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM simulation_telemetry_readings WHERE tenant_id = $1 OR user_id = $1 OR customer_id = $1`, [userId]).catch(() => {});
       }
 
       if (options.deleteDashboards) {
-        // For now, dashboards are purely in JSON files or DB? 
-        // We might not have a postgres table for dashboards in this version, but it's handled in memory if there were.
+        await client.query(`DELETE FROM dashboard_layouts WHERE user_id = $1 OR id = $1`, [userId]).catch(() => {});
       }
 
       if (options.deleteAlarms) {
-        const devRes = await client.query('SELECT id FROM devices WHERE tenant_id = $1 OR user_id = $1', [userId]);
-        const deviceIds = devRes.rows.map(r => r.id);
         if (deviceIds.length > 0) {
-          const placeholders = deviceIds.map((_, i) => `$${i + 2}`).join(',');
-          await client.query(`DELETE FROM active_alarms WHERE device_id IN (${placeholders})`, [userId, ...deviceIds]);
+          await client.query(`DELETE FROM active_alarms WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+          await client.query(`DELETE FROM alarm_events WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+          await client.query(`DELETE FROM threshold_rules WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
         }
+        await client.query(`DELETE FROM threshold_rules WHERE user_id = $1 OR tenant_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM active_alarms WHERE user_id = $1 OR tenant_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM alarm_events WHERE tenant_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM notifications WHERE user_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM dispatch_logs WHERE user_id = $1`, [userId]).catch(async () => {
+          await client.query(`DELETE FROM dispatch_logs WHERE tenant_id = $1`, [userId]).catch(() => {});
+        });
       }
 
       if (options.deleteDevices) {
-        // Deleting devices will cascade delete telemetry and alarms if foreign keys are set up correctly
+        if (deviceIds.length > 0) {
+          await client.query(`DELETE FROM device_commands WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+          await client.query(`DELETE FROM device_tokens WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
+        }
         await client.query(`DELETE FROM devices WHERE tenant_id = $1 OR user_id = $1;`, [userId]);
       } else {
         // Transfer devices to usr_admin
@@ -1278,7 +1289,7 @@ export class PostgresRepository {
       }
 
       // Kullanıcının oturumlarını temizle
-      await client.query(`DELETE FROM user_sessions WHERE user_id = $1;`, [userId]);
+      await client.query(`DELETE FROM user_sessions WHERE user_id = $1;`, [userId]).catch(() => {});
 
       // Kullanıcıyı sil
       await client.query(`DELETE FROM users WHERE id = $1;`, [userId]);
@@ -2024,6 +2035,11 @@ export class PostgresRepository {
     await this.query(`DELETE FROM threshold_rules WHERE id = $1;`, [ruleId]);
   }
 
+  public async bulkDeleteRules(ruleIds: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !ruleIds.length) return;
+    await this.query(`DELETE FROM threshold_rules WHERE id = ANY($1::text[]);`, [ruleIds]);
+  }
+
   // ==========================================
   // ACTIVE ALARMS
   // ==========================================
@@ -2080,6 +2096,36 @@ export class PostgresRepository {
       alarm.message || '',
       alarm.updatedAt || new Date().toISOString(),
     ]);
+  }
+
+  public async deleteActiveAlarm(alarmId: string): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    await this.query(`DELETE FROM active_alarms WHERE id = $1;`, [alarmId]);
+  }
+
+  public async bulkDeleteActiveAlarms(alarmIds: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !alarmIds.length) return;
+    await this.query(`DELETE FROM active_alarms WHERE id = ANY($1::text[]);`, [alarmIds]);
+  }
+
+  public async bulkAcknowledgeAlarms(alarmIds: string[], ackBy: string): Promise<void> {
+    if (!this.pool || !this.isConnected || !alarmIds.length) return;
+    const now = new Date().toISOString();
+    await this.query(`
+      UPDATE active_alarms 
+      SET acknowledged = TRUE, acknowledged_at = $1, acknowledged_by = $2, updated_at = $1 
+      WHERE id = ANY($3::text[]);
+    `, [now, ackBy, alarmIds]);
+  }
+
+  public async bulkResolveAlarms(alarmIds: string[], resolvedBy: string): Promise<void> {
+    if (!this.pool || !this.isConnected || !alarmIds.length) return;
+    const now = new Date().toISOString();
+    await this.query(`
+      UPDATE active_alarms 
+      SET state = 'RESOLVED', resolved_at = $1, updated_at = $1 
+      WHERE id = ANY($2::text[]);
+    `, [now, alarmIds]);
   }
 
   // ==========================================
@@ -2140,6 +2186,59 @@ export class PostgresRepository {
     } else {
       await this.query(`UPDATE notifications SET is_read = TRUE;`);
     }
+  }
+
+  public async deleteNotification(id: string): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    await this.query(`DELETE FROM notifications WHERE id = $1;`, [id]);
+  }
+
+  public async bulkDeleteNotifications(ids: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !ids.length) return;
+    await this.query(`DELETE FROM notifications WHERE id = ANY($1::text[]);`, [ids]);
+  }
+
+  public async deleteAllNotifications(userId?: string): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    if (userId && userId !== 'usr_admin') {
+      await this.query(`DELETE FROM notifications WHERE user_id = $1;`, [userId]);
+    } else {
+      await this.query(`DELETE FROM notifications;`);
+    }
+  }
+
+  public async deleteDispatchLog(id: string): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    await this.query(`DELETE FROM dispatch_logs WHERE id = $1;`, [id]);
+  }
+
+  public async bulkDeleteDispatchLogs(ids: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !ids.length) return;
+    await this.query(`DELETE FROM dispatch_logs WHERE id = ANY($1::text[]);`, [ids]);
+  }
+
+  public async clearDispatchLogs(tenantId?: string): Promise<void> {
+    if (!this.pool || !this.isConnected) return;
+    if (tenantId && tenantId !== 'usr_admin') {
+      try {
+        await this.query(`DELETE FROM dispatch_logs WHERE tenant_id = $1 OR user_id = $1;`, [tenantId]);
+      } catch {
+        await this.query(`DELETE FROM dispatch_logs WHERE user_id = $1;`, [tenantId]).catch(() => {});
+      }
+    } else {
+      await this.query(`DELETE FROM dispatch_logs;`);
+    }
+  }
+
+  public async bulkDeleteDevices(deviceIds: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !deviceIds.length) return;
+    await this.query(`DELETE FROM telemetry_readings WHERE device_id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM telemetry_packets WHERE device_id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM active_alarms WHERE device_id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM alarm_events WHERE device_id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM device_commands WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM device_tokens WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]);
   }
 
   // ==========================================
