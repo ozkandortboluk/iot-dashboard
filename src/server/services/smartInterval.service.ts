@@ -12,6 +12,9 @@ export interface WatchdogEvaluationResult {
   changed: boolean;
   reason?: string;
   timeoutSeconds: number;
+  isConfirmedOffline?: boolean;
+  graceBufferSeconds?: number;
+  elapsedSeconds?: number;
 }
 
 export class SmartIntervalService {
@@ -81,7 +84,9 @@ export class SmartIntervalService {
 
     // 1. Cihaz sinyal üretti -> online duruma geçiş
     dev.status = 'online';
+    dev.previousLastSeen = dev.lastSeen;
     dev.lastSeen = new Date(nowMs).toISOString();
+    dev.consecutiveMissedTicks = 0;
 
     const currentCalculated = this.calculateDeviceTimeouts(dev);
     const activeInterval = currentCalculated.expectedIntervalSeconds;
@@ -97,8 +102,14 @@ export class SmartIntervalService {
     if (!isWakeupAfterOffline && previousLastSeen > 0) {
       const deltaSec = Math.round((nowMs - previousLastSeen) / 1000);
 
+      // Micro-burst filtresi: Cihazın yerleşik aralığı varsa (>= 10 sn),
+      // çok parçalı paket gönderimleri veya ping ardışık çağrılarındaki (<= 3 sn) mikro-deltaları
+      // frekans örneği havuzuna alarak aralığı yapay şekilde çökertmesini önle.
+      const isMicroBurst = activeInterval >= 10 && deltaSec <= 3;
+
       // Sadece geçerli, burst olmayan deltalarda aralık ölçümü yap (min 2 sn)
       if (
+        !isMicroBurst &&
         deltaSec >= SmartIntervalService.MIN_INTERVAL_SECONDS &&
         deltaSec <= SmartIntervalService.MAX_INTERVAL_SECONDS
       ) {
@@ -213,7 +224,11 @@ export class SmartIntervalService {
     }
 
     // 4. Son sinyalden bu yana geçen süreyi kontrol et (Fiziksel & Sanal cihazlar için eşit kural)
-    const elapsedMs = nowMs - new Date(dev.lastSeen).getTime();
+    const elapsedMs = Math.max(0, nowMs - new Date(dev.lastSeen).getTime());
+    const graceBufferSeconds = Math.max(5, Math.min(20, Math.round(timeouts.offlineTimeoutSeconds * 0.25)));
+    const confirmedOfflineThresholdMs = (timeouts.offlineTimeoutSeconds + graceBufferSeconds) * 1000;
+    const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs;
+    const elapsedSeconds = Math.round(elapsedMs / 1000);
 
     if (elapsedMs > offlineTimeoutMs) {
       const changed = dev.status !== 'offline';
@@ -223,6 +238,9 @@ export class SmartIntervalService {
         changed,
         reason: `Veri gönderim sıklığının 2 katı sürede (${timeouts.offlineTimeoutSeconds} sn) sinyal alınamadı.`,
         timeoutSeconds: timeouts.offlineTimeoutSeconds,
+        isConfirmedOffline,
+        graceBufferSeconds,
+        elapsedSeconds,
       };
     } else if (elapsedMs > warningTimeoutMs) {
       const changed = dev.status !== 'warning';
@@ -234,6 +252,9 @@ export class SmartIntervalService {
         changed,
         reason: 'Sinyal gecikmesi tespit edildi (tolerans sonu yaklaşıyor)',
         timeoutSeconds: timeouts.offlineTimeoutSeconds,
+        isConfirmedOffline: false,
+        graceBufferSeconds,
+        elapsedSeconds,
       };
     } else {
       const changed = dev.status !== 'online';
@@ -242,6 +263,9 @@ export class SmartIntervalService {
         newStatus: 'online',
         changed,
         timeoutSeconds: timeouts.offlineTimeoutSeconds,
+        isConfirmedOffline: false,
+        graceBufferSeconds,
+        elapsedSeconds,
       };
     }
   }

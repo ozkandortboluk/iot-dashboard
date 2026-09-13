@@ -357,8 +357,8 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [addZoneId, setAddZoneId] = useState<string>('');
   const [addGroupId, setAddGroupId] = useState<string>('');
   const [manualApiKey, setManualApiKey] = useState('');
-  const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(10);
-  const [addExpectedInterval, setAddExpectedInterval] = useState<number>(5);
+  const [addHeartbeatTimeout, setAddHeartbeatTimeout] = useState<number>(30);
+  const [addExpectedInterval, setAddExpectedInterval] = useState<number>(15);
   const [addIntervalMode, setAddIntervalMode] = useState<'auto' | 'manual'>('auto');
   const [isSimulated, setIsSimulated] = useState<boolean>(false);
   const [saveSimulatedDataToDb, setSaveSimulatedDataToDb] = useState<boolean>(false);

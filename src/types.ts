@@ -190,6 +190,9 @@ export interface Device {
   pingMs?: number;
   rssi?: number;
   lastSeen: string;
+  previousLastSeen?: string; // Timestamp of previous packet for precise inter-arrival delta calculation
+  lastOfflineNotifiedAt?: string; // Cooldown tracker to prevent offline notification flapping
+  consecutiveMissedTicks?: number; // Watchdog debounce counter
   rateLimitPerMin: number;
   encryptionMethod: string;
   dataFlowActive?: boolean;

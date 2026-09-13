@@ -168,6 +168,56 @@ describe('SmartIntervalService - Watchdog and Dynamic Frequency Engine', () => {
     expect(result.remainingCount).toBe(0);
     expect(Object.keys(dev.metrics || {}).length).toBe(0);
   });
+
+  it('rejects sub-cycle micro-bursts (<= 3s) from corrupting established intervals', () => {
+    let now = 1700000000000;
+    const dev = createMockDevice({
+      id: 'test_dev_burst',
+      tenantId: 'tenant_1',
+      name: 'Burst Protected Device',
+      status: 'online',
+      lastSeen: new Date(now).toISOString(),
+      expectedIntervalSeconds: 30,
+      autoDetectedIntervalSeconds: 30,
+      intervalMode: 'auto',
+      recentIntervals: [30, 29, 31],
+    });
+
+    // Simulate rapid sub-packet burst (e.g., 2 sensors sent separately in 2 seconds)
+    now += 2000;
+    service.processDeviceTelemetryArrival(dev, now);
+
+    // Recent intervals should NOT have been polluted with the 2-second burst
+    expect(dev.recentIntervals).toEqual([30, 29, 31]);
+    expect(dev.expectedIntervalSeconds).toBe(30);
+
+    // Next regular cycle arrives at 30s
+    now += 30000;
+    service.processDeviceTelemetryArrival(dev, now);
+    expect(dev.recentIntervals?.length).toBe(4);
+    expect(dev.recentIntervals?.[dev.recentIntervals.length - 1]).toBe(30);
+  });
+
+  it('provides network jitter grace buffer before confirming offline status', () => {
+    const now = 1700000000000;
+    const dev = createMockDevice({
+      id: 'test_dev_grace',
+      tenantId: 'tenant_1',
+      name: 'Grace Test Device',
+      status: 'online',
+      expectedIntervalSeconds: 15, // 2x timeout = 30s, grace buffer = 8s -> confirmed = 38s
+      lastSeen: new Date(now - 32000).toISOString(), // 32s elapsed (> 30s but < 38s)
+    });
+
+    const result = service.evaluateDeviceWatchdog(dev, now);
+    expect(result.newStatus).toBe('offline');
+    // Jitter grace buffer is still active, so isConfirmedOffline is false
+    expect(result.isConfirmedOffline).toBe(false);
+
+    // After grace threshold passes (42s > 38s)
+    const confirmedResult = service.evaluateDeviceWatchdog(dev, now + 10000);
+    expect(confirmedResult.isConfirmedOffline).toBe(true);
+  });
 });
 
 describe('TenantSecurityService - Strict Isolation Rules', () => {

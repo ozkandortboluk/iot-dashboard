@@ -4,6 +4,46 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.2] - 2026-09-13
+
+### 📌 PostgreSQL Cihaz API Anahtarı Kısıt Hatası & Yabancı Anahtar Çakışma Düzeltmesi
+- **PostgreSQL `devices_api_key_key` Benzersizlik Kısıtının Düzeltilmesi & İndeks Dönüşümü**:
+  - `duplicate key value violates unique constraint "devices_api_key_key"` hatası kökten çözüldü.
+  - Veritabanı seviyesinde `devices` tablosundaki katı `devices_api_key_key` benzersizlik kısıtı temizlendi ve yerine ultra-hızlı O(1) B-Tree arama performansı sağlayan `idx_devices_api_key` ve `idx_devices_api_key_hash` standart indeksleri eklendi.
+  - `ensureTelemetrySchema` göç döngüsüne ve otomatik onarım mekanizmasına kısıt kaldırma eklendi.
+- **PostgreSQL `notifications_user_id_fkey` Yabancı Anahtar Çakışması Giderildi**:
+  - `notifications` tablosundaki `notifications_user_id_fkey` kısıtı temizlenerek, sistem bildirimleri, tenant alarmları ve bağımsız cihaz bildirimlerinin foreign key ihlali oluşturmadan güvenle kaydedilmesi sağlandı.
+  - Hızlı sorgulama için `idx_notifications_user_id` B-Tree indeksi tanımlandı.
+- **Uygulama Seviyesinde Zarif API Key Çakışma Doğrulaması**:
+  - `device.repository.ts` içerisindeki `createDevice` ve `updateDevice` fonksiyonlarına cihaz API anahtarı çakışma kontrolü eklendi. Kullanıcı var olan bir anahtarı girmeye çalıştığında anlaşılır ve açıklayıcı hata mesajı (`Bu API Anahtarı zaten başka bir cihaz tarafından kullanılıyor (...)`) döndürülür.
+  - Otomatik anahtar üretimlerinde ve anahtar yenilemelerinde (`regenerateApiKey`) sistem genelinde tam benzersizlik garanti altına alındı.
+- **PostgreSQL Havuz Sorgu Seviyesinde Otomatik İyileştirme (Auto-Repair)**:
+  - `postgres.ts` içindeki `query` metoduna `devices_api_key_key` ve `notifications_user_id_fkey` kısıtları için otomatik tespit ve kurtarma katmanı eklendi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize olarak `v1.17.2` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.17.1] - 2026-09-13
+
+### 📌 Aktif Cihaz Çevrimdışı Bildirim Flapping Sorununun Düzeltilmesi & Ağ Toleransı (Jitter Grace)
+- **Doğru Paket Aralığı Ölçümü & Erken `lastSeen` Ezilmesinin Giderilmesi**:
+  - `deviceAuthService.authenticateDevice` ve `deviceWsProtocolService` servislerinde her HTTP/WebSocket isteğinde `device.lastSeen` damgasının telemetri ayrıştırma ve akıllı sıklık motorundan önce güncellenmesi düzeltildi.
+  - Bu sayede `smartIntervalService.processDeviceTelemetryArrival` gelen her gerçek paketin önceki paketle olan gerçek zaman farkını (`deltaSec`) doğru hesaplayabilmekte ve sahadaki cihazın gerçek gönderim sıklığını (`autoDetectedIntervalSeconds`) dinamik olarak öğrenebilmektedir.
+- **Ağ Jitter Toleransı (Grace Cushion Buffer)**:
+  - Wi-Fi dalgalanmaları, TCP yeniden iletimleri, sensör ADC okuma süreleri ve mobil hat gecikmelerinde milisaniyelik gecikmeler sebebiyle cihazların anında sahte çevrimdışı (offline) alarmı üretmesi engellendi.
+  - `evaluateDeviceWatchdog` fonksiyonuna `graceBufferSeconds` (min 5s, max 20s, aralığın %25'i) entegre edildi. Tolerans aşılmadan ve kesinti doğrulanmadan bildirim üretilmez (`isConfirmedOffline`).
+- **Mikro-Burst ve Çok Parçalı Telemetri Koruması**:
+  - Cihazın yerleşik bir periyodu varken (>= 10 sn), peş peşe gelen çok parçalı sensör paketlerinin veya ping sinyallerinin (<= 3 sn) frekans havuzunu kirleterek aralığı 2 saniyeye çökertmesi önlendi.
+- **Bildirim Debouncing & Flapping Önleme**:
+  - `checkDeviceStatuses` motoruna 3 dakikalık bildirim soğuma süresi (cooldown) ve cihazın sinyal akışı normale döndüğünde otomatik toparlanma (recovery) kaydı eklendi.
+- **Periyodik Durum Denetleyicisi Promise Hatası Düzeltmesi**:
+  - `src/server/services/websocket.ts` içerisindeki `setInterval` döngüsünde `db.checkDeviceStatuses()` asenkron çağrısı `await` ile sarılarak her 3 saniyede gereksiz tetikleme yapılması engellendi.
+- **Yeni Cihaz Varsayılan Değer İyileştirmesi**:
+  - Yeni cihaz ekleme modalında varsayılan beklenen aralık gerçekçi IoT saha donanımlarına uygun olarak 15 saniyeye, zaman aşımı ise 30 saniyeye ayarlandı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.17.1` sürümüne yükseltildi.
+
+---
+
 ## 🚀 [v1.17.0] - 2026-09-13
 
 ### 📌 Bildirimler ve Olay Geçmişi Sekmesi & Gelişmiş Bildirim Yönetimi

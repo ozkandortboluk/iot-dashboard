@@ -1,0 +1,1 @@
+>dimware sayfasında da karo veya tek satırı gösterim modu mantıgı olmalı

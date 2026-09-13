@@ -186,14 +186,17 @@ export class DeviceWsProtocolService {
       this.recordMessageProcessed(deviceId, messageId, type);
     }
 
-    // Update device lastSeen and lastMessageAt
+    // Update device lastSeen and lastMessageAt (for telemetry, lastSeen is updated in processDeviceTelemetryArrival to preserve interval delta)
     const nowIso = new Date().toISOString();
-    db.updateDevice(deviceId, {
-      lastSeen: nowIso,
+    const updates: Partial<Device> = {
       lastMessageAt: nowIso,
       websocketConnected: true,
       status: 'online',
-    });
+    };
+    if (type !== 'telemetry') {
+      updates.lastSeen = nowIso;
+    }
+    db.updateDevice(deviceId, updates);
 
     // 4. Dispatch according to message type
     switch (type) {

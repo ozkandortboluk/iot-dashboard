@@ -200,37 +200,41 @@ router.post('/', authenticateUser, async (req, res) => {
     }
   }
 
-  const device = await db.createDevice({
-    id: id && id.trim() ? id.trim() : undefined,
-    tenantId: targetOwnerId,
-    name,
-    type,
-    location: location || 'Tanımsız Konum',
-    ipAddress: ipAddress || '127.0.0.1',
-    macAddress: macAddress || undefined,
-    status: 'online',
-    rateLimitPerMin: rateLimitPerMin || 120,
-    encryptionMethod: encryptionMethod || 'AES-256-GCM',
-    apiKey: finalApiKey,
-    heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 60,
-    expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : 30,
-    isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
-    saveSimulatedDataToDb: allowSimulated && saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
-    simulatedMetrics: allowSimulated && Array.isArray(simulatedMetrics) ? simulatedMetrics : undefined,
-    metrics: {},
-  });
+  try {
+    const device = await db.createDevice({
+      id: id && id.trim() ? id.trim() : undefined,
+      tenantId: targetOwnerId,
+      name,
+      type,
+      location: location || 'Tanımsız Konum',
+      ipAddress: ipAddress || '127.0.0.1',
+      macAddress: macAddress || undefined,
+      status: 'online',
+      rateLimitPerMin: rateLimitPerMin || 120,
+      encryptionMethod: encryptionMethod || 'AES-256-GCM',
+      apiKey: finalApiKey,
+      heartbeatTimeoutSeconds: heartbeatTimeoutSeconds ? Number(heartbeatTimeoutSeconds) : 60,
+      expectedIntervalSeconds: expectedIntervalSeconds ? Number(expectedIntervalSeconds) : 30,
+      isSimulated: allowSimulated && isSimulated !== undefined ? Boolean(isSimulated) : false,
+      saveSimulatedDataToDb: allowSimulated && saveSimulatedDataToDb !== undefined ? Boolean(saveSimulatedDataToDb) : false,
+      simulatedMetrics: allowSimulated && Array.isArray(simulatedMetrics) ? simulatedMetrics : undefined,
+      metrics: {},
+    });
 
-  if (ipAddress) db.removeUnregisteredDevice(ipAddress);
-  if (macAddress) db.removeUnregisteredDevice(macAddress);
-  if (name) db.removeUnregisteredDevice(name);
+    if (ipAddress) db.removeUnregisteredDevice(ipAddress);
+    if (macAddress) db.removeUnregisteredDevice(macAddress);
+    if (name) db.removeUnregisteredDevice(name);
 
-  broadcast('device:created', device);
-  broadcast('devices:updated', db.getDevices());
-  broadcast('network:updated', db.getDiscoveredDevices());
-  if (device.isSimulated && device.dataFlowActive !== false) {
-    runSimulationStep();
+    broadcast('device:created', device);
+    broadcast('devices:updated', db.getDevices());
+    broadcast('network:updated', db.getDiscoveredDevices());
+    if (device.isSimulated && device.dataFlowActive !== false) {
+      runSimulationStep();
+    }
+    res.status(201).json(device);
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Cihaz oluşturulamadı.' });
   }
-  res.status(201).json(device);
 });
 
 router.put('/:id', authenticateUser, async (req, res) => {

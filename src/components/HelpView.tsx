@@ -2319,8 +2319,8 @@ if (httpResponseCode > 0) {
       id: 'faq_smart_interval',
       category: 'Cihaz Entegrasyonu',
       question: 'Cihazların veri gönderme sıklığı ve çevrimdışı (offline) olma kuralı nasıl çalışır?',
-      answer: 'Sistem akıllı sıklık motoruna sahiptir:\n1. Otomatik Tespit: Cihaz ilk kez veri göndermeye başladığında ardışık paketler arasındaki süre ölçülerek "beklenen veri gönderim sıklığı" (expectedIntervalSeconds) otomatik belirlenir.\n2. Akıllı 2x Watchdog: Eğer veri gönderim sıklığının 2 katı süresince cihazdan yeni veri veya ping gelmezse, sistem cihazı otomatik olarak ÇEVRİMDİŞİ (Offline) durumuna geçirir.\n3. Çevrimdışı Süresinin Yalıtımı: Cihazın çevrimdışı kaldığı süre sıklık hesaplamasına dahil edilmez; böylece cihazın gerçek periyodu bozulmaz.\n4. Otomatik Canlanma: Çevrimdışı olan cihaz yeni veri gönderdiği anda son ayarlarını koruyarak anında ÇEVRİMİÇİ (Online) olur.\n5. Manuel Ayar & Kalıcılık: Kullanıcı cihaz ayarlarından sıklığı manuel değiştirebilir. Cihaz her zaman kullanıcının belirlediği son ayarda kalır.\n6. Geçmiş Metrik Temizliği: Sistemden gelen metrikler ekranında, 2 katı süresini aşan bayatlamış parametreler tek tıkla ("Süresi Dolanları Temizle (2x)") temizlenebilir.',
-      tags: ['akıllı sıklık', '2x kuralı', 'offline', 'online', 'watchdog', 'metrik temizleme', 'tolerans'],
+      answer: 'Sistem akıllı sıklık ve ağ toleransı motoruna sahiptir:\n1. Otomatik Tespit: Cihaz ilk kez veri göndermeye başladığında ardışık paketler arasındaki süre ölçülerek "beklenen veri gönderim sıklığı" (expectedIntervalSeconds) otomatik belirlenir.\n2. Akıllı 2x Watchdog & Ağ Jitter Toleransı: Veri gönderim sıklığının 2 katı süresince cihazdan yeni veri gelmezse sistem durumu takip eder. Wi-Fi dalgalanmaları veya sensör gecikmelerine karşı dinamik ağ toleransı (jitter cushion buffer) uygulanır; tekil gecikmelerde sahte çevrimdışı uyarısı üretilmez.\n3. Doğrulanmış Çevrimdışı Bildirimi & Debouncing: Tolerans süresini de aşan durumlarda doğrulanmış ÇEVRİMDİŞİ (Offline) durumuna geçer ve 3 dakikalık debouncing ile bildirim iletilir.\n4. Çevrimdışı Süresinin Yalıtımı: Cihazın çevrimdışı kaldığı süre sıklık hesaplamasına dahil edilmez; böylece cihazın gerçek periyodu bozulmaz.\n5. Otomatik Canlanma: Çevrimdışı olan cihaz yeni veri gönderdiği anda son ayarlarını koruyarak anında ÇEVRİMİÇİ (Online) olur.\n6. Manuel Ayar & Kalıcılık: Kullanıcı cihaz ayarlarından sıklığı manuel değiştirebilir. Cihaz her zaman kullanıcının belirlediği son ayarda kalır.\n7. Geçmiş Metrik Temizliği: Sistemden gelen metrikler ekranında, 2 katı süresini aşan bayatlamış parametreler tek tıkla ("Süresi Dolanları Temizle (2x)") temizlenebilir.',
+      tags: ['akıllı sıklık', '2x kuralı', 'offline', 'online', 'watchdog', 'metrik temizleme', 'tolerans', 'jitter'],
       codeSnippet: `// Sunucu Yanıtında Dinamik Veri Sıklığı (Piggybacking):
 {
   "success": true,
@@ -2393,6 +2393,13 @@ Body:
       question: 'Sanal Simülatör cihazı ile Gerçek Donanım ayrımı ve izolasyonu nasıl çalışır?',
       answer: 'Sistem sanal ve fiziksel donanımları kesin sınırlarla izole eder. Gerçek telemetri API’sine (/api/v1/telemetry, /api/telemetry, /api/telemetry/ping) sanal cihaz anahtarıyla gelen istekler otomatik olarak 403 Forbidden (simulated_device_not_allowed) hatası ile reddedilir. Sanal bir cihaz ancak yönetici (Admin) tarafından "Gerçek Donanıma Dönüştür" işlemi ile fiziksel cihaza çevrilebilir ve bu işlem sonucunda yeni bir fiziksel API anahtarı atanır.',
       tags: ['sanal cihaz', 'simülatör', 'izolasyon', '403', 'simulated_device_not_allowed', 'dönüştürme', 'fiziksel donanım', 'güvenlik'],
+    },
+    {
+      id: 'faq_10',
+      category: 'Müşteri & Güvenlik',
+      question: 'Cihaz API Anahtarı benzersizliği ve çakışma önleme mekanizması nasıl çalışır?',
+      answer: 'Her IoT cihazı platformda tekil ve güvenli bir API Anahtarına (API Key / Token) sahiptir. Yeni cihaz eklerken veya anahtar güncellerken başka bir cihaza ait olan bir anahtar girilirse sistem bunu anında algılar ve kullanıcı dostu bir hata ile işlemi engeller. Otomatik oluşturulan anahtarlar kriptografik rastgelelikle üretilir ve veritabanında yüksek performanslı B-Tree indeksleriyle indekslenir.',
+      tags: ['api key', 'token', 'güvenlik', 'benzersizlik', 'postgres', 'çakışma'],
     },
   ];
 

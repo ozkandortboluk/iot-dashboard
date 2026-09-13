@@ -940,12 +940,22 @@ export class PostgresRepository {
           }
         }
 
-        // 5. Cleanup foreign key constraints on ota_deployment_jobs that can block independent lifecycle
+        // 5. Cleanup foreign key and unique constraints that can block independent lifecycle or multi-tenant operation
         await client.query(`
           ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_firmware_id_fkey;
           ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_device_id_fkey;
           ALTER TABLE dashboard_layouts DROP CONSTRAINT IF EXISTS dashboard_layouts_user_id_fkey;
           ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_key;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_tenant_id;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_user_id;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
+          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_tenant_id_fkey;
+          CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);
+          CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);
+          CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
         `).catch(() => {});
 
         // 5.1 Enforce telemetry packet deduplication constraint retroactively for legacy deployments
@@ -1037,6 +1047,44 @@ export class PostgresRepository {
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL Otomatik Onarım Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
+      const isDevicesApiKeyUniqueError =
+        (err?.code === '23505' || errMsg.includes('duplicate key') || errMsg.includes('unique constraint')) &&
+        (errMsg.includes('devices_api_key_key') || (errMsg.includes('table "devices"') && errMsg.includes('api_key')));
+
+      if (isDevicesApiKeyUniqueError && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: devices_api_key_key benzersizlik kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak ve B-Tree indeksi oluşturularak sorgu tekrarlanıyor...`);
+          await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_key;`);
+          await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);`);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL devices_api_key_key Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
+      const isNotificationsFkError =
+        (err?.code === '23503' || errMsg.includes('foreign key constraint')) &&
+        (errMsg.includes('notifications_user_id_fkey') || (errMsg.includes('table "notifications"') && errMsg.includes('user_id')));
+
+      if (isNotificationsFkError && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: notifications_user_id_fkey yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak sorgu tekrarlanıyor...`);
+          await this.pool.query(`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);`);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL notifications_user_id_fkey Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
         } finally {
           this.isRecoveringSchema = false;
         }
@@ -1458,6 +1506,21 @@ export class PostgresRepository {
           return;
         } catch (retryErr: any) {
           console.warn('[PostgreSQL saveDevice fallback error]:', retryErr?.message || retryErr);
+        }
+      }
+
+      if (errMsg.includes('devices_api_key_key') || (errMsg.includes('duplicate key') && errMsg.includes('api_key'))) {
+        try {
+          if (this.pool) {
+            await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_key;`);
+            await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;`);
+            await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);`);
+            await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);`);
+          }
+          await this.query(sql, params);
+          return;
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL saveDevice drop constraint retry error]:', retryErr?.message || retryErr);
         }
       }
       throw saveErr;

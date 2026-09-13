@@ -296,11 +296,14 @@ export class DeviceAuthService {
       };
     }
 
-    // 6. Update Device Network Info & Last Seen
+    // 6. Update Device Network Info & Status
     const statusWasOffline = device.status === 'offline';
     device.status = 'online';
     device.dataFlowActive = true;
-    device.lastSeen = new Date().toISOString();
+    // NOTE: We deliberately do NOT overwrite device.lastSeen here.
+    // Overwriting lastSeen in authenticateDevice destroys the delta calculation in
+    // smartIntervalService.processDeviceTelemetryArrival (which executes immediately after
+    // authentication to accurately compute expectedIntervalSeconds and prevent false offline alarms).
     let devInfoUpdated = statusWasOffline;
 
     if (clientIp && (!device.ipAddress || device.ipAddress.includes('0.0.0.0'))) {

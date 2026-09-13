@@ -46,7 +46,32 @@ export class DeviceRepository {
       const evalResult = smartIntervalService.evaluateDeviceWatchdog(dev, now);
       if (evalResult.changed) {
         hasChanges = true;
-        if (evalResult.newStatus === 'offline' && prevStatus !== 'offline') {
+      }
+
+      // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery)
+      if (prevStatus === 'offline' && evalResult.newStatus === 'online') {
+        if (dev.lastOfflineNotifiedAt) {
+          this.db.addAuditLog(
+            dev.tenantId || 'system',
+            'Sistem Sinyal Takibi',
+            `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) telemetri akışını yeniden sağladı.`,
+            'low'
+          );
+          dev.lastOfflineNotifiedAt = undefined;
+          hasChanges = true;
+        }
+      }
+
+      // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi (3 dk debouncing ile)
+      if (evalResult.newStatus === 'offline' && evalResult.isConfirmedOffline) {
+        const lastNotifTime = dev.lastOfflineNotifiedAt ? new Date(dev.lastOfflineNotifiedAt).getTime() : 0;
+        const cooldownElapsed = now - lastNotifTime;
+        const NOTIFICATION_COOLDOWN_MS = 180_000; // 3 dakika bildirim debouncing
+
+        if (cooldownElapsed > NOTIFICATION_COOLDOWN_MS) {
+          dev.lastOfflineNotifiedAt = new Date(now).toISOString();
+          hasChanges = true;
+
           const timeoutSec = evalResult.timeoutSeconds;
           const timeFormatted = timeoutSec >= 3600 
             ? `${(timeoutSec / 3600).toFixed(1).replace('.0', '')} saattir` 
@@ -57,7 +82,7 @@ export class DeviceRepository {
           this.db.addAuditLog(
             dev.tenantId || 'system',
             'Sistem Sinyal Takibi',
-            `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri gönderim sıklığının 2 katı (${timeFormatted}) sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
+            `Cihaz Sinyal Kesintisi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri gönderim sıklığının 2 katı sürede (${timeFormatted}) sinyal göndermedi. Otomatik ÇEVRİMDİŞİ yapıldı.`,
             'high'
           );
 
@@ -207,7 +232,22 @@ export class DeviceRepository {
       }
     }
 
-    const keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
+    // Validate that if a custom apiKey was provided, it doesn't collide with an existing device
+    if (deviceData.apiKey && deviceData.apiKey.trim()) {
+      const existingKeyDev = this.getDeviceByApiKey(deviceData.apiKey.trim());
+      if (existingKeyDev && existingKeyDev.id !== newId) {
+        throw new Error(`Bu API Anahtarı zaten başka bir cihaz tarafından kullanılıyor (${existingKeyDev.name})`);
+      }
+    }
+
+    let keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
+    if (!deviceData.apiKey) {
+      let attempts = 0;
+      while (this.getDeviceByApiKey(keyDetails.rawKey) && attempts < 5) {
+        keyDetails = generateDeviceKeyDetails();
+        attempts++;
+      }
+    }
     const isSimulated = deviceData.isSimulated ?? false;
     const saveSimulatedDataToDb = deviceData.saveSimulatedDataToDb ?? false;
 
@@ -279,7 +319,12 @@ export class DeviceRepository {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
-    const keyDetails = generateDeviceKeyDetails();
+    let keyDetails = generateDeviceKeyDetails();
+    let attempts = 0;
+    while (this.getDeviceByApiKey(keyDetails.rawKey) && attempts < 5) {
+      keyDetails = generateDeviceKeyDetails();
+      attempts++;
+    }
     dev.previousApiKeyHash = dev.apiKeyHash;
     dev.apiKey = keyDetails.rawKey;
     dev.apiKeyPrefix = keyDetails.prefix;
@@ -517,6 +562,10 @@ export class DeviceRepository {
 
     if (updates.apiKey !== undefined && updates.apiKey.trim()) {
       const rawKey = updates.apiKey.trim();
+      const existingKeyDev = this.getDeviceByApiKey(rawKey);
+      if (existingKeyDev && existingKeyDev.id !== deviceId) {
+        throw new Error(`Bu API Anahtarı zaten başka bir cihaz tarafından kullanılıyor (${existingKeyDev.name})`);
+      }
       const keyDetails = generateDeviceKeyDetails(rawKey);
       dev.apiKey = keyDetails.rawKey;
       dev.apiKeyPrefix = keyDetails.prefix;

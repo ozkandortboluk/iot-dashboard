@@ -549,12 +549,17 @@ export function initWebSocketServer(server: http.Server) {
   });
 
   // Periodic device status checker
-  setInterval(() => {
-    const statusChanged = db.checkDeviceStatuses();
-    if (statusChanged) {
-      broadcast('devices:updated', db.getDevices());
-      broadcast('network:updated', db.getDiscoveredDevices());
-      db.getNotifications().then(n => broadcast('notifications:updated', n)).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
+  setInterval(async () => {
+    try {
+      const statusChanged = await db.checkDeviceStatuses();
+      if (statusChanged) {
+        broadcast('devices:updated', db.getDevices());
+        broadcast('network:updated', db.getDiscoveredDevices());
+        const n = await db.getNotifications();
+        broadcast('notifications:updated', n);
+      }
+    } catch (err: any) {
+      console.error('[WebSocket DB Error]:', err?.message || err);
     }
   }, 3000);
 
