@@ -1087,36 +1087,28 @@ export class DeviceRepository {
       allowedDevices = allowedDevices.filter((d: Device) => d.tenantId === targetCustomerId);
     }
 
-    const registeredDiscovered: DiscoveredNetworkDevice[] = allowedDevices.map((d: Device) => {
-      const metricsText = d.metrics ? Object.entries(d.metrics).map(([k, v]) => `${k}:${v}`).join(', ') : 'Veri akışı aktif';
-      return {
-        ip: d.ipAddress && d.ipAddress.trim() !== '' ? d.ipAddress : '—',
-        mac: d.macAddress && d.macAddress.trim() !== '' ? d.macAddress : '—',
-        hostname: d.name,
-        vendor: d.type === 'sensor' ? 'Espressif (NodeMCU)' : d.type || 'IoT Cihazı',
-        openPorts: [], // Real ports will be populated by field agents
-        status: d.status === 'online' ? 'transmitting' : 'idle',
-        pingMs: d.pingMs,
-        rssi: d.rssi,
-        lastPacket: metricsText,
-        registeredDeviceId: d.id,
-        lastSeen: d.lastSeen,
-        tenantId: d.tenantId,
-      };
-    });
-
     const registeredIps = new Set(
-      registeredDiscovered
-        .map((rd) => rd.ip.toLowerCase().trim())
-        .filter((ip) => ip && ip !== '—')
+      allDevices
+        .map((d) => d.ipAddress?.toLowerCase().trim())
+        .filter((ip): ip is string => !!ip && ip !== '—')
     );
     const registeredMacs = new Set(
-      registeredDiscovered
-        .map((rd) => rd.mac.toLowerCase().trim())
-        .filter((mac) => mac && mac !== '—')
+      allDevices
+        .map((d) => d.macAddress?.toLowerCase().trim())
+        .filter((mac): mac is string => !!mac && mac !== '—')
+    );
+    const registeredNames = new Set(
+      allDevices
+        .map((d) => d.name?.toLowerCase().trim())
+        .filter((name): name is string => !!name)
+    );
+    const registeredIds = new Set(
+      allDevices
+        .map((d) => d.id?.toLowerCase().trim())
+        .filter((id): id is string => !!id)
     );
 
-    // Filter unregistered devices matching visibility, removing hardcoded/mock fake nodes
+    // Filter unregistered devices matching visibility, removing hardcoded/mock fake nodes and any registered devices
     const unregList = (this.db.data.unregisteredDevices || [])
       .filter((d: DiscoveredNetworkDevice) => {
         // Exclude legacy mock or fake demo entries
@@ -1127,10 +1119,18 @@ export class DeviceRepository {
           return false;
         }
 
+        // Exclude if already registered in the system
+        if (d.registeredDeviceId && registeredIds.has(d.registeredDeviceId.toLowerCase().trim())) {
+          return false;
+        }
+
         const ipClean = d.ip ? d.ip.toLowerCase().trim() : '';
         const macClean = d.mac ? d.mac.toLowerCase().trim() : '';
+        const hostClean = d.hostname ? d.hostname.toLowerCase().trim() : '';
+
         if (ipClean && registeredIps.has(ipClean)) return false;
         if (macClean && registeredMacs.has(macClean)) return false;
+        if (hostClean && registeredNames.has(hostClean)) return false;
 
         if (!isAdmin) {
           // If non-admin, only show unregistered devices explicitly tagged with tenantId or on same subnet
@@ -1152,7 +1152,8 @@ export class DeviceRepository {
         };
       });
 
-    const combined: DiscoveredNetworkDevice[] = [...registeredDiscovered, ...unregList];
+    // Only return newly discovered / pending pairing devices; already registered devices must NOT be included in discovery pool
+    const combined: DiscoveredNetworkDevice[] = unregList;
 
     const statusPriority: Record<string, number> = {
       transmitting: 1,

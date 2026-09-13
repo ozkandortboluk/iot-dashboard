@@ -63,8 +63,20 @@ export const NetworkDiscoveryView: React.FC<{
   // Discovery State
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredNetworkDevice[]>([]);
   const [isLoadingDiscovered, setIsLoadingDiscovered] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [lifecycleFilter, setLifecycleFilter] = useState<'all' | 'discovered' | 'pending' | 'assigned' | 'active'>('all');
+  const [searchQuery, setSearchQuery] = useState(
+    () => localStorage.getItem('discovery_search_query') || ''
+  );
+  const [lifecycleFilter, setLifecycleFilter] = useState<'all' | 'discovered' | 'pending' | 'assigned' | 'active'>(
+    () => (localStorage.getItem('discovery_lifecycle_filter') as any) || 'all'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('discovery_search_query', searchQuery);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    localStorage.setItem('discovery_lifecycle_filter', lifecycleFilter);
+  }, [lifecycleFilter]);
 
   // Subnet Scanning State
   const [subnetInput, setSubnetInput] = useState('192.168.1.0/24');
@@ -242,9 +254,40 @@ export const NetworkDiscoveryView: React.FC<{
     }
   };
 
-  // Filter & Strictly Sort Discovered Devices (Online / Active nodes always at the top)
+  // Filter & Strictly Sort Discovered Devices (Excluding already added devices in the system)
   const filteredDiscovered = useMemo(() => {
+    // Build sets of already registered device identifiers to strictly exclude them from discovery
+    const registeredIds = new Set(
+      (devices || []).map((d) => d.id?.toLowerCase().trim()).filter(Boolean)
+    );
+    const registeredIps = new Set(
+      (devices || [])
+        .map((d) => d.ipAddress?.toLowerCase().trim())
+        .filter((ip): ip is string => !!ip && ip !== '—')
+    );
+    const registeredMacs = new Set(
+      (devices || [])
+        .map((d) => d.macAddress?.toLowerCase().trim())
+        .filter((mac): mac is string => !!mac && mac !== '—')
+    );
+    const registeredNames = new Set(
+      (devices || []).map((d) => d.name?.toLowerCase().trim()).filter(Boolean)
+    );
+
     const list = discoveredDevices.filter((d) => {
+      // 1. Strictly exclude if already present in registered devices
+      if (d.registeredDeviceId && registeredIds.has(d.registeredDeviceId.toLowerCase().trim())) {
+        return false;
+      }
+      const ipClean = d.ip ? d.ip.toLowerCase().trim() : '';
+      const macClean = d.mac ? d.mac.toLowerCase().trim() : '';
+      const nameClean = d.hostname ? d.hostname.toLowerCase().trim() : '';
+
+      if (ipClean && ipClean !== '—' && registeredIps.has(ipClean)) return false;
+      if (macClean && macClean !== '—' && registeredMacs.has(macClean)) return false;
+      if (nameClean && registeredNames.has(nameClean)) return false;
+
+      // 2. Search & lifecycle filters
       const matchSearch =
         (d.hostname && d.hostname.toLowerCase().includes(searchQuery.toLowerCase())) ||
         (d.ip && d.ip.includes(searchQuery)) ||
@@ -276,7 +319,7 @@ export const NetworkDiscoveryView: React.FC<{
       const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
       return tsB - tsA;
     });
-  }, [discoveredDevices, searchQuery, lifecycleFilter]);
+  }, [discoveredDevices, searchQuery, lifecycleFilter, devices]);
 
   const activeCount = devices.length;
   const discoveredPoolCount = discoveredDevices.length;

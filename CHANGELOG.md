@@ -4,6 +4,103 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.0] - 2026-09-13
+
+### 📌 Bildirimler ve Olay Geçmişi Sekmesi & Gelişmiş Bildirim Yönetimi
+- **Gelen Bildirimler Sekmesi (Notifications & Event Feed)**:
+  - "Bildirimler & Alarmlar" ekranına ilk ve birincil sekme olarak **"Gelen Bildirimler"** (`notifications`) eklendi.
+  - Sağ üstteki zil simgesine tıklayıp açılan menüden **"Tüm Bildirim Geçmişi →"** butonuna basıldığında doğrudan bu sekmeye yönlendirme sağlandı (`notifications_tab_change` olayı ve kalıcı sekme seçimi).
+- **Yeni `NotificationHistoryList` Bileşeni**:
+  - Bildirim başlığı, detay mesajı, ilgili cihaz adı/kimliği ve donanım türü (Saha Donanımı veya Sanal Cihaz simgeleriyle), okunma durumu ve göreli/mutlak zaman damgaları listelenir.
+  - **İstatistik & Filtreleme Kartları**: Kritik, Uyarı, Bilgi ve Okunmamış sayaçları tek tıkla filtrelenebilir.
+  - **Kaynak Filtreleri**: Tüm Kaynaklar, Saha Donanımı, Simülasyon/Test ve Sistem & API kaynaklarına göre hızlı filtreleme.
+  - **Arama Motoru**: Başlık, mesaj metni, cihaz adı ve cihaz kimliği üzerinden anlık dinamik arama.
+  - **Toplu İşlemler (Bulk Actions)**: Çoklu seçim onay kutuları, seçilenleri okundu yapma, seçilenleri silme (`/api/notifications/bulk-delete`) ve tüm bildirimleri onay modaliyle temizleme desteği.
+- **Alarm Genel Bakış Kartları (AlarmOverview Entegrasyonu)**:
+  - Üst özet metrik kartlarına **"Gelen Bildirimler"** kartı entegre edildi; toplam ve okunmamış bildirim sayıları canlı olarak gösterilip doğrudan bildirim listesine geçiş bağlantısı sağlandı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.17.0` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.16.0] - 2026-09-13
+
+### 📌 Saha Cihazları Gösterim Önceliği, Sıralama Kararlılığı & Özel Sıralama Yönetimi
+- **Aktif ve Gerçek Cihaz Önceliği (Active & Real Devices First)**:
+  - Kayıtlı saha cihazları listesinde varsayılan sıralama hiyerarşisi yeniden yapılandırıldı:
+    1. **1. Öncelik**: Aktif ve Gerçek Donanımlar (`online` & `!isSimulated`)
+    2. **2. Öncelik**: Diğer Gerçek Donanımlar (`warning`, `maintenance`, `offline` & `!isSimulated`)
+    3. **3. Öncelik**: Aktif Sanal Cihazlar (`online` & `isSimulated`)
+    4. **4. Öncelik**: Pasif Sanal Cihazlar (`offline` & `isSimulated`)
+- **Telemetriye Bağlı Liste Zıplamalarının Önlenmesi (Order Stability - No Telemetry Jitter)**:
+  - Cihazların `lastSeen` sinyal zamanına bağlı olarak sürekli sıralama değiştirmesi ve listenin zıplaması (`tsB - tsA`) kaldırıldı.
+  - Cihazlar aynı durum kategorisinde deterministik isim ve kimlik sırasıyla sabit tutularak, veri akışı sürerken kullanıcının odaklandığı cihaz kartının yer değiştirmesi engellendi.
+- **Kullanıcı Tanımlı Manuel Sıralama (Move Up / Down & Persistence)**:
+  - Kullanıcıların cihazları istedikleri sırada görüntüleyebilmeleri için hem **Karo (Grid)** kartlarında hem de **Liste (Row)** satırlarında **Yukarı (▲)** ve **Aşağı (▼)** taşıma butonları eklendi.
+  - Kullanıcının belirlediği özel sıra `localStorage` (`devices_custom_order`) üzerinde kalıcı olarak saklanır.
+  - Başlık araç çubuğuna özel sıralama aktifken tek tıkla varsayılan "Aktif & Gerçek Donanımlar Önce" kuralına geri dönmeyi sağlayan **"Sıralamayı Sıfırla"** butonu entegre edildi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.16.0` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.15.0] - 2026-09-13
+
+### 🎛️ Kullanıcı Tercihleri Kalıcılığı, Saha Cihazları Karo/Liste Görünümü & Keşif İzolasyonu
+- **Kullanıcı Ayarları & Durum Kalıcılığı (Persistent State Memory)**:
+  - Kullanıcının sistem genelinde yaptığı tüm görünüm seçimleri, filtreler, sekmeler ve modlar `localStorage` ile otomatik olarak kaydedilir. Sayfa yenilendiğinde, sekme değiştirildiğinde veya yeni oturum açıldığında kullanıcı sistemi tam olarak bıraktığı haliyle bulur.
+  - Kalıcı hale getirilen ayarlar:
+    - Saha Cihazları: Karo (Grid) / Liste görünüm modu (`devices_view_mode`), seçili cihaz (`devices_selected_id`), tesis/bölge/grup/etiket filtreleri.
+    - Ağ Keşfi & Eşleştirme: Aktif alt sekme, arama sorgusu, yaşam döngüsü filtresi.
+    - Cihaz Sağlığı & Tanı: Karo / Liste modu, arama filtresi.
+    - Ana Ekran: Aktif ana sekme (`nexus_active_tab`), düzenleme modu (`nexus_edit_mode`).
+    - Analitik Görünümü: Seçili cihaz, seçili metrik, zaman aralığı (24h/7d/30d vb.).
+    - Müşteri Yönetimi: Arama, rol filtresi, durum, cihaz, alarm ve sıralama tercihleri.
+    - Otomasyonlar: Arama, durum filtresi, cihaz filtresi.
+    - Yönetici müşteri filtresi (`selectedCustomerForAdmin`).
+- **Saha Cihazları Görünümü Yenilikleri (`DevicesView.tsx`)**:
+  - **Karo (Grid) ve Liste Görünüm Seçicisi**: Kullanıcının istediği an karo kartları veya liste satırları arasında geçiş yapabilmesi için başlığa modern geçiş butonu eklendi ve tercihi hafızaya alındı.
+  - **Cihaz İsmi Başında Sanal/Gerçek Simgesi**: Kayıtlı saha cihazlarının isimlerinin başında doğrudan sanal simülasyon simgesi (`Bot`) veya fiziksel saha donanımı simgesi (`Cpu`) konumlandırıldı.
+  - **Gereksiz Etiketlerin Temizlenmesi**: Kullanıcının talebi doğrultusunda "Veri gönderim sıklığı" ve "Sağlık Skoru" metinleri kaldırıldı, sade ve temiz bir telemetri/donanım durum paneli sunuldu.
+- **Cihaz Keşfi & Eşleştirme Havuzu İzolasyonu (`NetworkDiscoveryView.tsx`, `device.repository.ts`)**:
+  - Sisteme daha önce kaydedilmiş/eklenmiş olan fiziksel veya sanal saha cihazlarının (cihaz ID'si, IP adresi, MAC adresi veya ismi eşleşenler) keşfedilen yeni cihazlar havuzunda görünmesi hem sunucu katmanında hem de istemci filtreleme katmanında kesin olarak filtrelendi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.15.0` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.14.1] - 2026-09-13
+
+### 🛠️ Sistem Log Akışı ve Teşhis Doğrulama Çıktı Standardizasyonu (Diagnostic Logging & Stream Sanitization)
+- **Hata Giderme**: Test ve tanı amaçlı tetiklenen simüle edilmiş hata kayıtlarının (`test-error`), platform denetleyicisi tarafından `stderr` üzerinde gerçek çökme gibi algılanmasını önleyecek şekilde yapılandırıldı.
+- **Standart Çıktı Yönlendirmesi (`SystemLoggerService`)**: Yapılandırılmış log konsol çıktıları `stderr` yerine güvenli bir şekilde `stdout` (`console.log`) üzerine yönlendirildi; hata yığınları (stack trace) ve tüm meta veriler güvenle dahili bellek arabelleğine ve kalıcı dosya sistemine kaydedilmeye devam etmektedir.
+- **Sentetik Tanı İzi**: Tanı amaçlı simüle edilen test hata izi, gerçek `express-async-errors` çalışma zamanı izleri yerine temiz sentetik tanı dökümü ile güncellendi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**: `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.14.1` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.14.0] - 2026-09-13
+
+### 📋 Sunucu Çalışma Zamanı Sistem & Hata Günlükleri Altyapısı (System & Runtime Error Logging Engine)
+- **Kullanıcı Talebi**: "Web sitesi sunucuda çalışırken log üretecek şekilde bir yapı tasrlayabilr misin site sunucuda çalışırken bir hata olduğunda kodlarda yada sistem genelinde bu loga kaydedecek bir yapı olursa iyi olur. daha sonra bu loga ulaşmak istiyorum hataları bulabilmek için. yine bu log kaydı site üzerinde de görülebilsin. açıp kapatilabilsin log tutma sistemi."
+- **Sunucu Tarafı Loglama Motoru (`SystemLoggerService`)**:
+  - Dairesel RAM arabelleği (Circular buffer - varsayılan 1000 olay) ve diske kalıcı loglama (`logs/system_events.log`, otomatik rotasyon, max 20MB) mimarisi.
+  - Çalışma zamanında loglamayı açıp/kapatabilme (`enabled` toggle), log seviyesi filtreleme (`info`, `warn`, `error`, `critical`), dosya yazım kontrolü ve yapılandırma kalıcılığı (`data/system_logger_config.json`).
+- **Genel Hata ve HTTP Teşhis Yakalama (`server.ts`)**:
+  - Express genel hata yakalayıcısına (`errorHandler`) otomatik `systemLogger.error` entegrasyonu; tüm API çökmeleri, 5xx yanıtları, path, method, IP, user ID ve tam stack trace dökümleriyle günlüğe kaydedilir.
+  - İstemci tarafı (React) ve harici istemcilerden gelen hatalar için `POST /api/system-logs/client-error` telemetri uç noktası.
+- **Yönetici Arayüzü & Log Görüntüleyici (`SystemLogsView.tsx`, `SystemLogDetailModal.tsx`, `SystemLogsSettingsModal.tsx`)**:
+  - Seviyeye, kategoriye ve anahtar kelimeye göre anlık filtreleme, otomatik yenileme (canlı akış) ve hızlı arama.
+  - Log detay modalı ile URL, method, durum kodu, IP, kullanıcı ve tam stack trace kopyalama imkanı.
+  - Loglama ayarları modalı ile sistemi açma/kapatma anahtarı, log seviyesi seçimi ve RAM sınırlandırması.
+  - Logları JSON veya LOG formatında dışa aktarma (export) ve tek tıkla temizleme desteği.
+  - Test ve doğrulama için tek tıkla simüle edilmiş test hatası üretme ("Test Hatası Üret") butonu.
+- **Yetki & İzolasyon Kuralı 1 (Role-Based Access Control)**:
+  - Sistem ve hata loglarına erişim ve yönetim yalnızca Yönetici (`admin`) rolüne sınırlandırıldı (`manage_system_logs`). Müşteri ve analist rolleri sistem loglarına erişemez.
+- **Yardım & Bilgi Merkezi Canlı Kod Örnekleri (MANDATORY RULE 2)**:
+  - `HelpView.tsx` içerisine Sistem & Hata Günlükleri REST API rehberi (cURL / Bash) ile İstemci Hata Telemetrisi Raporlama (JavaScript / Fetch) kod blokları eklendi; platform filtrelerine `logs` kategorisi dahil edildi.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` senkronize biçimde `v1.14.0` sürümüne yükseltildi.
+
+---
+
 ## 🚀 [v1.13.5] - 2026-09-13
 
 ### 🗑️ Eşik ve Alarm Kuralları ile Teslimat Geçmişi Toplu/Tekli Silme & Durum Kalıcılığı (Bulk/Single Delete & State Persistence)

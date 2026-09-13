@@ -15,14 +15,18 @@ interface AlarmOverviewProps {
   activeAlarms: ActiveAlarm[];
   rules: ThresholdRule[];
   queueItems: NotificationQueueItem[];
+  notificationsCount?: number;
+  unreadNotificationsCount?: number;
   onOpenNewRule: () => void;
-  onNavigateToTab?: (tab: 'alarms_rules' | 'dispatch_queue' | 'delivery_logs' | 'channel_settings') => void;
+  onNavigateToTab?: (tab: 'notifications' | 'alarms_rules' | 'dispatch_queue' | 'delivery_logs' | 'channel_settings') => void;
 }
 
 export const AlarmOverview: React.FC<AlarmOverviewProps> = ({
   activeAlarms,
   rules,
   queueItems,
+  notificationsCount = 0,
+  unreadNotificationsCount = 0,
   onOpenNewRule,
   onNavigateToTab,
 }) => {
@@ -33,7 +37,36 @@ export const AlarmOverview: React.FC<AlarmOverviewProps> = ({
   const pendingQueueCount = queueItems.filter((q) => q.status === 'pending' || q.status === 'retrying').length;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+      {/* 1. Gelen Bildirimler */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+              <Bell className="w-3.5 h-3.5 text-indigo-500" />
+              Gelen Bildirimler
+            </span>
+            <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1">
+              {notificationsCount}
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+            <Bell className="w-5 h-5" />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <span>{unreadNotificationsCount > 0 ? `${unreadNotificationsCount} okunmamış` : 'Tümü okundu'}</span>
+          {onNavigateToTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('notifications')}
+              className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+            >
+              Listeyi Gör &rarr;
+            </button>
+          )}
+        </div>
+      </div>
       {/* 1. Kritik Alarmlar */}
       <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div className="flex items-start justify-between">

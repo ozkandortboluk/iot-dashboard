@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
@@ -21,6 +21,7 @@ import { HelpView } from './components/HelpView';
 import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
+import { SystemLogsView } from './components/system/SystemLogsView';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
 import {
@@ -36,10 +37,22 @@ import {
 } from 'lucide-react';
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>(
+    () => localStorage.getItem('nexus_active_tab') || 'dashboard'
+  );
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [editMode, setEditMode] = useState<boolean>(
+    () => localStorage.getItem('nexus_edit_mode') === 'true'
+  );
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_edit_mode', String(editMode));
+  }, [editMode]);
   const { user, logout } = useAuth();
   const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
@@ -70,6 +83,7 @@ function DashboardContent() {
     notifications: 'Bildirimler & Alarmlar',
     database_data: 'PostgreSQL & Veritabanı Yönetimi',
     security: 'Güvenlik & Audit Logları',
+    system_logs: 'Sunucu Sistem & Hata Günlükleri',
     deployment: 'Sunucu & DB Kurulum Rehberi',
     account_settings: 'Hesap & Şifre Ayarları',
     help: 'Yardım & Bilgi Merkezi',
@@ -186,6 +200,7 @@ function DashboardContent() {
           {safeActiveTab === 'notifications' && <NotificationsView />}
           {isAdmin && safeActiveTab === 'database_data' && <DatabaseDataView />}
           {isAdmin && safeActiveTab === 'security' && <SecurityView />}
+          {isAdmin && safeActiveTab === 'system_logs' && <SystemLogsView />}
           {isAdmin && safeActiveTab === 'deployment' && <DeploymentView />}
           {safeActiveTab === 'account_settings' && <AccountSettingsView />}
           {safeActiveTab === 'help' && <HelpView onNavigateToTab={(tab) => setActiveTab(tab)} />}

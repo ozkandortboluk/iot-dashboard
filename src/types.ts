@@ -902,7 +902,20 @@ export interface AuditLog {
 }
 
 export type SystemEventLevel = 'info' | 'warn' | 'error' | 'critical';
-export type SystemEventCategory = 'database' | 'server' | 'websocket' | 'telemetry' | 'auto_repair' | 'security' | 'auth' | 'backup';
+export type SystemEventCategory = 
+  | 'database' 
+  | 'server' 
+  | 'api'
+  | 'websocket' 
+  | 'telemetry' 
+  | 'auto_repair' 
+  | 'security' 
+  | 'auth' 
+  | 'backup'
+  | 'client'
+  | 'ota'
+  | 'worker'
+  | 'system';
 
 export interface SystemEvent {
   id: string;
@@ -912,6 +925,29 @@ export interface SystemEvent {
   message: string;
   details?: string;
   source?: string;
+  stack?: string;
+  method?: string;
+  path?: string;
+  ip?: string;
+  userId?: string;
+  statusCode?: number;
+}
+
+export interface SystemLoggerConfig {
+  enabled: boolean;
+  minLevel: SystemEventLevel;
+  logToFile: boolean;
+  maxInMemory: number;
+  totalEvents: number;
+  fileSizeBytes: number;
+  filePath: string;
+  counts: {
+    critical: number;
+    error: number;
+    warn: number;
+    info: number;
+    total: number;
+  };
 }
 
 export type DiscoveredDeviceLifecycleState = 'discovered' | 'pending' | 'assigned' | 'active';

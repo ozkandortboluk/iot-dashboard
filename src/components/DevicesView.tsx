@@ -51,6 +51,9 @@ import {
   History,
   FolderTree,
   MapPin,
+  LayoutGrid,
+  List,
+  RotateCcw,
 } from 'lucide-react';
 
 export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNavigateToHelp }) => {
@@ -71,8 +74,15 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   } = useRealtime();
   const { user } = useAuth();
 
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
+    () => localStorage.getItem('devices_selected_id') || null
+  );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // View Mode (Karo / Liste) with Persistence
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(
+    () => (localStorage.getItem('devices_view_mode') as 'list' | 'grid') || 'list'
+  );
 
   // Bulk Selection State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
@@ -80,17 +90,78 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
-  // Hierarchy Data & Filter State
+  // Hierarchy Data & Filter State with Persistence
   const [sites, setSites] = useState<Site[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [healthSummaries, setHealthSummaries] = useState<DeviceHealthSummary[]>([]);
   const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
 
-  const [selectedSiteId, setSelectedSiteId] = useState<string>('all');
-  const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
-  const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [selectedSiteId, setSelectedSiteId] = useState<string>(
+    () => localStorage.getItem('devices_filter_site') || 'all'
+  );
+  const [selectedZoneId, setSelectedZoneId] = useState<string>(
+    () => localStorage.getItem('devices_filter_zone') || 'all'
+  );
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(
+    () => localStorage.getItem('devices_filter_group') || 'all'
+  );
+  const [selectedTag, setSelectedTag] = useState<string>(
+    () => localStorage.getItem('devices_filter_tag') || 'all'
+  );
+
+  useEffect(() => {
+    if (selectedDeviceId) {
+      localStorage.setItem('devices_selected_id', selectedDeviceId);
+    } else {
+      localStorage.removeItem('devices_selected_id');
+    }
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    localStorage.setItem('devices_view_mode', viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    localStorage.setItem('devices_filter_site', selectedSiteId);
+  }, [selectedSiteId]);
+
+  useEffect(() => {
+    localStorage.setItem('devices_filter_zone', selectedZoneId);
+  }, [selectedZoneId]);
+
+  useEffect(() => {
+    localStorage.setItem('devices_filter_group', selectedGroupId);
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    localStorage.setItem('devices_filter_tag', selectedTag);
+  }, [selectedTag]);
+
+  // Custom User Device Ordering (Persistent)
+  const [customDeviceOrder, setCustomDeviceOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('devices_custom_order');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('devices_custom_order', JSON.stringify(customDeviceOrder));
+  }, [customDeviceOrder]);
+
+  // Clean up any deleted devices from customDeviceOrder
+  useEffect(() => {
+    if (customDeviceOrder.length > 0 && devices.length > 0) {
+      const existingIds = new Set(devices.map((d) => d.id));
+      const cleaned = customDeviceOrder.filter((id) => existingIds.has(id));
+      if (cleaned.length !== customDeviceOrder.length) {
+        setCustomDeviceOrder(cleaned);
+      }
+    }
+  }, [devices]);
 
   // Hierarchy management modal
   const [showHierarchyModal, setShowHierarchyModal] = useState(false);
@@ -135,7 +206,17 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     return Array.from(set).sort();
   }, [devices]);
 
-  // Filtered devices based on Site, Zone, Group, Tag, and Customer (strictly sorted online first)
+  // Base ranking: 1) Active Real Devices, 2) Real Devices (other), 3) Active Virtual Devices, 4) Passive Virtual Devices
+  const getDeviceBaseRank = useCallback((d: Device) => {
+    const isReal = !d.isSimulated;
+    const isOnline = d.status === 'online';
+    if (isReal && isOnline) return 1; // 1. Öncelik: Aktif ve Gerçek Donanım
+    if (isReal) return 2;             // 2. Öncelik: Gerçek Donanım (uyarı/bakım/çevrimdışı)
+    if (isOnline) return 3;           // 3. Öncelik: Aktif Sanal Cihaz
+    return 4;                         // 4. Öncelik: Pasif Sanal Cihaz
+  }, []);
+
+  // Filtered devices based on Site, Zone, Group, Tag (Active & Real devices first, stable order, supports custom user ordering)
   const filteredDevices = useMemo(() => {
     const list = devices.filter((d) => {
       if (selectedSiteId !== 'all' && d.siteId !== selectedSiteId) return false;
@@ -145,23 +226,61 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       return true;
     });
 
-    const statusPriority: Record<string, number> = {
-      online: 1,
-      warning: 2,
-      degraded: 2,
-      maintenance: 3,
-      offline: 4,
-    };
+    // If user has defined a custom order, respect it
+    if (customDeviceOrder.length > 0) {
+      const orderMap = new Map<string, number>(customDeviceOrder.map((id, index) => [id, index]));
+      return [...list].sort((a, b) => {
+        const hasA = orderMap.has(a.id);
+        const hasB = orderMap.has(b.id);
+        if (hasA && hasB) {
+          return (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0);
+        }
+        if (hasA) return -1;
+        if (hasB) return 1;
+        // Fallback for new devices not in custom order: Active & Real first, deterministic name
+        const rA = getDeviceBaseRank(a);
+        const rB = getDeviceBaseRank(b);
+        if (rA !== rB) return rA - rB;
+        const nameComp = (a.name || '').localeCompare(b.name || '', 'tr');
+        if (nameComp !== 0) return nameComp;
+        return (a.id || '').localeCompare(b.id || '');
+      });
+    }
 
+    // Default sorting: Active & Real first, then stable alphabetical (never jumps on telemetry receipt)
     return [...list].sort((a, b) => {
-      const pA = statusPriority[a.status] || 99;
-      const pB = statusPriority[b.status] || 99;
-      if (pA !== pB) return pA - pB;
-      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
-      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
-      return tsB - tsA;
+      const rA = getDeviceBaseRank(a);
+      const rB = getDeviceBaseRank(b);
+      if (rA !== rB) return rA - rB;
+      const nameComp = (a.name || '').localeCompare(b.name || '', 'tr');
+      if (nameComp !== 0) return nameComp;
+      return (a.id || '').localeCompare(b.id || '');
     });
-  }, [devices, selectedSiteId, selectedZoneId, selectedGroupId, selectedTag]);
+  }, [devices, selectedSiteId, selectedZoneId, selectedGroupId, selectedTag, customDeviceOrder, getDeviceBaseRank]);
+
+  // Handle Manual Device Reordering (Move Up / Move Down)
+  const handleMoveDevice = useCallback((deviceId: string, direction: 'up' | 'down', e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentIds = filteredDevices.map((d) => d.id);
+    const currentIndex = currentIds.indexOf(deviceId);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= currentIds.length) return;
+
+    const newOrder = [...currentIds];
+    const temp = newOrder[currentIndex];
+    newOrder[currentIndex] = newOrder[targetIndex];
+    newOrder[targetIndex] = temp;
+
+    setCustomDeviceOrder(newOrder);
+  }, [filteredDevices]);
+
+  // Reset to Default Order (Active & Real Devices First)
+  const handleResetDeviceOrder = useCallback(() => {
+    setCustomDeviceOrder([]);
+    localStorage.removeItem('devices_custom_order');
+  }, []);
 
   // Stable selected device resolution by ID (prevents flapping/disconnect ghosting)
   const selectedDevice = React.useMemo(() => {
@@ -1246,7 +1365,50 @@ void sendHeartbeat() {
                   </h3>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {/* Karo vs Liste Görünüm Butonları */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grid')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      viewMode === 'grid'
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="Karo Görünümü (Kartlar)"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Karo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      viewMode === 'list'
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                    title="Liste Görünümü (Satırlar)"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Liste</span>
+                  </button>
+                </div>
+
+                {/* Özel Sıralamayı Sıfırlama Butonu */}
+                {customDeviceOrder.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetDeviceOrder}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all cursor-pointer active:scale-95"
+                    title="Özel sıralamayı sıfırla (Varsayılan: Aktif ve Gerçek Donanımlar Önce)"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sıralamayı Sıfırla</span>
+                  </button>
+                )}
+
                 {selectedDeviceIds.size > 0 && (
                   <button
                     onClick={() => setShowBulkDeleteModal(true)}
@@ -1282,20 +1444,234 @@ void sendHeartbeat() {
               </div>
             )}
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/80 overflow-x-auto">
-              {filteredDevices.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
-                  Seçilen tesis, bölge veya etiket filtresine uygun cihaz bulunamadı.
-                </div>
-              ) : (
-                filteredDevices.map((dev, idx) => {
+            {filteredDevices.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                Seçilen tesis, bölge veya etiket filtresine uygun cihaz bulunamadı.
+              </div>
+            ) : viewMode === 'grid' ? (
+              /* KARO (GRID) GÖRÜNÜMÜ */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 sm:p-5">
+                {filteredDevices.map((dev, idx) => {
                   const isSelected = activeDevice?.id === dev.id;
                   const isChecked = selectedDeviceIds.has(dev.id);
                   const colors = getStatusColor(dev.status);
                   const devSite = sites.find((s) => s.id === dev.siteId);
                   const devZone = zones.find((z) => z.id === dev.zoneId);
                   const devGroup = groups.find((g) => g.id === dev.groupId);
-                  const devHealth = healthSummaries.find((h) => h.deviceId === dev.id);
+
+                  return (
+                    <div
+                      key={`${dev.id}_grid_${idx}`}
+                      onClick={() => setSelectedDeviceId(dev.id)}
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 relative ${
+                        isSelected
+                          ? 'bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-500 ring-2 ring-indigo-500/30 shadow-lg'
+                          : 'bg-white dark:bg-slate-900/70 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md'
+                      }`}
+                    >
+                      {/* Top Bar: Selection, Status Dot & Controls */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => handleToggleDeviceSelection(dev.id, e as any)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 cursor-pointer shrink-0"
+                          />
+                          <span className="relative flex h-2.5 w-2.5 shrink-0">
+                            {dev.status === 'online' && !dev.maintenanceMode && (
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            )}
+                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${dev.maintenanceMode ? 'bg-amber-400' : colors.dot}`}></span>
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                            {dev.maintenanceMode ? 'BAKIM' : getStatusLabel(dev.status)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMaintenanceDevice(dev);
+                            }}
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                              dev.maintenanceMode
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse'
+                                : 'text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 border-transparent'
+                            }`}
+                            title={dev.maintenanceMode ? 'Bakım Modu Aktif' : 'Bakım Moduna Al'}
+                          >
+                            <Wrench className="w-3 h-3" />
+                          </button>
+
+                          {(() => {
+                            const isRealDevice = !dev.isSimulated;
+                            const isActive = dev.status === 'online' && dev.dataFlowActive !== false;
+
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleDeviceStatus(dev, e)}
+                                className={`relative inline-flex items-center h-4.5 w-8 rounded-full transition-colors focus:outline-none cursor-pointer ${
+                                  isActive ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                                }`}
+                                title={
+                                  isRealDevice
+                                    ? isActive
+                                      ? 'Cihaz akışını durdur'
+                                      : 'Cihaz akışını başlat'
+                                    : isActive
+                                      ? 'Simülasyonu durdur'
+                                      : 'Simülasyonu başlat'
+                                }
+                              >
+                                <span
+                                  className={`inline-block w-3 h-3 transform rounded-full bg-white transition-transform flex items-center justify-center ${
+                                    isActive ? 'translate-x-4' : 'translate-x-0.5'
+                                  }`}
+                                >
+                                  <Power className={`w-1.5 h-1.5 ${isActive ? 'text-emerald-600' : 'text-slate-500'}`} />
+                                </span>
+                              </button>
+                            );
+                          })()}
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHardwareReplaceDevice(dev);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
+                            title="Donanım Değiştir / Kart Göçü"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit(dev);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer"
+                            title="Düzenle"
+                          >
+                            <Settings className="w-3 h-3" />
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingDevice(dev);
+                            }}
+                            className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                            title="Sil"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+
+                          {/* Sıralama Değiştirme (Yukarı / Aşağı) */}
+                          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={(e) => handleMoveDevice(dev.id, 'up', e)}
+                              className={`p-1 rounded transition-colors ${
+                                idx === 0
+                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                  : 'hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'
+                              }`}
+                              title="Cihazı Bir Sıra Yukarı Taşı"
+                            >
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === filteredDevices.length - 1}
+                              onClick={(e) => handleMoveDevice(dev.id, 'down', e)}
+                              className={`p-1 rounded transition-colors ${
+                                idx === filteredDevices.length - 1
+                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                  : 'hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'
+                              }`}
+                              title="Cihazı Bir Sıra Aşağı Taşı"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Device Name with Virtual/Real Icon at the BEGINNING */}
+                      <div className="flex items-center gap-2 min-w-0 pt-0.5">
+                        {dev.isSimulated ? (
+                          <span className="p-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 shrink-0 inline-flex items-center justify-center" title="Sanal Cihaz (Simülasyon)">
+                            <Bot className="w-4 h-4" />
+                          </span>
+                        ) : (
+                          <span className="p-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 shrink-0 inline-flex items-center justify-center" title="Gerçek Donanım (Fiziksel Saha Cihazı)">
+                            <Cpu className="w-4 h-4" />
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                            {dev.name}
+                          </h4>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                            {dev.location || 'Konum belirtilmedi'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Badges: Hierarchy, Owner */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {devSite && (
+                          <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                            <Building2 className="w-2.5 h-2.5" />
+                            <span>{devSite.name}</span>
+                          </span>
+                        )}
+                        {devZone && (
+                          <span className="px-1.5 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                            <MapPin className="w-2.5 h-2.5" />
+                            <span>{devZone.name}</span>
+                          </span>
+                        )}
+                        {devGroup && (
+                          <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1 border border-slate-700/60 bg-slate-800/80 text-slate-300">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: devGroup.color || '#3b82f6' }} />
+                            <span>{devGroup.name}</span>
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
+                          <Building2 className="w-2.5 h-2.5" />
+                          <span>{getOwnerName(dev.tenantId)}</span>
+                        </span>
+                      </div>
+
+                      {/* Footer: IP & Last Signal (No data frequency label, no health score text) */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-mono">IP: {dev.ipAddress || '—'}</span>
+                        <span>
+                          Son Sinyal: <strong className={dev.status === 'online' ? 'text-emerald-500 font-semibold' : dev.status === 'offline' ? 'text-rose-500 font-semibold' : 'text-amber-500'}>{formatRelativeTime(dev.lastSeen)}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* LİSTE GÖRÜNÜMÜ */
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/80 overflow-x-auto">
+                {filteredDevices.map((dev, idx) => {
+                  const isSelected = activeDevice?.id === dev.id;
+                  const isChecked = selectedDeviceIds.has(dev.id);
+                  const colors = getStatusColor(dev.status);
+                  const devSite = sites.find((s) => s.id === dev.siteId);
+                  const devZone = zones.find((z) => z.id === dev.zoneId);
+                  const devGroup = groups.find((g) => g.id === dev.groupId);
 
                   return (
                     <div
@@ -1323,15 +1699,21 @@ void sendHeartbeat() {
                         </span>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                              {dev.name}
-                            </p>
-
-                            <DeviceHealthBadge
-                              summary={devHealth}
-                              status={dev.status}
-                              maintenanceMode={dev.maintenanceMode}
-                            />
+                            {/* Sanal yada Gerçek Cihaz Simgesi Cihaz İsminin Başında */}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {dev.isSimulated ? (
+                                <span className="p-1 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 shrink-0 inline-flex items-center justify-center" title="Sanal Cihaz">
+                                  <Bot className="w-3.5 h-3.5" />
+                                </span>
+                              ) : (
+                                <span className="p-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 shrink-0 inline-flex items-center justify-center" title="Gerçek Donanım">
+                                  <Cpu className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                              <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                {dev.name}
+                              </p>
+                            </div>
 
                             {devSite && (
                               <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
@@ -1352,25 +1734,6 @@ void sendHeartbeat() {
                               </span>
                             )}
 
-                            {dev.isSimulated ? (
-                              <>
-                                <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
-                                  <Bot className="w-2.5 h-2.5" />
-                                  <span>SANAL CİHAZ</span>
-                                </span>
-                                {dev.saveSimulatedDataToDb && (
-                                  <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1" title="Sanal Cihaz Verileri Veritabanına Kaydediliyor">
-                                    <Database className="w-2.5 h-2.5" />
-                                    <span>DB KAYDI AKTİF</span>
-                                  </span>
-                                )}
-                              </>
-                            ) : (
-                              <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold rounded shrink-0 flex items-center gap-1">
-                                <Cpu className="w-2.5 h-2.5" />
-                                <span>GERÇEK DONANIM</span>
-                              </span>
-                            )}
                             <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
                               <Building2 className="w-2.5 h-2.5" />
                               <span>{getOwnerName(dev.tenantId)}</span>
@@ -1380,10 +1743,6 @@ void sendHeartbeat() {
                             <span>{dev.location}</span>
                             <span>•</span>
                             <span className="font-mono text-[10px]">IP: {dev.ipAddress}</span>
-                            <span>•</span>
-                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40" title={`Aktif Sıklık: ${dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5} sn | 2x Çevrimdışı Eşiği: ${Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)} sn`}>
-                              ⏱️ {dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5}s (2x: {Math.max((dev.expectedIntervalSeconds || dev.autoDetectedIntervalSeconds || 5) * 2, 4)}s)
-                            </span>
                             <span>•</span>
                             <span className="text-[10px] text-slate-400">
                               Son Sinyal: <strong className={dev.status === 'online' ? 'text-emerald-500 font-semibold' : dev.status === 'offline' ? 'text-rose-500 font-semibold' : 'text-amber-500'}>{formatRelativeTime(dev.lastSeen)}</strong>
@@ -1485,12 +1844,45 @@ void sendHeartbeat() {
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+
+                        {/* Sıralama Değiştirme (Yukarı / Aşağı) */}
+                        <div
+                          className="flex items-center bg-slate-100 dark:bg-slate-800/80 rounded-xl p-0.5 border border-slate-200 dark:border-slate-700/60"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={(e) => handleMoveDevice(dev.id, 'up', e)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              idx === 0
+                                ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                : 'hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'
+                            }`}
+                            title="Cihazı Bir Sıra Yukarı Taşı"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === filteredDevices.length - 1}
+                            onClick={(e) => handleMoveDevice(dev.id, 'down', e)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              idx === filteredDevices.length - 1
+                                ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                : 'hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer'
+                            }`}
+                            title="Cihazı Bir Sıra Aşağı Taşı"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </div>
 
           {/* Active System Metrics Card */}
@@ -1503,15 +1895,6 @@ void sendHeartbeat() {
                     ? `${activeDevice.name} Aktif Metrikleri (${activeSystemMetrics.length})`
                     : `Sistemden Gelen Aktif Metrikler (${activeSystemMetrics.length})`}
                 </h3>
-
-                {metricsScope === 'selected' && activeDevice && (
-                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
-                    <span>⏱️ Sıklık:</span>
-                    <strong>{activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5}s</strong>
-                    <span className="text-slate-300 dark:text-slate-600">|</span>
-                    <span className="text-rose-600 dark:text-rose-400 font-bold">2x Eşik: {Math.max((activeDevice.expectedIntervalSeconds || activeDevice.autoDetectedIntervalSeconds || activeDevice.customIntervalSeconds || 5) * 2, 4)}s</span>
-                  </span>
-                )}
               </div>
 
               {/* Controls: Stale Filter, 2x Cleanup, Reset & Scope Switcher */}
@@ -1664,10 +2047,18 @@ void sendHeartbeat() {
               <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-2.5">
-                    <Activity className="w-5 h-5 text-indigo-500" />
+                    {activeDevice.isSimulated ? (
+                      <span className="p-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 shrink-0 inline-flex items-center justify-center" title="Sanal Cihaz">
+                        <Bot className="w-5 h-5" />
+                      </span>
+                    ) : (
+                      <span className="p-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 shrink-0 inline-flex items-center justify-center" title="Gerçek Donanım">
+                        <Cpu className="w-5 h-5" />
+                      </span>
+                    )}
                     <div>
                       <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                        {activeDevice.name} — Cihaz Sağlığı & Donanım Durumu
+                        {activeDevice.name} — Donanım Durumu
                       </h3>
                       <p className="text-[10px] text-slate-500">
                         Hiyerarşik Konum: {sites.find((s) => s.id === activeDevice.siteId)?.name || 'Tesis Tanımsız'} &gt; {zones.find((z) => z.id === activeDevice.zoneId)?.name || 'Bölge Tanımsız'} &gt; {groups.find((g) => g.id === activeDevice.groupId)?.name || 'Grup Tanımsız'}
@@ -1676,11 +2067,6 @@ void sendHeartbeat() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <DeviceHealthBadge
-                      summary={selectedHealthSummary}
-                      status={activeDevice.status}
-                      maintenanceMode={activeDevice.maintenanceMode}
-                    />
                     <button
                       type="button"
                       onClick={() => setMaintenanceDevice(activeDevice)}
@@ -1704,15 +2090,9 @@ void sendHeartbeat() {
                   </div>
                 </div>
 
-                {/* Health Metrics Strip */}
+                {/* Diagnostic Metrics Strip (Health Score removed as requested) */}
                 {selectedHealthSummary && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-500 font-medium block">Sağlık Skoru</span>
-                      <span className="text-lg font-mono font-extrabold text-slate-900 dark:text-white">
-                        {selectedHealthSummary.healthScore}%
-                      </span>
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
                       <span className="text-[10px] text-slate-500 font-medium block">Veri Taze Mi?</span>
                       <span className={`text-xs font-mono font-bold ${selectedHealthSummary.isFresh ? 'text-emerald-500' : 'text-amber-500'}`}>

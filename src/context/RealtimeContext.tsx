@@ -111,12 +111,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [simulatorActive, setSimulatorActive] = useState(true);
-  const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>('all');
+  const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>(
+    () => localStorage.getItem('nexus_admin_selected_customer') || 'all'
+  );
   const [customersList, setCustomersList] = useState<User[]>([]);
 
   const selectedCustomerForAdminRef = useRef(selectedCustomerForAdmin);
   useEffect(() => {
     selectedCustomerForAdminRef.current = selectedCustomerForAdmin;
+    localStorage.setItem('nexus_admin_selected_customer', selectedCustomerForAdmin);
   }, [selectedCustomerForAdmin]);
 
   const getPendingCommand = useCallback(
@@ -162,21 +165,22 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       list = rawDevices.filter((d) => d.tenantId === user.id || (d as any).customerId === user.id || (d as any).assignedUserId === user.id);
     }
 
-    const statusPriority: Record<string, number> = {
-      online: 1,
-      warning: 2,
-      degraded: 2,
-      maintenance: 3,
-      offline: 4,
+    const getDeviceBaseRank = (d: Device) => {
+      const isReal = !d.isSimulated;
+      const isOnline = d.status === 'online';
+      if (isReal && isOnline) return 1; // 1. Öncelik: Aktif ve Gerçek Donanım
+      if (isReal) return 2;             // 2. Öncelik: Gerçek Donanım (uyarı/bakım/çevrimdışı)
+      if (isOnline) return 3;           // 3. Öncelik: Aktif Sanal Cihaz
+      return 4;                         // 4. Öncelik: Pasif Sanal Cihaz
     };
 
     return [...list].sort((a, b) => {
-      const pA = statusPriority[a.status] || 99;
-      const pB = statusPriority[b.status] || 99;
-      if (pA !== pB) return pA - pB;
-      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
-      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
-      return tsB - tsA;
+      const rA = getDeviceBaseRank(a);
+      const rB = getDeviceBaseRank(b);
+      if (rA !== rB) return rA - rB;
+      const nameComp = (a.name || '').localeCompare(b.name || '', 'tr');
+      if (nameComp !== 0) return nameComp;
+      return (a.id || '').localeCompare(b.id || '');
     });
   }, [rawDevices, user, selectedCustomerForAdmin, customersList]);
 

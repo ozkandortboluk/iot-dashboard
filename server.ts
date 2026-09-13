@@ -42,6 +42,7 @@ import {
 import { firmwareRouter } from './src/server/routes/firmware.js';
 import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
+import { systemLogsRouter } from './src/server/routes/systemLogs.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
@@ -191,6 +192,31 @@ app.use('/api/simulator', simulatorRouter);
 app.use('/api/firmwares', firmwareRouter);
 app.use('/api/ota', otaRouter);
 app.use('/api/compiler', compilerRouter);
+app.use('/api/system-logs', systemLogsRouter);
+app.use('/api/system/logs', systemLogsRouter);
+
+// Diagnostic HTTP status observer for 5xx responses across the system
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    if (res.statusCode >= 500 && !req.path.startsWith('/api/system-logs')) {
+      const duration = Date.now() - start;
+      systemLogger.error(
+        'server',
+        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+        {
+          method: req.method,
+          url: req.originalUrl,
+          statusCode: res.statusCode,
+          ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+          durationMs: duration,
+        },
+        'http_response_watcher'
+      );
+    }
+  });
+  next();
+});
 
 // API 404 Handler: Ensure non-existent /api routes return JSON error, not SPA index.html
 app.all('/api/*', (req, res) => {
@@ -199,11 +225,39 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// API Global Error Handler: Ensure API crashes return JSON, not HTML
+// API Global Error Handler: Ensure API crashes return JSON and are securely recorded in system error log
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const errMsg = err?.message || String(err);
+  const isDbErr = errMsg.includes('PostgreSQL') || errMsg.includes('veritabanı') || errMsg.includes('ECONNREFUSED');
+  const statusCode = err.status || err.statusCode || (isDbErr ? 503 : 500);
+
+  // Automatically record runtime API error in systemLogger
+  try {
+    systemLogger.error(
+      'api',
+      `[API Çalışma Hatası ${statusCode}] ${req.method} ${req.originalUrl}: ${errMsg}`,
+      {
+        error: errMsg,
+        stack: err?.stack,
+        method: req.method,
+        url: req.originalUrl,
+        ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+        userAgent: req.headers['user-agent'],
+        statusCode,
+      },
+      'express_global_error_handler'
+    );
+  } catch (loggerErr) {
+    console.error('[SystemLogger Recording Failure]:', loggerErr);
+  }
+
   if (req.path.startsWith('/api/')) {
     console.error('[API Error]:', err);
-    const isDbErr = err?.message?.includes('PostgreSQL') || err?.message?.includes('veritabanı') || err?.message?.includes('ECONNREFUSED'); res.status(isDbErr ? 503 : 500).json({ success: false, error: isDbErr ? 'Veritabanı Hizmet Dışı' : 'Sunucu hatası', details: err?.message || String(err) });
+    res.status(statusCode).json({
+      success: false,
+      error: isDbErr ? 'Veritabanı Hizmet Dışı' : 'Sunucu hatası',
+      details: errMsg,
+    });
   } else {
     next(err);
   }

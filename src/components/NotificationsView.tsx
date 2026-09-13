@@ -36,20 +36,34 @@ import { DeliveryQueue } from './notifications/DeliveryQueue';
 import { DeliveryHistory } from './notifications/DeliveryHistory';
 import { ChannelConfiguration } from './notifications/ChannelConfiguration';
 import { ContactPreferences } from './notifications/ContactPreferences';
+import { NotificationHistoryList } from './notifications/NotificationHistoryList';
 import { ToastNotification } from './common/ToastNotification';
 
 export const NotificationsView: React.FC = () => {
   const { user } = useAuth();
-  const { devices, customersList, isConnected, subscribeWsEvent, selectedCustomerForAdmin } = useRealtime();
+  const { devices, customersList, isConnected, subscribeWsEvent, selectedCustomerForAdmin, notifications } = useRealtime();
 
   // Active Navigation Tab with Persistence
   const [activeTab, setActiveTab] = useState<
-    'alarms' | 'rules' | 'queue' | 'history' | 'channels' | 'preferences'
-  >(() => (localStorage.getItem('notifications_active_tab') as any) || 'alarms');
+    'notifications' | 'alarms' | 'rules' | 'queue' | 'history' | 'channels' | 'preferences'
+  >(() => (localStorage.getItem('notifications_active_tab') as any) || 'notifications');
 
   useEffect(() => {
     localStorage.setItem('notifications_active_tab', activeTab);
   }, [activeTab]);
+
+  // Listen for direct navigation events from Header bell dropdown
+  useEffect(() => {
+    const handleTabChange = (e: any) => {
+      if (e?.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    window.addEventListener('notifications_tab_change', handleTabChange);
+    return () => window.removeEventListener('notifications_tab_change', handleTabChange);
+  }, []);
+
+  const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
   // Core Data States
   const [activeAlarms, setActiveAlarms] = useState<ActiveAlarm[]>([]);
@@ -648,12 +662,15 @@ export const NotificationsView: React.FC = () => {
         activeAlarms={activeAlarms}
         rules={rules}
         queueItems={queueItems}
+        notificationsCount={notifications.length}
+        unreadNotificationsCount={unreadNotificationsCount}
         onOpenNewRule={() => {
           setEditingRule(null);
           setIsWizardOpen(true);
         }}
         onNavigateToTab={(tab) => {
-          if (tab === 'alarms_rules') setActiveTab('rules');
+          if (tab === 'notifications') setActiveTab('notifications');
+          else if (tab === 'alarms_rules') setActiveTab('rules');
           else if (tab === 'dispatch_queue') setActiveTab('queue');
           else if (tab === 'delivery_logs') setActiveTab('history');
           else if (tab === 'channel_settings') setActiveTab('channels');
@@ -662,6 +679,27 @@ export const NotificationsView: React.FC = () => {
 
       {/* Tab Navigation Pill Bar */}
       <div className="flex items-center gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            activeTab === 'notifications'
+              ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Bell className="w-4 h-4" />
+          <span>Gelen Bildirimler</span>
+          {unreadNotificationsCount > 0 ? (
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-extrabold animate-pulse">
+              {unreadNotificationsCount}
+            </span>
+          ) : (
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px]">
+              {notifications.length}
+            </span>
+          )}
+        </button>
+
         <button
           onClick={() => setActiveTab('alarms')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
@@ -729,7 +767,7 @@ export const NotificationsView: React.FC = () => {
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'channels'
                 ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -751,6 +789,13 @@ export const NotificationsView: React.FC = () => {
       </div>
 
       {/* Dynamic Tab Body */}
+      {activeTab === 'notifications' && (
+        <NotificationHistoryList
+          devices={devices}
+          onShowToast={(msg, isErr) => showNotificationMsg(msg, isErr)}
+        />
+      )}
+
       {activeTab === 'alarms' && (
         <ActiveAlarmTable
           alarms={activeAlarms}

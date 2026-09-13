@@ -57,9 +57,23 @@ export const AutomationsView: React.FC = () => {
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Search and Filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [deviceFilter, setDeviceFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('nexus_automations_search') || '');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(
+    () => (localStorage.getItem('nexus_automations_status') as 'all' | 'active' | 'inactive') || 'all'
+  );
+  const [deviceFilter, setDeviceFilter] = useState<string>(() => localStorage.getItem('nexus_automations_device') || 'all');
+
+  useEffect(() => {
+    localStorage.setItem('nexus_automations_search', searchQuery);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_automations_status', statusFilter);
+  }, [statusFilter]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_automations_device', deviceFilter);
+  }, [deviceFilter]);
 
   // Trigger testing state
   const [testingId, setTestingId] = useState<string | null>(null);

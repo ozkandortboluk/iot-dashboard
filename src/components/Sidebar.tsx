@@ -16,6 +16,7 @@ import {
   ExternalLink,
   UserCog,
   HardDrive,
+  Terminal,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -281,6 +282,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'security',
           label: 'Güvenlik & Audit Logları',
           icon: ShieldCheck,
+        },
+        {
+          id: 'system_logs',
+          label: 'Sistem & Hata Günlükleri',
+          icon: Terminal,
         },
         {
           id: 'account_settings',

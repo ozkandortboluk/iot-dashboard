@@ -8,6 +8,7 @@ export type PermissionAction =
   | 'manage_ota'           // OTA Firmware yönetimi & Dağıtım (Admin: Evet, Operatör: İzinliyse, Analist: Hayır, Müşteri: Hayır)
   | 'manage_database'      // Veritabanı yönetimi (Sadece Admin)
   | 'manage_security'      // Güvenlik & Audit logları (Sadece Admin)
+  | 'manage_system_logs'   // Sistem & Hata logları, log motoru yönetimi (Sadece Admin)
   | 'manage_deployment'    // Sunucu & DB Kurulum rehberi (Sadece Admin)
   | 'manage_simulation'    // Sanal veri & telemetri üreteci (Sadece Admin - Kural 1)
   | 'view_devices'         // Cihaz izleme & sensör verileri (Admin: Tümü, Operatör: Tümü, Analist: Tümü, Müşteri: Kendi Cihazları)
@@ -85,6 +86,15 @@ export const PERMISSION_MATRIX: PermissionDetail[] = [
     action: 'manage_security',
     label: 'Güvenlik & Audit Logları',
     description: 'Sistem güvenlik logları, IP beyaz listesi ve denetim kayıtları',
+    admin: true,
+    operator: false,
+    analyst: false,
+    customer: false,
+  },
+  {
+    action: 'manage_system_logs',
+    label: 'Sistem & Hata Logları',
+    description: 'Sunucu çalışma zamanı logları, log açma/kapama ve hata teşhisi',
     admin: true,
     operator: false,
     analyst: false,
@@ -177,6 +187,7 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
     'notifications',
     'database_data',
     'security',
+    'system_logs',
     'deployment',
     'account_settings',
     'help',

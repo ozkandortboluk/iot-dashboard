@@ -41,9 +41,27 @@ export const AnalyticsView: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [selectedDevice, setSelectedDevice] = useState<string>('all');
-  const [selectedMetric, setSelectedMetric] = useState<string>('temperature');
-  const [timeRange, setTimeRange] = useState<string>('24h');
+  const [selectedDevice, setSelectedDevice] = useState<string>(
+    () => localStorage.getItem('nexus_analytics_device') || 'all'
+  );
+  const [selectedMetric, setSelectedMetric] = useState<string>(
+    () => localStorage.getItem('nexus_analytics_metric') || 'temperature'
+  );
+  const [timeRange, setTimeRange] = useState<string>(
+    () => localStorage.getItem('nexus_analytics_timerange') || '24h'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('nexus_analytics_device', selectedDevice);
+  }, [selectedDevice]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_analytics_metric', selectedMetric);
+  }, [selectedMetric]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_analytics_timerange', timeRange);
+  }, [timeRange]);
   const [timescaleData, setTimescaleData] = useState<TimeBucketDataPoint[]>([]);
   const [isLoadingTimescale, setIsLoadingTimescale] = useState(false);
   const [queryLatencyMs, setQueryLatencyMs] = useState<number | null>(null);

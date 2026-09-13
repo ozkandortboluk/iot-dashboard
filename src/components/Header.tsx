@@ -389,6 +389,8 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="px-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
                   <button
                     onClick={() => {
+                      localStorage.setItem('notifications_active_tab', 'notifications');
+                      window.dispatchEvent(new CustomEvent('notifications_tab_change', { detail: 'notifications' }));
                       setActiveTab('notifications');
                       setShowNotifications(false);
                     }}

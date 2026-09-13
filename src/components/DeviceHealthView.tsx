@@ -6,10 +6,16 @@ import type { Device } from '../types';
 
 export const DeviceHealthView: React.FC = () => {
   const { devices, isConnected } = useRealtime();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState<string>(
+    () => localStorage.getItem('device_health_search') || ''
+  );
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(
     () => (localStorage.getItem('device_health_view_mode') as 'grid' | 'list') || 'grid'
   );
+
+  useEffect(() => {
+    localStorage.setItem('device_health_search', searchTerm);
+  }, [searchTerm]);
 
   useEffect(() => {
     localStorage.setItem('device_health_view_mode', viewMode);

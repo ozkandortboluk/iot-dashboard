@@ -1266,7 +1266,6 @@ export class PostgresRepository {
       if (options.deleteDevices) {
         if (deviceIds.length > 0) {
           await client.query(`DELETE FROM device_commands WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
-          await client.query(`DELETE FROM device_tokens WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
         }
         await client.query(`DELETE FROM devices WHERE tenant_id = $1 OR user_id = $1;`, [userId]);
       } else {
@@ -2237,7 +2236,6 @@ export class PostgresRepository {
     await this.query(`DELETE FROM active_alarms WHERE device_id = ANY($1::text[]);`, [deviceIds]);
     await this.query(`DELETE FROM alarm_events WHERE device_id = ANY($1::text[]);`, [deviceIds]);
     await this.query(`DELETE FROM device_commands WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
-    await this.query(`DELETE FROM device_tokens WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
     await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]);
   }
 

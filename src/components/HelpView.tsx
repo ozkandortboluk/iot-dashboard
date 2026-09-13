@@ -54,7 +54,7 @@ interface DictionaryTerm {
 
 export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
   const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'code_examples' | 'guides' | 'troubleshooting'>('code_examples');
-  const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ota' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs'>('all');
+  const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ota' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs' | 'logs'>('all');
   const [activeCodeExampleId, setActiveCodeExampleId] = useState<string>('code_esp32_http_telemetry');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaqCategory, setSelectedFaqCategory] = useState<string>('all');
@@ -2118,6 +2118,143 @@ curl -i "${originUrl}/health/ready"
 curl -i "${originUrl}/health"
 `,
     },
+    {
+      id: 'code_system_logs_api_curl',
+      title: 'Sistem & Hata Günlükleri Yönetim API\'si (cURL / REST)',
+      category: 'curl',
+      categoryLabel: 'Sistem & Hata Logları',
+      badge: 'Yönetici & Teşhis API',
+      description: 'Sunucu çalışma zamanı loglarını listeleme, loglama motorunu açma/kapatma (toggle), filtreleme, test hatası üretme ve JSON/LOG formatında dışa aktarma (export) uç noktaları.',
+      tags: ['system logs', 'error logs', 'hata', 'loglama', 'curl', 'rest api', 'diagnostics', 'export', 'toggle'],
+      endpoint: 'GET, POST /api/system-logs & /api/system-logs/settings',
+      code: `#!/bin/bash
+# =========================================================================
+# NEXUSNODE IoT - SİSTEM & HATA GÜNLÜKLERİ YÖNETİM API REHBERİ
+# Güvenlik Kuralı: Bu uç noktalar yalnızca Yönetici (Admin) oturumu ile yetkilendirilir.
+# =========================================================================
+
+ADMIN_TOKEN="Bearer YOUR_ADMIN_SESSION_TOKEN"
+API_BASE="${originUrl}/api/system-logs"
+
+# 1. TÜM LOGLARI LİSTELEME VE FİLTRELEME
+# Parametreler: level (critical|error|warn|info), category, search, limit, offset
+curl -X GET "\${API_BASE}?level=error&limit=50" \\
+  -H "Authorization: \${ADMIN_TOKEN}"
+
+# 2. LOGLAMA SİSTEMİ DURUMUNU VE YAPILANDIRMASINI SORGULAMA
+curl -X GET "\${API_BASE}/settings" \\
+  -H "Authorization: \${ADMIN_TOKEN}"
+
+# 3. LOGLAMA SİSTEMİNİ AÇMA / KAPATMA (TOGGLE)
+# Loglama motorunu geçici olarak kapatma:
+curl -X POST "\${API_BASE}/settings" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "enabled": false
+  }'
+
+# Loglama motorunu tekrar aktif etme:
+curl -X POST "\${API_BASE}/settings" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "enabled": true,
+    "minLevel": "info",
+    "logToFile": true,
+    "maxInMemory": 1000
+  }'
+
+# 4. TANI & TEST HATASI ÜRETME (Simulated Error Trigger)
+curl -X POST "\${API_BASE}/test-error" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "level": "error",
+    "category": "server",
+    "message": "Manuel test hata kaydı - Hata yakalama boru hattı doğrulaması"
+  }'
+
+# 5. LOGLARI DOSYA OLARAK DIŞA AKTARMA (EXPORT)
+# JSON formatında indirme:
+curl -O -J "\${API_BASE}/export?format=json" \\
+  -H "Authorization: \${ADMIN_TOKEN}"
+
+# Düz metin (.log) formatında indirme:
+curl -O -J "\${API_BASE}/export?format=log" \\
+  -H "Authorization: \${ADMIN_TOKEN}"
+
+# 6. LOG KAYITLARINI TEMİZLEME / SIFIRLAMA
+curl -X POST "\${API_BASE}/clear" \\
+  -H "Authorization: \${ADMIN_TOKEN}"
+`,
+    },
+    {
+      id: 'code_client_error_logging_js',
+      title: 'İstemci ve Node.js Hata Telemetrisi Gönderimi (JavaScript / Fetch)',
+      category: 'nodejs',
+      categoryLabel: 'Hata Teşhis & Raporlama',
+      badge: 'Frontend & Backend Error Telemetry',
+      description: 'Web arayüzü (React ErrorBoundary) veya Node.js istemcilerindeki çalışma zamanı hatalarını ve stack trace dökümlerini sunucu sistem loguna ileten üretim kodu.',
+      tags: ['error reporting', 'client error', 'stack trace', 'javascript', 'fetch', 'axios', 'telemetry'],
+      endpoint: 'POST /api/system-logs/client-error',
+      code: `// =========================================================================
+// NEXUSNODE IoT - İSTEMCİ HATA TELEMETRİSİ RAPORLAMA KODU (JavaScript / TypeScript)
+// Amaç: Web arayüzü veya harici JS servislerindeki hataları merkezi loga yazar.
+// =========================================================================
+
+async function reportErrorToSystemLog(error, context = {}) {
+  try {
+    const payload = {
+      message: error.message || String(error),
+      stack: error.stack || null,
+      url: typeof window !== 'undefined' ? window.location.href : 'node_runtime',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Node.js',
+      componentStack: context.componentStack || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    const response = await fetch('${originUrl}/api/system-logs/client-error', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    return result.success;
+  } catch (err) {
+    console.error('[Hata Raporlama Başarısız]:', err);
+    return false;
+  }
+}
+
+// 1. ÖRNEK KULLANIM (Window / Global Hata Yakalayıcı)
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    reportErrorToSystemLog(event.error || new Error(event.message));
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    reportErrorToSystemLog(new Error('İstemci İşlenmeyen Promise Reddi: ' + event.reason));
+  });
+}
+
+// 2. ÖRNEK KULLANIM (Manuel Try / Catch Bloğu)
+async function performCriticalDeviceOperation(deviceId) {
+  try {
+    // Kritik API veya kontrol işlemi
+    const res = await fetch(\`/api/devices/\${deviceId}/control\`, { method: 'POST' });
+    if (!res.ok) throw new Error(\`Cihaz kontrol yanıt vermedi: HTTP \${res.status}\`);
+  } catch (error) {
+    // Hatayı merkezi sistem loguna ilet
+    await reportErrorToSystemLog(error, { deviceId });
+    throw error;
+  }
+}
+`,
+    },
   ];
 
   const filteredCodeExamples = useMemo(() => {
@@ -2125,7 +2262,8 @@ curl -i "${originUrl}/health"
       const matchesCategory =
         selectedCodeCategory === 'all' ||
         item.category === selectedCodeCategory ||
-        (selectedCodeCategory === 'ota' && (item.category === 'ota' || item.tags.includes('ota')));
+        (selectedCodeCategory === 'ota' && (item.category === 'ota' || item.tags.includes('ota'))) ||
+        (selectedCodeCategory === 'logs' && (item.tags.includes('system logs') || item.tags.includes('error logs') || item.tags.includes('error reporting')));
       const matchesSearch =
         searchQuery.trim() === '' ||
         item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2536,6 +2674,7 @@ Body:
                 { id: 'python', label: 'Python (Agent)' },
                 { id: 'curl', label: 'cURL & Bash' },
                 { id: 'nodejs', label: 'Node.js / JS' },
+                { id: 'logs', label: 'Sistem & Hata Logları' },
               ].map((cat) => (
                 <button
                   key={cat.id}
