@@ -2,9 +2,10 @@
 
 > Merkezi backlog + doğrulanmış P0 durumu + önceliklendirilmiş yol haritası.
 >
-> **Son inceleme:** 2026-09-12  
-> **İncelenen HEAD:** `69fe63a6cb04b546e04d941c6a50b6044f5a2a35`  
-> **package.json:** `1.11.5`
+> **Son inceleme:** 2026-09-13  
+> **İncelenen HEAD:** `0d8bca034fbfd54bb5fd4b92e13bb189bfd91955`  
+> **package.json:** `1.17.7`  
+> **Not:** Bugünkü değişiklikler özellikle PostgreSQL tenant kapsamı, DB dayanıklılığı, sistem logları, test izolasyonu ve yönetim arayüzü tarafını ileri taşıdı.
 
 ## Öncelik
 - 🔴 **P0:** production/site erişilebilirliği, veri bütünlüğü, DB mimarisi, migration/readiness ve doğrudan çökme riski
@@ -25,9 +26,11 @@
 - [x] Shared PostgreSQL pool ve production write guard mevcut.
 - [x] `/health` ve `/health/ready` PostgreSQL'i esas alıyor.
 - [x] Production database config'te `local` engine seçimi engellendi.
-- [x] `/system/stats` SQLite raporlamasından çıkarıldı; PostgreSQL/TimescaleDB veya disconnected durumunu raporluyor.
-- [ ] `LocalDatabase` / `db.json` legacy katmanının production source-of-truth olamayacağı runtime policy ile kesinleştirilmeli.
-- [ ] Firestore legacy/stub/sync yolları production veri akışından tamamen ayrıştırılmalı.
+- [x] `/system/stats` PostgreSQL/TimescaleDB veya disconnected durumunu raporluyor.
+- [x] PostgreSQL tenant scope kontrolleri notifications/logs/alarms tarafında güçlendirildi.
+- [x] Memory/PostgreSQL permission kontrolleri standardize edilmeye başlandı.
+- [ ] `LocalDatabase` / legacy `db.json` katmanının production source-of-truth olamayacağı runtime policy ile kesinleştirilmeli.
+- [ ] Firestore legacy/stub/sync yolları production veri akışından tamamen ayrıştırılmalı veya kaldırılmalı.
 - [ ] Tüm DB write endpoint'lerinde PostgreSQL-only + 503 E2E testi.
 
 ## P0.2 — Tek PostgreSQL connection pool
@@ -46,17 +49,18 @@
 - [x] Migration 004 tenant ALTER/FK hataları throw ediyor.
 - [x] Migration 002 hypertable/compression hataları throw ediyor.
 - [x] Kritik API write yollarında 503/error propagation mevcut.
-- [x] Migration 002 Timescale extension enable hatası production'da fail ediyor (`NODE_ENV=production || REQUIRE_TIMESCALE=true`).
-- [x] `initPostgresRepository()` hydration `saveUser/saveDevice/saveRule` vb. catch'leri `systemLogger.error` ile kaydediliyor.
-- [x] `createBackup().catch()` operasyon catch'i `systemLogger.error` ile kaydediliyor.
+- [x] Migration 002 Timescale extension enable hatası production'da fail ediyor.
+- [x] Hydration sırasında yakalanan DB hataları system logger'a kaydediliyor.
+- [x] Backup catch yolları sessizce kaybolmak yerine loglanıyor.
 - [ ] DB read error ile gerçek boş sonuç ayrımı tam taranmalı.
+- [ ] Tenant scope/read-query regresyon testleri eklenmeli.
 
 ## P0.4 — DB hazır olmadan uygulama hazır olmamalı
 **Durum: 🟢 Kod tarafı tamam; operasyon testi açık**
 
 - [x] `isReady()` schema ensure koşulunu dikkate alıyor.
 - [x] `/health/ready` DB hazır değilse 503.
-- [x] Advisory lock alınamadığında 3 saniye sonra doğrudan `isSchemaEnsured=true` yapılması kaldırıldı (15s poll + verifySchemaContract).
+- [x] Advisory lock sonrası schema verification zorunlu.
 - [x] Startup timeout sonrası readiness yalnız gerçek DB/schema durumuna göre belirleniyor.
 - [ ] Nginx → app → DB failure-injection testi.
 
@@ -67,10 +71,10 @@
 - [x] `schema_migrations`.
 - [x] Advisory lock.
 - [x] Pending migration transaction/rollback modeli.
-- [x] Timescale extension failure fail ediyor (production modda).
+- [x] Timescale extension failure fail ediyor.
 - [ ] `down` migration'lar gerçek rollback veya açık irreversible politika sağlamalı.
-- [x] Migration checksum (`computeMigrationChecksum`) SHA-256 olarak yazılıyor ve drift kontrol ediliyor.
-- [x] Migration sonrası otomatik schema verification (`verifySchemaContract`).
+- [x] Migration checksum SHA-256 yazılıyor ve drift kontrol ediliyor.
+- [x] Migration sonrası otomatik schema verification.
 - [ ] Runtime DDL ile migration DDL tek canonical kaynağa indirilmeli.
 
 ## P0.6 — Telemetry packet idempotency
@@ -78,7 +82,7 @@
 
 - [x] `(device_id, boot_id, sequence)` unique constraint tanımlı.
 - [x] Dedup modeli mevcut.
-- [x] Verification gerçek constraint kolonlarını ordinal sırayla (`device_id, boot_id, sequence`) doğruluyor.
+- [x] Verification gerçek constraint kolonlarını ordinal sırayla doğruluyor.
 - [x] `ON CONFLICT (device_id, boot_id, sequence)` hedefi gerçek constraint ile birebir eşleşiyor.
 - [ ] Duplicate/retry/reboot/out-of-order/concurrent production-benzeri test kanıtı.
 
@@ -86,11 +90,11 @@
 **Durum: 🟠 Büyük ölçüde tamamlandı; load testi açık**
 
 - [x] Verifier `telemetry_readings` hypertable olup olmadığını kontrol ediyor.
-- [x] Composite PK verifier `(id, created_at)` sırasını kontrol ediyor.
+- [x] Composite PK `(id, created_at)` sırasını kontrol ediyor.
 - [x] 7 günlük chunk interval katalogdan kesin kontrol ediliyor.
 - [x] Compression ayarı ve compression policy katalogdan kontrol ediliyor.
-- [x] Timescale extension/version production için zorunlu kılındı.
-- [x] `simulation_telemetry_readings` hypertable doğrulaması eklendi.
+- [x] Timescale extension/version production için zorunlu.
+- [x] `simulation_telemetry_readings` hypertable doğrulaması var.
 - [ ] 50 müşteri × 5 cihaz × ~5 saniye load/soak kanıtı.
 
 ## P0.8 — Telemetry veri kaybı / replay
@@ -112,31 +116,34 @@
 - [ ] Docker healthcheck + Nginx zinciri gerçek DB failure injection ile doğrulanmalı.
 
 ## P0.10 — `tenant_id` / schema drift regression gate
-**Durum: 🟠 Kısmi**
+**Durum: 🟠 Kısmi; bugünkü değişikliklerle iyileştirildi**
 
 - [x] Critical column verification mevcut.
 - [x] `tenant_id` migration mevcut.
-- [x] `DATABASE_URL` CI/production gate mevcut.
-- [ ] Tenant backfill gerçek müşteri eşlemesine göre yapılmalı.
+- [x] DATABASE_URL CI/production gate mevcut.
+- [x] Notifications, logs ve alarms için tenant scope filtreleri güçlendirildi.
+- [x] Legacy record tenant sync/migration iyileştirildi.
+- [ ] Tenant backfill gerçek müşteri eşlemesine göre doğrulanmalı.
 - [ ] NULL/yanlış tenant reconciliation.
 - [ ] Tenant column type/default/index/FK tam doğrulanmalı.
 - [ ] Tenant isolation negatif testleri.
 
 ## P0.11 — package/lock dependency drift
-**Durum: 🟢 Tamamlandı**
+**Durum: 🔴 Açık**
 
 - [x] `npm ci` modeli mevcut.
 - [x] `verify:schema` scripti mevcut.
-- [x] `package.json` ve `package-lock.json` versiyonları `1.11.5` olarak eşitlendi.
+- [ ] `package.json` sürümü `1.17.7` iken `package-lock.json` hâlâ `1.17.2`; senkronize edilmeli.
 - [ ] CI metadata drift fail etmeli.
 
 ## P0.12 — Production DB-only enforcement
 **Durum: 🟢 Kod tarafı tamam; regression testi açık**
 
-- [x] Production `local` engine seçimi 403 ile engellendi.
+- [x] Production `local` engine seçimi engellendi.
 - [x] `/system/stats` SQLite raporlamasından çıkarıldı.
-- [x] `LocalDatabase.getActiveEngine()` production ortamında doğrudan `'postgres'` zorunlu kılıyor.
+- [x] Production runtime PostgreSQL kullanımına zorlanıyor.
 - [ ] PostgreSQL-only regression test.
+- [ ] Legacy local/Firestore yollarının production write path'inden kesin ayrıldığı otomatik test.
 
 ## P0.13 — Migration false-success
 **Durum: 🟢 Kod tarafı tamam**
@@ -144,60 +151,99 @@
 - [x] 002 hypertable/compression errors throw ediyor.
 - [x] 003 PK/unique errors throw ediyor.
 - [x] 004 tenant ALTER/FK errors throw ediyor.
-- [x] Timescale extension oluşturulamaması migration'ı fail ettiriyor (`NODE_ENV=production || REQUIRE_TIMESCALE=true`); standard PostgreSQL fallback production'da engellendi.
-- [x] Migration başarılı kaydedilmeden önce ve sonra zorunlu schema contract gate (`verifySchemaContract`) çalışıyor.
+- [x] Timescale extension oluşturulamaması production migration'ı fail ettiriyor.
+- [x] Migration contract gate başarı kaydından önce/sonra çalışıyor.
 
 ## P0.14 — Schema verification false-positive
 **Durum: 🟢 Tamamlandı**
 
 - [x] Composite PK `(id, created_at)` sıkı kontrol ediliyor.
-- [x] Unique constraint kolonları ordinal sıra ile (`device_id, boot_id, sequence`) kontrol ediliyor.
-- [x] Hypertable dimension/chunk interval (7 gün) kontrolü eklendi.
-- [x] Compression + policy kontrolü eklendi.
-- [x] Timescale extension version kontrolü eklendi.
-- [x] Migration checksum kontrolü eklendi.
+- [x] Unique constraint kolonları ordinal sırayla kontrol ediliyor.
+- [x] Hypertable dimension/chunk interval kontrolü var.
+- [x] Compression + policy kontrolü var.
+- [x] Timescale extension version kontrolü var.
+- [x] Migration checksum kontrolü var.
 
 ## P0.15 — Multitenant migration safety
-**Durum: 🟢 Kod tarafı tamam; negatif testler açık**
+**Durum: 🟠 Kod büyük ölçüde tamam; negatif testler açık**
 
 - [x] Yeni tenant kolonlarında kalıcı default eklenmiyor.
 - [x] ALTER/FK hataları throw ediyor.
-- [x] NULL tenant backfill `usr_admin` varsayımına körü körüne bağlanmıyor; `devices`, `telemetry_readings`, `active_alarms` vb. tablolar ilişkisel olarak gerçek kullanıcı/cihaz sahipliğine göre güncelleniyor.
+- [x] NULL tenant backfill ilişkisel sahiplik mantığına taşındı.
+- [x] Tenant kapsamı notifications/logs/alarms için kod seviyesinde güçlendirildi.
 - [ ] Yanlış tenant reconciliation.
 - [ ] Tenant isolation negatif testleri.
+- [ ] Gerçek çoklu müşteri verisiyle cross-tenant sızıntı testi.
 
-## P0.16 — 🔴 YENİ: Schema readiness bypass
-**Durum: 🟢 Tamamlandı**
+## P0.16 — Schema readiness bypass
+**Durum: 🟢 Kod tarafı tamam; multi-instance testi açık**
 
-`PostgresRepository.ensureTelemetrySchema()` advisory lock alınamadığında 3 saniye bekleyip `isSchemaEnsured=true` yapıyordu. Artık diğer instance'ın kilidi bırakması 15 saniyeye kadar izleniyor ve ardından `verifySchemaContract()` ile şemanın eksiksiz olduğu doğrulanıyor. Doğrulanamazsa `isSchemaEnsured=false` kalıyor.
-
-- [x] Lock alınamadığında diğer instance'ın migration sonucunu gerçekten bekle (15s polling).
-- [x] Başarı kanıtı olmadan `isSchemaEnsured=true` yapılmıyor (`verifySchemaContract()` zorunlu).
-- [x] Timeout veya şema hatası durumunda readiness 503 kalıyor.
+- [x] Lock alınamadığında diğer instance'ın migration sonucunu bekleme/polling var.
+- [x] Başarı kanıtı olmadan `isSchemaEnsured=true` yapılmıyor.
+- [x] Timeout/schema hatasında readiness 503 kalıyor.
 - [ ] Multi-instance migration/readiness testi.
 
-## P0.17 — 🔴 YENİ: Migration bypass configuration
-**Durum: 🟢 Tamamlandı**
+## P0.17 — Migration bypass configuration
+**Durum: 🟢 Kod tarafı tamam; CI policy testi açık**
 
-`DISABLE_AUTO_MIGRATION=true` olduğunda `isSchemaEnsured=true` doğrudan atanıyordu. Artık üretim modunda (`NODE_ENV=production`) şema sözleşmesi (`verifySchemaContract()`) zorunlu koşuluyor ve doğrulanmayan şemalarda readiness 503 kalıyor.
-
-- [x] Production'da `DISABLE_AUTO_MIGRATION=true` yalnızca doğrulanmış schema contract ile çalışıyor.
-- [x] Bu flag readiness'i otomatik true yapmıyor.
+- [x] Production'da `DISABLE_AUTO_MIGRATION=true` yalnız doğrulanmış schema contract ile çalışıyor.
+- [x] Flag readiness'i otomatik true yapmıyor.
 - [ ] CI'da production environment policy testi.
 
-## P0.18 — 🔴 YENİ: Process crash handling
-**Durum: 🟢 Tamamlandı**
+## P0.18 — Process crash handling
+**Durum: 🟢 Kod tarafı tamam; operasyon doğrulaması açık**
 
-`server.ts` `uncaughtException` ve `unhandledRejection` olaylarında `gracefulCrashExit` mekanizması devreye alındı. Kritik loglar kaydedildikten sonra process'in bozuk bellek durumuyla yaşamasını önlemek adına 1 saniye içinde `process.exit(1)` yapılarak container supervisor'ının temiz bir container başlatması sağlandı.
-
-- [x] `uncaughtException` sonrası kontrollü shutdown + supervisor/container restart politikası.
-- [x] `unhandledRejection` için kontrollü crash exit politikası.
-- [x] Graceful shutdown sırasında logların kaydedilmesi sağlandı.
+- [x] `uncaughtException` sonrası kontrollü crash exit.
+- [x] `unhandledRejection` için kontrollü crash exit.
+- [x] Graceful shutdown loglama mekanizması.
 - [ ] Docker restart policy ile E2E doğrulama.
 
 ---
 
-# 2. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME
+# 2. 🔴 P0 — BUGÜNKÜ DEĞİŞİKLİKLERDEN SONRA YENİ / GÜNCEL ÖNCELİKLER
+
+## P0.19 — Package-lock release parity
+**Durum: 🔴 Yeni kritik**
+
+Bugünkü uygulama sürümü `1.17.7` iken lockfile üst metadata'sı `1.17.2` olarak kalmış durumda. Bu, `npm ci`, release metadata ve sürüm denetimleri arasında drift oluşturabilir.
+
+- [ ] `package-lock.json` kök ve workspace version alanlarını `1.17.7` ile eşitle.
+- [ ] CI'da package/lock/version source parity gate zorunlu olsun.
+- [ ] Release öncesi beklenmeyen lockfile drift kontrolü.
+
+## P0.20 — Production Compose ile CI Timescale parity
+**Durum: 🔴 Yeni / mevcut risk**
+
+Repository production compose `timescale/timescaledb:latest-pg15` kullanırken CI `latest-pg16` kullanıyor. Bu, şema/extension davranışının production ile CI arasında ayrışmasına neden olabilir.
+
+- [ ] Production ve CI PostgreSQL/Timescale majör sürümlerini tek sürüm politikasında birleştir.
+- [ ] Image digest pinle.
+- [ ] Upgrade/restore testini CI'ya ekle.
+
+## P0.21 — Docker production secret / network güvenliği
+**Durum: 🔴 Yeni / doğrudan production riski**
+
+`docker-compose.yml` içinde varsayılan PostgreSQL parolası, JWT secret'ı ve host `5432` port publish'i mevcut. Production'da gerçek secret verilmemesi durumunda tahmin edilebilir güvenlik açığı ve gereksiz DB erişim yüzeyi oluşabilir.
+
+- [ ] Production'da default DB password kesinlikle reddedilmeli.
+- [ ] Default JWT/session secret kesinlikle reddedilmeli.
+- [ ] Host `5432` publish kaldırılmalı; DB yalnız private Docker network'ten erişilebilir olmalı.
+- [ ] Secret scanning + startup policy.
+
+## P0.22 — DB restart / proxy recovery gerçek testi
+**Durum: 🔴 Açık**
+
+Kod tarafında health/readiness ve restart davranışları belirgin biçimde güçlendi; fakat gerçek Docker/PostgreSQL/Nginx failure-injection sonucu henüz roadmap üzerinde doğrulanmış değil.
+
+- [ ] PostgreSQL restart → app recovery.
+- [ ] App restart → proxy recovery.
+- [ ] Proxy restart → HTTP + WebSocket recovery.
+- [ ] Host reboot → DB → app → proxy.
+- [ ] Gerçek ESP8266/ESP32 `connect → telemetry → DB → dashboard → command → ACK → UI` E2E.
+
+---
+
+# 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME
 
 - [ ] PostgreSQL restart → app recovery.
 - [ ] App restart → proxy recovery.
@@ -213,14 +259,13 @@
 
 ---
 
-# 3. 🟠 P1 — DOCKER / PRODUCTION / GÜVENİLİRLİK
+# 4. 🟠 P1 — DOCKER / PRODUCTION / GÜVENİLİRLİK
 
 ## P1.1 — Compose / CI / production parity
-- [ ] `timescale/timescaledb:latest-pg15` kaldırılmalı.
-- [ ] CI `latest-pg16` ile production PostgreSQL 17 / TimescaleDB sürümleri eşleştirilmeli.
+- [ ] `latest-pg15` / `latest-pg16` ayrımı kaldırılmalı; production ile CI aynı majör sürümde olmalı.
 - [ ] Image digest pinleme.
-- [ ] Gereksiz host `5432` publish kaldırılmalı.
-- [ ] DB private Docker network'te olmalı.
+- [ ] Host `5432` publish kaldırılmalı.
+- [ ] DB private Docker network'te kalmalı.
 - [ ] Firewall/allowlist doğrulanmalı.
 
 ## P1.2 — Default secret'lar
@@ -258,7 +303,7 @@
 - [ ] Periyodik restore drill.
 
 ## P1.8 — Release/version metadata parity
-- [ ] `package.json`, `package-lock.json`, version source, CHANGELOG ve roadmap aynı release bilgisini göstermeli.
+- [ ] `package.json`, `package-lock.json`, `version.ts`, CHANGELOG ve roadmap aynı release bilgisini göstermeli.
 - [ ] CI metadata drift'i fail ettirmeli.
 - [ ] Deployment öncesi commit SHA + uygulama sürümü görünür olmalı.
 
@@ -273,20 +318,33 @@
 - [ ] Manual/automation ayrımı.
 - [ ] Fail-safe/default state.
 
+## P1.10 — Sistem logları / gözlemlenebilirlik
+**Bugünkü geliştirmelerle temel atıldı; şimdi operasyonel hale getirilmeli.**
+
+- [x] Persistent System Logs API/arayüzü mevcut.
+- [x] HTTP 5xx observer eklendi.
+- [x] Dashboard/system state persistence geliştirildi.
+- [ ] Log severity/source/correlation ID standardizasyonu.
+- [ ] Error → request → device → tenant zincirinin tek trace kimliğiyle izlenmesi.
+- [ ] Log retention/rotation.
+- [ ] Kritik P0 olaylarında alarm/notification entegrasyonu.
+
 ---
 
-# 4. 🟡 P2 — MEVCUT ÖZELLİKLER
+# 5. 🟡 P2 — MEVCUT ÖZELLİKLER
 
 ## Live Dashboard
 - [ ] Render/memory optimizasyonu.
 - [ ] Stale/offline mesajları.
 - [ ] Persisted vs live data görünürlüğü.
+- [ ] Bugünkü localStorage state persistence davranışlarının tenant/device değişimlerinde regresyon testi.
 
 ## Device Management
 - [ ] Toplu operasyonlar.
 - [ ] Bakım planlama.
 - [ ] Health timeline.
 - [ ] Device replacement veri bütünlüğü.
+- [ ] Customer selector UX'in admin/test hesapları dışındaki gerçek müşteri sıralama ve filtre davranışı.
 
 ## Telemetry
 - [ ] Metric catalog + unit normalization.
@@ -335,7 +393,7 @@
 
 ---
 
-# 5. 🟢 P3 — KALİTE / TEKNİK BORÇ
+# 6. 🟢 P3 — KALİTE / TEKNİK BORÇ
 
 - [ ] package/version/CHANGELOG/README/roadmap parity.
 - [ ] OpenAPI ↔ gerçek API parity.
@@ -347,10 +405,11 @@
 - [ ] Backup restore drill otomasyonu.
 - [ ] Load/soak/capacity plan.
 - [ ] DB schema drift CI.
+- [ ] Test verisi ile production verisinin daha sert sınırlandırılması.
 
 ---
 
-# 6. ⭐ STRATEJİK ÖZELLİKLER
+# 7. ⭐ STRATEJİK ÖZELLİKLER
 
 **P0/P1 tamamlanmadan öncelik verilmemeli.**
 
@@ -369,26 +428,26 @@
 
 ---
 
-# 7. 🏗️ UYGULAMA SIRASI
+# 8. 🏗️ GÜNCEL UYGULAMA SIRASI
 
-### Faz 0 — Production güvenliğini kesinleştir
-1. **P0.16** schema readiness bypass
-2. **P0.17** migration bypass configuration
-3. **P0.13** Timescale extension failure / migration false-success
-4. **P0.14** schema verification false-positive
-5. **P0.15** tenant backfill/isolation safety
-6. **P0.3** sessiz DB write/hydration hataları
-7. **P0.7** Timescale integrity
-8. **P0.6** telemetry idempotency
-9. **P0.8** telemetry loss/replay
-10. **P0.18 + P0 Recovery** process/restart/ESP E2E
-11. **P0.11** package/lock parity
+### Faz 0 — Production güvenliğini tamamla
+1. **P0.11 + P0.19** — package/lock/version parity (`1.17.7`)
+2. **P0.20** — Production/CI Timescale sürüm parity + digest pin
+3. **P0.21** — Default secret ve host DB port güvenliği
+4. **P0.22 + Recovery** — DB/app/proxy restart ve gerçek ESP E2E
+5. **P0.15** — Tenant isolation negatif testleri
+6. **P0.6** — Telemetry idempotency load/replay kanıtı
+7. **P0.7** — Timescale soak/load kanıtı
+8. **P0.8** — Telemetry loss/replay failure-injection
+9. **P0.16/P0.17** — Multi-instance + CI policy doğrulaması
+10. **P0.1/P0.12** — PostgreSQL-only regression + legacy path izolasyonu
 
 ### Faz 1 — Telemetry + cihaz güvenilirliği
 - Telemetry soak/load
 - Command ID → ACK → final state
 - Device health
 - Alarm lifecycle
+- System Logs correlation
 
 ### Faz 2 — Operasyon merkezi
 - Command Center
@@ -414,7 +473,7 @@
 
 ---
 
-# 8. ✅ DEFINITION OF DONE
+# 9. ✅ DEFINITION OF DONE
 
 Bir P0 maddesi ancak aşağıdaki şartlar sağlandığında `[x]` olabilir:
 
@@ -434,15 +493,15 @@ Bir P0 maddesi ancak aşağıdaki şartlar sağlandığında `[x]` olabilir:
 
 ---
 
-# 🎯 2026-09-12 SONRAKİ EN KRİTİK SIRA
+# 🎯 2026-09-13 SONRAKİ EN KRİTİK SIRA
 
-**1. P0.16 → Yanlış schema readiness**  
-**2. P0.17 → Migration bypass**  
-**3. P0.13 → Timescale extension / migration false-success**  
-**4. P0.14 → Schema verification false-positive**  
-**5. P0.15 → Tenant backfill/isolation**  
-**6. P0.3 → Sessiz DB hataları**  
-**7. P0.7 → Timescale integrity**  
-**8. P0.6 → Telemetry idempotency**  
-**9. P0.8 → Telemetry loss/replay**  
-**10. P0.18 + Recovery → process/restart/load/ESP E2E**
+**1. P0.11/P0.19 → `package-lock.json` sürüm drift'i (1.17.2 → 1.17.7)**  
+**2. P0.20 → CI/production Timescale sürüm farkı**  
+**3. P0.21 → Production default secret + host 5432 exposure**  
+**4. P0.22 → Gerçek DB/app/proxy recovery + ESP uçtan uca test**  
+**5. P0.15 → Tenant isolation negatif testleri**  
+**6. P0.6 → Telemetry idempotency/load kanıtı**  
+**7. P0.7 → Timescale soak/load kanıtı**  
+**8. P0.8 → Telemetry loss/replay failure-injection**  
+**9. P0.16/P0.17 → Multi-instance + CI policy doğrulaması**  
+**10. P0.1/P0.12 → PostgreSQL-only regression ve legacy DB yollarının kesin izolasyonu**
