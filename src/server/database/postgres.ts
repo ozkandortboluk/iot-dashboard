@@ -2362,8 +2362,8 @@ export class PostgresRepository {
   }
 
   public async getCommands(deviceId: string, tenantId?: string, limit: number = 100): Promise<DeviceCommand[]> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return [];
     }
     let sql = `SELECT * FROM device_commands WHERE device_id = $1`;
     const params: any[] = [deviceId];
@@ -2378,19 +2378,27 @@ export class PostgresRepository {
       params.push(limit);
     }
 
-    const res = await this.query(sql, params);
-    return res.rows.map(r => this.mapDeviceCommandRow(r));
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map(r => this.mapDeviceCommandRow(r));
+    } catch {
+      return [];
+    }
   }
 
   public async getPendingCommands(deviceId: string): Promise<DeviceCommand[]> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return [];
     }
-    const res = await this.query(
-      `SELECT * FROM device_commands WHERE device_id = $1 AND status IN ('pending', 'sent') ORDER BY created_at ASC LIMIT 20`,
-      [deviceId]
-    );
-    return res.rows.map(r => this.mapDeviceCommandRow(r));
+    try {
+      const res = await this.query(
+        `SELECT * FROM device_commands WHERE device_id = $1 AND status IN ('pending', 'sent') ORDER BY created_at ASC LIMIT 20`,
+        [deviceId]
+      );
+      return res.rows.map(r => this.mapDeviceCommandRow(r));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -2399,8 +2407,8 @@ export class PostgresRepository {
    * Reclaims any previously 'sent'/'claimed' command whose lease expired (>60s) without an ACK.
    */
   public async claimPendingCommands(deviceId: string, limit: number = 20, leaseSeconds: number = 60): Promise<DeviceCommand[]> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return [];
     }
     if (!deviceId) return [];
     const sql = `
@@ -2424,8 +2432,12 @@ export class PostgresRepository {
       )
       RETURNING *;
     `;
-    const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
-    return res.rows.map(r => this.mapDeviceCommandRow(r));
+    try {
+      const res = await this.query(sql, [deviceId, limit, leaseSeconds]);
+      return res.rows.map(r => this.mapDeviceCommandRow(r));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -2439,8 +2451,8 @@ export class PostgresRepository {
     result?: any,
     errorMessage?: string
   ): Promise<DeviceCommand | null> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return null;
     }
     if (!commandId || !deviceId) return null;
     const sql = `
@@ -2457,17 +2469,21 @@ export class PostgresRepository {
       WHERE (id = $1 OR command_id = $1) AND device_id = $2
       RETURNING *;
     `;
-    const res = await this.query(sql, [
-      commandId,
-      deviceId,
-      status,
-      result !== undefined ? JSON.stringify(result) : null,
-      errorMessage || null
-    ]);
-    if (res && res.rows && res.rows.length > 0) {
-      return this.mapDeviceCommandRow(res.rows[0]);
+    try {
+      const res = await this.query(sql, [
+        commandId,
+        deviceId,
+        status,
+        result !== undefined ? JSON.stringify(result) : null,
+        errorMessage || null
+      ]);
+      if (res && res.rows && res.rows.length > 0) {
+        return this.mapDeviceCommandRow(res.rows[0]);
+      }
+      return null;
+    } catch {
+      return null;
     }
-    return null;
   }
 
   public async updateCommandStatus(
@@ -2476,8 +2492,8 @@ export class PostgresRepository {
     status: DeviceCommandStatus,
     errorMessage?: string
   ): Promise<DeviceCommand | null> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return null;
     }
     if (!commandId || !deviceId) return null;
     const sql = `
@@ -2488,16 +2504,20 @@ export class PostgresRepository {
       WHERE (id = $1 OR command_id = $1) AND device_id = $2
       RETURNING *;
     `;
-    const res = await this.query(sql, [commandId, deviceId, status, errorMessage || null]);
-    if (res && res.rows && res.rows.length > 0) {
-      return this.mapDeviceCommandRow(res.rows[0]);
+    try {
+      const res = await this.query(sql, [commandId, deviceId, status, errorMessage || null]);
+      if (res && res.rows && res.rows.length > 0) {
+        return this.mapDeviceCommandRow(res.rows[0]);
+      }
+      return null;
+    } catch {
+      return null;
     }
-    return null;
   }
 
   public async expireStaleCommands(timeoutSeconds = 600): Promise<DeviceCommand[]> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    if (!this.pool || !this.isConnected || !this.isReady()) {
+      return [];
     }
     const sql = `
       UPDATE device_commands
@@ -2508,8 +2528,12 @@ export class PostgresRepository {
         AND created_at < CURRENT_TIMESTAMP - (COALESCE(timeout_seconds, $1) || ' seconds')::INTERVAL
       RETURNING *;
     `;
-    const res = await this.query(sql, [timeoutSeconds]);
-    return (res?.rows || []).map((r: any) => this.mapDeviceCommandRow(r));
+    try {
+      const res = await this.query(sql, [timeoutSeconds]);
+      return (res?.rows || []).map((r: any) => this.mapDeviceCommandRow(r));
+    } catch {
+      return [];
+    }
   }
 
   public async markCommandsDelivered(commandIds: string[]): Promise<void> {
@@ -3373,7 +3397,7 @@ export class PostgresRepository {
    */
   
   public async getAlarms(tenantId?: string): Promise<any[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected || !this.isReady()) return [];
     let sql = `SELECT * FROM active_alarms`;
     const params: any[] = [];
     if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
@@ -3381,41 +3405,45 @@ export class PostgresRepository {
       params.push(tenantId);
     }
     sql += ` ORDER BY updated_at DESC LIMIT 200`;
-    const res = await this.query(sql, params);
-    return res.rows.map(r => ({
-      id: r.id,
-      incidentId: r.incident_id,
-      lastEvaluatedAt: r.last_evaluated_at,
-      ruleId: r.rule_id,
-      deviceId: r.device_id,
-      deviceName: r.device_name,
-      tenantId: r.tenant_id || r.user_id,
-      metricKey: r.metric_key,
-      operator: r.operator,
-      thresholdValue: r.threshold_value,
-      currentValue: r.current_value,
-      severity: r.severity,
-      state: r.state,
-      firstBreachAt: r.first_breach_at,
-      triggeredAt: r.triggered_at,
-      lastNotifiedAt: r.last_notified_at,
-      resolvedAt: r.resolved_at,
-      acknowledged: r.acknowledged,
-      acknowledgedAt: r.acknowledged_at,
-      acknowledgedBy: r.acknowledged_by,
-      silencedUntil: r.silenced_until,
-      repeatCount: r.repeat_count,
-      message: r.message,
-      updatedAt: r.updated_at,
-      userId: r.user_id,
-      source: r.source,
-      environment: r.environment,
-      isSimulation: r.is_simulation
-    }));
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map(r => ({
+        id: r.id,
+        incidentId: r.incident_id,
+        lastEvaluatedAt: r.last_evaluated_at,
+        ruleId: r.rule_id,
+        deviceId: r.device_id,
+        deviceName: r.device_name,
+        tenantId: r.tenant_id || r.user_id,
+        metricKey: r.metric_key,
+        operator: r.operator,
+        thresholdValue: r.threshold_value,
+        currentValue: r.current_value,
+        severity: r.severity,
+        state: r.state,
+        firstBreachAt: r.first_breach_at,
+        triggeredAt: r.triggered_at,
+        lastNotifiedAt: r.last_notified_at,
+        resolvedAt: r.resolved_at,
+        acknowledged: r.acknowledged,
+        acknowledgedAt: r.acknowledged_at,
+        acknowledgedBy: r.acknowledged_by,
+        silencedUntil: r.silenced_until,
+        repeatCount: r.repeat_count,
+        message: r.message,
+        updatedAt: r.updated_at,
+        userId: r.user_id,
+        source: r.source,
+        environment: r.environment,
+        isSimulation: r.is_simulation
+      }));
+    } catch {
+      return [];
+    }
   }
 
   public async getAlarmEvents(tenantId?: string, incidentId?: string, alarmId?: string, deviceId?: string): Promise<any[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected || !this.isReady()) return [];
     let sql = `SELECT * FROM alarm_events WHERE 1=1`;
     const params: any[] = [];
     let idx = 1;
@@ -3437,29 +3465,33 @@ export class PostgresRepository {
       params.push(deviceId);
     }
     sql += ` ORDER BY created_at DESC LIMIT 200`;
-    const res = await this.query(sql, params);
-    return res.rows.map(r => ({
-      id: r.id,
-      incidentId: r.incident_id,
-      alarmId: r.alarm_id,
-      deviceId: r.device_id,
-      deviceName: r.device_name,
-      tenantId: r.tenant_id,
-      eventType: r.event_type,
-      alarmState: r.alarm_state,
-      metricKey: r.metric_key,
-      value: r.value,
-      message: r.message,
-      createdAt: r.created_at,
-      metadata: r.metadata,
-      source: r.source,
-      isSimulation: r.is_simulation,
-      environment: r.environment
-    }));
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map(r => ({
+        id: r.id,
+        incidentId: r.incident_id,
+        alarmId: r.alarm_id,
+        deviceId: r.device_id,
+        deviceName: r.device_name,
+        tenantId: r.tenant_id,
+        eventType: r.event_type,
+        alarmState: r.alarm_state,
+        metricKey: r.metric_key,
+        value: r.value,
+        message: r.message,
+        createdAt: r.created_at,
+        metadata: r.metadata,
+        source: r.source,
+        isSimulation: r.is_simulation,
+        environment: r.environment
+      }));
+    } catch {
+      return [];
+    }
   }
 
   public async getNotifications(tenantId?: string): Promise<any[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected || !this.isReady()) return [];
     let sql = `SELECT * FROM notifications`;
     const params: any[] = [];
     if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
@@ -3467,24 +3499,28 @@ export class PostgresRepository {
       params.push(tenantId);
     }
     sql += ` ORDER BY created_at DESC LIMIT 100`;
-    const res = await this.query(sql, params);
-    return res.rows.map(r => ({
-      id: r.id,
-      tenantId: r.tenant_id,
-      userId: r.user_id,
-      type: r.type,
-      title: r.title,
-      message: r.message,
-      read: r.is_read,
-      createdAt: r.created_at,
-      alarmId: r.alarm_id,
-      ruleId: r.rule_id,
-      alarmState: r.alarm_state
-    }));
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map(r => ({
+        id: r.id,
+        tenantId: r.tenant_id,
+        userId: r.user_id,
+        type: r.type,
+        title: r.title,
+        message: r.message,
+        read: r.is_read,
+        createdAt: r.created_at,
+        alarmId: r.alarm_id,
+        ruleId: r.rule_id,
+        alarmState: r.alarm_state
+      }));
+    } catch {
+      return [];
+    }
   }
 
   public async getDispatchLogs(tenantId?: string): Promise<any[]> {
-    if (!this.pool) return [];
+    if (!this.pool || !this.isConnected || !this.isReady()) return [];
     let sql = `SELECT * FROM dispatch_logs`;
     const params: any[] = [];
     if (tenantId && tenantId !== 'usr_admin' && tenantId !== 'all') {
@@ -3492,20 +3528,24 @@ export class PostgresRepository {
       params.push(tenantId);
     }
     sql += ` ORDER BY sent_at DESC LIMIT 100`;
-    const res = await this.query(sql, params);
-    return res.rows.map(r => ({
-      id: r.id,
-      ruleId: r.rule_id,
-      alarmId: r.alarm_id,
-      tenantId: r.tenant_id,
-      userId: r.user_id,
-      userName: r.user_name,
-      channel: r.channel,
-      recipient: r.recipient,
-      status: r.status,
-      error: r.error,
-      sentAt: r.sent_at
-    }));
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map(r => ({
+        id: r.id,
+        ruleId: r.rule_id,
+        alarmId: r.alarm_id,
+        tenantId: r.tenant_id,
+        userId: r.user_id,
+        userName: r.user_name,
+        channel: r.channel,
+        recipient: r.recipient,
+        status: r.status,
+        error: r.error,
+        sentAt: r.sent_at
+      }));
+    } catch {
+      return [];
+    }
   }
 
   public async queryWithTenant(tenantId: string, isAdmin: boolean, text: string, params: any[] = []): Promise<any> {

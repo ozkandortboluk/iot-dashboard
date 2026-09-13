@@ -611,12 +611,7 @@ class LocalDatabase {
   }
 
   public isPostgresProductionMode(): boolean {
-    // Fallback only allowed in test runners (Vitest) when DB is not running
-    if ((process.env.VITEST || process.env.NODE_ENV === 'test') && !this.postgresRepo?.isReady()) {
-      return false;
-    }
-    // In production and real runtime, PostgreSQL is the single authoritative source.
-    return true;
+    return !!this.postgresRepo?.isReady();
   }
 
   private ensureDirectory() {

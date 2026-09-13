@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.11.6] - 2026-09-12
+
+### 🛡️ Veritabanı Dayanıklılığı & Hata Yönetimi İyileştirmeleri (Database Resilience & Error Shielding)
+- **`isPostgresProductionMode()` Hazırlık Kontrolü (`src/server/db.ts`)**:
+  - `isPostgresProductionMode()` fonksiyonu `this.postgresRepo.isReady()` kontrolüyle dinamik hale getirildi. Veritabanı bağlantısı henüz kurulmamışken veya çevrimdışıyken çağrıların körü körüne PostgreSQL'e yönlendirilip 500 hatası üretmesi engellendi; RAM ve in-memory / WAL fallback katmanlarının kesintisiz çalışması sağlandı.
+- **PostgreSQL Repository Hata Kalkanı (`src/server/database/postgres.ts`)**:
+  - `getNotifications`, `getAlarms`, `getAlarmEvents`, `getDispatchLogs`, `getCommands`, `getPendingCommands`, `claimPendingCommands`, `acknowledgeCommand`, `updateCommandStatus` ve `expireStaleCommands` fonksiyonlarında bağlantı hazırlık (`isReady()`) kontrolleri ve `try/catch` korumaları eklendi.
+  - Veritabanı hazır olmadığında veya sorgu kesintiye uğradığında fırlatılan işlenmemiş hatalar (`[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil`) giderildi ve güvenli varsayılan değerlerle (`[]` / `null`) dönülmesi sağlandı.
+- **SemVer Senkronizasyonu (MANDATORY RULE 1)**:
+  - `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları `v1.11.6` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.11.5] - 2026-09-12
 
 ### 🔴 P0 Roadmap & Kritik Üretim Düzeltmeleri (Production Stability & Schema Integrity)
