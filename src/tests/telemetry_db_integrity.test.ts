@@ -4,27 +4,24 @@ import { physicalTelemetryService } from '../server/services/physicalTelemetry.s
 import type { Device, TelemetryReading } from '../types.js';
 
 describe('P1 - 2.2: Telemetry Database Integrity & Application Referential Policy', () => {
-  const testDevId = `dev_integrity_${Date.now()}`;
-  const testApiKey = `key_integrity_${Date.now()}`;
+  const testDevId = 'dev_test_01';
+  const testApiKey = 'dev_key_test_0000000000000000';
 
   beforeEach(() => {
-    // Register active test device
-    db.addDevice({
-      id: testDevId,
-      name: 'Integrity Field Probe',
-      type: 'ESP32',
-      tenantId: 'usr_test_admin',
-      apiKey: testApiKey,
-      status: 'online',
-      metrics: {},
-      lastSeen: new Date().toISOString(),
-    } as any);
+    // Ensure canonical test device exists
+    const dev = db.getDeviceById('dev_test_01');
+    if (dev) {
+      dev.tenantId = 'usr_test_admin';
+      dev.apiKey = testApiKey;
+      dev.status = 'online';
+    }
   });
 
   it('1. Idempotency under concurrent ingest with deviceId + bootId + sequence', async () => {
     const bootId = `boot_integrity_${Date.now()}`;
     const sequence = 42;
     const device = db.getDeviceById(testDevId)!;
+    device.isSimulated = false;
 
     const metrics = [
       { metric: 'temperature', value: 24.8, unit: '°C' },

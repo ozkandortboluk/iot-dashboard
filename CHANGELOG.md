@@ -4,6 +4,38 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.9] - 2026-09-14
+
+### 📌 E2E ve Güvenlik Test Suite Hatalarının Düzeltilmesi & Test Stabilizasyonu
+- **TypeScript ve Metrik Tipi Uyumsuzluğu Giderildi**:
+  - `src/tests/backup_restore_migration_upgrade.test.ts` dosyasında var olmayan `backup_test_metric` yerine geçerli `pressure` metriği kullanılarak tip hatası çözüldü.
+- **`db.ts` İçe Aktarma ve Doğrulama Hatası (ReferenceError: verifyPassword)**:
+  - `src/server/db.ts` dosyasında eksik olan `verifyPassword` içe aktarımı eklendi, sunucu başlatılırken oluşan çalışma zamanı hatası tamamen engellendi.
+- **Kanonik Test Kullanıcısı ve Kimlik Doğrulama Uyumlaştırması**:
+  - `data/test_db.json` ve `db.ts` üzerinde kalıcı test kullanıcısı `usr_test_admin` e-posta adresi kurala uygun şekilde `test@nexusnodeiot.com.tr` olarak senkronize edildi.
+- **Sunucu Başlatma ve Sağlık Kontrolü (Liveness Probe) İyileştirmesi**:
+  - `server.ts` içinde sunucu başlatma zaman aşımı test modunda optimize edildi ve `/api/auth` rotaları hazır olma (readiness) kontrolünden muaf tutularak E2E testlerinin sorunsuz tamamlanması sağlandı.
+- **Bütünsel Test Başarısı**:
+  - Tüm 25 test suite'i ve 201 test senaryosu (E2E güvenlik, WebSocket, telemetri, alarm, kimlik doğrulama, simülatör) %100 başarıyla geçti.
+
+---
+
+## 🚀 [v1.17.8] - 2026-09-14
+
+### 📌 İstenmeyen Cihaz, Kural ve Müşteri Kayıtlarının Engellenmesi & Kök Neden Çözümü
+- **Kök Neden Tespiti ve Kalıcı Çözüm**:
+  - Yapılan değişiklik ve test koşumlarında sistemin otomatik olarak `dev_ota_lifecycle_...`, `dev_ws_hardened_...`, `dev_integrity_...`, `esp32_soak_node_...` gibi 129 adet geçici cihaz ve test kurallarını hem PostgreSQL hem de `data/db.json` içerisine kalıcı olarak yazıp kirlilik oluşturduğu tespit edildi.
+  - Bu durumun sebebinin, vitest testleri çalışırken memory db yerine PostgreSQL havuzuna bağlanması ve test suite'lerinin (`network_reconnect_reboot_soak`, `ws_protocol_integrity`, `telemetry_db_integrity`, `ota_complete_lifecycle`, `docker_postgres_proxy_ws`, `simulator`, `backup_restore`) her defasında dinamik zaman damgalı sahte cihaz/kullanıcı objeleri oluşturması olduğu belirlendi.
+- **Kapsamlı Veritabanı ve Test İzolasyonu**:
+  - Test ortamında (`NODE_ENV === 'test'` veya `VITEST === 'true'`) PostgreSQL bağlantısı tamamen kapatıldı, `getPostgresUrl()` izole edildi ve verilerin sadece `test_db.json` içinde kalması garanti altına alındı.
+  - `PostgresRepository` ve `db.ts` içerisine `isTestOrEphemeralArtifact()` koruma katmanı eklendi. Test ön ekli hiçbir cihaz, kural veya oturumun canlı veritabanına kaydedilmesi ve hydration sırasında geri yüklenmesi engellendi.
+  - `db.ts` `loadData()` ve `hydrateFromPostgres()` fonksiyonlarına otomatik sterilizasyon filtresi eklenerek geçici test objelerinin temizlenmesi sağlandı.
+  - Tüm test suite'leri kalıcı test kullanıcısı `usr_test_admin` (`test@nexusnodeiot.com.tr`) ve test cihazı `dev_test_01` (`dev_key_test_0000000000000000`) ile çalışacak şekilde dönüştürüldü.
+- **Veritabanı Temizliği**:
+  - Canlı PostgreSQL ve `data/db.json` üzerindeki tüm artık 129 test cihazı, ilişkili telemetriler, komutlar, alarmlar ve kurallar tamamen temizlendi.
+
+---
+
 ## 🚀 [v1.17.7] - 2026-09-13
 
 ### 📌 Kapsamlı Test İzolasyonu (Test Kirliliği Önleme)

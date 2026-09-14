@@ -5,20 +5,16 @@ import { terminateDeviceSockets, isAllowedWsOrigin } from '../server/services/we
 import type { Device } from '../types.js';
 
 describe('P1 - 2.3: WebSocket Protocol Integrity & Hardening', () => {
-  const testDevId = `dev_ws_hardened_${Date.now()}`;
-  const testApiKey = `key_ws_hardened_${Date.now()}`;
+  const testDevId = 'dev_test_01';
+  const testApiKey = 'dev_key_test_0000000000000000';
 
   beforeEach(() => {
-    db.addDevice({
-      id: testDevId,
-      name: 'Hardened WS Field Node',
-      type: 'ESP32',
-      tenantId: 'usr_test_admin',
-      apiKey: testApiKey,
-      status: 'online',
-      metrics: {},
-      lastSeen: new Date().toISOString(),
-    } as any);
+    const dev = db.getDeviceById('dev_test_01');
+    if (dev) {
+      dev.status = 'online';
+      dev.tenantId = 'usr_test_admin';
+      dev.apiKey = testApiKey;
+    }
   });
 
   it('1. Origin Validation Policy (CORS/Origin Protection for WebSockets)', () => {

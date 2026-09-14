@@ -16,8 +16,8 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
   let serverPort: number;
   let wsUrl: string;
 
-  const proxyDeviceId = 'esp32_proxy_prod_node_01';
-  const proxyApiKey = 'sec_proxy_prod_key_77889900aabb';
+  const proxyDeviceId = 'dev_test_01';
+  const proxyApiKey = 'dev_key_test_0000000000000000';
   const proxyDevice: Device = {
     id: proxyDeviceId,
     tenantId: 'usr_test_admin',
@@ -42,8 +42,8 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
 
   const proxyAdminUser: User = {
     id: 'usr_test_admin',
-    name: 'Özkan Dörtbölük',
-    email: 'admin@dashboard.io',
+    name: 'Test Kullanıcısı',
+    email: 'test@nexusnodeiot.com.tr',
     role: 'admin',
     created_at: new Date().toISOString(),
   };

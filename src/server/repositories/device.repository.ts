@@ -1164,9 +1164,6 @@ export class DeviceRepository {
         if (d.hostname === 'Fiber-Modem-Gateway' || (d.ip === '192.168.1.1' && d.vendor?.includes('Zyxel'))) {
           return false;
         }
-        if (d.mac === 'AA:BB:CC:DD:EE:FF' || d.hostname === 'esp32-unreg' || d.pairingCode === 'PAIR99' || d.ip === '192.168.244.188') {
-          return false;
-        }
 
         // Exclude if already registered in the system
         if (d.registeredDeviceId && registeredIds.has(d.registeredDeviceId.toLowerCase().trim())) {

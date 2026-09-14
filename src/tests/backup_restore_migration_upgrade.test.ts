@@ -42,18 +42,12 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
   });
 
   it('1. Create durable JSON/SQL backup and verify structural completeness', async () => {
-    // Ensure test data exists
-    const testDevId = `dev_backup_test_${Date.now()}`;
-    db.addDevice({
-      id: testDevId,
-      name: 'Backup Test Device',
-      type: 'ESP32',
-      tenantId: 'usr_test_admin',
-      apiKey: `key_${testDevId}`,
-      status: 'online',
-      metrics: { temperature: 26.5 },
-      lastSeen: new Date().toISOString(),
-    } as any);
+    // Ensure canonical test device exists
+    const testDevId = 'dev_test_01';
+    const dev = db.getDeviceById(testDevId);
+    if (dev) {
+      dev.tenantId = 'usr_test_admin';
+    }
 
     const backupResult = await db.createBackup();
     expect(backupResult).toBeDefined();
@@ -86,36 +80,32 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
   });
 
   it('3. Restore database state from backup and verify entity preservation', async () => {
-    const targetDevId = `dev_restore_verify_${Date.now()}`;
-    const testDevice: Device = {
-      id: targetDevId,
-      name: 'Pre-Backup Snapshot Sensor',
-      type: 'NodeMCU',
-      tenantId: 'usr_test_admin',
-      apiKey: `key_restore_${Date.now()}`,
-      status: 'online',
-      metrics: { pressure: 1013.25 },
-      lastSeen: new Date().toISOString(),
-    } as any;
+    const targetDevId = 'dev_test_01';
+    const originalDev = db.getDeviceById(targetDevId);
+    expect(originalDev).toBeDefined();
+    
+    // Set specific test metric before backup
+    if (originalDev) {
+      originalDev.metrics = { ...(originalDev.metrics || {}), pressure: 99.9 };
+    }
 
-    db.addDevice(testDevice);
     const backupResult = await db.createBackup();
     const backupFile = backupResult.filename;
     createdBackupFiles.push(backupFile);
 
-    // Modify local state by deleting test device
-    db.deleteDevice(targetDevId);
-    expect(db.getDeviceById(targetDevId)).toBeUndefined();
+    // Modify local state by changing metric
+    if (originalDev) {
+      originalDev.metrics = { ...(originalDev.metrics || {}), pressure: 11.1 };
+    }
 
     // Restore from backup
     const restored = db.restoreBackup(backupFile);
     expect(restored).toBe(true);
 
-    // Verify entity was restored
+    // Verify entity was restored to pre-backup snapshot state
     const restoredDev = db.getDeviceById(targetDevId);
     expect(restoredDev).toBeDefined();
-    expect(restoredDev?.name).toBe('Pre-Backup Snapshot Sensor');
-    expect(restoredDev?.metrics?.pressure).toBe(1013.25);
+    expect(restoredDev?.metrics?.pressure).toBe(99.9);
   });
 
   it('4. Schema Migration & Version Upgrade backward compatibility', () => {

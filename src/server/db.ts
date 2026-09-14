@@ -1,5 +1,5 @@
 import { UserRepository } from "./repositories/user.repository.js";
-import { hashPassword, encryptSecret, decryptSecret, isMaskedSecret, maskSecret } from "./utils/crypto.js";
+import { hashPassword, verifyPassword, encryptSecret, decryptSecret, isMaskedSecret, maskSecret } from "./utils/crypto.js";
 import { DeviceRepository } from "./repositories/device.repository.js";
 import { TelemetryRepository } from "./repositories/telemetry.repository.js";
 import { AlarmRepository } from "./repositories/alarm.repository.js";
@@ -65,10 +65,10 @@ import type {
   OtaDeploymentJob,
 } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
-import { PostgresRepository } from './database/postgres.js';
+import { PostgresRepository, isTestOrEphemeralArtifact } from './database/postgres.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = process.env.NODE_ENV === 'test' ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
+const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
 
 interface DatabaseSchema {
   users: User[];
@@ -388,9 +388,18 @@ class LocalDatabase {
       try {
         const hydrated = await this.postgresRepo.hydrateFromPostgres();
         if (hydrated) {
+          // Filter out any ephemeral test artifacts from hydrated data
+          hydrated.devices = hydrated.devices.filter((d: any) => !isTestOrEphemeralArtifact(d.id));
+          hydrated.rules = hydrated.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
+          hydrated.users = hydrated.users.filter((u: any) =>
+            u.id === 'usr_test_admin' ||
+            u.id === 'usr_admin' ||
+            (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_') && !u.email?.includes('customer_') && !u.email?.includes('@example.com'))
+          );
+
           if (hydrated.users.length > 0) {
             const existingUserIds = new Set(hydrated.users.map(u => u.id));
-            const missingUsers = this.data.users.filter(u => !existingUserIds.has(u.id));
+            const missingUsers = this.data.users.filter(u => !existingUserIds.has(u.id) && (u.id === 'usr_test_admin' || u.id === 'usr_admin' || (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_'))));
             this.data.users = [...hydrated.users, ...missingUsers];
             this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
             for (const u of missingUsers) {
@@ -408,7 +417,7 @@ class LocalDatabase {
 
           if (hydrated.devices.length > 0) {
             const existingDeviceIds = new Set(hydrated.devices.map(d => d.id));
-            const missingDevices = this.data.devices.filter(d => !existingDeviceIds.has(d.id));
+            const missingDevices = this.data.devices.filter(d => !existingDeviceIds.has(d.id) && !isTestOrEphemeralArtifact(d.id));
             this.data.devices = [...hydrated.devices, ...missingDevices];
             for (const d of missingDevices) {
               await this.postgresRepo.saveDevice(d).catch((err: any) => {
@@ -417,6 +426,7 @@ class LocalDatabase {
             }
           } else {
             for (const d of this.data.devices) {
+              if (isTestOrEphemeralArtifact(d.id)) continue;
               await this.postgresRepo.saveDevice(d).catch((err: any) => {
                 systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
               });
@@ -427,6 +437,7 @@ class LocalDatabase {
             this.data.rules = hydrated.rules;
           } else {
             for (const r of this.data.rules) {
+              if (isTestOrEphemeralArtifact(r.id) || (r.deviceId && isTestOrEphemeralArtifact(r.deviceId))) continue;
               await this.postgresRepo.saveRule(r).catch((err: any) => {
                 systemLogger.error('database', `Kural PostgreSQL hydration hatası (${r.id}): ${err?.message || err}`);
               });
@@ -679,6 +690,21 @@ class LocalDatabase {
             deviceCommandsDays: 15,
           };
         }
+
+        // Automatic sanitization: Strip any ephemeral test devices, rules, and mock users from parsed data
+        if (parsed.devices && Array.isArray(parsed.devices)) {
+          parsed.devices = parsed.devices.filter((d: any) => !isTestOrEphemeralArtifact(d.id));
+        }
+        if (parsed.rules && Array.isArray(parsed.rules)) {
+          parsed.rules = parsed.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
+        }
+        if (parsed.users && Array.isArray(parsed.users)) {
+          parsed.users = parsed.users.filter((u: any) =>
+            u.id === 'usr_test_admin' ||
+            u.id === 'usr_admin' ||
+            (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_') && !u.email?.includes('customer_') && !u.email?.includes('@example.com'))
+          );
+        }
       } catch (err) {
         console.error('Error reading db.json, re-initializing empty database:', err);
         parsed = emptyData;
@@ -686,8 +712,8 @@ class LocalDatabase {
     }
 
     // Add persistent test admin user if it doesn't exist
-    const hasTestAdmin = parsed.users.some(u => u.id === 'usr_test_admin');
-    if (!hasTestAdmin) {
+    const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin');
+    if (!testAdmin) {
       const testAdminId = 'usr_test_admin';
       parsed.users.push({
         id: testAdminId,
@@ -709,6 +735,11 @@ class LocalDatabase {
         widgets: [...defaultWidgets],
         updatedAt: new Date().toISOString(),
       });
+    } else {
+      testAdmin.email = 'test@nexusnodeiot.com.tr';
+      if (!parsed.passwords['usr_test_admin'] || !verifyPassword('test1234', parsed.passwords['usr_test_admin'])) {
+        parsed.passwords['usr_test_admin'] = hashPassword('test1234');
+      }
     }
 
     // Add persistent test device if it doesn't exist
@@ -2259,6 +2290,9 @@ class LocalDatabase {
   }
 
   public getPostgresUrl(): string {
+    if (process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) {
+      return '';
+    }
     const storedUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
     return resolvePostgresConnectionString(storedUrl);
   }

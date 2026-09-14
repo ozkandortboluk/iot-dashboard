@@ -15,8 +15,13 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   const testEmail = `test_${Date.now()}@test.com`;
 
   beforeAll(async () => {
-    // Start production bundle
-    serverProcess = spawn('node', ['dist/server.cjs'], {
+    // Start production bundle if exists, else tsx server.ts
+    const fs = await import('node:fs');
+    const isBundled = fs.existsSync('dist/server.cjs');
+    const cmd = isBundled ? 'node' : 'npx';
+    const args = isBundled ? ['dist/server.cjs'] : ['tsx', 'server.ts'];
+
+    serverProcess = spawn(cmd, args, {
       env: { ...process.env, PORT: String(PORT), SERVER_PORT: String(PORT), NODE_ENV: 'production' }
     });
     serverProcess.stderr?.on('data', (data: Buffer) => {

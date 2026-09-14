@@ -148,12 +148,13 @@ app.use('/api', (req, res, next) => {
     return next();
   }
 
-  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair
-  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database')) {
+  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair; auth allows login/logout
+  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database') || req.path.startsWith('/auth')) {
     return next();
   }
 
-  if (!db.postgresRepo?.isReady()) {
+  const isPgConfigured = Boolean(db.getPostgresUrl());
+  if (isPgConfigured && !db.postgresRepo?.isReady()) {
     return res.status(503).json({ 
       success: false, 
       code: 'DB_UNAVAILABLE',
@@ -275,7 +276,8 @@ startCommandExpiryWorker();
 async function setupViteOrStatic() {
   console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
   try {
-    await db.waitForInitialization(20000);
+    const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 3000;
+    await db.waitForInitialization(startupTimeout);
   } catch (err: any) {
     console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
   }

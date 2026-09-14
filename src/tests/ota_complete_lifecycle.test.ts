@@ -16,22 +16,18 @@ import {
 import type { Device, Firmware, OtaDeploymentJob } from '../types.js';
 
 describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', () => {
-  const targetDevId = `dev_ota_lifecycle_${Date.now()}`;
-  const testFirmwareId = `fw_v200_${Date.now()}`;
+  const targetDevId = 'dev_test_01';
+  const testFirmwareId = 'fw_test_canonical';
 
   beforeEach(() => {
-    // Add target device
-    db.addDevice({
-      id: targetDevId,
-      name: 'Lifecycle Field Controller',
-      type: 'ESP32',
-      hardwareModel: 'ESP32_WROOM_32',
-      hardwareRevision: 'v2.0',
-      firmwareVersion: '1.3.0',
-      tenantId: 'usr_test_admin',
-      apiKey: `key_ota_test_${Date.now()}`,
-      status: 'online',
-    } as any);
+    // Configure canonical test device
+    const dev = db.getDeviceById('dev_test_01');
+    if (dev) {
+      dev.hardwareModel = 'ESP32_WROOM_32';
+      dev.hardwareRevision = 'v2.0';
+      dev.firmwareVersion = '1.3.0';
+      dev.tenantId = 'usr_test_admin';
+    }
 
     // Add firmware
     const mockBin = Buffer.concat([

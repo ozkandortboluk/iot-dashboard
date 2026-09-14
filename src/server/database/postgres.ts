@@ -20,6 +20,38 @@ import type {
 } from '../../types.js';
 
 
+export function isTestOrEphemeralArtifact(id?: string): boolean {
+  if (!id) return false;
+  const prefixes = [
+    'dev_ota_lifecycle_',
+    'dev_ws_hardened_',
+    'dev_integrity_',
+    'esp32_soak_node_',
+    'dev_backup_test_',
+    'esp32_cust_',
+    'sim_device_',
+    'dev_other_tenant_',
+    'dev_physical_cmd_',
+    'esp32_hw_prod_',
+    'esp32_proxy_prod_',
+    'dev_legacy_',
+    'dev_field_ops_',
+    'dev_delete_policy_',
+    'sim_test_dev_',
+    'phys_test_dev_',
+    'esp32_soak_field_node_',
+    'dev_tenant_',
+    'fw_v200_',
+    'auto_high_temp_',
+    'rule_test_',
+    'test_dev_col_',
+    'dev_restore_verify_',
+    'dev_ghost_',
+    'rule_lifecycle_',
+  ];
+  return prefixes.some((p) => id.startsWith(p));
+}
+
 export class PostgresRepository {
   private pool: Pool | null = null;
   private isConnected = false;
@@ -1215,6 +1247,9 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    if (user.id !== 'usr_test_admin' && (user.id.startsWith('usr_customer_') || user.id.startsWith('usr_cust_') || user.email?.includes('customer_') || user.email?.includes('@example.com'))) {
+      return; // Do not persist ephemeral test users to PostgreSQL
+    }
     const sql = `
       INSERT INTO users (
         id, name, email, phone, notification_email, whatsapp_number, 
@@ -1410,6 +1445,10 @@ export class PostgresRepository {
   public async saveDevice(dev: Device): Promise<void> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+
+    if (isTestOrEphemeralArtifact(dev.id)) {
+      return; // Do not persist ephemeral test devices to PostgreSQL
     }
 
     // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_admin'e yönlendirilir
@@ -2068,6 +2107,11 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+
+    if (isTestOrEphemeralArtifact(rule.id) || (rule.deviceId && isTestOrEphemeralArtifact(rule.deviceId))) {
+      return; // Do not persist ephemeral test rules to PostgreSQL
+    }
+
     const sql = `
       INSERT INTO threshold_rules (
         id, user_id, user_name, device_id, metric_key, operator, threshold_value,

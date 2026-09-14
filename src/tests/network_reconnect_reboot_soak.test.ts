@@ -23,9 +23,8 @@ app.use('/api', commandsRouter);
 describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (Roadmap P0 - Item 2)', () => {
   const testTenantId = 'usr_test_admin';
   const testCustomerId = 'usr_test_admin';
-  const uniqueSuffix = Date.now().toString();
-  const testDeviceId = `esp32_soak_node_${uniqueSuffix}`;
-  const testApiKey = `nex_soak_key_${uniqueSuffix}`;
+  const testDeviceId = 'dev_test_01';
+  const testApiKey = 'dev_key_test_0000000000000000';
   let sessionCookie: string = '';
 
   const soakDevice: Device = {
@@ -52,8 +51,8 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
 
   const soakOperator: User = {
     id: 'usr_test_admin',
-    name: 'Özkan Dörtbölük',
-    email: 'admin@dashboard.io',
+    name: 'Test Kullanıcısı',
+    email: 'test@nexusnodeiot.com.tr',
     role: 'admin',
     created_at: new Date().toISOString(),
   };
