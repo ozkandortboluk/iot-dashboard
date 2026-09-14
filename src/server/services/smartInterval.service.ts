@@ -51,10 +51,17 @@ export class SmartIntervalService {
 
     // 2x Kuralı: Veri gönderim sıklığının 2 katı sürede veri gelmezse offline olur.
     // Minimum 10 saniye ağ toleransı (hücresel ağ, Wi-Fi jitter veya handshake gecikmeleri için).
-    const offlineTimeoutSeconds = Math.max(
+    const autoTimeout = Math.max(
       expectedInterval * 2,
       SmartIntervalService.MIN_OFFLINE_TIMEOUT_SECONDS
     );
+
+    // Kullanıcı arayüzden veya cihaz ayarlarından özel bir çevrimdışı süresi (heartbeatTimeoutSeconds)
+    // belirlediyse ve bu süre hesaplanan 2x süresinden daha geniş bir tolerans sağlıyorsa (örn: cihaz 5 sn'de
+    // bir gönderirken kullanıcı çevrimdışı olma süresini 60 sn yaptıysa), kullanıcının belirlediği bu
+    // geniş toleransı koru. Böylece tek bir Wi-Fi gecikmesinde cihaz gereksiz yere çevrimdışına düşmez.
+    const customTimeout = dev.customHeartbeatTimeoutSeconds || dev.heartbeatTimeoutSeconds || 0;
+    const offlineTimeoutSeconds = Math.max(autoTimeout, customTimeout);
 
     // Tutarlılık kuralı: heartbeatTimeoutSeconds ile offlineTimeoutSeconds AYNI değere kilitlenir.
     const heartbeatTimeoutSeconds = offlineTimeoutSeconds;

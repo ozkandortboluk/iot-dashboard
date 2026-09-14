@@ -200,6 +200,7 @@ export interface Device {
   expectedIntervalSeconds?: number;
   intervalMode?: 'auto' | 'manual'; // 'auto' (sistem dinamik belirler) veya 'manual' (kullanıcı sabitler)
   customIntervalSeconds?: number; // Kullanıcının belirlediği özel sıklık
+  customHeartbeatTimeoutSeconds?: number; // Kullanıcının belirlediği özel çevrimdışı tolerans/zaman aşımı
   autoDetectedIntervalSeconds?: number; // Sistemin peş peşe gelen paketlerden ölçtüğü sıklık
   recentIntervals?: number[]; // Son N ardışık paket aralıkları (aykırı değer ve burst filtrelemesi için)
   isSimulated?: boolean;

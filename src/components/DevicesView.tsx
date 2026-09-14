@@ -729,7 +729,8 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         expectedIntervalSeconds: addExpectedInterval,
         intervalMode: addIntervalMode,
         customIntervalSeconds: addIntervalMode === 'manual' ? addExpectedInterval : undefined,
-        heartbeatTimeoutSeconds: Math.max(addExpectedInterval * 2, 4),
+        heartbeatTimeoutSeconds: addHeartbeatTimeout || Math.max(addExpectedInterval * 2, 10),
+        customHeartbeatTimeoutSeconds: addHeartbeatTimeout || Math.max(addExpectedInterval * 2, 10),
         isSimulated,
         saveSimulatedDataToDb: isSimulated ? saveSimulatedDataToDb : false,
         simulatedMetrics: isSimulated ? addSimMetrics : [],
@@ -769,7 +770,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setEditExpectedInterval(effInterval);
     setEditIntervalMode(dev.intervalMode || 'auto');
     setEditAutoDetectedInterval(dev.autoDetectedIntervalSeconds);
-    setEditHeartbeatTimeout(dev.heartbeatTimeoutSeconds || Math.max(effInterval * 2, 4));
+    setEditHeartbeatTimeout(dev.customHeartbeatTimeoutSeconds || dev.heartbeatTimeoutSeconds || Math.max(effInterval * 2, 10));
     setEditIsSimulated(dev.isSimulated ?? false);
     setEditSaveSimulatedDataToDb(dev.saveSimulatedDataToDb ?? false);
     setEditSimMetrics(dev.simulatedMetrics || (dev.isSimulated ? ['l1', 'l2', 'l3', 'ri', 'rc', 'p'] : ['l1', 'l2', 'l3', 'ri', 'rc', 'p']));
@@ -797,7 +798,8 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         expectedIntervalSeconds: editExpectedInterval,
         intervalMode: editIntervalMode,
         customIntervalSeconds: editIntervalMode === 'manual' ? editExpectedInterval : undefined,
-        heartbeatTimeoutSeconds: Math.max(editExpectedInterval * 2, 4),
+        heartbeatTimeoutSeconds: editHeartbeatTimeout || Math.max(editExpectedInterval * 2, 10),
+        customHeartbeatTimeoutSeconds: editHeartbeatTimeout || Math.max(editExpectedInterval * 2, 10),
         isSimulated: editIsSimulated,
         saveSimulatedDataToDb: editIsSimulated ? editSaveSimulatedDataToDb : false,
         simulatedMetrics: editIsSimulated ? editSimMetrics : [],
@@ -1135,9 +1137,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     setExpectedInterval: (val: number) => void,
     intervalMode: 'auto' | 'manual',
     setIntervalMode: (mode: 'auto' | 'manual') => void,
-    autoDetectedInterval?: number
+    autoDetectedInterval?: number,
+    heartbeatTimeout?: number,
+    setHeartbeatTimeout?: (val: number) => void
   ) => {
-    const offlineThreshold = Math.max(expectedInterval * 2, 4);
+    const effectiveTimeout = heartbeatTimeout || Math.max(expectedInterval * 2, 10);
 
     return (
       <div className="p-4 bg-indigo-50/40 dark:bg-slate-800/40 rounded-2xl border border-indigo-200/70 dark:border-slate-700/80 space-y-3.5">
@@ -1145,7 +1149,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
             <h4 className="font-bold text-indigo-700 dark:text-indigo-300 text-xs uppercase tracking-wider">
-              Akıllı Veri Gönderim Sıklığı & Watchdog
+              Akıllı Veri Gönderim Sıklığı & Watchdog Zaman Aşımı
             </h4>
           </div>
 
@@ -1165,79 +1169,148 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         </div>
 
         <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-          Cihaz çalıştığında veri gönderim sıklığı sistem tarafından dinamik olarak ölçülür veya kullanıcı tarafından kutucuktan güncellenebilir.
-          <strong className="text-rose-600 dark:text-rose-400"> 2 Katı Kuralı:</strong> Cihazdan veri gönderim sıklığının 2 katı (<strong>{offlineThreshold} saniye</strong>) boyunca veri gelmezse cihaz otomatik <strong>Çevrimdışı (Offline)</strong> moduna geçer. Cihaz tekrar veri göndermeye başlarsa anında <strong>Çevrimiçi (Online)</strong> olur (kullanıcının son ayarı korunur, çevrimdışı kalınan süre sıklık hesabına dahil edilmez).
+          Cihazınızın veri gönderme periyodunu ve bağlantı koptuğunda ne kadar süre sonra <strong>Çevrimdışı (Offline)</strong> alarmı verileceğini belirleyin. Cihaz 5 saniyede bir gönderiyorsa dahi çevrimdışı süresini <strong>60 sn (1 dakika)</strong> gibi güvenli bir eşiğe ayarlayarak Wi-Fi dalgalanmalarındaki gereksiz sahte çevrimdışı alarmlarını engelleyebilirsiniz.
         </p>
 
-        {/* Ayar Kutucuğu */}
+        {/* Ayar Kutucuğu - Sıklık ve Çevrimdışı Süresi */}
         <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex-1">
-              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
-                Veri Gönderim Sıklığı (Saniye):
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* 1. Veri Gönderim Sıklığı */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                ⏱️ Veri Gönderim Sıklığı (Saniye):
               </label>
               <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                Mevcut aktif sıklık değeri. Bu kutucuktaki değeri değiştirdiğinizde ayar kullanıcının son ayarı olarak kilitlenir.
+                Cihazın normalde ne sıklıkla paket attığı.
               </p>
+              <div className="flex items-center gap-2 pt-1">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={86400}
+                    value={expectedInterval}
+                    onChange={(e) => {
+                      const val = Math.max(1, Number(e.target.value));
+                      setExpectedInterval(val);
+                      setIntervalMode('manual');
+                      if (setHeartbeatTimeout && (!heartbeatTimeout || heartbeatTimeout < val)) {
+                        setHeartbeatTimeout(Math.max(val * 2, 10));
+                      }
+                    }}
+                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-indigo-500/60 dark:border-indigo-500/60 rounded-xl font-mono text-sm font-bold text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
+                </div>
+
+                {intervalMode === 'manual' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIntervalMode('auto');
+                      if (autoDetectedInterval && autoDetectedInterval > 0) {
+                        setExpectedInterval(autoDetectedInterval);
+                      }
+                    }}
+                    className="px-2.5 py-2 text-[10px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 cursor-pointer"
+                    title="Sistemin cihaz sinyallerinden otomatik ölçmesine izin ver"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Oto</span>
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/30 px-2 py-2 rounded-xl border border-emerald-500/20 whitespace-nowrap">
+                    {autoDetectedInterval ? `${autoDetectedInterval} sn` : 'Ölçülüyor'}
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <input
-                  type="number"
-                  min={1}
-                  max={86400}
-                  value={expectedInterval}
-                  onChange={(e) => {
-                    const val = Math.max(1, Number(e.target.value));
-                    setExpectedInterval(val);
-                    setIntervalMode('manual');
-                  }}
-                  className="w-32 px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-indigo-500/60 dark:border-indigo-500/60 rounded-xl font-mono text-sm font-bold text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
-              </div>
+            {/* 2. Çevrimdışı Kalma Tolerans Süresi */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-rose-700 dark:text-rose-300">
+                🚨 Çevrimdışı (Timeout) Eşiği:
+              </label>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Kaç saniye veri gelmezse ÇEVRİMDİŞİ alarmı verilsin.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    min={5}
+                    max={604800}
+                    value={effectiveTimeout}
+                    onChange={(e) => {
+                      const val = Math.max(5, Number(e.target.value));
+                      if (setHeartbeatTimeout) setHeartbeatTimeout(val);
+                    }}
+                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-rose-500/60 dark:border-rose-500/60 rounded-xl font-mono text-sm font-bold text-rose-700 dark:text-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
+                </div>
 
-              {intervalMode === 'manual' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIntervalMode('auto');
-                    if (autoDetectedInterval && autoDetectedInterval > 0) {
-                      setExpectedInterval(autoDetectedInterval);
-                    }
-                  }}
-                  className="px-3 py-2 text-[11px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 cursor-pointer"
-                  title="Sistemin cihaz sinyallerinden otomatik ölçmesine izin ver"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Otomatik Moda Al</span>
-                </button>
-              ) : (
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-2 rounded-xl border border-emerald-500/20">
-                  {autoDetectedInterval ? `Son Ölçüm: ${autoDetectedInterval} sn` : 'Canlı Dinleniyor'}
-                </span>
-              )}
+                {setHeartbeatTimeout && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeartbeatTimeout(Math.max(expectedInterval * 2, 10));
+                    }}
+                    className="px-2.5 py-2 text-[10px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 transition cursor-pointer whitespace-nowrap"
+                    title="Sıklığın 2 katına eşitle"
+                  >
+                    2x Yap
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* 2X Watchdog Bilgilendirme Çubuğu */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
-            <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
-              <span className="text-slate-500 dark:text-slate-400">⏱️ Veri Gönderim Periyodu:</span>
-              <strong className="font-mono text-slate-900 dark:text-white">{expectedInterval} saniye</strong>
+          {/* Çevrimdışı Hızlı Seçim Butonları */}
+          {setHeartbeatTimeout && (
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+              <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Hızlı Çevrimdışı (Timeout) Şablonları:
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {[
+                  { label: '30 Saniye', val: 30, desc: 'Hızlı Alarm' },
+                  { label: '60 Saniye (1 Dk)', val: 60, desc: 'Önerilen Tolerans' },
+                  { label: '120 Saniye (2 Dk)', val: 120, desc: 'Wi-Fi Jitter Güvenli' },
+                  { label: '300 Saniye (5 Dk)', val: 300, desc: 'Geniş Ağ Toleransı' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    type="button"
+                    onClick={() => setHeartbeatTimeout(item.val)}
+                    className={`px-2.5 py-1.5 rounded-lg text-left border transition cursor-pointer text-xs ${
+                      effectiveTimeout === item.val
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                        : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-rose-400'
+                    }`}
+                  >
+                    <div className="font-bold">{item.label}</div>
+                    <div className={`text-[9px] ${effectiveTimeout === item.val ? 'text-rose-100' : 'text-slate-400'}`}>
+                      {item.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex items-center justify-between p-2 rounded-lg bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/60 dark:border-rose-900/40">
-              <span className="text-rose-700 dark:text-rose-300 font-semibold">⚠️ Çevrimdışı Eşiği (2x):</span>
-              <strong className="font-mono text-rose-600 dark:text-rose-400">{offlineThreshold} saniye sonra offline</strong>
-            </div>
+          )}
+
+          {/* Watchdog Durum Özeti */}
+          <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 text-[11px] flex flex-wrap items-center justify-between gap-2">
+            <span className="text-slate-600 dark:text-slate-300">
+              💡 Özet Durum: Her <strong>{expectedInterval} sn</strong>'de bir veri beklenir. <strong>{effectiveTimeout} sn</strong> boyunca sinyal gelmezse Çevrimdışı uyarısı tetiklenir.
+            </span>
           </div>
         </div>
 
-        {/* Hızlı Seçim Şablonları */}
+        {/* Hızlı Sıklık Seçim Şablonları */}
         <div className="space-y-1.5">
           <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Hızlı Şablonlar:
+            Hızlı Veri Gönderim Şablonları:
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
@@ -2741,7 +2814,10 @@ void sendHeartbeat() {
                 addExpectedInterval,
                 setAddExpectedInterval,
                 addIntervalMode,
-                setAddIntervalMode
+                setAddIntervalMode,
+                undefined,
+                addHeartbeatTimeout,
+                setAddHeartbeatTimeout
               )}
 
               {/* Section 6: Admin Customer Assignment */}
@@ -3106,7 +3182,9 @@ void sendHeartbeat() {
                 setEditExpectedInterval,
                 editIntervalMode,
                 setEditIntervalMode,
-                editAutoDetectedInterval
+                editAutoDetectedInterval,
+                editHeartbeatTimeout,
+                setEditHeartbeatTimeout
               )}
 
               {/* Section 5: Müşteri / Firma Sorumlusu (Admin Only) */}

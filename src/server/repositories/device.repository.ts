@@ -513,7 +513,11 @@ export class DeviceRepository {
     }
     if (updates.rateLimitPerMin !== undefined) dev.rateLimitPerMin = updates.rateLimitPerMin;
     if (updates.encryptionMethod !== undefined) dev.encryptionMethod = updates.encryptionMethod;
-    if (updates.heartbeatTimeoutSeconds !== undefined) dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
+    if (updates.heartbeatTimeoutSeconds !== undefined) {
+      dev.heartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
+      dev.customHeartbeatTimeoutSeconds = updates.heartbeatTimeoutSeconds;
+    }
+    if (updates.customHeartbeatTimeoutSeconds !== undefined) dev.customHeartbeatTimeoutSeconds = updates.customHeartbeatTimeoutSeconds;
     if (updates.intervalMode !== undefined) dev.intervalMode = updates.intervalMode;
     if (updates.customIntervalSeconds !== undefined) dev.customIntervalSeconds = updates.customIntervalSeconds;
     if (updates.autoDetectedIntervalSeconds !== undefined) dev.autoDetectedIntervalSeconds = updates.autoDetectedIntervalSeconds;

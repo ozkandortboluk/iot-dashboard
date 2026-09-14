@@ -2827,6 +2827,16 @@ Body:
                 </div>
 
                 <div className="p-4 bg-white dark:bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
+                  <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold">
+                    <Radio className="w-4 h-4" />
+                    <span>Bağımsız Watchdog & Tolerans Eşiği</span>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400 leading-relaxed text-[11px]">
+                    Hızlı veri gönderen cihazlarda (örn: 5 sn) Wi-Fi dalgalanmalarından kaynaklı sahte çevrimdışı bildirimlerini önlemek için, Cihaz Düzenle penceresinden <b>Çevrimdışı (Timeout) Eşiği</b> değerini 60 sn (1 dk) olarak belirleyebilirsiniz. Sistem cihazın 5 sn gönderim sıklığını korur ancak yalnızca 60 sn sinyal kesilirse alarm üretir.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white dark:bg-[#0f172a] rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
                   <div className="flex items-center gap-2 text-cyan-600 dark:text-cyan-400 font-bold">
                     <Radio className="w-4 h-4" />
                     <span>Röle & Komut Tetikleme (Piggybacking)</span>

@@ -16,8 +16,8 @@ function createMockDevice(overrides: Partial<Device> = {}): Device {
     apiKey: 'test_key',
     rateLimitPerMin: 60,
     encryptionMethod: 'AES-256-GCM',
-    expectedIntervalSeconds: 30,
-    heartbeatTimeoutSeconds: 60,
+    expectedIntervalSeconds: overrides.expectedIntervalSeconds ?? 30,
+    heartbeatTimeoutSeconds: overrides.heartbeatTimeoutSeconds ?? ((overrides.expectedIntervalSeconds ?? 30) * 2),
     isSimulated: false,
     metrics: {},
     ...overrides,
@@ -128,6 +128,41 @@ describe('SmartIntervalService - Watchdog and Dynamic Frequency Engine', () => {
     expect(dev.intervalMode).toBe('manual');
     // Offline threshold should be 2 * 60 = 120s
     expect(dev.heartbeatTimeoutSeconds).toBe(120);
+  });
+
+  it('preserves user-configured heartbeatTimeoutSeconds (e.g. 60s) even when telemetry arrives rapidly every 5s', () => {
+    let now = 1700000000000;
+    const dev = createMockDevice({
+      id: 'test_dev_rapid_5s',
+      tenantId: 'tenant_1',
+      name: 'Rapid 5s Sensor With 60s Timeout',
+      status: 'online',
+      lastSeen: new Date(now).toISOString(),
+      expectedIntervalSeconds: 5,
+      heartbeatTimeoutSeconds: 60, // User explicitly set 1 minute timeout
+      intervalMode: 'auto',
+      recentIntervals: [],
+    });
+
+    // Device sends 5 packets every 5 seconds
+    for (let i = 0; i < 5; i++) {
+      now += 5000;
+      service.processDeviceTelemetryArrival(dev, now);
+    }
+
+    // Expected interval is around 5s
+    expect(dev.expectedIntervalSeconds).toBe(5);
+    // CRITICAL: heartbeatTimeoutSeconds must NOT collapse to 5*2=10s, it must stay at 60s!
+    expect(dev.heartbeatTimeoutSeconds).toBe(60);
+
+    // Watchdog evaluation at 15s after last packet: must STILL BE ONLINE (not offline!)
+    const watchdogResult15s = service.evaluateDeviceWatchdog(dev, now + 15000);
+    expect(watchdogResult15s.newStatus).toBe('online');
+    expect(watchdogResult15s.isConfirmedOffline).toBe(false);
+
+    // Watchdog evaluation at 65s after last packet: now becomes offline
+    const watchdogResult65s = service.evaluateDeviceWatchdog(dev, now + 65000);
+    expect(watchdogResult65s.newStatus).toBe('offline');
   });
 
   it('evaluates device watchdog to mark device offline after 2x interval has elapsed', () => {

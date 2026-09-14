@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.11] - 2026-09-14
+
+### 📌 Akıllı Watchdog Tolerans Süresi & Sahte Çevrimdışı Bildirimlerini Önleme (Kullanıcı Ayarı Entegrasyonu)
+- **Bağımsız Çevrimdışı (Watchdog Timeout) Eşiği Kullanıcı Arayüzü**:
+  - `DevicesView.tsx` cihaz ekleme ve düzenleme modal pencerelerine kullanıcı tarafından doğrudan girilebilen **Çevrimdışı (Timeout) Eşiği** input alanı ve hızlı şablon butonları (`30 sn`, `60 sn (1 Dk)`, `120 sn (2 Dk)`, `300 sn (5 Dk)`) eklendi.
+  - Hızlı veri gönderen cihazlar (örn: 5 saniyede bir telemetri atan ESP32) için sıklık değeri 5 sn olarak korunurken, çevrimdışı olma tolerans süresi 60 sn (1 dk) olarak bağımsız ayarlanabilir hale getirildi.
+- **Backend & Repository Katmanında Toleransın Kalıcı Hale Getirilmesi**:
+  - `device.repository.ts` içinde `updateDevice` fonksiyonu, kullanıcının belirlediği `customHeartbeatTimeoutSeconds` ve `heartbeatTimeoutSeconds` değerlerini kaydetmeye başladı.
+  - `smartInterval.service.ts` hesaplama algoritmasında kullanıcının belirlediği özel zaman aşımı değeri önceliklendirildi (`Math.max(autoTimeout, customTimeout)`).
+  - Böylece Wi-Fi sinyal dalgalanmaları veya anlık paket gecikmelerinde sistemin 10. saniyede hemen sahte "Çevrimdışı" alarmı vermesi tamamen önlendi.
+- **Yardım ve Bilgi Merkezi (Help & Knowledge Center) Güncellemesi**:
+  - `HelpView.tsx` Hızlı İpuçları bölümüne Akıllı Watchdog ve bağımsız tolerans eşiği çalışma prensibi eklendi.
+
+---
+
 ## 🚀 [v1.17.10] - 2026-09-14
 
 ### 📌 VPS ve Canlı Ortamda Silinen Test Kullanıcılarının Yeniden Oluşmasını Önleme & Veri Tabanı Senkronizasyon İyileştirmesi
