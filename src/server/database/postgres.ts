@@ -52,6 +52,27 @@ export function isTestOrEphemeralArtifact(id?: string): boolean {
   return prefixes.some((p) => id.startsWith(p));
 }
 
+export function isTestOrEphemeralUser(id?: string, email?: string, name?: string): boolean {
+  if (!id) return false;
+  if (id === 'usr_admin' || id === 'usr_test_admin') return false;
+  if (id.startsWith('usr_customer_') || id.startsWith('usr_cust_') || id.startsWith('usr_tmp_') || id.startsWith('usr_ephemeral_')) {
+    return true;
+  }
+  if (name === 'E2E User' || name === 'Integration Test User') {
+    return true;
+  }
+  if (email && (
+    email.startsWith('test_') ||
+    email.startsWith('integration_') ||
+    email.includes('@example.com') ||
+    email.includes('@test.com') ||
+    email.includes('customer_')
+  )) {
+    return true;
+  }
+  return false;
+}
+
 export class PostgresRepository {
   private pool: Pool | null = null;
   private isConnected = false;
@@ -1013,54 +1034,64 @@ export class PostgresRepository {
           END $$;
         `).catch((err: any) => console.warn('[PostgreSQL Deduplication Constraint Setup]', err?.message));
 
-        // 6. Seed Canonical Root Admin (usr_admin)
-        await client.query(`
-          INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-          VALUES (
-            'usr_admin', 
-            'Sistem Yöneticisi', 
-            'admin@nexusnode.io', 
-            '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 
-            'admin', 
-            'Merkez Yönetim', 
-            'active', 
-            CURRENT_TIMESTAMP
-          )
-          ON CONFLICT (id) DO NOTHING;
-        `).catch(() => {});
+        // 6. Check existing user count to avoid resurrecting deleted users or force-seeding
+        const userCountRes = await client.query('SELECT COUNT(*) FROM users');
+        const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
-        // 7. Seed Permanent Test Admin & Device (usr_test_admin)
-        await client.query(`
-          INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-          VALUES (
-            'usr_test_admin',
-            'Test Kullanıcısı',
-            'test@nexusnodeiot.com.tr',
-            '$2b$10$l6m4lLoiQaRgmgd1SlQy8.ofgjjxdXfTkaNKVoJayHYX1G6BSSPne',
-            'admin',
-            'Test Laboratuvarı',
-            'active',
-            CURRENT_TIMESTAMP
-          )
-          ON CONFLICT (id) DO NOTHING;
-        `).catch(() => {});
+        if (totalUsers === 0) {
+          // Only seed initial root admin on a brand new, completely empty database
+          await client.query(`
+            INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+            VALUES (
+              'usr_admin', 
+              'Sistem Yöneticisi', 
+              'admin@nexusnode.io', 
+              '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 
+              'admin', 
+              'Merkez Yönetim', 
+              'active', 
+              CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (id) DO NOTHING;
+          `).catch(() => {});
+        }
 
-        await client.query(`
-          INSERT INTO devices (id, name, type, api_key, status, location, is_simulated, tenant_id, user_id, created_at)
-          VALUES (
-            'dev_test_01',
-            'Test Simülasyon Cihazı',
-            'sensor',
-            'dev_key_test_0000000000000000',
-            'online',
-            'Sanal Test Odası',
-            true,
-            'usr_test_admin',
-            'usr_test_admin',
-            CURRENT_TIMESTAMP
-          )
-          ON CONFLICT (id) DO NOTHING;
-        `).catch(() => {});
+        // 7. Seed Canonical Test Admin & Device ONLY in test environment or if explicitly requested
+        // Never resurrect in production if the user deliberately removed it!
+        const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+        if (isTestEnv) {
+          await client.query(`
+            INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+            VALUES (
+              'usr_test_admin',
+              'Test Kullanıcısı',
+              'test@nexusnodeiot.com.tr',
+              '$2b$10$l6m4lLoiQaRgmgd1SlQy8.ofgjjxdXfTkaNKVoJayHYX1G6BSSPne',
+              'admin',
+              'Test Laboratuvarı',
+              'active',
+              CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (id) DO NOTHING;
+          `).catch(() => {});
+
+          await client.query(`
+            INSERT INTO devices (id, name, type, api_key, status, location, is_simulated, tenant_id, user_id, created_at)
+            VALUES (
+              'dev_test_01',
+              'Test Simülasyon Cihazı',
+              'sensor',
+              'dev_key_test_0000000000000000',
+              'online',
+              'Sanal Test Odası',
+              true,
+              'usr_test_admin',
+              'usr_test_admin',
+              CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (id) DO NOTHING;
+          `).catch(() => {});
+        }
 
         const contractValid = await this.verifySchemaContract(client);
         this.isSchemaEnsured = contractValid;
@@ -1247,7 +1278,7 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
-    if (user.id !== 'usr_test_admin' && (user.id.startsWith('usr_customer_') || user.id.startsWith('usr_cust_') || user.email?.includes('customer_') || user.email?.includes('@example.com'))) {
+    if (isTestOrEphemeralUser(user.id, user.email, user.name)) {
       return; // Do not persist ephemeral test users to PostgreSQL
     }
     const sql = `

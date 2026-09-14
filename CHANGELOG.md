@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.10] - 2026-09-14
+
+### 📌 VPS ve Canlı Ortamda Silinen Test Kullanıcılarının Yeniden Oluşmasını Önleme & Veri Tabanı Senkronizasyon İyileştirmesi
+- **Kök Neden Çözümü (PostgreSQL Hydration & Re-seeding İzolasyonu)**:
+  - VPS sunucusunda veritabanından silinen test kullanıcılarının sunucu veya Docker konteyneri yeniden başlatıldığında tekrar oluşmasının nedeni tespit edildi:
+    1. Eski `data/db.json` dosyasında kalan 80'den fazla geçmiş test kullanıcısı, sunucu başlatılırken PostgreSQL'de "eksik" kullanıcı olarak algılanıp `initPostgresRepository` hydration döngüsü tarafından otomatik olarak PostgreSQL'e yeniden ekleniyordu (`saveUser`).
+    2. `postgres.ts` içindeki `ensureTelemetrySchema` fonksiyonu, her bağlantıda `ON CONFLICT (id) DO NOTHING` ile `usr_test_admin` ve `dev_test_01` kayıtlarını veritabanına yeniden yazıyordu.
+- **PostgreSQL Tek Yetkili Veri Kaynağı (Source of Truth) Yapıldı**:
+  - `src/server/db.ts` içindeki `initPostgresRepository` fonksiyonunda, PostgreSQL'de kullanıcı (`hydrated.users.length > 0`) veya cihaz (`hydrated.devices.length > 0`) mevcut olduğunda, diskteki JSON dosyasından eksik kullanıcıların veritabanına geri eklenmesi engellendi. Veritabanından silinen hiçbir kullanıcı artık geri getirilmez.
+- **Test ve Geçici Kullanıcı Filtresi (`isTestOrEphemeralUser`)**:
+  - `src/server/database/postgres.ts` içerisine `isTestOrEphemeralUser` fonksiyonu eklendi. Test kullanıcıları (`E2E User`, `Integration Test User`, `test_`, `integration_`, vb.) doğrudan filtrelenerek PostgreSQL'e kaydedilmesi engellendi.
+- **Üretim Ortamında Otomatik Test Hesabı Eklenmesi Sınırlandırıldı**:
+  - `usr_test_admin` ve `dev_test_01` kayıtlarının PostgreSQL'e otomatik eklenmesi yalnızca test ortamlarında (`NODE_ENV=test`, `VITEST`) veya açıkça `.env` üzerinden `ENABLE_TEST_ACCOUNT=true` tanımlandığında çalışacak şekilde sınırlandırıldı.
+- **`data/db.json` Temizlendi ve Güvenceye Alındı**:
+  - `data/db.json` içerisindeki tüm yetkisiz/geçici test kullanıcıları, eski test cihazları ve yetim dashboard kayıtları temizlendi; sadece ana sistem yöneticisi ve kanonik test kullanıcısı korundu.
+
+---
+
 ## 🚀 [v1.17.9] - 2026-09-14
 
 ### 📌 E2E ve Güvenlik Test Suite Hatalarının Düzeltilmesi & Test Stabilizasyonu

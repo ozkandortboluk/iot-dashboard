@@ -65,7 +65,7 @@ import type {
   OtaDeploymentJob,
 } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
-import { PostgresRepository, isTestOrEphemeralArtifact } from './database/postgres.js';
+import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser } from './database/postgres.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
@@ -391,24 +391,19 @@ class LocalDatabase {
           // Filter out any ephemeral test artifacts from hydrated data
           hydrated.devices = hydrated.devices.filter((d: any) => !isTestOrEphemeralArtifact(d.id));
           hydrated.rules = hydrated.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
-          hydrated.users = hydrated.users.filter((u: any) =>
-            u.id === 'usr_test_admin' ||
-            u.id === 'usr_admin' ||
-            (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_') && !u.email?.includes('customer_') && !u.email?.includes('@example.com'))
-          );
+          hydrated.users = hydrated.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
 
           if (hydrated.users.length > 0) {
-            const existingUserIds = new Set(hydrated.users.map(u => u.id));
-            const missingUsers = this.data.users.filter(u => !existingUserIds.has(u.id) && (u.id === 'usr_test_admin' || u.id === 'usr_admin' || (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_'))));
-            this.data.users = [...hydrated.users, ...missingUsers];
+            // PostgreSQL IS THE SINGLE SOURCE OF TRUTH.
+            // Do NOT re-insert missing users from db.json into PostgreSQL!
+            // Doing so would resurrect users that the admin intentionally deleted.
+            this.data.users = hydrated.users;
             this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
-            for (const u of missingUsers) {
-              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
-                systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
-              });
-            }
           } else {
+            // PostgreSQL is completely empty. Only seed legitimate non-ephemeral users.
             for (const u of this.data.users) {
+              if (isTestOrEphemeralUser(u.id, u.email, u.name)) continue;
+              if (u.id === 'usr_test_admin' && process.env.NODE_ENV === 'production' && process.env.ENABLE_TEST_ACCOUNT !== 'true') continue;
               await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
                 systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
               });
@@ -416,17 +411,14 @@ class LocalDatabase {
           }
 
           if (hydrated.devices.length > 0) {
-            const existingDeviceIds = new Set(hydrated.devices.map(d => d.id));
-            const missingDevices = this.data.devices.filter(d => !existingDeviceIds.has(d.id) && !isTestOrEphemeralArtifact(d.id));
-            this.data.devices = [...hydrated.devices, ...missingDevices];
-            for (const d of missingDevices) {
-              await this.postgresRepo.saveDevice(d).catch((err: any) => {
-                systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
-              });
-            }
+            // PostgreSQL IS THE SINGLE SOURCE OF TRUTH for devices.
+            // Do NOT re-insert missing devices from db.json into PostgreSQL!
+            this.data.devices = hydrated.devices;
           } else {
+            // PostgreSQL has 0 devices. Only seed legitimate non-ephemeral devices.
             for (const d of this.data.devices) {
               if (isTestOrEphemeralArtifact(d.id)) continue;
+              if (d.id === 'dev_test_01' && process.env.NODE_ENV === 'production' && process.env.ENABLE_TEST_ACCOUNT !== 'true') continue;
               await this.postgresRepo.saveDevice(d).catch((err: any) => {
                 systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
               });
@@ -699,11 +691,7 @@ class LocalDatabase {
           parsed.rules = parsed.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
         }
         if (parsed.users && Array.isArray(parsed.users)) {
-          parsed.users = parsed.users.filter((u: any) =>
-            u.id === 'usr_test_admin' ||
-            u.id === 'usr_admin' ||
-            (!u.id.startsWith('usr_customer_') && !u.id.startsWith('usr_cust_') && !u.email?.includes('customer_') && !u.email?.includes('@example.com'))
-          );
+          parsed.users = parsed.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
         }
       } catch (err) {
         console.error('Error reading db.json, re-initializing empty database:', err);
@@ -711,55 +699,59 @@ class LocalDatabase {
       }
     }
 
-    // Add persistent test admin user if it doesn't exist
-    const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin');
-    if (!testAdmin) {
-      const testAdminId = 'usr_test_admin';
-      parsed.users.push({
-        id: testAdminId,
-        name: 'Test Kullanıcısı',
-        email: 'test@nexusnodeiot.com.tr',
-        phone: '+905550000000',
-        notificationEmail: 'test@nexusnodeiot.com.tr',
-        whatsappNumber: '+905550000000',
-        role: 'admin',
-        companyName: 'Test Laboratuvarı',
-        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-        created_at: new Date().toISOString(),
-      });
-      parsed.passwords[testAdminId] = hashPassword('test1234');
-      parsed.dashboards.push({
-        id: `dash_${testAdminId}`,
-        tenantId: testAdminId,
-        title: `Test Laboratuvarı Özel Dashboard`,
-        widgets: [...defaultWidgets],
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      testAdmin.email = 'test@nexusnodeiot.com.tr';
-      if (!parsed.passwords['usr_test_admin'] || !verifyPassword('test1234', parsed.passwords['usr_test_admin'])) {
-        parsed.passwords['usr_test_admin'] = hashPassword('test1234');
-      }
-    }
+    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
 
-    // Add persistent test device if it doesn't exist
-    const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
-    if (!hasTestDevice) {
-      parsed.devices.push({
-        id: 'dev_test_01',
-        tenantId: 'usr_test_admin',
-        name: 'Test Simülasyon Cihazı',
-        type: 'sensor',
-        apiKey: 'dev_key_test_0000000000000000',
-        status: 'online',
-        location: 'Sanal Test Odası',
-        ipAddress: '127.0.0.1',
-        lastSeen: new Date().toISOString(),
-        rateLimitPerMin: 100,
-        encryptionMethod: 'AES-256-GCM',
-        isSimulated: true,
-        metrics: { temperature: 24.5, humidity: 55.0 }
-      });
+    // In test environment or when explicitly enabled, ensure persistent test admin user exists
+    if (isTestEnv) {
+      const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin');
+      if (!testAdmin) {
+        const testAdminId = 'usr_test_admin';
+        parsed.users.push({
+          id: testAdminId,
+          name: 'Test Kullanıcısı',
+          email: 'test@nexusnodeiot.com.tr',
+          phone: '+905550000000',
+          notificationEmail: 'test@nexusnodeiot.com.tr',
+          whatsappNumber: '+905550000000',
+          role: 'admin',
+          companyName: 'Test Laboratuvarı',
+          notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+          created_at: new Date().toISOString(),
+        });
+        parsed.passwords[testAdminId] = hashPassword('test1234');
+        parsed.dashboards.push({
+          id: `dash_${testAdminId}`,
+          tenantId: testAdminId,
+          title: `Test Laboratuvarı Özel Dashboard`,
+          widgets: [...defaultWidgets],
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        testAdmin.email = 'test@nexusnodeiot.com.tr';
+        if (!parsed.passwords['usr_test_admin'] || !verifyPassword('test1234', parsed.passwords['usr_test_admin'])) {
+          parsed.passwords['usr_test_admin'] = hashPassword('test1234');
+        }
+      }
+
+      // Add persistent test device if it doesn't exist
+      const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
+      if (!hasTestDevice) {
+        parsed.devices.push({
+          id: 'dev_test_01',
+          tenantId: 'usr_test_admin',
+          name: 'Test Simülasyon Cihazı',
+          type: 'sensor',
+          apiKey: 'dev_key_test_0000000000000000',
+          status: 'online',
+          location: 'Sanal Test Odası',
+          ipAddress: '127.0.0.1',
+          lastSeen: new Date().toISOString(),
+          rateLimitPerMin: 100,
+          encryptionMethod: 'AES-256-GCM',
+          isSimulated: true,
+          metrics: { temperature: 24.5, humidity: 55.0 }
+        });
+      }
     }
 
     // Check if there are any admin users
