@@ -4,6 +4,18 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.12] - 2026-09-14
+
+### 📌 PostgreSQL Threshold Rules Yabancı Anahtar (FK) İzolasyonu & Otomatik Onarım İyileştirmesi
+- **Threshold Rules Tablosu İçin Foreign Key Kısıtlarının İzolasyonu**:
+  - `threshold_rules` tablosunda `user_id` ve `device_id` yabancı anahtar kısıtları (`threshold_rules_user_id_fkey`) kaldırılarak çok kiracılı (multi-tenant) mimari ve bağımsız cihaz/kural yaşam döngüsü güvenceye alındı.
+  - PostgreSQL şema başlangıç temizliği, şema tanımları (`schema.ts`) ve dinamik sorgu hata yakalama bloklarına (`isThresholdRulesFkError`) otomatik kısıt kaldırma ve indeksleme mantığı eklendi.
+  - Hydration sırasında silinmiş kullanıcılar veya genel kuralların (`deviceId: 'all'`) sebep olduğu `insert or update on table "threshold_rules" violates foreign key constraint` hataları tamamen giderildi.
+- **PostgreSQL Bağlantı Havuzu (Connection Pool) İzleme Dengelemesi**:
+  - `databaseAutoHealer.service.ts` havuz doygunluk uyarı eşiği anlık trafik sıçramalarında sahte degraded alarmlarını önleyecek şekilde optimize edildi.
+
+---
+
 ## 🚀 [v1.17.11] - 2026-09-14
 
 ### 📌 Akıllı Watchdog Tolerans Süresi & Sahte Çevrimdışı Bildirimlerini Önleme (Kullanıcı Ayarı Entegrasyonu)

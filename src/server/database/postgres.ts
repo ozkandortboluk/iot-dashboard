@@ -1000,6 +1000,11 @@ export class PostgresRepository {
           ALTER TABLE dashboard_layouts DROP CONSTRAINT IF EXISTS dashboard_layouts_user_id_fkey;
           ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
           ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_key;
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_tenant_id;
@@ -1011,8 +1016,12 @@ export class PostgresRepository {
           CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
           CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id ON notifications (tenant_id);
           CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_threshold_rules_user_id ON threshold_rules (user_id);
+          CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);
           CREATE INDEX IF NOT EXISTS idx_dispatch_logs_tenant_id ON dispatch_logs (tenant_id);
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
+          UPDATE threshold_rules SET tenant_id = user_id WHERE (tenant_id IS NULL OR tenant_id = '') AND user_id IS NOT NULL;
           UPDATE dispatch_logs SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
         `).catch(() => {});
 
@@ -1246,6 +1255,35 @@ export class PostgresRepository {
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL OTA Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
+      const isThresholdRulesFkError =
+        (err?.code === '23503' || errMsg.includes('foreign key constraint')) &&
+        (errMsg.includes('threshold_rules_user_id_fkey') ||
+         errMsg.includes('threshold_rules_device_id_fkey') ||
+         errMsg.includes('fk_threshold_rules_user_id') ||
+         errMsg.includes('fk_threshold_rules_device_id') ||
+         errMsg.includes('fk_threshold_rules_tenant_id') ||
+         (errMsg.includes('table "threshold_rules"') && (errMsg.includes('user_id') || errMsg.includes('device_id') || errMsg.includes('foreign key'))));
+
+      if (isThresholdRulesFkError && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: threshold_rules yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak indeks oluşturuluyor ve sorgu tekrarlanıyor...`);
+          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;`);
+          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;`);
+          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;`);
+          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;`);
+          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_user_id ON threshold_rules (user_id);`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);`);
+          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);`);
+          return await this.pool.query(text, params);
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL threshold_rules Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
         } finally {
           this.isRecoveringSchema = false;
         }
@@ -2171,7 +2209,7 @@ export class PostgresRepository {
     `;
     const params = [
       rule.id,
-      rule.tenantId || null,
+      rule.tenantId || (rule as any).userId || null,
       rule.userName || null,
       rule.deviceId || 'all',
       rule.metricKey,
@@ -2196,6 +2234,14 @@ export class PostgresRepository {
     } catch (err: any) {
       if (err?.message?.includes('column') || err?.message?.includes('does not exist')) {
         await this.ensureTelemetrySchema(true);
+        await this.query(sql, params);
+      } else if (err?.code === '23503' || err?.message?.includes('foreign key')) {
+        await this.pool?.query(`
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
+        `).catch(() => {});
         await this.query(sql, params);
       } else {
         throw err;

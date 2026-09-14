@@ -504,7 +504,7 @@ CREATE TABLE IF NOT EXISTS active_alarms (
 
 CREATE TABLE IF NOT EXISTS dashboard_layouts (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(64),
     title VARCHAR(128) NOT NULL,
     widgets_json JSONB NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -512,7 +512,8 @@ CREATE TABLE IF NOT EXISTS dashboard_layouts (
 
 CREATE TABLE IF NOT EXISTS threshold_rules (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(64),
+    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
     user_name VARCHAR(128),
     device_id VARCHAR(64) DEFAULT 'all',
     metric_key VARCHAR(64) NOT NULL,
@@ -534,7 +535,8 @@ CREATE TABLE IF NOT EXISTS threshold_rules (
 
 CREATE TABLE IF NOT EXISTS notifications (
     id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(64),
+    tenant_id VARCHAR(64) DEFAULT 'usr_admin',
     title VARCHAR(256) NOT NULL,
     message TEXT NOT NULL,
     severity VARCHAR(32) DEFAULT 'info',
@@ -637,8 +639,19 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
 
+-- Safe Constraint Drops to Prevent Multi-Tenant Foreign Key Blockages
+ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
+ALTER TABLE dashboard_layouts DROP CONSTRAINT IF EXISTS dashboard_layouts_user_id_fkey;
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
+ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
+ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
+ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
+ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
+ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
+
 -- Safe Column Migrations for Existing Tables
 ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
 ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);
 ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS device_id VARCHAR(64) DEFAULT 'all';
 ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS hysteresis DOUBLE PRECISION DEFAULT 1.0;

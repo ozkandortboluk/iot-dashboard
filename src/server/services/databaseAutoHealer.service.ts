@@ -220,7 +220,7 @@ export class DatabaseAutoHealer {
       }
 
       // 1. Check pool saturation
-      if (poolStats.waitingCount > 5) {
+      if (poolStats.waitingCount > 15) {
         status = 'degraded';
         this.recordHealingEvent(`Havuz bekleme kuyruğu yüksek (${poolStats.waitingCount}). Kilitli sorgular taranıyor...`);
         systemLogger.warn('auto_repair', `PostgreSQL havuzunda bekleyen istemci sayısı yüksek: ${poolStats.waitingCount}`);
