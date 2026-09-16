@@ -4,49 +4,6 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
-## 🚀 [v1.17.15] - 2026-09-16
-
-### 📌 İlk Kurulum (Setup) Modunun Kilitlenmesi & Admin Sıfırlama Onarımı
-- **Otomatik Sahte Yönetici Tohumlamasının Kaldırılması**:
-  - `schema.ts`, `004_multitenant_columns.ts`, `postgres.ts` ve `timescaledb.sql` dosyalarında boş veritabanı açılışında bilinmeyen/kullanılamayan bir parola hash'i ile (`$2a$10$B50m1l26vD8LhJqZ8XyqA...`) `usr_admin` / `admin@nexusnode.io` kaydı tohumlanması tamamen engellendi.
-  - Boş veya temiz veritabanlarında ilk kurulum sihirbazının (`/api/auth/setup`) doğrudan tetiklenebilmesi için `users` tablosu tertemiz bırakıldı.
-  - `checkIfAdminExists()` fonksiyonuna sahte şablon hash filtresi eklenerek mevcut eski veritabanlarındaki dummy kayıtların kurulum sihirbazını bloke etmesi önlendi.
-- **Sistemi İlk Kurulum Moduna Sıfırlama Uç Noktası (`/api/auth/reset-to-setup`)**:
-  - Parolası unutulan veya yönetici hesabı kilitlenen sistemlerde operatörün veya yetkili kullanıcının sistemi ilk kuruluma döndürebilmesi için `POST /api/auth/reset-to-setup` API uç noktası eklendi.
-  - Uç nokta hem PostgreSQL üzerindeki kullanıcı ve oturum kayıtlarını hem de bellek/RAM önbelleğini arındırarak sistemin anında `needSetup: true` moduna dönmesini sağlar.
-- **Kullanıcı Arayüzü İlk Kuruluma Sıfırlama Desteği (`LoginView.tsx`)**:
-  - Kurulum sekmesinde kayıtlı bir yönetici bulunduğu tespit edildiğinde yöneticiye bilgilendirici uyarı ve onay mekanizmalı **"Sistemi İlk Kurulum Moduna Sıfırla"** butonu entegre edildi.
-
----
-
-## 🚀 [v1.17.14] - 2026-09-16
-
-### 📌 PostgreSQL Bağlantısında İlk Kurulum (Setup) Sihirbazına Otomatik Geçiş Onarımı
-- **Yetkili PostgreSQL Admin Kontrolü & Bellek Arındırma (`purgeOrphanAdminsFromMemory`)**:
-  - PostgreSQL veritabanına bağlanıldığında ancak veritabanında hiç yönetici hesabı bulunmadığında sistemin doğrudan ilk kurulum sihirbazına (`authMode: 'setup'`) geçmesi güvence altına alındı.
-  - PostgreSQL boş olduğunda RAM önbelleğindeki eski/artık yönetici kayıtlarının (`this.data.users`) sorgu ve denetimleri yanıltması engellendi; yetkili veritabanı boşken RAM önbelleği temizlenerek tek doğruluk kaynağının PostgreSQL olması sağlandı.
-  - `/api/auth/setup-status` ve `/api/auth/setup` uç noktalarında PostgreSQL doğrudan sorgulanarak (`db.postgresRepo.checkIfAdminExists()`) gerçek yönetici mevcudiyeti garanti edildi.
-- **Kullanıcı Arayüzü İlk Kurulum Denetimi & Esnek Geçişler (`LoginView.tsx`)**:
-  - Giriş ekranına anlık durum sorgulama (`isCheckingSetup`), otomatik kurulum moduna yönlendirme ve tek tıkla kurulum durumunu yenileme (`RefreshCw`) butonu eklendi.
-  - Veritabanına bağlı ancak yöneticisi olmayan durumlar için belirgin ve yönlendirici uyarı kutusu yerleştirildi.
-  - Form altında ve tab butonlarında, kullanıcının dilediği an ilk kurulum sihirbazı ile mevcut giriş modu arasında geçiş yapabilmesini sağlayan dinamik kısayol bağlantıları entegre edildi.
-  - `AuthContext.tsx` içerisindeki `checkSetupStatus` metoduna `no-cache` ve `no-store` başlıkları eklenerek tarayıcı önbelleğinden kaynaklı bayat kurulum yanıtları engellendi.
-
----
-
-## 🚀 [v1.17.13] - 2026-09-16
-
-### 📌 Docker Compose & PostgreSQL Ortam Değişkenleri Yapılandırması
-- **Docker Compose PostgreSQL / TimescaleDB Varsayılan Kimlik Bilgileri Güncellemesi**:
-  - `docker-compose.yml` dosyasında TimescaleDB servisi için varsayılan ortam değişkenleri kullanıcı isteğine uygun olarak güncellendi:
-    - `POSTGRES_USER`: `iot_user`
-    - `POSTGRES_PASSWORD`: `kastamonuaraccalalibeyli.37`
-    - `POSTGRES_DB`: `iot_dashboard`
-  - TimescaleDB `healthcheck` komutu (`pg_isready`) ve uygulama servisi (`app`) `DATABASE_URL` bağlantı dizesi yeni varsayılan kimlik bilgileriyle tam uyumlu hale getirildi.
-  - `.env.example` dosyasındaki `DATABASE_URL` şablonu yeni varsayılan veritabanı adı ve kullanıcı bilgileriyle senkronize edildi.
-
----
-
 ## 🚀 [v1.17.12] - 2026-09-14
 
 ### 📌 PostgreSQL Threshold Rules Yabancı Anahtar (FK) İzolasyonu & Otomatik Onarım İyileştirmesi

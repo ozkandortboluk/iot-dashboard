@@ -400,20 +400,13 @@ class LocalDatabase {
             this.data.users = hydrated.users;
             this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
           } else {
-            // PostgreSQL is completely empty (0 users).
-            // In production without test flags, do NOT auto-seed orphan RAM users so setup onboarding can trigger cleanly.
-            const isTestMode = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-            if (isTestMode) {
-              for (const u of this.data.users) {
-                if (isTestOrEphemeralUser(u.id, u.email, u.name)) continue;
-                await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
-                  systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
-                });
-              }
-            } else {
-              // PostgreSQL is fresh & authoritative. Clear in-memory users so setup wizard accurately detects missing admin.
-              this.data.users = [];
-              this.data.passwords = {};
+            // PostgreSQL is completely empty. Only seed legitimate non-ephemeral users.
+            for (const u of this.data.users) {
+              if (isTestOrEphemeralUser(u.id, u.email, u.name)) continue;
+              if (u.id === 'usr_test_admin' && process.env.NODE_ENV === 'production' && process.env.ENABLE_TEST_ACCOUNT !== 'true') continue;
+              await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
+                systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
+              });
             }
           }
 
@@ -622,30 +615,6 @@ class LocalDatabase {
 
   public isPostgresProductionMode(): boolean {
     return !!this.postgresRepo?.isReady();
-  }
-
-  public isPostgresConnected(): boolean {
-    return !!this.postgresRepo?.isReady() || !!this.postgresRepo?.getPool();
-  }
-
-  public async checkIfAdminExists(): Promise<boolean> {
-    const isPgConnected = this.isPostgresConnected();
-    if (isPgConnected && this.postgresRepo) {
-      try {
-        return await this.postgresRepo.checkIfAdminExists();
-      } catch (err) {
-        console.warn('[DB checkIfAdminExists PG Error]:', err);
-      }
-    }
-    const users = this.getUsers();
-    return users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
-  }
-
-  public purgeOrphanAdminsFromMemory(): void {
-    const isPgConnected = this.isPostgresConnected();
-    if (isPgConnected) {
-      this.data.users = (this.data.users || []).filter(u => u.role !== 'admin');
-    }
   }
 
   private ensureDirectory() {
