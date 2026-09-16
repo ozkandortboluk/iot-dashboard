@@ -619,7 +619,7 @@ export class PostgresRepository {
               min_breach_duration_sec INT DEFAULT 0,
               repeat_interval_sec INT DEFAULT 0,
               notification_channels JSONB DEFAULT '["app"]'::jsonb,
-              active_hours JSONB,
+              active_hours VARCHAR(64) DEFAULT '00:00-23:59',
               recipients JSONB,
               silenced_until TIMESTAMP WITH TIME ZONE,
               created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -957,7 +957,7 @@ export class PostgresRepository {
           { table: 'threshold_rules', column: 'min_breach_duration_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;` },
           { table: 'threshold_rules', column: 'repeat_interval_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;` },
           { table: 'threshold_rules', column: 'notification_channels', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS notification_channels JSONB DEFAULT '["app"]'::jsonb;` },
-          { table: 'threshold_rules', column: 'active_hours', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;` },
+          { table: 'threshold_rules', column: 'active_hours', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours VARCHAR(64) DEFAULT '00:00-23:59';` },
           { table: 'threshold_rules', column: 'recipients', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;` },
           { table: 'threshold_rules', column: 'silenced_until', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;` },
           { table: 'threshold_rules', column: 'message_template', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS message_template TEXT;` },
@@ -2617,13 +2617,14 @@ export class PostgresRepository {
 
     const sql = `
       INSERT INTO threshold_rules (
-        id, user_id, user_name, device_id, metric_key, operator, threshold_value,
+        id, user_id, tenant_id, user_name, device_id, metric_key, operator, threshold_value,
         severity, enabled, message_template, hysteresis, min_breach_duration_sec,
         repeat_interval_sec, notification_channels, active_hours, recipients, silenced_until,
         created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
+        tenant_id = EXCLUDED.tenant_id,
         user_name = EXCLUDED.user_name,
         device_id = EXCLUDED.device_id,
         metric_key = EXCLUDED.metric_key,
@@ -2641,9 +2642,20 @@ export class PostgresRepository {
         silenced_until = EXCLUDED.silenced_until,
         updated_at = CURRENT_TIMESTAMP;
     `;
+    let activeHoursVal = '00:00-23:59';
+    if (typeof rule.activeHours === 'string' && rule.activeHours.trim()) {
+      activeHoursVal = rule.activeHours.trim();
+    } else if (rule.activeHours && typeof rule.activeHours === 'object' && (rule.activeHours as any).start) {
+      activeHoursVal = `${(rule.activeHours as any).start}-${(rule.activeHours as any).end || '23:59'}`;
+    }
+
+    const effectiveUserId = (rule as any).userId || rule.tenantId || null;
+    const effectiveTenantId = rule.tenantId || (rule as any).userId || 'default';
+
     const params = [
       rule.id,
-      rule.tenantId || (rule as any).userId || null,
+      effectiveUserId,
+      effectiveTenantId,
       rule.userName || null,
       rule.deviceId || 'all',
       rule.metricKey,
@@ -2656,7 +2668,7 @@ export class PostgresRepository {
       rule.minBreachDurationSeconds || 10,
       rule.repeatIntervalSeconds || 300,
       JSON.stringify(rule.notificationChannels || ['app']),
-      rule.activeHours || '00:00-23:59',
+      activeHoursVal,
       JSON.stringify(rule.recipients || []),
       rule.disabledUntil || null,
       new Date().toISOString(),
@@ -2675,6 +2687,16 @@ export class PostgresRepository {
           ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
           ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
           ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
+        `).catch(() => {});
+        await this.query(sql, params);
+      } else if (err?.message?.includes('invalid input syntax for type json') || err?.message?.includes('active_hours')) {
+        await this.pool?.query(`
+          ALTER TABLE threshold_rules ALTER COLUMN active_hours TYPE VARCHAR(64) USING (
+            CASE 
+              WHEN active_hours IS NULL THEN '00:00-23:59'
+              ELSE active_hours::text
+            END
+          );
         `).catch(() => {});
         await this.query(sql, params);
       } else {

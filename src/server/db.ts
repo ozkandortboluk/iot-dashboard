@@ -377,7 +377,7 @@ class LocalDatabase {
         client.release();
       }
 
-      this.postgresRepo.setConnected(true);
+      this.postgresRepo.setConnected(true, true);
       if (!this.data.databaseSettings) {
         this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
       }
@@ -509,7 +509,7 @@ class LocalDatabase {
 
       // 2. Synchronous Schema & DDL Verification (ensures schema migration before readiness)
       try {
-        await this.postgresRepo.ensureTelemetrySchema();
+        await this.postgresRepo.ensureTelemetrySchema(true);
       } catch (tErr: any) {
         systemLogger.warn('database', 'PostgreSQL Telemetri Şema Kurulum Uyarısı:', tErr?.message || tErr);
       }
@@ -531,7 +531,7 @@ class LocalDatabase {
       return { success: false, message: 'PostgreSQL bağlantısı bulunamadı veya DATABASE_URL tanımlı değil.' };
     }
     this.postgresRepo.setPool(pool);
-    this.postgresRepo.setConnected(true);
+    this.postgresRepo.setConnected(true, true);
     try {
       const res = await this.postgresRepo.syncAllToPostgres(this.data);
       return {
@@ -2350,7 +2350,7 @@ class LocalDatabase {
         }
       } catch (err: any) {
         // Fallback to in-memory computation
-        this.postgresRepo.setConnected(false);
+        console.warn('[PostgreSQL queryTimeBucketTelemetry Notice]:', err?.message || err);
       }
     }
     return this.queryTimeBucketTelemetry(params as any);
@@ -2872,7 +2872,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
           await pool.query(`UPDATE "${safeTableName}" SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, recordId]);
         }
       } catch (err: any) {
-        this.postgresRepo.setConnected(false);
+        console.warn('[PostgreSQL updateTableRecord Error]:', err?.message || err);
       }
     }
 
@@ -2910,7 +2910,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       try {
         await pool.query(`DELETE FROM "${safeTableName}" WHERE id = $1`, [recordId]);
       } catch (err: any) {
-        this.postgresRepo.setConnected(false);
+        console.warn('[PostgreSQL deleteTableRecord Error]:', err?.message || err);
       }
     }
 
@@ -2956,7 +2956,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
 
         await pool.query(`INSERT INTO "${safeTableName}" (${colNames}) VALUES (${paramPlaceholders})`, values);
       } catch (err: any) {
-        this.postgresRepo.setConnected(false);
+        console.warn('[PostgreSQL insertTableRecord Error]:', err?.message || err);
       }
     }
 

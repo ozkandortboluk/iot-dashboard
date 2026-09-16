@@ -526,7 +526,7 @@ export class DatabaseAutoHealer {
       }
 
       // Ensure repo state matches reality
-      this.dbInstance.postgresRepo.setConnected(true);
+      this.dbInstance.postgresRepo.setConnected(true, true);
       if (this.dbInstance.data.databaseSettings) {
         this.dbInstance.data.databaseSettings.isPostgresConnected = true;
         this.dbInstance.data.databaseSettings.lastTestedAt = now;

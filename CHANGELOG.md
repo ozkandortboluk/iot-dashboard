@@ -4,6 +4,32 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.21] - 2026-09-16
+
+### 📌 PostgreSQL Bağlantı Sağlığı, Hazırlık (Readiness) ve AutoHealer İyileştirmesi
+- **PostgreSQL Hazırlık & Bağlantı Bayrağı Güçlendirmesi (`src/server/db.ts`, `src/server/database/postgres.ts`)**:
+  - `initPostgresRepository` ve `DatabaseAutoHealer` süreçlerinde bağlantı kurulduğunda `isSchemaEnsured` ve `isConnected` bayrakları atomik olarak `true` işaretlenerek `/api/health` ve `/health/ready` uç noktalarının 503 / degraded kalması engellendi.
+  - CRUD ve tekil kayıt işleme operasyonlarında (`updateTableRecord`, `deleteTableRecord`, `insertTableRecord`, `queryTimeBucketTelemetry`) yakalanan SQL hatalarının tüm veritabanı havuzunu `setConnected(false)` durumuna düşürmesi engellendi; sadece loglama ve bellek yedekleme devreye alındı.
+- **Sunucu Başlatma Zaman Aşımı (Startup Grace Period)**:
+  - `server.ts` içerisindeki soğuk başlatma bekleme süresi 15 saniyeye çıkarılarak PostgreSQL şema doğrulamasının ve migrasyon kontrollerinin HTTP trafiği başlamadan önce tamamlanması sağlandı.
+- **Kanonik Test Hesabı Doğrulaması**:
+  - `usr_test_admin` ve `dev_test_01` ile tüm sistem metrikleri, API ve veritabanı sağlık uç noktaları (`/api/health`) 200 OK ve `connected` olarak doğrulandı.
+
+---
+
+## 🚀 [v1.17.20] - 2026-09-16
+
+### 📌 Eşik & Alarm Kuralları PostgreSQL Şema ve JSON Dönüşüm İyileştirmesi
+- **`active_hours` ve `tenant_id` Kolon Uyumsuzluklarının Giderilmesi (`011_fix_threshold_rules_active_hours_json_syntax.ts`)**:
+  - `threshold_rules` tablosundaki `active_hours` kolonu `VARCHAR(64)` tipine dönüştürüldü; `saveRule` metodunda JSON ayrıştırma ve saat aralığı string formatları (`00:00-23:59` vb.) normalize edildi.
+  - `tenant_id` kolonu `DROP NOT NULL` yapılarak çok kiracılı ve kullanıcı bazlı kuralların eksiksiz `INSERT/UPDATE` ile PostgreSQL'e hidrate edilmesi sağlandı.
+- **Otomatik Onarım & Dayanıklılık Mekanizması**:
+  - `PostgresRepository.saveRule` fonksiyonuna olası JSON tip hatalarını dinamik olarak algılayıp şemayı onaran ve sorguyu yeniden çalıştıran akıllı kurtarma bloğu eklendi.
+- **Kanonik Test Doğrulaması**:
+  - `usr_test_admin` ve `dev_test_01` için oluşturulan alarm kurallarının PostgreSQL'e hatasız yazıldığı ve okunduğu doğrulandı.
+
+---
+
 ## 🚀 [v1.17.19] - 2026-09-16
 
 ### 📌 Cihaz Eşleştirme Token Çözümleme & Donanım Anahtarı Üretimi İyileştirmesi

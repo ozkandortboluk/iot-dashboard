@@ -10,6 +10,7 @@ import { migration007 } from './007_comprehensive_schema_synchronization_and_col
 import { migration008 } from './008_remove_rigid_tenant_foreign_keys.js';
 import { migration009 } from './009_ensure_device_schema_resilience.js';
 import { migration010 } from './010_heal_device_tokens_and_prohibit_placeholders.js';
+import { migration011 } from './011_fix_threshold_rules_active_hours_json_syntax.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -30,6 +31,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration008,
   migration009,
   migration010,
+  migration011,
 ];
 
 let lastMigrationStatus: {
