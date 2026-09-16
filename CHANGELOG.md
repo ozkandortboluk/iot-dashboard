@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.13] - 2026-09-16
+
+### 📌 Docker Compose & PostgreSQL Ortam Değişkenleri Yapılandırması
+- **Docker Compose PostgreSQL / TimescaleDB Varsayılan Kimlik Bilgileri Güncellemesi**:
+  - `docker-compose.yml` dosyasında TimescaleDB servisi için varsayılan ortam değişkenleri kullanıcı isteğine uygun olarak güncellendi:
+    - `POSTGRES_USER`: `iot_user`
+    - `POSTGRES_PASSWORD`: `kastamonuaraccalalibeyli.37`
+    - `POSTGRES_DB`: `iot_dashboard`
+  - TimescaleDB `healthcheck` komutu (`pg_isready`) ve uygulama servisi (`app`) `DATABASE_URL` bağlantı dizesi yeni varsayılan kimlik bilgileriyle tam uyumlu hale getirildi.
+  - `.env.example` dosyasındaki `DATABASE_URL` şablonu yeni varsayılan veritabanı adı ve kullanıcı bilgileriyle senkronize edildi.
+
+---
+
 ## 🚀 [v1.17.12] - 2026-09-14
 
 ### 📌 PostgreSQL Threshold Rules Yabancı Anahtar (FK) İzolasyonu & Otomatik Onarım İyileştirmesi
