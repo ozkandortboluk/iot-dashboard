@@ -302,6 +302,15 @@ async function setupViteOrStatic() {
     });
   }
 
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server] Port ${PORT} kullanımda (EADDRINUSE). Yeniden başlatma bekleniyor...`);
+      process.exit(1);
+    } else {
+      console.error('[Server] HTTP sunucu hatası:', err);
+    }
+  });
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(` IoT Telemetri & Alarm Sunucusu Port ${PORT} Üzerinde Aktif!`);

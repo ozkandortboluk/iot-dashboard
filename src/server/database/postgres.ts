@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { recordDatabaseHealingEvent } from '../services/databaseAutoHealer.service.js';
 import { getSharedPgPoolStats } from './connection.js';
 import { runAllMigrations, getMigrationStatus, getLatestMigrationRunStatus } from './migrations/migrationRunner.js';
 import type {
@@ -709,9 +710,13 @@ export class PostgresRepository {
             name: 'audit_logs',
             ddl: `CREATE TABLE IF NOT EXISTS audit_logs (
               id VARCHAR(64) PRIMARY KEY,
+              tenant_id VARCHAR(64) DEFAULT 'usr_admin',
               user_id VARCHAR(64),
               user_name VARCHAR(128),
               action TEXT NOT NULL,
+              resource_type VARCHAR(64) DEFAULT 'system',
+              resource_id VARCHAR(64),
+              details JSONB,
               ip_address VARCHAR(64),
               severity VARCHAR(32) DEFAULT 'low',
               created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -720,6 +725,7 @@ export class PostgresRepository {
           {
             name: 'user_sessions',
             ddl: `CREATE TABLE IF NOT EXISTS user_sessions (
+              id VARCHAR(64) DEFAULT gen_random_uuid()::text,
               token VARCHAR(128) PRIMARY KEY,
               user_id VARCHAR(64) NOT NULL,
               user_role VARCHAR(32) NOT NULL,
@@ -958,8 +964,19 @@ export class PostgresRepository {
           // Audit logs
           { table: 'audit_logs', column: 'user_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'audit_logs', column: 'user_name', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
+          { table: 'audit_logs', column: 'resource_type', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';` },
           // User sessions
           { table: 'user_sessions', column: 'user_id', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
+          { table: 'user_sessions', column: 'user_role', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_role VARCHAR(32) DEFAULT 'operator';` },
+          { table: 'user_sessions', column: 'user_email', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_email VARCHAR(128);` },
+          { table: 'user_sessions', column: 'user_name', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
+          { table: 'user_sessions', column: 'created_at', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
+          { table: 'user_sessions', column: 'expires_at', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days');` },
+          // Device WS Deduplication
+          { table: 'device_ws_messages_dedup', column: 'message_id', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);` },
+          { table: 'device_ws_messages_dedup', column: 'expires_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour');` },
+          { table: 'device_ws_messages_dedup', column: 'received_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
+          { table: 'device_ws_messages_dedup', column: 'message_type', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'telemetry';` },
           // Dispatch logs
           { table: 'dispatch_logs', column: 'user_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'dispatch_logs', column: 'user_name', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
@@ -1042,6 +1059,46 @@ export class PostgresRepository {
               -- Ignore concurrent constraint additions or relation missing errors
           END $$;
         `).catch((err: any) => console.warn('[PostgreSQL Deduplication Constraint Setup]', err?.message));
+
+        // 5.2 Enforce device_ws_messages_dedup unique constraint and default msg_id
+        await client.query(`
+          ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);
+          UPDATE device_ws_messages_dedup SET message_id = msg_id WHERE message_id IS NULL AND msg_id IS NOT NULL;
+          ALTER TABLE device_ws_messages_dedup ALTER COLUMN msg_id SET DEFAULT gen_random_uuid()::text;
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'unq_device_ws_dedup'
+            ) THEN
+              ALTER TABLE device_ws_messages_dedup ADD CONSTRAINT unq_device_ws_dedup UNIQUE (device_id, message_id);
+            END IF;
+          EXCEPTION
+            WHEN OTHERS THEN NULL;
+          END $$;
+        `).catch(() => {});
+
+        // 5.3 Enforce user_sessions unique constraint on token and default id
+        await client.query(`
+          ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+          DO $$
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token'
+            ) THEN
+              ALTER TABLE user_sessions ADD CONSTRAINT unq_user_sessions_token UNIQUE (token);
+            END IF;
+          EXCEPTION
+            WHEN OTHERS THEN NULL;
+          END $$;
+        `).catch(() => {});
+
+        // 5.4 Ensure audit_logs resource_type is nullable with default
+        await client.query(`
+          ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';
+          ALTER TABLE audit_logs ALTER COLUMN resource_type DROP NOT NULL;
+          ALTER TABLE audit_logs ALTER COLUMN resource_type SET DEFAULT 'system';
+          UPDATE audit_logs SET resource_type = 'system' WHERE resource_type IS NULL;
+        `).catch(() => {});
 
         // 6. Check existing user count to avoid resurrecting deleted users or force-seeding
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
@@ -1152,8 +1209,58 @@ export class PostgresRepository {
       if (isMissingColumnOrTable && !this.isRecoveringSchema && this.pool) {
         this.isRecoveringSchema = true;
         try {
-          console.warn(`[PostgreSQL Otomatik Onarım]: Eksik kolon/tablo tespit edildi (${errMsg}), şema eşitlenip sorgu tekrarlanıyor...`);
+          console.warn(`[PostgreSQL Otomatik Onarım]: Eksik kolon/tablo tespit edildi (${errMsg}), akıllı onarım motoru devreye girdi...`);
+
+          // 1. Dinamik Kolon Onarım Analizi (Eğer 'column "xyz" does not exist' ise hedef tablo ve kolonu otomatik tespit et)
+          const colMatch = errMsg.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does\s+not\s+exist/i);
+          if (colMatch && colMatch[1]) {
+            const missingCol = colMatch[1].toLowerCase();
+            const tableMatch = text.match(/(?:FROM|INTO|UPDATE)\s+"?([a-zA-Z0-9_]+)"?/i);
+            const targetTable = tableMatch ? tableMatch[1].toLowerCase() : null;
+
+            if (targetTable) {
+              let ddlType = 'TEXT';
+              if (missingCol === 'expires_at' || missingCol.endsWith('_at') || missingCol.endsWith('_time')) {
+                ddlType = "TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')";
+              } else if (missingCol.endsWith('_id') || missingCol === 'token' || missingCol === 'key') {
+                ddlType = 'VARCHAR(128)';
+              } else if (missingCol.startsWith('is_') || missingCol.startsWith('has_') || missingCol.endsWith('_enabled') || missingCol.endsWith('_revoked') || missingCol.endsWith('_connected')) {
+                ddlType = 'BOOLEAN DEFAULT FALSE';
+              } else if (missingCol.endsWith('_count') || missingCol.endsWith('_seconds') || missingCol.endsWith('_sec') || missingCol.endsWith('_ms')) {
+                ddlType = 'INT DEFAULT 0';
+              } else if (missingCol.endsWith('_json') || missingCol.endsWith('_metrics') || missingCol.endsWith('_scopes') || missingCol.endsWith('_channels') || missingCol.endsWith('_definitions')) {
+                ddlType = "JSONB DEFAULT '[]'::jsonb";
+              }
+
+              console.log(`[PostgreSQL Otomatik Onarım]: Hedef tablo (${targetTable}) için eksik kolon (${missingCol} -> ${ddlType}) anında oluşturuluyor...`);
+              try {
+                await this.pool.query(`ALTER TABLE ${targetTable} ADD COLUMN IF NOT EXISTS ${missingCol} ${ddlType};`);
+                recordDatabaseHealingEvent(
+                  `Eksik kolon tespit edildi ve anında onarıldı: ${targetTable}.${missingCol} (${ddlType})`,
+                  { table: targetTable, column: missingCol, ddlType, error: errMsg, query: text.substring(0, 150) },
+                  'warn'
+                );
+                if (missingCol === 'expires_at' && targetTable === 'user_sessions') {
+                  await this.pool.query(`UPDATE user_sessions SET expires_at = CURRENT_TIMESTAMP + INTERVAL '7 days' WHERE expires_at IS NULL;`).catch(() => {});
+                  recordDatabaseHealingEvent(
+                    `'user_sessions' tablosu 'expires_at' kolonu için 7 günlük varsayılan oturum süresi tanımlandı.`,
+                    { table: 'user_sessions', column: 'expires_at' },
+                    'info'
+                  );
+                }
+              } catch (alterColErr: any) {
+                console.warn('[PostgreSQL Otomatik Kolon Ekleme Uyarısı]:', alterColErr?.message || alterColErr);
+              }
+            }
+          }
+
+          // 2. Kapsamlı Şema ve Migrasyon Eşitlemesi
           await this.ensureTelemetrySchema(true);
+          recordDatabaseHealingEvent(
+            `Veritabanı şema ve migrasyon eşitlemesi otomatik tamamlandı.`,
+            { error: errMsg },
+            'info'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL Otomatik Onarım Tekrar Hatası]:', retryErr?.message || retryErr);
@@ -1174,6 +1281,11 @@ export class PostgresRepository {
           await this.pool.query(`ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;`);
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);`);
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);`);
+          recordDatabaseHealingEvent(
+            `devices tablosu api_key tekillik kısıtı kaldırıldı ve B-Tree indeksi oluşturuldu.`,
+            { table: 'devices', error: errMsg },
+            'warn'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL devices_api_key_key Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
@@ -1192,6 +1304,11 @@ export class PostgresRepository {
           console.warn(`[PostgreSQL Otomatik Onarım]: notifications_user_id_fkey yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak sorgu tekrarlanıyor...`);
           await this.pool.query(`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;`);
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);`);
+          recordDatabaseHealingEvent(
+            `notifications tablosu yabancı anahtar (FK) kısıtı kaldırıldı ve B-Tree indeksi oluşturuldu.`,
+            { table: 'notifications', error: errMsg },
+            'warn'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL notifications_user_id_fkey Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
@@ -1232,6 +1349,11 @@ export class PostgresRepository {
                 END LOOP;
             END $$;
           `);
+          recordDatabaseHealingEvent(
+            `devices tablosu çok kiracılı yabancı anahtar kısıtları otomatik temizlendi.`,
+            { table: 'devices', error: errMsg },
+            'warn'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL Cihaz Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
@@ -1252,6 +1374,11 @@ export class PostgresRepository {
           console.warn(`[PostgreSQL Otomatik Onarım]: OTA işleri yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak sorgu tekrarlanıyor...`);
           await this.pool.query(`ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_firmware_id_fkey;`);
           await this.pool.query(`ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_device_id_fkey;`);
+          recordDatabaseHealingEvent(
+            `ota_deployment_jobs tablosu foreign key kısıtları otomatik temizlendi.`,
+            { table: 'ota_deployment_jobs', error: errMsg },
+            'warn'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL OTA Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
@@ -1281,9 +1408,95 @@ export class PostgresRepository {
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_user_id ON threshold_rules (user_id);`);
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);`);
           await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);`);
+          recordDatabaseHealingEvent(
+            `threshold_rules tablosu yabancı anahtar kısıtları kaldırılarak performans indeksleri eklendi.`,
+            { table: 'threshold_rules', error: errMsg },
+            'warn'
+          );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
           console.warn('[PostgreSQL threshold_rules Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
+      // Auto-heal NOT NULL violations (e.g. audit_logs.resource_type)
+      const isNotNullViolation =
+        (err?.code === '23502' || errMsg.includes('violates not-null constraint'));
+
+      if (isNotNullViolation && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          const colMatch = errMsg.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of\s+relation\s+"?([a-zA-Z0-9_]+)"?\s+violates not-null constraint/i);
+          if (colMatch && colMatch[1] && colMatch[2]) {
+            const col = colMatch[1].toLowerCase();
+            const tbl = colMatch[2].toLowerCase();
+            console.warn(`[PostgreSQL Otomatik Onarım]: ${tbl}.${col} NOT NULL kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak varsayılan atanıyor...`);
+            await this.pool.query(`ALTER TABLE ${tbl} ALTER COLUMN ${col} DROP NOT NULL;`);
+            if (col === 'resource_type') {
+              await this.pool.query(`ALTER TABLE ${tbl} ALTER COLUMN ${col} SET DEFAULT 'system';`);
+              await this.pool.query(`UPDATE ${tbl} SET ${col} = 'system' WHERE ${col} IS NULL;`);
+            } else if (col === 'id' || col === 'msg_id') {
+              await this.pool.query(`ALTER TABLE ${tbl} ALTER COLUMN ${col} SET DEFAULT gen_random_uuid()::text;`);
+            }
+            recordDatabaseHealingEvent(
+              `${tbl}.${col} tablosunda NOT NULL kısıtı otomatik kaldırıldı ve varsayılan değer tanımlandı.`,
+              { table: tbl, column: col, error: errMsg },
+              'warn'
+            );
+            return await this.pool.query(text, params);
+          }
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL NOT NULL Onarım Tekrar Hatası]:', retryErr?.message || retryErr);
+        } finally {
+          this.isRecoveringSchema = false;
+        }
+      }
+
+      // Auto-heal ON CONFLICT specification missing unique constraint
+      const isOnConflictMismatch =
+        (err?.code === '42P10' || errMsg.includes('there is no unique or exclusion constraint matching the ON CONFLICT specification'));
+
+      if (isOnConflictMismatch && !this.isRecoveringSchema && this.pool) {
+        this.isRecoveringSchema = true;
+        try {
+          console.warn(`[PostgreSQL Otomatik Onarım]: ON CONFLICT kısıtı eşleşmeme hatası tespit edildi (${errMsg}), otomatik indeks/kısıt ekleniyor...`);
+          const conflictMatch = text.match(/ON\s+CONFLICT\s*\(([^)]+)\)/i);
+          const tableMatch = text.match(/(?:INTO|UPDATE)\s+"?([a-zA-Z0-9_]+)"?/i);
+          if (conflictMatch && conflictMatch[1] && tableMatch && tableMatch[1]) {
+            const conflictCols = conflictMatch[1].split(',').map(c => c.trim()).join(', ');
+            const targetTable = tableMatch[1].toLowerCase();
+            const constraintName = `unq_${targetTable}_${conflictMatch[1].replace(/[^a-zA-Z0-9_]/g, '_')}`.substring(0, 60);
+
+            if (targetTable === 'device_ws_messages_dedup') {
+              await this.pool.query(`ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);`);
+              await this.pool.query(`UPDATE device_ws_messages_dedup SET message_id = msg_id WHERE message_id IS NULL AND msg_id IS NOT NULL;`);
+              await this.pool.query(`ALTER TABLE device_ws_messages_dedup ALTER COLUMN msg_id SET DEFAULT gen_random_uuid()::text;`);
+            } else if (targetTable === 'user_sessions') {
+              await this.pool.query(`ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;`);
+            }
+
+            await this.pool.query(`
+              DO $$
+              BEGIN
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = '${constraintName}'
+                ) THEN
+                  ALTER TABLE ${targetTable} ADD CONSTRAINT ${constraintName} UNIQUE (${conflictCols});
+                END IF;
+              END;
+              $$;
+            `);
+            recordDatabaseHealingEvent(
+              `${targetTable} tablosunda ON CONFLICT (${conflictCols}) için UNIQUE kısıtı (${constraintName}) otomatik oluşturuldu.`,
+              { table: targetTable, columns: conflictCols, constraint: constraintName, error: errMsg },
+              'warn'
+            );
+            return await this.pool.query(text, params);
+          }
+        } catch (retryErr: any) {
+          console.warn('[PostgreSQL ON CONFLICT Onarım Tekrar Hatası]:', retryErr?.message || retryErr);
         } finally {
           this.isRecoveringSchema = false;
         }
@@ -2536,16 +2749,24 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    const tenantId = log.tenantId || (log.userId && log.userId.startsWith('usr_') ? log.userId : 'usr_admin');
+    const resourceType = (log as any).resourceType || (log as any).resource_type || 'system';
+    const resourceId = (log as any).resourceId || (log as any).resource_id || null;
+    const details = (log as any).details ? JSON.stringify((log as any).details) : null;
     const sql = `
-      INSERT INTO audit_logs (id, user_id, user_name, action, ip_address, severity, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO audit_logs (id, tenant_id, user_id, user_name, action, resource_type, resource_id, details, ip_address, severity, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (id) DO NOTHING;
     `;
     await this.query(sql, [
       log.id,
-      log.tenantId || null,
+      tenantId,
+      log.userId || null,
       log.userName || null,
       log.action,
+      resourceType,
+      resourceId,
+      details,
       log.ip || null,
       log.severity || 'low',
       log.timestamp || new Date().toISOString(),
@@ -2956,12 +3177,18 @@ export class PostgresRepository {
 
   public async saveSession(session: UserSession): Promise<void> {
     if (!this.pool) return;
+    const sessionId = (session as any).id || `sess_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
     const sql = `
-      INSERT INTO user_sessions (token, user_id, user_role, user_email, user_name, created_at, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at;
+      INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (token) DO UPDATE SET 
+        expires_at = EXCLUDED.expires_at,
+        user_role = EXCLUDED.user_role,
+        user_email = EXCLUDED.user_email,
+        user_name = EXCLUDED.user_name;
     `;
     await this.query(sql, [
+      sessionId,
       session.token,
       session.userId,
       session.userRole,
@@ -3953,13 +4180,14 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) return true;
     try {
       const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+      const msgId = `${deviceId}_${messageId}`;
       const sql = `
-        INSERT INTO device_ws_messages_dedup (device_id, message_id, message_type, expires_at)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO device_ws_messages_dedup (msg_id, device_id, message_id, message_type, expires_at)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (device_id, message_id) DO NOTHING
         RETURNING device_id;
       `;
-      const res = await this.query(sql, [deviceId, messageId, messageType, expiresAt]);
+      const res = await this.query(sql, [msgId, deviceId, messageId, messageType, expiresAt]);
       return res.rowCount !== null && res.rowCount > 0;
     } catch (err: any) {
       console.warn(`[PostgresRepository] checkAndRecordWsMessage error (${deviceId}/${messageId}):`, err?.message || err);

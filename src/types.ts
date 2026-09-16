@@ -899,6 +899,7 @@ export interface AuditLog {
   id: string;
   timestamp: string;
   tenantId: string;
+  userId?: string;
   userName: string;
   action: string;
   ip: string;

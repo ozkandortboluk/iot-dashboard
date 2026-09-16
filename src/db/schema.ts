@@ -159,8 +159,12 @@ export const dashboardLayouts = pgTable('dashboard_layouts', {
 export const auditLogs = pgTable('audit_logs', {
   id: varchar('id', { length: 64 }).primaryKey(),
   tenantId: varchar('tenant_id', { length: 64 }),
+  userId: varchar('user_id', { length: 64 }),
   userName: varchar('user_name', { length: 128 }),
   action: varchar('action', { length: 256 }).notNull(),
+  resourceType: varchar('resource_type', { length: 64 }).default('system'),
+  resourceId: varchar('resource_id', { length: 64 }),
+  details: jsonb('details'),
   ipAddress: varchar('ip_address', { length: 45 }),
   severity: varchar('severity', { length: 32 }).default('low'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

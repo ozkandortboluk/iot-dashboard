@@ -4,6 +4,8 @@ import { migration001 } from './001_core_relational_tables.js';
 import { migration002 } from './002_timescale_hypertables.js';
 import { migration003 } from './003_idempotency_constraints.js';
 import { migration004 } from './004_multitenant_columns.js';
+import { migration005 } from './005_auto_heal_expires_at_and_session_columns.js';
+import { migration006 } from './006_fix_audit_logs_and_on_conflict_constraints.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -18,6 +20,8 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration002,
   migration003,
   migration004,
+  migration005,
+  migration006,
 ];
 
 let lastMigrationStatus: {

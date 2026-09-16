@@ -1,6 +1,78 @@
 import { systemLogger } from './systemLogger.service.js';
 import type { DatabaseEngineType } from '../../types.js';
 
+let activeAutoHealerInstance: DatabaseAutoHealer | null = null;
+
+export function getActiveAutoHealer(): DatabaseAutoHealer | null {
+  return activeAutoHealerInstance;
+}
+
+export function registerAutoHealerInstance(instance: DatabaseAutoHealer): void {
+  activeAutoHealerInstance = instance;
+}
+
+/**
+ * Global telemetry and schema healing event recorder.
+ * Automatically adds the event to:
+ * 1. systemLogger (System Events in category 'auto_repair')
+ * 2. In-memory DatabaseAutoHealer healing history
+ * 3. PostgreSQL system_events table (if available)
+ * 4. PostgreSQL audit_logs table (if available)
+ */
+export function recordDatabaseHealingEvent(
+  actionMessage: string,
+  details?: {
+    table?: string;
+    column?: string;
+    error?: string;
+    sql?: string;
+    [key: string]: any;
+  },
+  level: 'info' | 'warn' | 'error' = 'warn'
+): void {
+  // 1. Structured log in systemLogger
+  if (level === 'info') {
+    systemLogger.info('auto_repair', actionMessage, details);
+  } else if (level === 'error') {
+    systemLogger.error('auto_repair', actionMessage, details);
+  } else {
+    systemLogger.warn('auto_repair', actionMessage, details);
+  }
+
+  // 2. Add to active AutoHealer's recent healing history
+  if (activeAutoHealerInstance) {
+    activeAutoHealerInstance.recordHealingEvent(actionMessage);
+  }
+
+  // 3. Persist to PostgreSQL tables asynchronously
+  try {
+    const pool = activeAutoHealerInstance?.getPool?.() || null;
+    if (pool) {
+      const now = new Date();
+      const auditId = `aud_heal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const safeAction = `[Otomatik Onarım] ${actionMessage}`.substring(0, 250);
+
+      // Save to audit_logs
+      pool.query(`
+        INSERT INTO audit_logs (id, tenant_id, user_id, user_name, action, resource_type, ip_address, severity, created_at)
+        VALUES ($1, 'usr_admin', 'system_auto_healer', 'Sistem Otomatik Onarım', $2, 'system', '127.0.0.1', 'medium', CURRENT_TIMESTAMP)
+        ON CONFLICT (id) DO NOTHING;
+      `, [auditId, safeAction]).catch(() => {});
+
+      // Save to system_events
+      const eventId = `evt_heal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const detailsStr = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
+      pool.query(`
+        INSERT INTO system_events (id, timestamp, level, category, message, details, source)
+        VALUES ($1, CURRENT_TIMESTAMP, $2, 'auto_repair', $3, $4, 'database_auto_healer')
+        ON CONFLICT (id) DO NOTHING;
+      `, [eventId, level, actionMessage.substring(0, 400), detailsStr ? detailsStr.substring(0, 1000) : null]).catch(() => {});
+    }
+  } catch (_e) {
+    // Non-blocking
+  }
+}
+
 export interface DatabaseHealthReport {
   status: 'healthy' | 'degraded' | 'recovering' | 'down';
   isPostgresConnected: boolean;
@@ -28,6 +100,15 @@ export class DatabaseAutoHealer {
 
   constructor(dbInstance: any) {
     this.dbInstance = dbInstance;
+    registerAutoHealerInstance(this);
+  }
+
+  public getPool(): any {
+    try {
+      return this.dbInstance?.getPgPool?.() || this.dbInstance?.postgresRepo?.pool || null;
+    } catch {
+      return null;
+    }
   }
 
   public startWatchdog(intervalMs: number = 30000): void {
@@ -158,15 +239,83 @@ export class DatabaseAutoHealer {
             );
             CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp DESC);
           `);
-          this.recordHealingEvent('system_events tablosu otomatik oluşturuldu.');
-          systemLogger.info('auto_repair', 'system_events tablosu otomatik oluşturuldu.');
+          recordDatabaseHealingEvent('system_events tablosu otomatik oluşturuldu.', { table: 'system_events' }, 'info');
+        }
+
+        if (existing.has('audit_logs')) {
+          const colRes = await client.query(`
+            SELECT column_name, is_nullable
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'audit_logs';
+          `);
+          const auditCols = new Map(colRes.rows.map((r: any) => [r.column_name, r.is_nullable]));
+          if (!auditCols.has('resource_type') || auditCols.get('resource_type') === 'NO') {
+            await client.query(`
+              ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';
+              ALTER TABLE audit_logs ALTER COLUMN resource_type DROP NOT NULL;
+              ALTER TABLE audit_logs ALTER COLUMN resource_type SET DEFAULT 'system';
+              UPDATE audit_logs SET resource_type = 'system' WHERE resource_type IS NULL;
+            `);
+            recordDatabaseHealingEvent('audit_logs.resource_type kolonu ve varsayılan değeri otomatik onarıldı.', { table: 'audit_logs', column: 'resource_type' }, 'info');
+          }
+        }
+
+        if (existing.has('user_sessions')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'user_sessions';
+          `);
+          const sessionCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!sessionCols.has('expires_at')) {
+            await client.query(`
+              ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days');
+              UPDATE user_sessions SET expires_at = CURRENT_TIMESTAMP + INTERVAL '7 days' WHERE expires_at IS NULL;
+              CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
+            `);
+            recordDatabaseHealingEvent('user_sessions.expires_at kolonu otomatik onarıldı ve eklendi.', { table: 'user_sessions', column: 'expires_at' }, 'warn');
+          }
+          await client.query(`
+            ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+            DO $$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token') THEN
+                ALTER TABLE user_sessions ADD CONSTRAINT unq_user_sessions_token UNIQUE (token);
+              END IF;
+            END $$;
+          `).catch(() => {});
+        }
+
+        if (existing.has('device_ws_messages_dedup')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'device_ws_messages_dedup';
+          `);
+          const dedupCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!dedupCols.has('message_id') || !dedupCols.has('expires_at')) {
+            await client.query(`
+              ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);
+              UPDATE device_ws_messages_dedup SET message_id = msg_id WHERE message_id IS NULL AND msg_id IS NOT NULL;
+              ALTER TABLE device_ws_messages_dedup ALTER COLUMN msg_id SET DEFAULT gen_random_uuid()::text;
+              ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour');
+              UPDATE device_ws_messages_dedup SET expires_at = CURRENT_TIMESTAMP + INTERVAL '1 hour' WHERE expires_at IS NULL;
+              CREATE INDEX IF NOT EXISTS idx_device_ws_dedup_expires ON device_ws_messages_dedup(expires_at);
+              DO $$
+              BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unq_device_ws_dedup') THEN
+                  ALTER TABLE device_ws_messages_dedup ADD CONSTRAINT unq_device_ws_dedup UNIQUE (device_id, message_id);
+                END IF;
+              END $$;
+            `);
+            recordDatabaseHealingEvent('device_ws_messages_dedup tablosu message_id ve benzersizlik kısıtı otomatik onarıldı.', { table: 'device_ws_messages_dedup' }, 'info');
+          }
         }
 
         // If any critical tables are missing, trigger non-blocking safe schema patch
         if (missing.length > 0) {
           const msg = `Eksik tablolar tespit edildi: ${missing.join(', ')}. Şema onarılıyor...`;
-          this.recordHealingEvent(msg);
-          systemLogger.warn('auto_repair', msg);
+          recordDatabaseHealingEvent(msg, { missingTables: missing }, 'warn');
           await this.dbInstance.postgresRepo.ensureTelemetrySchema(true).catch(() => {});
         }
       } finally {
@@ -318,9 +467,10 @@ export class DatabaseAutoHealer {
     };
   }
 
-  private recordHealingEvent(msg: string): void {
+  public recordHealingEvent(msg: string): void {
     const entry = `[${new Date().toLocaleTimeString('tr-TR')}] ${msg}`;
     this.healingHistory.push(entry);
+    this.lastRepairedAt = new Date().toISOString();
     if (this.healingHistory.length > 50) {
       this.healingHistory.shift();
     }

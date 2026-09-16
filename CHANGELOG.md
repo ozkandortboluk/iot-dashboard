@@ -4,6 +4,56 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.15] - 2026-09-16
+
+### 📌 PostgreSQL NOT NULL Kısıtı ve ON CONFLICT Benzersizlik Hatası Kalıcı Onarımı & Dinamik İyileştirme
+- **`audit_logs.resource_type` NOT NULL Kısıtı Giderimi**:
+  - `audit_logs` tablosunda `resource_type` kolonunun `NOT NULL` olması sebebiyle meydana gelen `null value in column "resource_type" of relation "audit_logs" violates not-null constraint` hatası çözüldü.
+  - `006_fix_audit_logs_and_on_conflict_constraints.ts` migrasyonu ile `ALTER TABLE audit_logs ALTER COLUMN resource_type DROP NOT NULL;` ve `SET DEFAULT 'system'` uygulandı.
+  - `saveAuditLog` ve `recordDatabaseHealingEvent` fonksiyonlarında `resource_type` parametresi güvenceye alındı; varsayılan olarak `'system'` değeri sağlandı.
+  - `src/db/schema.ts` içerisindeki Drizzle şema tanımı güncellendi.
+- **ON CONFLICT Kısıtı Eşleşmeme Hatası Çözümü (`device_ws_messages_dedup` & `user_sessions`)**:
+  - `there is no unique or exclusion constraint matching the ON CONFLICT specification` hatası incelendi; `device_ws_messages_dedup` tablosunda `(device_id, message_id)` benzersizlik kısıtı eksikliği ve `user_sessions` tablosunda `token` benzersizlik kısıtı eksikliği giderildi.
+  - `device_ws_messages_dedup` için `message_id` kolonu, `unq_device_ws_dedup` UNIQUE kısıtı ve `msg_id` varsayılan UUID ataması sağlandı.
+  - `user_sessions` için `unq_user_sessions_token` UNIQUE kısıtı ve `id` varsayılan UUID ataması sağlandı.
+- **Sorgu Çalışma Zamanı Otomatik Onarım Mekanizması (Self-Healing Query Interceptors)**:
+  - `postgres.ts` `query()` metodunda `isNotNullViolation` (kod `23502`) ve `isOnConflictMismatch` (kod `42P10`) yakalayıcıları eklendi.
+  - Bir NOT NULL veya ON CONFLICT uyuşmazlığı tespit edildiğinde, ilgili tablo analiz edilip eksik kısıt veya kolon otomatik olarak onarılır, sistem günlüğüne kaydedilir ve sorgu kesintisiz biçimde yeniden yürütülür.
+  - `DatabaseAutoHealer` arka plan servis denetimlerine ilgili tablo ve kolon doğrulamaları eklendi.
+
+---
+
+## 🚀 [v1.17.14] - 2026-09-16
+
+### 📌 Otomatik Veritabanı Onarım Eylemlerinin Sistem ve Denetim Günlüklerine (Log) Kaydedilmesi
+- **Çok Katmanlı Otomatik Onarım Günlük Kaydı (Comprehensive Auto-Repair Logging)**:
+  - Veritabanı sorgu motorundaki dinamik şema düzeltmeleri (`ALTER TABLE ... ADD COLUMN`, kısıt kaldırma, indeks oluşturma) ve arka plan `DatabaseAutoHealer` onarımları için merkezi `recordDatabaseHealingEvent` mekanizması devreye alındı.
+  - **Sistem Günlüğü (System Logger)**: Her onarım işlemi kategori olarak `'auto_repair'` seçilerek tablo adı, onarılan kolon, DDL veri tipi, sebep olan SQL hatası ve sorgu özetiyle birlikte yapılandırılmış JSON log formatında kaydedilir.
+  - **Canlı Arayüz Geçmişi (Healing History)**: Gerçekleşen tüm onarım işlemleri zaman damgasıyla `DatabaseAutoHealerPanel` içindeki "Son Otomatik Onarım Adımları" listesine anında yansıtılır.
+  - **Kalıcı Denetim ve Olay Kaydı (PostgreSQL audit_logs & system_events)**: Yapılan DDL ve şema müdahaleleri veritabanı `audit_logs` (eylem: `[Otomatik Onarım] ...`, kullanıcı: `Sistem Otomatik Onarım Motoru`) ve `system_events` tablolarına asenkron yazılarak kalıcı izleme sağlanır.
+- **Tüm Onarım Noktalarının Entegrasyonu**:
+  - `column does not exist` dinamik kolon oluşturma adımları (örn. `user_sessions.expires_at`, `device_ws_messages_dedup.expires_at`),
+  - `devices_api_key_key` benzersizlik kısıtı kaldırma ve B-Tree indeksleme,
+  - `notifications`, `devices`, `ota_deployment_jobs` ve `threshold_rules` yabancı anahtar (FK) kısıt temizleme operasyonları,
+  - Şema ve migrasyon eşitlemeleri log kayıtlarına tam detayla dahil edildi.
+
+---
+
+## 🚀 [v1.17.13] - 2026-09-16
+
+### 📌 PostgreSQL Akıllı Kolon ve Şema Otomatik Onarım Motoru (Self-Healing Schema Engine)
+- **Akıllı Kolon Eksikliği Hata Yakalama ve Anında Onarım**:
+  - PostgreSQL sorgu katmanında (`postgres.ts` `query()` metodu), `column "xyz" does not exist` (özellikle `column "expires_at" does not exist`) türündeki hataları anında yakalayan regex tabanlı otomatik onarım motoru devreye alındı.
+  - Hedef tablo ve eksik kolon adı analiz edilerek (`expires_at`, `*_id`, `is_*`, `*_count`, `*_json` vb.) uygun veri tipi (`TIMESTAMP WITH TIME ZONE`, `VARCHAR`, `BOOLEAN`, `INT`, `JSONB`) ile `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` DDL komutu çalışma anında (runtime) tetiklenir ve sorgu kullanıcıya hata yansıtılmadan otomatik tekrar denenir.
+- **Migration 005 & Tablo Kolon Dayanıklılığı (Resilience)**:
+  - `005_auto_heal_expires_at_and_session_columns.ts` migrasyonu oluşturuldu ve `migrationRunner.ts` içerisine eklendi.
+  - `user_sessions` (`expires_at`, `created_at`, `user_role`, `user_email`, `user_name`), `device_ws_messages_dedup` (`expires_at`, `received_at`, `message_type`), `devices` ve `ota_deployment_jobs` tabloları için eksik olabilecek tüm kolonlar ve indeksler garanti altına alındı.
+  - `audit_logs` tablosunda çok kiracılı `tenant_id` alanı için `DEFAULT 'usr_admin'` atanarak null kısıtı hataları önlendi; `saveAuditLog` metodu eksik parametreleri güvenle tamamlayacak şekilde güncellendi.
+- **Sunucu Yaşam Döngüsü ve Port Çakışması Koruması**:
+  - `server.ts` içerisine `EADDRINUSE` yakalayıcı ve temiz hata çıkış koruması eklendi; dev server'ın asılı kalması engellendi.
+
+---
+
 ## 🚀 [v1.17.12] - 2026-09-14
 
 ### 📌 PostgreSQL Threshold Rules Yabancı Anahtar (FK) İzolasyonu & Otomatik Onarım İyileştirmesi

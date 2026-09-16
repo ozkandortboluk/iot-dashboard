@@ -252,7 +252,7 @@ export const migration001: Migration = {
         user_id VARCHAR(64),
         tenant_id VARCHAR(64) DEFAULT 'usr_admin',
         action VARCHAR(64) NOT NULL,
-        resource_type VARCHAR(64) NOT NULL,
+        resource_type VARCHAR(64) DEFAULT 'system',
         resource_id VARCHAR(64),
         details JSONB,
         ip_address VARCHAR(45),

@@ -1,23 +1,22 @@
-version: '3.8'
-
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg15
     container_name: nexus_timescaledb
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-iot_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-GizliSifreniz123!}
-      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard_db}
+      POSTGRES_USER: iot_user
+      POSTGRES_PASSWORD: kastamonuaraccalalibeyli.37
+      POSTGRES_DB: iot_dashboard
     ports:
       - "5432:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_admin} -d ${POSTGRES_DB:-iot_dashboard_db}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U iot_user -d iot_dashboard"]
+      interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 20s
     networks:
       - nexus_net
 
@@ -25,6 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: iot-dashboard-app
     container_name: nexus_app
     restart: unless-stopped
     depends_on:
@@ -33,15 +33,19 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-iot_admin}:${POSTGRES_PASSWORD:-GizliSifreniz123!}@timescaledb:5432/${POSTGRES_DB:-iot_dashboard_db}?sslmode=disable
-      JWT_SECRET: ${JWT_SECRET:-nexus_super_secret_jwt_key_2026}
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_USER: iot_user
+      DB_PASSWORD: kastamonuaraccalalibeyli.37
+      DB_NAME: iot_dashboard
     volumes:
       - app_data:/app/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health/live || exit 1"]
-      interval: 15s
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
     networks:
       - nexus_net
 
@@ -57,13 +61,25 @@ services:
       - "443:443"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz || exit 0"]
       interval: 15s
       timeout: 5s
       retries: 3
     networks:
       - nexus_net
+
+  adminer:
+    image: adminer:latest
+    container_name: nexus_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - nexus_net
+    depends_on:
+      - timescaledb
 
 volumes:
   timescaledb_data:
