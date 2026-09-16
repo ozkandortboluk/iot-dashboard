@@ -6,6 +6,9 @@ import { migration003 } from './003_idempotency_constraints.js';
 import { migration004 } from './004_multitenant_columns.js';
 import { migration005 } from './005_auto_heal_expires_at_and_session_columns.js';
 import { migration006 } from './006_fix_audit_logs_and_on_conflict_constraints.js';
+import { migration007 } from './007_comprehensive_schema_synchronization_and_column_healing.js';
+import { migration008 } from './008_remove_rigid_tenant_foreign_keys.js';
+import { migration009 } from './009_ensure_device_schema_resilience.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -22,6 +25,9 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration004,
   migration005,
   migration006,
+  migration007,
+  migration008,
+  migration009,
 ];
 
 let lastMigrationStatus: {

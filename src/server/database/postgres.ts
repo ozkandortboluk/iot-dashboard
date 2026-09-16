@@ -881,6 +881,16 @@ export class PostgresRepository {
           { table: 'users', column: 'notification_preferences', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb;` },
           { table: 'users', column: 'role', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'operator';` },
           // Devices
+          { table: 'devices', column: 'ip', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip VARCHAR(45);` },
+          { table: 'devices', column: 'ip_address', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);` },
+          { table: 'devices', column: 'mac_address', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(32);` },
+          { table: 'devices', column: 'data_flow_active', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;` },
+          { table: 'devices', column: 'auth_token', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);` },
+          { table: 'devices', column: 'customer_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';` },
+          { table: 'devices', column: 'type', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);` },
+          { table: 'devices', column: 'assigned_user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS assigned_user_id VARCHAR(64);` },
+          { table: 'devices', column: 'created_by_user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(64);` },
+          { table: 'devices', column: 'previous_api_key_hash', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_api_key_hash VARCHAR(128);` },
           { table: 'devices', column: 'tenant_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
           { table: 'devices', column: 'user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';` },
           { table: 'devices', column: 'previous_tenant_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_id VARCHAR(64);` },
@@ -896,9 +906,11 @@ export class PostgresRepository {
           { table: 'devices', column: 'simulated_metrics', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;` },
           { table: 'devices', column: 'ota_status', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_status VARCHAR(32) DEFAULT 'IDLE';` },
           { table: 'devices', column: 'ota_target_firmware_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_firmware_id VARCHAR(64);` },
+          { table: 'devices', column: 'ota_target_version', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_version VARCHAR(32);` },
           { table: 'devices', column: 'ota_progress', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_progress INT DEFAULT 0;` },
           { table: 'devices', column: 'ota_error_message', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_error_message TEXT;` },
           { table: 'devices', column: 'ota_last_check_at', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_last_check_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'devices', column: 'ota_job_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_job_id VARCHAR(64);` },
           { table: 'devices', column: 'expected_interval_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS expected_interval_seconds INT DEFAULT 30;` },
           { table: 'devices', column: 'auto_detected_interval_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_detected_interval_seconds INT DEFAULT 30;` },
           { table: 'devices', column: 'heartbeat_timeout_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS heartbeat_timeout_seconds INT DEFAULT 60;` },
@@ -938,6 +950,8 @@ export class PostgresRepository {
           // Threshold Rules
           { table: 'threshold_rules', column: 'tenant_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
           { table: 'threshold_rules', column: 'user_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
+          { table: 'threshold_rules', column: 'user_name', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
+          { table: 'threshold_rules', column: 'device_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS device_id VARCHAR(64) DEFAULT 'all';` },
           { table: 'threshold_rules', column: 'hysteresis', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS hysteresis NUMERIC DEFAULT 0;` },
           { table: 'threshold_rules', column: 'min_breach_duration_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;` },
           { table: 'threshold_rules', column: 'repeat_interval_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;` },
@@ -945,27 +959,62 @@ export class PostgresRepository {
           { table: 'threshold_rules', column: 'active_hours', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;` },
           { table: 'threshold_rules', column: 'recipients', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;` },
           { table: 'threshold_rules', column: 'silenced_until', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;` },
+          { table: 'threshold_rules', column: 'message_template', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS message_template TEXT;` },
           // Active Alarms
           { table: 'active_alarms', column: 'user_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'active_alarms', column: 'tenant_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
+          { table: 'active_alarms', column: 'device_name', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS device_name VARCHAR(128) DEFAULT '';` },
+          { table: 'active_alarms', column: 'operator', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS operator VARCHAR(32) DEFAULT '>';` },
+          { table: 'active_alarms', column: 'current_value', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS current_value NUMERIC DEFAULT 0;` },
+          { table: 'active_alarms', column: 'trigger_value', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS trigger_value NUMERIC;` },
+          { table: 'active_alarms', column: 'first_breach_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS first_breach_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
+          { table: 'active_alarms', column: 'last_notified_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_notified_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'active_alarms', column: 'silenced_until', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;` },
+          { table: 'active_alarms', column: 'repeat_count', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;` },
+          { table: 'active_alarms', column: 'message', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS message TEXT;` },
+          { table: 'active_alarms', column: 'note', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS note TEXT;` },
           { table: 'active_alarms', column: 'source', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';` },
           { table: 'active_alarms', column: 'environment', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';` },
           { table: 'active_alarms', column: 'is_simulation', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;` },
           { table: 'active_alarms', column: 'incident_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS incident_id VARCHAR(128);` },
           { table: 'active_alarms', column: 'last_evaluated_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'active_alarms', column: 'acknowledged_by', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);` },
+          { table: 'active_alarms', column: 'acknowledged_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'active_alarms', column: 'resolved_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'active_alarms', column: 'updated_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
           // Dashboard layouts
           { table: 'dashboard_layouts', column: 'user_id', ddl: `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'dashboard_layouts', column: 'title', ddl: `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS title VARCHAR(128) DEFAULT 'Özel Dashboard';` },
           // Notifications
           { table: 'notifications', column: 'user_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
+          { table: 'notifications', column: 'tenant_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
+          { table: 'notifications', column: 'type', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(64) DEFAULT 'alert';` },
+          { table: 'notifications', column: 'source', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'system';` },
           { table: 'notifications', column: 'alarm_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_id VARCHAR(128);` },
           { table: 'notifications', column: 'rule_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS rule_id VARCHAR(64);` },
           { table: 'notifications', column: 'alarm_state', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_state VARCHAR(32);` },
+          { table: 'notifications', column: 'severity', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
+          { table: 'notifications', column: 'device_name', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS device_name VARCHAR(128);` },
+          { table: 'notifications', column: 'acknowledged', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN DEFAULT FALSE;` },
+          { table: 'notifications', column: 'acknowledged_at', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'notifications', column: 'acknowledged_by', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);` },
+          { table: 'notifications', column: 'repeat_count', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;` },
+          { table: 'notifications', column: 'current_value', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS current_value NUMERIC;` },
+          { table: 'notifications', column: 'threshold_value', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS threshold_value NUMERIC;` },
+          { table: 'notifications', column: 'is_read', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;` },
+          { table: 'notifications', column: 'read', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE;` },
+          { table: 'notifications', column: 'updated_at', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
           // Audit logs
           { table: 'audit_logs', column: 'user_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'audit_logs', column: 'user_name', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
+          { table: 'audit_logs', column: 'tenant_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
           { table: 'audit_logs', column: 'resource_type', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';` },
+          { table: 'audit_logs', column: 'resource_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_id VARCHAR(64);` },
+          { table: 'audit_logs', column: 'details', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS details JSONB;` },
+          { table: 'audit_logs', column: 'ip_address', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);` },
+          { table: 'audit_logs', column: 'severity', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'low';` },
           // User sessions
+          { table: 'user_sessions', column: 'id', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS id VARCHAR(64);` },
           { table: 'user_sessions', column: 'user_id', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'user_sessions', column: 'user_role', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_role VARCHAR(32) DEFAULT 'operator';` },
           { table: 'user_sessions', column: 'user_email', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_email VARCHAR(128);` },
@@ -974,12 +1023,19 @@ export class PostgresRepository {
           { table: 'user_sessions', column: 'expires_at', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days');` },
           // Device WS Deduplication
           { table: 'device_ws_messages_dedup', column: 'message_id', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);` },
+          { table: 'device_ws_messages_dedup', column: 'msg_id', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS msg_id VARCHAR(128);` },
           { table: 'device_ws_messages_dedup', column: 'expires_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour');` },
           { table: 'device_ws_messages_dedup', column: 'received_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
           { table: 'device_ws_messages_dedup', column: 'message_type', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'telemetry';` },
           // Dispatch logs
+          { table: 'dispatch_logs', column: 'tenant_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
           { table: 'dispatch_logs', column: 'user_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'dispatch_logs', column: 'user_name', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
+          { table: 'dispatch_logs', column: 'severity', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
+          { table: 'dispatch_logs', column: 'attempt_count', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 1;` },
+          { table: 'dispatch_logs', column: 'latency_ms', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;` },
+          { table: 'dispatch_logs', column: 'error_details', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS error_details TEXT;` },
+          { table: 'dispatch_logs', column: 'title', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS title VARCHAR(256);` },
           // Device commands
           { table: 'device_commands', column: 'command_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_id VARCHAR(64);` },
           { table: 'device_commands', column: 'tenant_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
@@ -987,15 +1043,52 @@ export class PostgresRepository {
           { table: 'device_commands', column: 'user_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
           { table: 'device_commands', column: 'source', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'manual';` },
           { table: 'device_commands', column: 'idempotency_key', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);` },
-          // Notifications & Logs
-          { table: 'notifications', column: 'tenant_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'notifications', column: 'type', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(64);` },
-          { table: 'dispatch_logs', column: 'tenant_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
+          { table: 'device_commands', column: 'command_type', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_type VARCHAR(64) DEFAULT 'GENERAL_COMMAND';` },
+          { table: 'device_commands', column: 'command_name', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_name VARCHAR(64);` },
+          { table: 'device_commands', column: 'command', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command VARCHAR(64);` },
+          { table: 'device_commands', column: 'value_payload', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS value_payload TEXT;` },
+          { table: 'device_commands', column: 'sent_by', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_by VARCHAR(64);` },
+          { table: 'device_commands', column: 'retry_count', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;` },
+          { table: 'device_commands', column: 'max_retries', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;` },
+          { table: 'device_commands', column: 'applied_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'device_commands', column: 'executed_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS executed_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'device_commands', column: 'sent_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'device_commands', column: 'acknowledged_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'device_commands', column: 'error_message', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS error_message TEXT;` },
+          { table: 'device_commands', column: 'timeout_seconds', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS timeout_seconds INT DEFAULT 300;` },
+          { table: 'device_commands', column: 'output_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS output_id VARCHAR(64);` },
+          { table: 'device_commands', column: 'parameters', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS parameters JSONB DEFAULT '{}'::jsonb;` },
+          { table: 'device_commands', column: 'result', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS result JSONB;` },
+          { table: 'device_commands', column: 'target_state', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS target_state VARCHAR(64);` },
           // Firmwares & OTA
+          { table: 'firmwares', column: 'role_key', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS role_key VARCHAR(64) DEFAULT 'ALL';` },
+          { table: 'firmwares', column: 'hardware_model', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64) DEFAULT 'ALL';` },
+          { table: 'firmwares', column: 'binary_data', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS binary_data BYTEA;` },
+          { table: 'firmwares', column: 'binary_size', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS binary_size BIGINT DEFAULT 0;` },
           { table: 'firmwares', column: 'signature', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS signature TEXT;` },
           { table: 'firmwares', column: 'file_path', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS file_path TEXT;` },
+          { table: 'firmwares', column: 'min_hardware_revision', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS min_hardware_revision VARCHAR(32);` },
+          { table: 'firmwares', column: 'is_active', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;` },
           { table: 'ota_deployment_jobs', column: 'download_token', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_token VARCHAR(128);` },
-          { table: 'ota_deployment_jobs', column: 'expires_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;` }
+          { table: 'ota_deployment_jobs', column: 'expires_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'ota_deployment_jobs', column: 'attempt_count', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 0;` },
+          { table: 'ota_deployment_jobs', column: 'max_attempts', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS max_attempts INT DEFAULT 3;` },
+          { table: 'ota_deployment_jobs', column: 'last_attempt_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'ota_deployment_jobs', column: 'next_retry_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'ota_deployment_jobs', column: 'download_started_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_started_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'ota_deployment_jobs', column: 'boot_confirmed_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS boot_confirmed_at TIMESTAMP WITH TIME ZONE;` },
+          { table: 'ota_deployment_jobs', column: 'completed_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;` },
+          // System Events
+          { table: 'system_events', column: 'created_at', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
+          { table: 'system_events', column: 'event_type', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS event_type VARCHAR(64);` },
+          { table: 'system_events', column: 'payload', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS payload JSONB;` },
+          { table: 'system_events', column: 'severity', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
+          { table: 'system_events', column: 'level', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS level VARCHAR(32) DEFAULT 'info';` },
+          { table: 'system_events', column: 'category', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT 'system';` },
+          { table: 'system_events', column: 'message', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS message TEXT DEFAULT '';` },
+          { table: 'system_events', column: 'details', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS details TEXT;` },
+          { table: 'system_events', column: 'source', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'system';` },
+          { table: 'system_events', column: 'timestamp', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` }
         ];
 
         for (const req of requiredColumns) {
@@ -1028,8 +1121,47 @@ export class PostgresRepository {
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_user_id;
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
           ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_tenant_id_fkey;
+          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_tenant_id;
+          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_user_id;
+          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_tenant_id_fkey;
+          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_user_id_fkey;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS fk_notifications_tenant_id;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS fk_notifications_user_id;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_tenant_id_fkey;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS fk_active_alarms_tenant_id;
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS fk_active_alarms_user_id;
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS active_alarms_tenant_id_fkey;
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS active_alarms_user_id_fkey;
+          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS fk_alarm_events_tenant_id;
+          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS fk_alarm_events_user_id;
+          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS alarm_events_tenant_id_fkey;
+          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS alarm_events_user_id_fkey;
+          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS fk_device_commands_tenant_id;
+          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS fk_device_commands_user_id;
+          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS device_commands_tenant_id_fkey;
+          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS device_commands_user_id_fkey;
+          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS fk_telemetry_readings_tenant_id;
+          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS fk_telemetry_readings_user_id;
+          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_tenant_id_fkey;
+          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_user_id_fkey;
+          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS fk_simulation_telemetry_readings_tenant_id;
+          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS fk_simulation_telemetry_readings_user_id;
+          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_tenant_id_fkey;
+          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_user_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_tenant_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
+          ALTER TABLE dispatch_logs DROP CONSTRAINT IF EXISTS fk_dispatch_logs_tenant_id;
+          ALTER TABLE dispatch_logs DROP CONSTRAINT IF EXISTS fk_dispatch_logs_user_id;
+
+          CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs (tenant_id);
           CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);
           CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);
+          CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices (tenant_id);
           CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
           CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id ON notifications (tenant_id);
           CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
@@ -1037,9 +1169,27 @@ export class PostgresRepository {
           CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);
           CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);
           CREATE INDEX IF NOT EXISTS idx_dispatch_logs_tenant_id ON dispatch_logs (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_devices_ip_address ON devices (ip_address);
+          CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices (ip);
+          CREATE INDEX IF NOT EXISTS idx_active_alarms_device_id ON active_alarms (device_id);
+          CREATE INDEX IF NOT EXISTS idx_active_alarms_tenant_id ON active_alarms (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_alarm_events_tenant_id ON alarm_events (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands (device_id);
+          CREATE INDEX IF NOT EXISTS idx_device_commands_tenant_id ON device_commands (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_telemetry_readings_tenant_id ON telemetry_readings (tenant_id);
+          CREATE INDEX IF NOT EXISTS idx_simulation_telemetry_readings_tenant_id ON simulation_telemetry_readings (tenant_id);
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
+          UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
+          UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;
           UPDATE threshold_rules SET tenant_id = user_id WHERE (tenant_id IS NULL OR tenant_id = '') AND user_id IS NOT NULL;
           UPDATE dispatch_logs SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
+          UPDATE devices SET ip_address = ip WHERE (ip_address IS NULL OR ip_address = '') AND (ip IS NOT NULL AND ip != '');
+          UPDATE devices SET ip = ip_address WHERE (ip IS NULL OR ip = '') AND (ip_address IS NOT NULL AND ip_address != '');
+          UPDATE devices SET data_flow_active = TRUE WHERE data_flow_active IS NULL;
+          UPDATE device_commands SET command = command_name WHERE (command IS NULL OR command = '') AND (command_name IS NOT NULL AND command_name != '');
+          UPDATE device_commands SET command_name = command WHERE (command_name IS NULL OR command_name = '') AND (command IS NOT NULL AND command != '');
+          UPDATE device_commands SET command_type = 'GENERAL_COMMAND' WHERE command_type IS NULL OR command_type = '';
+          UPDATE active_alarms SET current_value = trigger_value WHERE (current_value = 0 OR current_value IS NULL) AND trigger_value IS NOT NULL;
         `).catch(() => {});
 
         // 5.1 Enforce telemetry packet deduplication constraint retroactively for legacy deployments
@@ -1142,14 +1292,17 @@ export class PostgresRepository {
           `).catch(() => {});
 
           await client.query(`
-            INSERT INTO devices (id, name, type, api_key, status, location, is_simulated, tenant_id, user_id, created_at)
+            INSERT INTO devices (id, name, type, device_type, api_key, status, location, ip, ip_address, is_simulated, tenant_id, user_id, created_at)
             VALUES (
               'dev_test_01',
               'Test Simülasyon Cihazı',
               'sensor',
+              'sensor',
               'dev_key_test_0000000000000000',
               'online',
               'Sanal Test Odası',
+              '192.168.1.100',
+              '192.168.1.100',
               true,
               'usr_test_admin',
               'usr_test_admin',
@@ -1387,35 +1540,44 @@ export class PostgresRepository {
         }
       }
 
-      const isThresholdRulesFkError =
-        (err?.code === '23503' || errMsg.includes('foreign key constraint')) &&
-        (errMsg.includes('threshold_rules_user_id_fkey') ||
-         errMsg.includes('threshold_rules_device_id_fkey') ||
-         errMsg.includes('fk_threshold_rules_user_id') ||
-         errMsg.includes('fk_threshold_rules_device_id') ||
-         errMsg.includes('fk_threshold_rules_tenant_id') ||
-         (errMsg.includes('table "threshold_rules"') && (errMsg.includes('user_id') || errMsg.includes('device_id') || errMsg.includes('foreign key'))));
+      const isTenantOrTableFkError =
+        (err?.code === '23503' || errMsg.includes('foreign key constraint') || errMsg.includes('violates foreign key')) &&
+        (errMsg.includes('tenant_id') ||
+         errMsg.includes('audit_logs') ||
+         errMsg.includes('notifications') ||
+         errMsg.includes('active_alarms') ||
+         errMsg.includes('alarm_events') ||
+         errMsg.includes('device_commands') ||
+         errMsg.includes('telemetry_readings') ||
+         errMsg.includes('threshold_rules') ||
+         errMsg.includes('dispatch_logs'));
 
-      if (isThresholdRulesFkError && !this.isRecoveringSchema && this.pool) {
+      if (isTenantOrTableFkError && !this.isRecoveringSchema && this.pool) {
         this.isRecoveringSchema = true;
         try {
-          console.warn(`[PostgreSQL Otomatik Onarım]: threshold_rules yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak indeks oluşturuluyor ve sorgu tekrarlanıyor...`);
-          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;`);
-          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;`);
-          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;`);
-          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;`);
-          await this.pool.query(`ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;`);
-          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_user_id ON threshold_rules (user_id);`);
-          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);`);
-          await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);`);
+          console.warn(`[PostgreSQL Otomatik Onarım]: Yabancı anahtar kısıtı tespit edildi (${errMsg}), kısıt kaldırılarak indeks oluşturuluyor ve sorgu tekrarlanıyor...`);
+          
+          const targetTables = ['audit_logs', 'notifications', 'active_alarms', 'alarm_events', 'device_commands', 'telemetry_readings', 'simulation_telemetry_readings', 'threshold_rules', 'dispatch_logs', 'devices'];
+          for (const tbl of targetTables) {
+            await this.pool.query(`
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS fk_${tbl}_tenant_id;
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS fk_${tbl}_user_id;
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS fk_${tbl}_device_id;
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS ${tbl}_tenant_id_fkey;
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS ${tbl}_user_id_fkey;
+              ALTER TABLE ${tbl} DROP CONSTRAINT IF EXISTS ${tbl}_device_id_fkey;
+              CREATE INDEX IF NOT EXISTS idx_${tbl}_tenant_id ON ${tbl} (tenant_id);
+            `).catch(() => {});
+          }
+
           recordDatabaseHealingEvent(
-            `threshold_rules tablosu yabancı anahtar kısıtları kaldırılarak performans indeksleri eklendi.`,
-            { table: 'threshold_rules', error: errMsg },
+            `Tablo yabancı anahtar kısıtı otomatik kaldırılarak performans indeksi eklendi (${errMsg}).`,
+            { error: errMsg },
             'warn'
           );
           return await this.pool.query(text, params);
         } catch (retryErr: any) {
-          console.warn('[PostgreSQL threshold_rules Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
+          console.warn('[PostgreSQL Kısıt Kaldırma Tekrar Hatası]:', retryErr?.message || retryErr);
         } finally {
           this.isRecoveringSchema = false;
         }
@@ -1735,12 +1897,14 @@ export class PostgresRepository {
 
     // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_admin'e yönlendirilir
     const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_admin';
+    const effectiveType = dev.deviceType || dev.type || 'sensor';
+    const effectiveIp = (dev as any).ipAddress || (dev as any).ip || null;
 
     const sql = `
       INSERT INTO devices (
         id, tenant_id, user_id, previous_tenant_id, previous_tenant_name, ownership_transferred_at,
-        name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
-        ip_address, mac_address, last_seen, rate_limit_per_min, 
+        name, type, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
+        ip, ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
         save_simulated_data_to_db, simulated_metrics, role_key, hardware_model, firmware_version,
         ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at,
@@ -1751,7 +1915,7 @@ export class PostgresRepository {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
         $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, 
-        $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44
+        $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
       )
       ON CONFLICT (id) DO UPDATE SET
         tenant_id = EXCLUDED.tenant_id,
@@ -1760,12 +1924,14 @@ export class PostgresRepository {
         previous_tenant_name = COALESCE(EXCLUDED.previous_tenant_name, devices.previous_tenant_name),
         ownership_transferred_at = COALESCE(EXCLUDED.ownership_transferred_at, devices.ownership_transferred_at),
         name = EXCLUDED.name,
+        type = EXCLUDED.type,
         device_type = EXCLUDED.device_type,
         api_key = EXCLUDED.api_key,
         api_key_prefix = EXCLUDED.api_key_prefix,
         api_key_hash = EXCLUDED.api_key_hash,
         status = EXCLUDED.status,
         location = EXCLUDED.location,
+        ip = EXCLUDED.ip,
         ip_address = EXCLUDED.ip_address,
         mac_address = EXCLUDED.mac_address,
         last_seen = EXCLUDED.last_seen,
@@ -1805,13 +1971,15 @@ export class PostgresRepository {
       dev.previousTenantName || null,
       dev.ownershipTransferredAt || null,
       dev.name,
-      dev.deviceType || dev.type || 'sensor',
+      effectiveType,
+      effectiveType,
       dev.apiKey || null,
       dev.apiKeyPrefix || null,
       dev.apiKeyHash || null,
       dev.status || 'online',
       dev.location || null,
-      dev.ipAddress || null,
+      effectiveIp,
+      effectiveIp,
       dev.macAddress || null,
       dev.lastSeen || new Date().toISOString(),
       dev.rateLimitPerMin || 120,
@@ -1841,7 +2009,7 @@ export class PostgresRepository {
       JSON.stringify(dev.capabilities || []),
       JSON.stringify(dev.supportedOutputs || []),
       JSON.stringify(dev.supportedCommands || []),
-      new Date().toISOString(),
+      (dev as any).createdAt || new Date().toISOString(),
     ];
 
     try {
@@ -1902,8 +2070,8 @@ export class PostgresRepository {
       previousTenantName: r.previous_tenant_name || undefined,
       ownershipTransferredAt: r.ownership_transferred_at ? new Date(r.ownership_transferred_at).toISOString() : undefined,
       name: r.name,
-      type: r.device_type,
-      deviceType: r.device_type,
+      type: r.device_type || r.type || 'sensor',
+      deviceType: r.device_type || r.type || 'sensor',
       roleKey: r.role_key || undefined,
       hardwareModel: r.hardware_model || undefined,
       firmwareVersion: r.firmware_version || undefined,
@@ -1912,7 +2080,7 @@ export class PostgresRepository {
       apiKeyHash: r.api_key_hash,
       status: r.status || 'online',
       location: r.location || '',
-      ipAddress: r.ip_address || '',
+      ipAddress: r.ip_address || r.ip || '',
       macAddress: r.mac_address || '',
       lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : new Date().toISOString(),
       rateLimitPerMin: r.rate_limit_per_min || 120,

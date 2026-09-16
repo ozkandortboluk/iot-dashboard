@@ -74,17 +74,10 @@ export const migration004: Migration = {
           ALTER TABLE ${item.table} ALTER COLUMN ${item.column} SET NOT NULL;
         `);
 
-        // Add Foreign Key (if it's not a hypertable with issues, wait, foreign keys on hypertables to regular tables are supported)
-        const fkName = `fk_${item.table}_tenant_id`;
-        const fkCheck = await client.query(`
-          SELECT 1 FROM pg_constraint WHERE conname = $1
-        `, [fkName]);
-
-        if (fkCheck.rows.length === 0) {
-           await client.query(`
-             ALTER TABLE ${item.table} ADD CONSTRAINT ${fkName} FOREIGN KEY (${item.column}) REFERENCES users(id) ON DELETE CASCADE;
-           `);
-        }
+        // Create index on tenant_id for high performance multi-tenant isolation
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS idx_${item.table}_tenant_id ON ${item.table} (${item.column});
+        `);
       } catch (err: any) {
         console.error(`[Migration 004] ALTER TABLE ${item.table} ADD COLUMN/FK ${item.column} error:`, err?.message || err);
         throw err;

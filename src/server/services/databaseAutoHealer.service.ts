@@ -312,6 +312,124 @@ export class DatabaseAutoHealer {
           }
         }
 
+        if (existing.has('devices')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'devices';
+          `);
+          const devCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!devCols.has('ip_address') || !devCols.has('data_flow_active') || !devCols.has('auth_token')) {
+            await client.query(`
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip VARCHAR(45);
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
+              ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);
+              UPDATE devices SET ip_address = ip WHERE (ip_address IS NULL OR ip_address = '') AND (ip IS NOT NULL AND ip != '');
+              UPDATE devices SET ip = ip_address WHERE (ip IS NULL OR ip = '') AND (ip_address IS NOT NULL AND ip_address != '');
+              UPDATE devices SET data_flow_active = TRUE WHERE data_flow_active IS NULL;
+            `);
+            recordDatabaseHealingEvent('devices tablosu ip_address ve data_flow_active kolonları otomatik onarıldı.', { table: 'devices' }, 'info');
+          }
+        }
+
+        if (existing.has('active_alarms')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'active_alarms';
+          `);
+          const alarmCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!alarmCols.has('device_name') || !alarmCols.has('current_value') || !alarmCols.has('first_breach_at')) {
+            await client.query(`
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS device_name VARCHAR(128) DEFAULT '';
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS operator VARCHAR(32) DEFAULT '>';
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS current_value NUMERIC DEFAULT 0;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS trigger_value NUMERIC;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS first_breach_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_notified_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS message TEXT;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS note TEXT;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+            `);
+            recordDatabaseHealingEvent('active_alarms tablosu eksik kolonları otomatik onarıldı.', { table: 'active_alarms' }, 'info');
+          }
+        }
+
+        if (existing.has('notifications')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'notifications';
+          `);
+          const notifCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!notifCols.has('severity') || !notifCols.has('device_name') || !notifCols.has('is_read')) {
+            await client.query(`
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS device_name VARCHAR(128);
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN DEFAULT FALSE;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS current_value NUMERIC;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS threshold_value NUMERIC;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE;
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(64) DEFAULT 'alert';
+              ALTER TABLE notifications ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'system';
+              UPDATE notifications SET read = is_read WHERE read IS NULL;
+              UPDATE notifications SET is_read = read WHERE is_read IS NULL;
+            `);
+            recordDatabaseHealingEvent('notifications tablosu eksik kolonları otomatik onarıldı.', { table: 'notifications' }, 'info');
+          }
+        }
+
+        if (existing.has('device_commands')) {
+          const colRes = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'device_commands';
+          `);
+          const cmdCols = new Set(colRes.rows.map((r: any) => r.column_name));
+          if (!cmdCols.has('command_type') || !cmdCols.has('command_name') || !cmdCols.has('value_payload')) {
+            await client.query(`
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_type VARCHAR(64) DEFAULT 'GENERAL_COMMAND';
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_name VARCHAR(64);
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command VARCHAR(64);
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS value_payload TEXT;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_by VARCHAR(64);
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS executed_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;
+              ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS error_message TEXT;
+              UPDATE device_commands SET command = command_name WHERE (command IS NULL OR command = '') AND (command_name IS NOT NULL AND command_name != '');
+              UPDATE device_commands SET command_name = command WHERE (command_name IS NULL OR command_name = '') AND (command IS NOT NULL AND command != '');
+            `);
+            recordDatabaseHealingEvent('device_commands tablosu eksik kolonları otomatik onarıldı.', { table: 'device_commands' }, 'info');
+          }
+        }
+
+        // Drop any residual rigid tenant FK constraints that block system/multi-tenant logging
+        await client.query(`
+          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_tenant_id;
+          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS fk_notifications_tenant_id;
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS fk_active_alarms_tenant_id;
+          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS fk_alarm_events_tenant_id;
+          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS fk_device_commands_tenant_id;
+          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS fk_telemetry_readings_tenant_id;
+          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS fk_simulation_telemetry_readings_tenant_id;
+          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
+        `).catch(() => {});
+
         // If any critical tables are missing, trigger non-blocking safe schema patch
         if (missing.length > 0) {
           const msg = `Eksik tablolar tespit edildi: ${missing.join(', ')}. Şema onarılıyor...`;

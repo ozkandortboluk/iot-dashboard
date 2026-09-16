@@ -4,6 +4,48 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.18] - 2026-09-16
+
+### 📌 Cihaz Şeması Çift Kolon Uyumluluğu & Paket Yöneticisi Dayanıklılığı
+- **`devices` Tablosu Çift Kolon ve Kısıt Esnekliği (`009_ensure_device_schema_resilience.ts`)**:
+  - `type` / `device_type` ve `ip` / `ip_address` kolonları hem veritabanı seviyesinde hem de `PostgresRepository.saveDevice` / `mapDeviceRow` metodlarında tam çift yönlü senkronize edildi.
+  - Olası `null value in column "type" violates not-null constraint` veya `column "ip_address" does not exist` hataları şema düzeyinde `DROP NOT NULL`, varsayılan değer atamaları ve çift kolon beslemesi ile kalıcı olarak giderildi.
+- **Paket Bağımlılıkları ve Kilit Dosyaları Senkronizasyonu**:
+  - `bun.lock` ve `package-lock.json` kilit dosyaları doğrulandı, `bun install` ve `npm install` komutlarının 0 çıkış koduyla sorunsuz çalıştığı teyit edildi.
+- **Kanonik Test Doğrulaması**:
+  - `dev_test_01` cihazı üzerinden `saveDevice` ve `getDeviceById` akışları test edilerek tüm kolon eşleşmelerinin hatasız çalıştığı onaylandı.
+
+---
+
+## 🚀 [v1.17.17] - 2026-09-16
+
+### 📌 `audit_logs` ve Çok Kiracılı Tablolarda Yabancı Anahtar (FK) Kısıt Hatası Kalıcı Çözümü
+- **`audit_logs.tenant_id` Yabancı Anahtar Kısıtı Kaldırıldı**:
+  - `insert or update on table "audit_logs" violates foreign key constraint "fk_audit_logs_tenant_id"` hatası kalıcı olarak giderildi.
+  - Güvenlik ve denetim kayıtlarının (audit logs) sistem olayları (`system`), kimliği doğrulanmamış başarısız giriş denemeleri (`unknown`) veya arka plan görevleri tarafından kesintisiz kaydedilebilmesi için `fk_audit_logs_tenant_id` kısıtı kaldırıldı ve yüksek performanslı `idx_audit_logs_tenant_id` B-Tree indeksi ile değiştirildi.
+- **Tüm Çok Kiracılı Tablolarda Esnek İzolasyon ve İndeksleme (`008_remove_rigid_tenant_foreign_keys.ts`)**:
+  - `audit_logs`, `notifications`, `active_alarms`, `alarm_events`, `device_commands`, `telemetry_readings`, `simulation_telemetry_readings`, `threshold_rules`, `dispatch_logs` tablolarındaki kısıtlayıcı `fk_*_tenant_id` yabancı anahtarları kaldırılarak yerlerine yüksek hızlı sorgulama indeksleri oluşturuldu.
+- **Çalışma Zamanı Yabancı Anahtar Otomatik Onarıcısı (Runtime FK Auto-Healer)**:
+  - `postgres.ts` içerisindeki `query` hata yakalayıcısına ve `databaseAutoHealer.service.ts` servisine çok kiracılı FK hatalarını anında tespit edip kısıtı kaldırarak sorguyu şeffaf biçimde tekrarlayan koruma katmanı eklendi.
+
+---
+
+## 🚀 [v1.17.16] - 2026-09-16
+
+### 📌 Kapsamlı Veritabanı Şema Senkronizasyonu & Eksik Kolon Kalıcı Onarım Motoru
+- **Tüm Tablolarda Eksiksiz Kolon Eşitlemesi (Comprehensive Schema Sync)**:
+  - Veritabanında çalışma zamanında ve canlı sorgularda karşılaşılan tüm eksik kolon (`column does not exist`) sorunları için `007_comprehensive_schema_synchronization_and_column_healing.ts` kapsamlı migrasyonu oluşturuldu ve devreye alındı.
+  - `devices` tablosu: `ip`, `ip_address`, `data_flow_active`, `auth_token`, `customer_id`, `type`, `location`, `status`, `last_seen` kolonları güvenceye alındı.
+  - `active_alarms` tablosu: `device_name`, `operator`, `current_value`, `trigger_value`, `first_breach_at`, `last_notified_at`, `silenced_until`, `repeat_count`, `message`, `note`, `acknowledged_by`, `acknowledged_at`, `resolved_at` kolonları senkronize edildi.
+  - `notifications` tablosu: `severity`, `device_name`, `acknowledged`, `acknowledged_at`, `acknowledged_by`, `repeat_count`, `current_value`, `threshold_value`, `is_read`, `read`, `type`, `source` kolonları eklendi ve senkronize edildi.
+  - `device_commands` tablosu: `command_type`, `command_name`, `command`, `value_payload`, `sent_by`, `retry_count`, `max_retries`, `applied_at`, `executed_at`, `sent_at`, `acknowledged_at`, `error_message`, `timeout_seconds`, `output_id`, `parameters`, `result`, `target_state` kolonları eklendi.
+  - `dispatch_logs`, `audit_logs`, `system_events`, `threshold_rules`, `firmwares`, `ota_deployment_jobs`, `dashboard_layouts`, `user_sessions`, `device_ws_messages_dedup` tablolarının tüm potansiyel eksik kolonları tam şema ile eşitlendi.
+- **Çift Katmanlı Koruma & Çalışma Zamanı Oto-İyileştirici (Dual-Layer Auto-Healer)**:
+  - `postgres.ts` içindeki `ensureTelemetrySchema` ve `databaseAutoHealer.service.ts` içindeki `verifyAndRepairTables` fonksiyonları güncellenerek tüm kritik tablolar ve kolonlar periyodik olarak doğrulanıp eksiklik durumunda otomatik onarım tetiklenecek şekilde yapılandırıldı.
+  - Eksik kolon hatası oluştuğunda sorgu kesintiye uğramadan anında kolon DDL'i çalıştırılıp sorgu başarıyla tekrarlanır.
+
+---
+
 ## 🚀 [v1.17.15] - 2026-09-16
 
 ### 📌 PostgreSQL NOT NULL Kısıtı ve ON CONFLICT Benzersizlik Hatası Kalıcı Onarımı & Dinamik İyileştirme
