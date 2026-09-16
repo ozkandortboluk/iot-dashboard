@@ -73,6 +73,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
+  const [customApiKey, setCustomApiKey] = useState('');
 
   // Duplicate Check & Strategy
   const [isCheckingCollision, setIsCheckingCollision] = useState(false);
@@ -102,12 +103,14 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
       setMacAddress(initialDevice.mac);
       if (initialDevice.pairingCode) setPairingCode(initialDevice.pairingCode);
       if (initialDevice.hardwareModel) setDeviceType(initialDevice.hardwareModel);
+      setCustomApiKey('');
     } else {
       setDeviceName('');
       setIpAddress('');
       setMacAddress('');
       setPairingCode('');
       setDeviceType('ESP32');
+      setCustomApiKey('');
     }
   }, [initialDevice, isOpen]);
 
@@ -193,6 +196,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
         zoneId: selectedZoneId || undefined,
         groupId: selectedGroupId || undefined,
         tags,
+        apiKey: customApiKey.trim() || undefined,
         collisionStrategy,
         targetDeviceIdToReplace: collisionStrategy === 'replace_hardware' ? targetDeviceIdToReplace : undefined,
       };
@@ -461,6 +465,22 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Cihaz API Token / Kimlik Anahtarı <span className="text-slate-500 font-normal">(Opsiyonel)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Örn: nex_... (Boş bırakılırsa cihazın gönderdiği token algılanır veya yeni üretilir)"
+                    value={customApiKey}
+                    onChange={(e) => setCustomApiKey(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Boş bırakırsanız sistem cihazın gönderdiği donanım tokenini kullanır veya güvenli bir kriptografik token üretir.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -693,26 +713,46 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                 </p>
               </div>
 
-              {pairedResult?.apiKey && (
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-2">
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                    Cihaz Özel API Anahtarı (x-api-key)
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 bg-slate-900 px-3 py-2 rounded-lg text-xs font-mono text-cyan-400 border border-slate-800 select-all truncate">
-                      {pairedResult.apiKey}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={handleCopyKey}
-                      className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0"
-                    >
-                      {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      <span>{isCopied ? 'Kopyalandı' : 'Kopyala'}</span>
-                    </button>
+              {(() => {
+                const displayKey = pairedResult?.apiKey || pairedResult?.device?.apiKey;
+                if (!displayKey || displayKey === '__USE_CACHED_TOKEN__') {
+                  return (
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left text-xs text-slate-400">
+                      Cihaz anahtarı başarıyla yapılandırıldı ve arka planda güvenle saklandı.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Cihaz Özel API Anahtarı (x-api-key)
+                      </span>
+                      <span className="text-[10px] text-emerald-400 font-medium">Aktif ve Hazır</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-slate-900 px-3 py-2 rounded-lg text-xs font-mono text-cyan-400 border border-slate-800 select-all truncate">
+                        {displayKey}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(displayKey);
+                          setIsCopied(true);
+                          setTimeout(() => setIsCopied(false), 2500);
+                        }}
+                        className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0"
+                      >
+                        {isCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                        <span>{isCopied ? 'Kopyalandı' : 'Kopyala'}</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      Bu anahtarı cihazınızın kodundaki veya firmware ayarlarındaki <code className="text-slate-400">x-api-key</code> başlığına ekleyin.
+                    </p>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>

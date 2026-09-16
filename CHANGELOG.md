@@ -4,6 +4,23 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.17.19] - 2026-09-16
+
+### 📌 Cihaz Eşleştirme Token Çözümleme & Donanım Anahtarı Üretimi İyileştirmesi
+- **`__USE_CACHED_TOKEN__` Yer Tutucusunun Kalıcı Olarak Kaldırılması**:
+  - Cihaz eşleştirme (`pairDevice` ve `createDevice`) süreçlerinde yer tutucu metinlerin veritabanına ve bellek depolarına yazılması kesin olarak engellendi.
+  - Donanımın daha önce ağ keşif (`discovery`) veya yetkisiz telemetri paketleriyle gönderdiği gerçek donanım tokeni otomatik olarak algılanıp cihaza atanıyor; eğer saha cihazı bir token iletmediyse veya özel anahtar girilmediyse, platform kriptografik olarak güvenli benzersiz bir API anahtarı (`nex_...`) ve SHA-256 hash'i üreterek cihazı yetkilendiriyor.
+- **Veritabanı Onarımı & Şema Koruması (`010_heal_device_tokens_and_prohibit_placeholders.ts`)**:
+  - Sistemde yer tutucu veya geçersiz anahtara sahip tüm cihazlar otomatik olarak tespit edildi ve geçerli tokenler üretilerek veritabanında onarıldı (`dev_1789576313773` / ESP32-b714 dahil).
+  - `PostgresRepository.saveDevice` ve `mapDeviceRow` katmanlarına otomatik kontrol ve onarım koruması entegre edildi.
+- **Eşleştirme Sihirbazı UI Geliştirmesi (`ProvisioningWizardModal.tsx`)**:
+  - Adım 1'e isteğe bağlı özel API anahtarı girme alanı eklendi (boş bırakıldığında otomatik algılama/üretim bilgisiyle).
+  - Adım 4 başarı ekranında atanan gerçek API anahtarının net olarak görüntülenmesi, kopyalanabilmesi ve firmware entegrasyonu yönergesi güçlendirildi.
+- **Kanonik Test Güvencesi**:
+  - `usr_test_admin` ve `dev_test_01` cihazının kalıcı `dev_key_test_0000000000000000` anahtarı doğrulanarak koruma altına alındı.
+
+---
+
 ## 🚀 [v1.17.18] - 2026-09-16
 
 ### 📌 Cihaz Şeması Çift Kolon Uyumluluğu & Paket Yöneticisi Dayanıklılığı

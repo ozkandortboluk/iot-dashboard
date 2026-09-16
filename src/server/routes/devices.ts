@@ -188,15 +188,36 @@ router.post('/', authenticateUser, async (req, res) => {
 
   let finalApiKey = apiKey && apiKey.trim() ? apiKey.trim() : undefined;
   
-  if (finalApiKey === '__USE_CACHED_TOKEN__') {
+  if (
+    !finalApiKey ||
+    finalApiKey === '__USE_CACHED_TOKEN__' ||
+    finalApiKey.includes('USE_CACHED') ||
+    finalApiKey === 'Yok' ||
+    finalApiKey === 'undefined' ||
+    finalApiKey === 'null'
+  ) {
+    finalApiKey = undefined;
     // Try to recover token from unregistered devices cache
-    const unreg = (db.data.unregisteredDevices || []).find((d: any) => 
-      (ipAddress && d.ip === ipAddress) || (macAddress && d.mac === macAddress) || (name && d.hostname === name)
-    );
-    if (unreg && (unreg as any).tokenProvided) {
-      finalApiKey = (unreg as any).tokenProvided;
-    } else {
-      finalApiKey = undefined;
+    const cleanDevMac = macAddress?.replace(/[:-]/g, '').toLowerCase();
+    const unreg = (db.data.unregisteredDevices || []).find((d: any) => {
+      const cleanUnregMac = d.mac?.replace(/[:-]/g, '').toLowerCase();
+      const macMatch = cleanDevMac && cleanUnregMac && cleanDevMac === cleanUnregMac;
+      const ipMatch = ipAddress && d.ip === ipAddress;
+      const nameMatch = name && (d.hostname === name || d.name === name);
+      return macMatch || ipMatch || nameMatch;
+    });
+    if (unreg && (unreg as any).tokenProvided && typeof (unreg as any).tokenProvided === 'string') {
+      const cand = (unreg as any).tokenProvided.trim();
+      if (
+        cand !== 'Yok' &&
+        cand !== '__USE_CACHED_TOKEN__' &&
+        !cand.includes('USE_CACHED') &&
+        cand !== 'undefined' &&
+        cand !== 'null' &&
+        cand.length >= 8
+      ) {
+        finalApiKey = cand;
+      }
     }
   }
 

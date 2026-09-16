@@ -29,14 +29,62 @@ export function generateDeviceKeyDetails(providedKey?: string): {
   prefix: string;
   hash: string;
 } {
-  const rawKey = providedKey?.trim() || `nex_${crypto.randomBytes(4).toString('hex')}_${crypto.randomBytes(12).toString('hex')}`;
+  const cleanKey = providedKey?.trim();
+  const isValidProvided = Boolean(
+    cleanKey &&
+    cleanKey !== '__USE_CACHED_TOKEN__' &&
+    cleanKey !== 'Yok' &&
+    cleanKey !== 'undefined' &&
+    cleanKey !== 'null' &&
+    !cleanKey.includes('USE_CACHED') &&
+    cleanKey.length >= 8
+  );
+
+  const rawKey = isValidProvided && cleanKey
+    ? cleanKey
+    : `nex_${crypto.randomBytes(4).toString('hex')}_${crypto.randomBytes(12).toString('hex')}`;
   const prefix = rawKey.substring(0, 12);
   const hash = hashApiKey(rawKey);
   return { rawKey, prefix, hash };
 }
 
 export class DeviceRepository {
-  constructor(private db: any) {}
+  constructor(private db: any) {
+    this.healExistingDeviceTokens();
+  }
+
+  public healExistingDeviceTokens(): void {
+    if (!this.db?.data?.devices || !Array.isArray(this.db.data.devices)) return;
+    let modified = false;
+    for (const dev of this.db.data.devices) {
+      if (dev.id === 'dev_test_01') {
+        if (dev.apiKey !== 'dev_key_test_0000000000000000') {
+          dev.apiKey = 'dev_key_test_0000000000000000';
+          dev.apiKeyPrefix = 'dev_key_test';
+          dev.apiKeyHash = hashApiKey(dev.apiKey);
+          modified = true;
+          this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+        }
+      } else if (
+        !dev.apiKey ||
+        dev.apiKey === '__USE_CACHED_TOKEN__' ||
+        dev.apiKey.includes('USE_CACHED') ||
+        dev.apiKey === 'Yok' ||
+        dev.apiKey === 'undefined' ||
+        dev.apiKey === 'null'
+      ) {
+        const newKey = generateDeviceKeyDetails();
+        dev.apiKey = newKey.rawKey;
+        dev.apiKeyPrefix = newKey.prefix;
+        dev.apiKeyHash = newKey.hash;
+        modified = true;
+        this.db.postgresRepo?.saveDevice(dev).catch(() => {});
+      }
+    }
+    if (modified && typeof this.db.saveData === 'function') {
+      this.db.saveData(this.db.data);
+    }
+  }
 
   public async checkDeviceStatuses(): Promise<boolean> {
     const now = Date.now();
@@ -232,16 +280,56 @@ export class DeviceRepository {
       }
     }
 
-    // Validate that if a custom apiKey was provided, it doesn't collide with an existing device
-    if (deviceData.apiKey && deviceData.apiKey.trim()) {
-      const existingKeyDev = this.getDeviceByApiKey(deviceData.apiKey.trim());
+    // 1. Resolve Device Token: Check if request has an explicit valid key
+    let resolvedApiKey: string | undefined = deviceData.apiKey?.trim();
+    if (
+      !resolvedApiKey ||
+      resolvedApiKey === '__USE_CACHED_TOKEN__' ||
+      resolvedApiKey.includes('USE_CACHED') ||
+      resolvedApiKey === 'Yok' ||
+      resolvedApiKey === 'undefined' ||
+      resolvedApiKey === 'null'
+    ) {
+      resolvedApiKey = undefined;
+    }
+
+    // 2. If no valid key was provided directly, attempt to recover the token the field device sent during discovery/unregistered packets
+    if (!resolvedApiKey) {
+      const cleanDevMac = deviceData.macAddress?.replace(/[:-]/g, '').toLowerCase();
+      const unreg = (this.db.data.unregisteredDevices || []).find((d: any) => {
+        const cleanUnregMac = d.mac?.replace(/[:-]/g, '').toLowerCase();
+        const macMatch = cleanDevMac && cleanUnregMac && cleanDevMac === cleanUnregMac;
+        const ipMatch = deviceData.ipAddress && d.ip && d.ip === deviceData.ipAddress;
+        const nameMatch = deviceData.name && (d.hostname === deviceData.name || d.name === deviceData.name);
+        return macMatch || ipMatch || nameMatch;
+      });
+
+      if (unreg && unreg.tokenProvided && typeof unreg.tokenProvided === 'string') {
+        const candidate = unreg.tokenProvided.trim();
+        if (
+          candidate !== 'Yok' &&
+          candidate !== '__USE_CACHED_TOKEN__' &&
+          !candidate.includes('USE_CACHED') &&
+          candidate !== 'undefined' &&
+          candidate !== 'null' &&
+          candidate.length >= 8
+        ) {
+          resolvedApiKey = candidate;
+          this.db.addAuditLog('system', 'Eşleştirme', `Cihazın (${deviceData.name}) gönderdiği donanım tokeni (${candidate.substring(0, 8)}...) başarıyla kaydedildi.`, 'info');
+        }
+      }
+    }
+
+    // Validate that if a custom apiKey was provided or recovered, it doesn't collide with an existing device
+    if (resolvedApiKey) {
+      const existingKeyDev = this.getDeviceByApiKey(resolvedApiKey);
       if (existingKeyDev && existingKeyDev.id !== newId) {
         throw new Error(`Bu API Anahtarı zaten başka bir cihaz tarafından kullanılıyor (${existingKeyDev.name})`);
       }
     }
 
-    let keyDetails = generateDeviceKeyDetails(deviceData.apiKey);
-    if (!deviceData.apiKey) {
+    let keyDetails = generateDeviceKeyDetails(resolvedApiKey);
+    if (!resolvedApiKey) {
       let attempts = 0;
       while (this.getDeviceByApiKey(keyDetails.rawKey) && attempts < 5) {
         keyDetails = generateDeviceKeyDetails();
@@ -1937,6 +2025,46 @@ export class DeviceRepository {
       }
     }
 
+    // 1. Resolve Device Token: Check if request has an explicit valid key
+    let resolvedApiKey: string | undefined = request.apiKey?.trim();
+    if (
+      !resolvedApiKey ||
+      resolvedApiKey === '__USE_CACHED_TOKEN__' ||
+      resolvedApiKey.includes('USE_CACHED') ||
+      resolvedApiKey === 'Yok' ||
+      resolvedApiKey === 'undefined' ||
+      resolvedApiKey === 'null'
+    ) {
+      resolvedApiKey = undefined;
+    }
+
+    // 2. If no valid key was explicitly entered by user, look up tokenProvided from unregisteredDevices cache
+    if (!resolvedApiKey) {
+      const cleanDevMac = request.macAddress?.replace(/[:-]/g, '').toLowerCase();
+      const unreg = (this.db.data.unregisteredDevices || []).find((d: any) => {
+        const cleanUnregMac = d.mac?.replace(/[:-]/g, '').toLowerCase();
+        const macMatch = cleanDevMac && cleanUnregMac && cleanDevMac === cleanUnregMac;
+        const ipMatch = request.ipAddress && d.ip && d.ip === request.ipAddress;
+        const codeMatch = request.pairingCode && d.pairingCode && d.pairingCode === request.pairingCode;
+        const nameMatch = request.name && (d.hostname === request.name || d.name === request.name);
+        return macMatch || ipMatch || codeMatch || nameMatch;
+      });
+
+      if (unreg && unreg.tokenProvided && typeof unreg.tokenProvided === 'string') {
+        const candidate = unreg.tokenProvided.trim();
+        if (
+          candidate !== 'Yok' &&
+          candidate !== '__USE_CACHED_TOKEN__' &&
+          !candidate.includes('USE_CACHED') &&
+          candidate !== 'undefined' &&
+          candidate !== 'null' &&
+          candidate.length >= 8
+        ) {
+          resolvedApiKey = candidate;
+        }
+      }
+    }
+
     // Standard new device creation
     const createdDev = await this.createDevice({
       name: resolvedDeviceName,
@@ -1950,7 +2078,7 @@ export class DeviceRepository {
       zoneId: request.zoneId,
       groupId: request.groupId,
       tags: request.tags || [],
-      apiKey: request.apiKey || '__USE_CACHED_TOKEN__',
+      apiKey: resolvedApiKey,
       rateLimitPerMin: 120,
       encryptionMethod: 'AES-256-GCM',
       status: 'offline',

@@ -217,7 +217,9 @@ networkRouter.post('/pair', authenticateUser, async (req, res) => {
       zoneId,
       groupId,
       tags: Array.isArray(tags) ? tags : [],
-      apiKey,
+      apiKey: apiKey && typeof apiKey === 'string' && apiKey.trim() && apiKey !== '__USE_CACHED_TOKEN__' && !apiKey.includes('USE_CACHED') && apiKey !== 'Yok'
+        ? apiKey.trim()
+        : undefined,
       collisionStrategy: collisionStrategy || 'reject',
       targetDeviceIdToReplace,
     },
