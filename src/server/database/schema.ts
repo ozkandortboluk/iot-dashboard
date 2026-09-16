@@ -48,20 +48,6 @@ EXCEPTION
         RAISE NOTICE 'users table alter notice: %', SQLERRM;
 END $$;
 
--- 2b. Canonical Root System Administrator & Fallback Tenant (usr_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_admin',
-    'Sistem Yöneticisi',
-    'admin@nexusnode.io',
-    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-    'admin',
-    'Merkez Yönetim',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',

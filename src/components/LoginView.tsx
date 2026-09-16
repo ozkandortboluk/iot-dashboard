@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database, LogIn, UserPlus } from 'lucide-react';
+import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database, LogIn, UserPlus, RefreshCw, AlertTriangle, RotateCcw } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const LoginView: React.FC = () => {
@@ -9,6 +9,7 @@ export const LoginView: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   
   const [needSetup, setNeedSetup] = useState(false);
+  const [isCheckingSetup, setIsCheckingSetup] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'setup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,21 +20,50 @@ export const LoginView: React.FC = () => {
   const [seedDemoData, setSeedDemoData] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isResettingSetup, setIsResettingSetup] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // Detect if system is running for the first time and needs an admin account
-  useEffect(() => {
-    checkSetupStatus().then((val) => {
+  const refreshSetupCheck = useCallback(async () => {
+    setIsCheckingSetup(true);
+    try {
+      const val = await checkSetupStatus();
       setNeedSetup(val);
       if (val) {
         setAuthMode('setup');
-        setCompanyName('Merkez Yönetim');
-      } else {
-        setAuthMode('login');
+        setCompanyName((prev) => prev || 'Merkez Yönetim');
       }
-    }).catch(() => {
-      setAuthMode('login');
-    });
+    } catch {
+      // Fallback
+    } finally {
+      setIsCheckingSetup(false);
+    }
   }, [checkSetupStatus]);
+
+  const handleResetToSetup = async () => {
+    setIsResettingSetup(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/auth/reset-to-setup', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Sıfırlama başarısız.');
+      }
+      setSuccessMsg('Sistem başarıyla ilk kurulum moduna alındı. Şimdi yönetici hesabınızı oluşturabilirsiniz.');
+      setShowResetConfirm(false);
+      await refreshSetupCheck();
+      setAuthMode('setup');
+    } catch (err: any) {
+      setError(err.message || 'Sıfırlama sırasında hata oluştu.');
+    } finally {
+      setIsResettingSetup(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSetupCheck();
+  }, [refreshSetupCheck]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,85 +176,158 @@ export const LoginView: React.FC = () => {
 
         {/* Form Container Card */}
         <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-xl dark:shadow-2xl space-y-6">
-          {/* Mode Switcher Tabs */}
-          {needSetup ? (
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('setup');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'setup'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>İlk Kurulum</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'login'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Mevcut Giriş</span>
-              </button>
+          {/* Mode Switcher Tabs with Refresh Action */}
+          <div className="flex items-center gap-2">
+            <div className={`grid ${needSetup ? 'grid-cols-2' : 'grid-cols-3'} p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold flex-1`}>
+              {needSetup ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('setup');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'setup'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>İlk Kurulum</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'login'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Giriş Yap</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'login'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Giriş</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('register');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'register'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Kayıt</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('setup');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      authMode === 'setup'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Kurulum</span>
+                  </button>
+                </>
+              )}
             </div>
-          ) : (
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'login'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Giriş Yap</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('register');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'register'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Yeni Kayıt</span>
-              </button>
+            <button
+              type="button"
+              onClick={refreshSetupCheck}
+              disabled={isCheckingSetup}
+              title="Kurulum Durumunu Yeniden Kontrol Et"
+              className="p-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${isCheckingSetup ? 'animate-spin text-indigo-500' : ''}`} />
+            </button>
+          </div>
+
+          {needSetup && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs rounded-xl flex items-start gap-2 font-medium leading-relaxed">
+              <Database className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+              <span>
+                <strong>Veritabanı Bağlı • Yönetici Hesabı Gerekli:</strong> Sistem veritabanına bağlandı ancak henüz bir yönetici hesabı bulunmuyor. Sisteme erişmek için lütfen ilk yönetici hesabını oluşturun.
+              </span>
             </div>
           )}
 
-          {authMode === 'setup' && (
-            <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs rounded-xl flex items-center gap-2 font-medium leading-relaxed">
-              <Database className="w-4 h-4 shrink-0 text-indigo-500" />
-              <span>
-                <strong>Üretim Modu Güvenliği:</strong> Varsayılan şifreler kaldırılmıştır. Lütfen kendi yöneticinizi oluşturun.
-              </span>
+          {authMode === 'setup' && !needSetup && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs rounded-xl space-y-2.5 leading-relaxed font-medium">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <span>
+                  <strong>Sistemde Kayıtlı Yönetici Mevcut:</strong> Veritabanında daha önceden oluşturulmuş bir yönetici hesabı bulunmaktadır. Eğer şifrenizi unuttuysanız veya sistemi sıfırdan kurmak istiyorsanız aşağıdaki buton ile sistemi ilk kurulum moduna sıfırlayabilirsiniz.
+                </span>
+              </div>
+              {!showResetConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowResetConfirm(true)}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Sistemi İlk Kurulum Moduna Sıfırla</span>
+                </button>
+              ) : (
+                <div className="p-2.5 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-lg space-y-2">
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold">
+                    Mevcut kullanıcı ve yönetici hesapları temizlenecektir. Emin misiniz?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={isResettingSetup}
+                      onClick={handleResetToSetup}
+                      className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded text-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isResettingSetup ? 'Sıfırlanıyor...' : 'Evet, Sıfırla ve Kuruluma Geç'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowResetConfirm(false)}
+                      className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded text-xs hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer"
+                    >
+                      İptal
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -374,45 +477,49 @@ export const LoginView: React.FC = () => {
           </form>
 
           {/* Toggle link below form */}
-          <div className="text-center pt-2">
-            {needSetup ? (
-              authMode === 'login' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('setup');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
-                >
-                  İlk kurulum sihirbazına dönmek için tıklayın
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
-                >
-                  Mevcut bir hesabınız varsa Giriş Yapın
-                </button>
-              )
-            ) : authMode === 'login' ? (
+          <div className="text-center pt-2 space-y-2">
+            {authMode === 'setup' ? (
               <button
                 type="button"
                 onClick={() => {
-                  setAuthMode('register');
+                  setAuthMode('login');
                   setError('');
                   setSuccessMsg('');
                 }}
                 className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
               >
-                Hesabınız yok mu? Yeni Müşteri Kaydı Oluşturun
+                Mevcut bir hesabınız varsa Giriş Yapın
               </button>
+            ) : authMode === 'login' ? (
+              <>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('register');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    Hesabınız yok mu? Yeni Müşteri Kaydı Oluşturun
+                  </button>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('setup');
+                      setError('');
+                      setSuccessMsg('');
+                    }}
+                    className="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Veritabanında yönetici hesabı yok mu? İlk Kurulum Sihirbazı</span>
+                  </button>
+                </div>
+              </>
             ) : (
               <button
                 type="button"

@@ -46,24 +46,36 @@ router.get('/setup-status', async (req, res) => {
   // 1. Ensure database has completed initial hydration from PostgreSQL / disk cache
   await db.waitForInitialization();
 
-  const users = db.getUsers();
-  let hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+  const isPgActive = db.isPostgresConnected() || !!db.postgresRepo?.isReady() || !!db.postgresRepo?.getPool();
+  let hasAdmin = false;
 
-  // 2. Direct PostgreSQL fallback: If in-memory cache hasn't loaded admin yet, query PostgreSQL directly
-  if (!hasAdmin && (db.postgresRepo?.getPool() || db.getPostgresUrl())) {
+  if (isPgActive && db.postgresRepo) {
     try {
-      const pgAdminExists = await db.postgresRepo.checkIfAdminExists();
-      if (pgAdminExists) {
-        hasAdmin = true;
-        // Trigger background hydration to sync in-memory data
-        db.initPostgresRepository().catch(() => {});
+      // Direct authoritative PostgreSQL query: When PostgreSQL is connected,
+      // it is the SINGLE SOURCE OF TRUTH. Check if an active admin user exists in DB.
+      hasAdmin = await db.postgresRepo.checkIfAdminExists();
+      if (!hasAdmin) {
+        // PostgreSQL is connected but has NO admin account.
+        // Purge any stale/orphan admin from memory so memory accurately reflects the empty DB state.
+        db.purgeOrphanAdminsFromMemory();
       }
     } catch (pgErr) {
       console.warn('[Setup-Status PG Check Warning]:', pgErr);
+      const users = db.getUsers();
+      hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
     }
+  } else {
+    // Local / In-memory JSON mode fallback
+    const users = db.getUsers();
+    hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
   }
 
-  res.json({ needSetup: !hasAdmin, inProgress: isSetupInProgress });
+  res.json({
+    needSetup: !hasAdmin,
+    inProgress: isSetupInProgress,
+    hasAdmin,
+    isPostgres: isPgActive,
+  });
 });
 
 router.post('/setup', async (req, res) => {
@@ -77,9 +89,23 @@ router.post('/setup', async (req, res) => {
     });
   }
 
-  // Pre-check: Ensure admin account does not already exist
-  const users = db.getUsers();
-  const hasAdmin = users.some((u) => u.role === 'admin');
+  // Pre-check: Authoritative check against active database engine
+  const isPgActive = db.isPostgresConnected() || !!db.postgresRepo?.isReady() || !!db.postgresRepo?.getPool();
+  let hasAdmin = false;
+
+  if (isPgActive && db.postgresRepo) {
+    try {
+      hasAdmin = await db.postgresRepo.checkIfAdminExists();
+    } catch (pgErr) {
+      console.warn('[Setup POST PG Pre-check Warning]:', pgErr);
+      const users = db.getUsers();
+      hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+    }
+  } else {
+    const users = db.getUsers();
+    hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+  }
+
   if (hasAdmin) {
     return res.status(400).json({ error: 'Kurulum zaten tamamlanmış. Sistemde en az bir yönetici bulunmaktadır.' });
   }
@@ -112,10 +138,20 @@ router.post('/setup', async (req, res) => {
 
   try {
     // Re-verify inside lock to guarantee mutual exclusion
-    const currentUsers = db.getUsers();
-    if (currentUsers.some((u) => u.role === 'admin')) {
+    let doubleCheckAdmin = false;
+    if (isPgActive && db.postgresRepo) {
+      doubleCheckAdmin = await db.postgresRepo.checkIfAdminExists();
+    } else {
+      const currentUsers = db.getUsers();
+      doubleCheckAdmin = currentUsers.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+    }
+
+    if (doubleCheckAdmin) {
       throw new Error('Kurulum zaten başka bir oturum tarafından tamamlandı.');
     }
+
+    // Clean any orphan in-memory admin accounts before registering authoritative admin
+    db.purgeOrphanAdminsFromMemory();
 
     const adminUser = await db.registerUser(name, email, password, 'admin', companyName);
 
@@ -138,6 +174,40 @@ router.post('/setup', async (req, res) => {
     res.status(400).json({ error: msg });
   } finally {
     isSetupInProgress = false;
+  }
+});
+
+router.post('/reset-to-setup', async (req, res) => {
+  await db.waitForInitialization();
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`reset-setup:${clientIp}`, 5);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: 'Çok fazla sıfırlama denemesi. Lütfen bir süre sonra tekrar deneyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  try {
+    const isPgActive = db.isPostgresConnected() || !!db.postgresRepo?.isReady() || !!db.postgresRepo?.getPool();
+    if (isPgActive && db.postgresRepo?.getPool()) {
+      const pool = db.postgresRepo.getPool()!;
+      await pool.query('DELETE FROM user_sessions').catch(() => {});
+      await pool.query('DELETE FROM users');
+    }
+
+    db.data.users = [];
+    db.data.passwords = {};
+    db.data.sessions = [];
+    db.purgeOrphanAdminsFromMemory();
+
+    res.json({
+      success: true,
+      message: 'Sistem kullanıcı kayıtları sıfırlandı. Sistem başarıyla ilk kurulum moduna alındı.',
+    });
+  } catch (err: any) {
+    console.error('[Reset to Setup Error]:', err);
+    res.status(500).json({ error: 'İlk kurulum moduna sıfırlama başarısız: ' + (err?.message || err) });
   }
 });
 

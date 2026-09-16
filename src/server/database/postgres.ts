@@ -258,9 +258,16 @@ export class PostgresRepository {
   public async checkIfAdminExists(): Promise<boolean> {
     if (!this.pool) return false;
     try {
-      const res = await this.pool.query("SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;");
+      const res = await this.pool.query(
+        "SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) AND (status IS NULL OR status NOT IN ('deleted', 'suspended')) AND (password_hash IS NOT NULL AND password_hash != '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K') LIMIT 1;"
+      );
       return (res.rowCount || 0) > 0;
-    } catch {
+    } catch (err: any) {
+      // If table doesn't exist yet, there is definitely no admin
+      if (err?.code === '42P01') { // undefined_table
+        return false;
+      }
+      console.warn('[PostgreSQL checkIfAdminExists Warning]:', err?.message || err);
       return false;
     }
   }
@@ -1043,27 +1050,8 @@ export class PostgresRepository {
           END $$;
         `).catch((err: any) => console.warn('[PostgreSQL Deduplication Constraint Setup]', err?.message));
 
-        // 6. Check existing user count to avoid resurrecting deleted users or force-seeding
-        const userCountRes = await client.query('SELECT COUNT(*) FROM users');
-        const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
-
-        if (totalUsers === 0) {
-          // Only seed initial root admin on a brand new, completely empty database
-          await client.query(`
-            INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-            VALUES (
-              'usr_admin', 
-              'Sistem Yöneticisi', 
-              'admin@nexusnode.io', 
-              '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 
-              'admin', 
-              'Merkez Yönetim', 
-              'active', 
-              CURRENT_TIMESTAMP
-            )
-            ON CONFLICT (id) DO NOTHING;
-          `).catch(() => {});
-        }
+        // 6. Check existing user count
+        // When totalUsers === 0 on a brand new database, leave it clean so the First-Time Setup Wizard can run!
 
         // 7. Seed Canonical Test Admin & Device ONLY in test environment or if explicitly requested
         // Never resurrect in production if the user deliberately removed it!
@@ -1637,18 +1625,14 @@ export class PostgresRepository {
       const errMsg = saveErr?.message || String(saveErr);
       if (errMsg.includes('fk_devices_tenant_id') || errMsg.includes('devices_user_id_fkey') || (errMsg.includes('foreign key') && errMsg.includes('devices'))) {
         try {
-          // Fallback: Belirtilen tenant_id veritabanında yoksa, 'usr_admin' garantisi altında 'usr_admin'e yönlendir ve kaydet
+          // Fallback: Belirtilen tenant_id veritabanında yoksa, cihaz foreign key hatasını aşmak için kısıtı kaldır
           if (this.pool) {
             await this.pool.query(`
-              INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-              VALUES ('usr_admin', 'Sistem Yöneticisi', 'admin@nexusnode.io', '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 'admin', 'Merkez Yönetim', 'active', CURRENT_TIMESTAMP)
-              ON CONFLICT (id) DO NOTHING;
-            `);
+              ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
+              ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_tenant_id;
+            `).catch(() => {});
           }
-          const fallbackParams = [...params];
-          fallbackParams[1] = 'usr_admin';
-          fallbackParams[2] = 'usr_admin';
-          await this.query(sql, fallbackParams);
+          await this.query(sql, params);
           return;
         } catch (retryErr: any) {
           console.warn('[PostgreSQL saveDevice fallback error]:', retryErr?.message || retryErr);

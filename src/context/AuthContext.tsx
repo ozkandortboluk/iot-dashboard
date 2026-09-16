@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { User } from '../types';
 
 interface AuthContextType {
@@ -156,15 +156,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const checkSetupStatus = async (): Promise<boolean> => {
+  const checkSetupStatus = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/setup-status');
+      const res = await fetch('/api/auth/setup-status', {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
+      if (!res.ok) return false;
       const data = await res.json();
-      return !!data.needSetup;
+      return Boolean(data.needSetup);
     } catch {
       return false;
     }
-  };
+  }, []);
 
   const updateUser = (updatedUser: User) => {
     setUser(updatedUser);
