@@ -29,18 +29,43 @@ async function verifySchemaDrift() {
     const client = await pool.connect();
     console.log('✅ Connected to database pool.');
 
-    // 1. Verify schema_migrations table exists (P0.5)
-    const migTableRes = await client.query(`
+    // 1. Verify all 19 Canonical Tables exist
+    const allTablesRes = await client.query(`
       SELECT table_name 
       FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name = 'schema_migrations';
+      WHERE table_schema = 'public';
     `);
+    const existingTables = new Set<string>(allTablesRes.rows.map((r: any) => r.table_name));
 
-    if (migTableRes.rows.length === 0) {
-      console.error('❌ [DRIFT DETECTED] schema_migrations table is missing! Versioned migrations have not been initialized.');
+    const canonicalTables = [
+      'users',
+      'devices',
+      'telemetry_packets',
+      'telemetry_readings',
+      'simulation_telemetry_readings',
+      'threshold_rules',
+      'active_alarms',
+      'alarm_events',
+      'device_commands',
+      'notifications',
+      'user_sessions',
+      'audit_logs',
+      'system_events',
+      'device_ws_messages_dedup',
+      'firmwares',
+      'ota_deployment_jobs',
+      'dashboard_layouts',
+      'dispatch_logs',
+      'schema_migrations',
+    ];
+
+    const missingTables = canonicalTables.filter((tbl) => !existingTables.has(tbl));
+    if (missingTables.length > 0) {
+      console.error('❌ [DRIFT DETECTED] Missing canonical tables in database:');
+      missingTables.forEach((t) => console.error(`   - ${t}`));
       process.exit(1);
     }
-    console.log('✅ Versioned migrations table (schema_migrations) verified.');
+    console.log(`✅ All ${canonicalTables.length} canonical schema tables verified.`);
 
     // 2. Fetch all public columns
     const colsRes = await client.query(`

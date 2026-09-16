@@ -4,6 +4,7 @@ import { systemLogger } from '../services/systemLogger.service.js';
 import { recordDatabaseHealingEvent } from '../services/databaseAutoHealer.service.js';
 import { getSharedPgPoolStats } from './connection.js';
 import { runAllMigrations, getMigrationStatus, getLatestMigrationRunStatus } from './migrations/migrationRunner.js';
+import { SchemaAuditor, type SchemaAuditReport, type SchemaHealingResult } from './schemaAuditor.js';
 import type {
   User,
   Device,
@@ -268,6 +269,53 @@ export class PostgresRepository {
   }
 
   /**
+   * Performs complete live PostgreSQL Schema Audit against Canonical Schema.
+   */
+  public async auditSchema(clientInstance?: any): Promise<SchemaAuditReport> {
+    if (!this.pool) {
+      return {
+        timestamp: new Date().toISOString(),
+        isHealthy: false,
+        score: 0,
+        summary: {
+          totalCanonicalTables: 0,
+          existingTablesCount: 0,
+          missingTablesCount: 0,
+          missingColumnsCount: 0,
+          typeMismatchCount: 0,
+          missingIndexesCount: 0,
+          missingConstraintsCount: 0,
+          missingTriggersCount: 0,
+          missingFunctionsCount: 0,
+        },
+        discrepancies: {
+          missingTables: [],
+          missingColumns: [],
+          typeMismatches: [],
+          missingIndexes: [],
+          missingConstraints: [],
+          missingTriggers: [],
+          missingFunctions: [],
+        },
+        humanReadableMessages: ['PostgreSQL bağlantı havuzu henüz başlatılmadı.'],
+      };
+    }
+    const client = clientInstance || this.pool;
+    return await SchemaAuditor.auditSchema(client);
+  }
+
+  /**
+   * Performs migration-independent Auto-Healing against Canonical Schema.
+   */
+  public async autoHealSchema(clientInstance?: any): Promise<SchemaHealingResult> {
+    if (!this.pool) {
+      throw new Error('PostgreSQL havuzu bağlı değil.');
+    }
+    const client = clientInstance || this.pool;
+    return await SchemaAuditor.autoHeal(client);
+  }
+
+  /**
    * Verifies that the database schema satisfies all critical production contracts (P0.14, P0.16, P0.17)
    */
   public async verifySchemaContract(clientInstance?: any): Promise<boolean> {
@@ -285,74 +333,14 @@ export class PostgresRepository {
     }
 
     try {
-      // 1. Verify schema_migrations table exists
-      const migTable = await client.query(`
-        SELECT table_name FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = 'schema_migrations';
-      `);
-      if (migTable.rows.length === 0) {
-        console.error('[Schema Contract Check] schema_migrations table is missing!');
-        return false;
+      const audit = await SchemaAuditor.auditSchema(client);
+      if (!audit.isHealthy) {
+        console.warn(`[Schema Contract Check] Tespit edilen şema uyumsuzlukları (Skor: %${audit.score}):`);
+        for (const msg of audit.humanReadableMessages.slice(0, 10)) {
+          console.warn(`  ${msg}`);
+        }
       }
-
-      // 2. Verify critical tables exist
-      const requiredTables = ['users', 'devices', 'telemetry_readings', 'telemetry_packets', 'active_alarms', 'threshold_rules', 'device_commands'];
-      const tablesRes = await client.query(`
-        SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';
-      `);
-      const existingTables = new Set<string>(tablesRes.rows.map((r: any) => r.table_name));
-      const missingTables = requiredTables.filter(t => !existingTables.has(t));
-      if (missingTables.length > 0) {
-        console.error('[Schema Contract Check] Missing required tables:', missingTables);
-        return false;
-      }
-
-      // 3. Verify Composite Primary Key on telemetry_readings (id, created_at)
-      const pkRes = await client.query(`
-        SELECT kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu 
-          ON tc.constraint_name = kcu.constraint_name 
-          AND tc.table_schema = kcu.table_schema
-        WHERE tc.table_name = 'telemetry_readings' AND tc.constraint_type = 'PRIMARY KEY'
-        ORDER BY kcu.ordinal_position;
-      `);
-      const pkCols = pkRes.rows.map((r: any) => r.column_name);
-      if (pkCols.length !== 2 || pkCols[0] !== 'id' || pkCols[1] !== 'created_at') {
-        console.error('[Schema Contract Check] Composite PK on telemetry_readings mismatch. Found:', pkCols);
-        return false;
-      }
-
-      // 4. Verify Unique Constraint on telemetry_packets in exact ordinal order (device_id, boot_id, sequence)
-      const unqRes = await client.query(`
-        SELECT a.attname
-        FROM pg_constraint c
-        CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
-        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
-        WHERE c.conrelid = 'telemetry_packets'::regclass 
-          AND c.conname = 'unq_telemetry_device_boot_sequence'
-        ORDER BY u.ord;
-      `);
-      const unqCols = unqRes.rows.map((r: any) => r.attname);
-      if (unqCols.length !== 3 || unqCols[0] !== 'device_id' || unqCols[1] !== 'boot_id' || unqCols[2] !== 'sequence') {
-        console.error('[Schema Contract Check] Unique constraint on telemetry_packets mismatch. Found:', unqCols);
-        return false;
-      }
-
-      // 5. Verify tenant_id column exists on core tables
-      const colsRes = await client.query(`
-        SELECT table_name, column_name FROM information_schema.columns 
-        WHERE table_schema = 'public' AND column_name = 'tenant_id';
-      `);
-      const tablesWithTenant = new Set<string>(colsRes.rows.map((r: any) => r.table_name));
-      const criticalTenantTables = ['devices', 'telemetry_readings', 'active_alarms', 'device_commands'];
-      const missingTenant = criticalTenantTables.filter(t => !tablesWithTenant.has(t));
-      if (missingTenant.length > 0) {
-        console.error('[Schema Contract Check] Missing tenant_id on tables:', missingTenant);
-        return false;
-      }
-
-      return true;
+      return audit.isHealthy;
     } catch (checkErr: any) {
       console.error('[Schema Contract Check] Validation error:', checkErr?.message || checkErr);
       return false;
@@ -450,735 +438,16 @@ export class PostgresRepository {
         await client.query("SET statement_timeout = '8s';");
         await client.query("SET lock_timeout = '2s';");
 
-        // 1. Discover all existing public tables in one fast query (zero exclusive lock)
-        const tablesRes = await client.query(`
-          SELECT table_name 
-          FROM information_schema.tables 
-          WHERE table_schema = 'public';
-        `);
-        const existingTables = new Set<string>(tablesRes.rows.map((r: any) => r.table_name));
-
-        // 2. Create only strictly missing tables (fast path)
-        const tableDefinitions: Array<{ name: string; ddl: string }> = [
-          {
-            name: 'users',
-            ddl: `CREATE TABLE IF NOT EXISTS users (
-              id VARCHAR(64) PRIMARY KEY,
-              name VARCHAR(128) NOT NULL,
-              email VARCHAR(128) UNIQUE NOT NULL,
-              phone VARCHAR(32),
-              notification_email VARCHAR(128),
-              whatsapp_number VARCHAR(32),
-              telegram_chat_id VARCHAR(64),
-              password_hash VARCHAR(256) NOT NULL,
-              role VARCHAR(32) DEFAULT 'operator',
-              company_name VARCHAR(128),
-              notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
-              status VARCHAR(32) DEFAULT 'active',
-              deleted_at TIMESTAMP WITH TIME ZONE,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'devices',
-            ddl: `CREATE TABLE IF NOT EXISTS devices (
-              id VARCHAR(64) PRIMARY KEY,
-              tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-              user_id VARCHAR(64) DEFAULT 'usr_admin',
-              previous_tenant_id VARCHAR(64),
-              previous_tenant_name VARCHAR(128),
-              ownership_transferred_at TIMESTAMP WITH TIME ZONE,
-              name VARCHAR(128) NOT NULL,
-              device_type VARCHAR(32) NOT NULL,
-              api_key VARCHAR(128),
-              api_key_prefix VARCHAR(32),
-              api_key_hash VARCHAR(128),
-              status VARCHAR(32) DEFAULT 'online',
-              location VARCHAR(256),
-              ip_address VARCHAR(45),
-              mac_address VARCHAR(32),
-              last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              rate_limit_per_min INT DEFAULT 120,
-              encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
-              metrics JSONB DEFAULT '{}'::jsonb,
-              data_flow_active BOOLEAN DEFAULT TRUE,
-              is_simulated BOOLEAN DEFAULT FALSE,
-              save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
-              simulated_metrics JSONB DEFAULT '[]'::jsonb,
-              role_key VARCHAR(64),
-              hardware_model VARCHAR(64),
-              firmware_version VARCHAR(32),
-              ota_status VARCHAR(32) DEFAULT 'IDLE',
-              ota_target_firmware_id VARCHAR(64),
-              ota_progress INT DEFAULT 0,
-              ota_error_message TEXT,
-              ota_last_check_at TIMESTAMP WITH TIME ZONE,
-              expected_interval_seconds INT DEFAULT 30,
-              auto_detected_interval_seconds INT DEFAULT 30,
-              heartbeat_timeout_seconds INT DEFAULT 60,
-              interval_mode VARCHAR(16) DEFAULT 'auto',
-              custom_interval_seconds INT,
-              recent_intervals JSONB DEFAULT '[]'::jsonb,
-              websocket_connected BOOLEAN DEFAULT FALSE,
-              last_message_at TIMESTAMP WITH TIME ZONE,
-              output_definitions JSONB DEFAULT '[]'::jsonb,
-              capabilities JSONB DEFAULT '[]'::jsonb,
-              supported_outputs JSONB DEFAULT '[]'::jsonb,
-              supported_commands JSONB DEFAULT '[]'::jsonb,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'device_ws_messages_dedup',
-            ddl: `CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (
-              device_id VARCHAR(64) NOT NULL,
-              message_id VARCHAR(128) NOT NULL,
-              message_type VARCHAR(32) NOT NULL,
-              received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-              PRIMARY KEY (device_id, message_id)
-            );`
-          },
-          {
-            name: 'telemetry_packets',
-            ddl: `CREATE TABLE IF NOT EXISTS telemetry_packets (
-              id VARCHAR(192) PRIMARY KEY,
-              device_id VARCHAR(64) NOT NULL,
-              boot_id VARCHAR(64) DEFAULT 'default' NOT NULL,
-              sequence BIGINT NOT NULL,
-              idempotency_key VARCHAR(192),
-              metric_count INTEGER DEFAULT 1,
-              received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-              CONSTRAINT unq_telemetry_device_boot_sequence UNIQUE(device_id, boot_id, sequence)
-            );`
-          },
-          {
-            name: 'telemetry_readings',
-            ddl: `CREATE TABLE IF NOT EXISTS telemetry_readings (
-              id VARCHAR(128) NOT NULL,
-              packet_id VARCHAR(128),
-              tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-              customer_id VARCHAR(64) DEFAULT 'usr_admin',
-              user_id VARCHAR(64) DEFAULT 'usr_admin',
-              device_id VARCHAR(64),
-              device_name VARCHAR(128) NOT NULL,
-              metric VARCHAR(64) NOT NULL,
-              metric_value DOUBLE PRECISION NOT NULL,
-              unit VARCHAR(16) NOT NULL,
-              status_level VARCHAR(32) DEFAULT 'normal',
-              sequence BIGINT,
-              boot_id VARCHAR(64) DEFAULT 'default',
-              idempotency_key VARCHAR(192),
-              source VARCHAR(32) DEFAULT 'physical',
-              environment VARCHAR(32) DEFAULT 'production',
-              simulation_run_id VARCHAR(128),
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-              PRIMARY KEY (id, created_at)
-            );`
-          },
-          {
-            name: 'simulation_telemetry_readings',
-            ddl: `CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
-              id VARCHAR(128) NOT NULL,
-              packet_id VARCHAR(128),
-              tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-              customer_id VARCHAR(64) DEFAULT 'usr_admin',
-              user_id VARCHAR(64) DEFAULT 'usr_admin',
-              device_id VARCHAR(64),
-              device_name VARCHAR(128) NOT NULL,
-              metric VARCHAR(64) NOT NULL,
-              metric_value DOUBLE PRECISION NOT NULL,
-              unit VARCHAR(16) NOT NULL,
-              status_level VARCHAR(32) DEFAULT 'normal',
-              sequence BIGINT,
-              boot_id VARCHAR(64) DEFAULT 'default',
-              idempotency_key VARCHAR(192),
-              source VARCHAR(32) DEFAULT 'simulator',
-              environment VARCHAR(32) DEFAULT 'sandbox',
-              simulation_run_id VARCHAR(128),
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-              PRIMARY KEY (id, created_at)
-            );`
-          },
-          {
-            name: 'threshold_rules',
-            ddl: `CREATE TABLE IF NOT EXISTS threshold_rules (
-              id VARCHAR(64) PRIMARY KEY,
-              user_id VARCHAR(64),
-              tenant_id VARCHAR(64),
-              user_name VARCHAR(128),
-              device_id VARCHAR(64) DEFAULT 'all',
-              metric_key VARCHAR(64) NOT NULL,
-              operator VARCHAR(8) NOT NULL,
-              threshold_value NUMERIC NOT NULL,
-              severity VARCHAR(32) DEFAULT 'warning',
-              enabled BOOLEAN DEFAULT TRUE,
-              message_template TEXT,
-              hysteresis NUMERIC DEFAULT 0,
-              min_breach_duration_sec INT DEFAULT 0,
-              repeat_interval_sec INT DEFAULT 0,
-              notification_channels JSONB DEFAULT '["app"]'::jsonb,
-              active_hours VARCHAR(64) DEFAULT '00:00-23:59',
-              recipients JSONB,
-              silenced_until TIMESTAMP WITH TIME ZONE,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'active_alarms',
-            ddl: `CREATE TABLE IF NOT EXISTS active_alarms (
-              id VARCHAR(128) PRIMARY KEY,
-              incident_id VARCHAR(128),
-              last_evaluated_at TIMESTAMP WITH TIME ZONE,
-              rule_id VARCHAR(64) REFERENCES threshold_rules(id) ON DELETE CASCADE,
-              device_id VARCHAR(64),
-              device_name VARCHAR(128) NOT NULL,
-              user_id VARCHAR(64),
-              tenant_id VARCHAR(64),
-              metric_key VARCHAR(64) NOT NULL,
-              operator VARCHAR(32) NOT NULL,
-              threshold_value NUMERIC NOT NULL,
-              current_value NUMERIC NOT NULL,
-              severity VARCHAR(32) DEFAULT 'warning',
-              state VARCHAR(32) DEFAULT 'TRIGGERED',
-              first_breach_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              triggered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              last_notified_at TIMESTAMP WITH TIME ZONE,
-              resolved_at TIMESTAMP WITH TIME ZONE,
-              acknowledged BOOLEAN DEFAULT FALSE,
-              acknowledged_at TIMESTAMP WITH TIME ZONE,
-              acknowledged_by VARCHAR(128),
-              silenced_until TIMESTAMP WITH TIME ZONE,
-              repeat_count INT DEFAULT 0,
-              message TEXT,
-              source VARCHAR(32) DEFAULT 'physical',
-              environment VARCHAR(32) DEFAULT 'production',
-              is_simulation BOOLEAN DEFAULT FALSE,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'alarm_events',
-            ddl: `CREATE TABLE IF NOT EXISTS alarm_events (
-              id VARCHAR(128) PRIMARY KEY,
-              incident_id VARCHAR(128) NOT NULL,
-              alarm_id VARCHAR(128) NOT NULL,
-              rule_id VARCHAR(64) NOT NULL,
-              device_id VARCHAR(64) NOT NULL,
-              tenant_id VARCHAR(64) NOT NULL,
-              event_type VARCHAR(32) NOT NULL,
-              message TEXT,
-              triggered_by VARCHAR(128),
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'dashboard_layouts',
-            ddl: `CREATE TABLE IF NOT EXISTS dashboard_layouts (
-              id VARCHAR(64) PRIMARY KEY,
-              user_id VARCHAR(64),
-              title VARCHAR(128) NOT NULL,
-              widgets_json JSONB NOT NULL,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'notifications',
-            ddl: `CREATE TABLE IF NOT EXISTS notifications (
-              id VARCHAR(64) PRIMARY KEY,
-              user_id VARCHAR(64),
-              title VARCHAR(256) NOT NULL,
-              message TEXT NOT NULL,
-              severity VARCHAR(32) DEFAULT 'info',
-              device_id VARCHAR(64),
-              device_name VARCHAR(128),
-              is_read BOOLEAN DEFAULT FALSE,
-              alarm_id VARCHAR(128),
-              rule_id VARCHAR(64),
-              alarm_state VARCHAR(32),
-              acknowledged BOOLEAN DEFAULT FALSE,
-              acknowledged_at TIMESTAMP WITH TIME ZONE,
-              acknowledged_by VARCHAR(128),
-              repeat_count INT DEFAULT 0,
-              current_value NUMERIC,
-              threshold_value NUMERIC,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'audit_logs',
-            ddl: `CREATE TABLE IF NOT EXISTS audit_logs (
-              id VARCHAR(64) PRIMARY KEY,
-              tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-              user_id VARCHAR(64),
-              user_name VARCHAR(128),
-              action TEXT NOT NULL,
-              resource_type VARCHAR(64) DEFAULT 'system',
-              resource_id VARCHAR(64),
-              details JSONB,
-              ip_address VARCHAR(64),
-              severity VARCHAR(32) DEFAULT 'low',
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'user_sessions',
-            ddl: `CREATE TABLE IF NOT EXISTS user_sessions (
-              id VARCHAR(64) DEFAULT gen_random_uuid()::text,
-              token VARCHAR(128) PRIMARY KEY,
-              user_id VARCHAR(64) NOT NULL,
-              user_role VARCHAR(32) NOT NULL,
-              user_email VARCHAR(128) NOT NULL,
-              user_name VARCHAR(128) NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-            );`
-          },
-          {
-            name: 'dispatch_logs',
-            ddl: `CREATE TABLE IF NOT EXISTS dispatch_logs (
-              id VARCHAR(64) PRIMARY KEY,
-              user_id VARCHAR(64),
-              user_name VARCHAR(128),
-              channel VARCHAR(32) NOT NULL,
-              recipient VARCHAR(128) NOT NULL,
-              title VARCHAR(256),
-              message TEXT NOT NULL,
-              severity VARCHAR(32) DEFAULT 'info',
-              status VARCHAR(32) DEFAULT 'delivered',
-              attempt_count INT DEFAULT 1,
-              latency_ms INT DEFAULT 0,
-              error_details TEXT,
-              sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'device_commands',
-            ddl: `CREATE TABLE IF NOT EXISTS device_commands (
-              id VARCHAR(64) PRIMARY KEY,
-              command_id VARCHAR(64),
-              tenant_id VARCHAR(64),
-              customer_id VARCHAR(64),
-              device_id VARCHAR(64) REFERENCES devices(id) ON DELETE CASCADE,
-              user_id VARCHAR(64),
-              command_type VARCHAR(64) NOT NULL,
-              command_name VARCHAR(64),
-              output_id VARCHAR(64),
-              value_payload TEXT,
-              parameters JSONB DEFAULT '{}'::jsonb,
-              source VARCHAR(32) DEFAULT 'manual',
-              status VARCHAR(32) DEFAULT 'pending',
-              sent_by VARCHAR(64),
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              sent_at TIMESTAMP WITH TIME ZONE,
-              acknowledged_at TIMESTAMP WITH TIME ZONE,
-              executed_at TIMESTAMP WITH TIME ZONE,
-              error_message TEXT,
-              idempotency_key VARCHAR(128),
-              timeout_seconds INT DEFAULT 300,
-              retry_count INT DEFAULT 0,
-              max_retries INT DEFAULT 3,
-              applied_at TIMESTAMP WITH TIME ZONE
-            );`
-          },
-          {
-            name: 'firmwares',
-            ddl: `CREATE TABLE IF NOT EXISTS firmwares (
-              id VARCHAR(64) PRIMARY KEY,
-              name VARCHAR(128) NOT NULL,
-              device_type VARCHAR(64) NOT NULL,
-              role_key VARCHAR(64) DEFAULT 'ALL',
-              hardware_model VARCHAR(64) DEFAULT 'ALL',
-              version VARCHAR(32) NOT NULL,
-              description TEXT,
-              binary_data BYTEA,
-              binary_size BIGINT DEFAULT 0,
-              sha256 VARCHAR(64) NOT NULL,
-              signature TEXT,
-              file_path TEXT,
-              min_hardware_revision VARCHAR(32),
-              is_active BOOLEAN DEFAULT TRUE,
-              uploaded_by VARCHAR(128) NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );`
-          },
-          {
-            name: 'ota_deployment_jobs',
-            ddl: `CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
-              id VARCHAR(64) PRIMARY KEY,
-              firmware_id VARCHAR(64),
-              firmware_version VARCHAR(32) NOT NULL,
-              firmware_name VARCHAR(128) NOT NULL,
-              device_id VARCHAR(64),
-              device_name VARCHAR(128) NOT NULL,
-              device_type VARCHAR(64) NOT NULL,
-              role_key VARCHAR(64) NOT NULL,
-              target_scope VARCHAR(32) DEFAULT 'single',
-              status VARCHAR(32) DEFAULT 'PENDING',
-              progress_percent INT DEFAULT 0,
-              error_message TEXT,
-              initiated_by VARCHAR(128) NOT NULL,
-              download_token VARCHAR(128),
-              expires_at TIMESTAMP WITH TIME ZONE,
-              attempt_count INT DEFAULT 0,
-              max_attempts INT DEFAULT 3,
-              last_attempt_at TIMESTAMP WITH TIME ZONE,
-              next_retry_at TIMESTAMP WITH TIME ZONE,
-              download_started_at TIMESTAMP WITH TIME ZONE,
-              boot_confirmed_at TIMESTAMP WITH TIME ZONE,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              completed_at TIMESTAMP WITH TIME ZONE
-            );`
-          },
-          {
-            name: 'system_events',
-            ddl: `CREATE TABLE IF NOT EXISTS system_events (
-              id VARCHAR(128) PRIMARY KEY,
-              timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              level VARCHAR(32) NOT NULL,
-              category VARCHAR(64) NOT NULL,
-              message TEXT NOT NULL,
-              details TEXT,
-              source VARCHAR(64) DEFAULT 'system'
-            );`
-          }
-        ];
-
-        for (const tbl of tableDefinitions) {
-          if (!existingTables.has(tbl.name)) {
-            try {
-              await client.query(tbl.ddl);
-              existingTables.add(tbl.name);
-            } catch (createErr: any) {
-              console.warn(`[PostgreSQL Schema] Tablo oluşturulamadı (${tbl.name}):`, createErr?.message || createErr);
-            }
-          }
+        // 1. Authoritative Schema Auditor & Self-Healer with Repair -> Verify Loop
+        const healRes = await SchemaAuditor.autoHeal(client);
+        if (!healRes.verificationPassed || !healRes.isHealthy) {
+          console.error(`[PostgreSQL Schema FAIL] SchemaAuditor Repair -> Verify doğrulaması başarısız oldu! Skor: %${healRes.afterReport.score}. Hatalar:`, healRes.errors);
+        } else if (healRes.actionsTaken.length > 0) {
+          console.log(`[PostgreSQL Schema PASS] SchemaAuditor ${healRes.actionsTaken.length} adet otomatik şema düzeltmesi uyguladı ve doğruladı.`);
         }
 
-        // 3. Discover all existing public columns in one single fast query (zero exclusive lock)
-        const colsRes = await client.query(`
-          SELECT table_name, column_name 
-          FROM information_schema.columns 
-          WHERE table_schema = 'public';
-        `);
-        const existingColumns = new Set<string>(
-          colsRes.rows.map((r: any) => `${r.table_name}.${r.column_name}`)
-        );
-
-        // 4. Check-before-alter: Only execute ALTER TABLE if column is genuinely missing!
-        const requiredColumns: Array<{ table: string; column: string; ddl: string }> = [
-          // Users
-          { table: 'users', column: 'status', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';` },
-          { table: 'users', column: 'deleted_at', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'users', column: 'phone', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(32);` },
-          { table: 'users', column: 'notification_email', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(128);` },
-          { table: 'users', column: 'whatsapp_number', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(32);` },
-          { table: 'users', column: 'telegram_chat_id', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(64);` },
-          { table: 'users', column: 'company_name', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name VARCHAR(128);` },
-          { table: 'users', column: 'notification_preferences', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb;` },
-          { table: 'users', column: 'role', ddl: `ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'operator';` },
-          // Devices
-          { table: 'devices', column: 'ip', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip VARCHAR(45);` },
-          { table: 'devices', column: 'ip_address', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);` },
-          { table: 'devices', column: 'mac_address', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(32);` },
-          { table: 'devices', column: 'data_flow_active', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;` },
-          { table: 'devices', column: 'auth_token', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);` },
-          { table: 'devices', column: 'customer_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'devices', column: 'type', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);` },
-          { table: 'devices', column: 'assigned_user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS assigned_user_id VARCHAR(64);` },
-          { table: 'devices', column: 'created_by_user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(64);` },
-          { table: 'devices', column: 'previous_api_key_hash', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_api_key_hash VARCHAR(128);` },
-          { table: 'devices', column: 'tenant_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'devices', column: 'user_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'devices', column: 'previous_tenant_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_id VARCHAR(64);` },
-          { table: 'devices', column: 'previous_tenant_name', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_tenant_name VARCHAR(128);` },
-          { table: 'devices', column: 'ownership_transferred_at', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ownership_transferred_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'devices', column: 'role_key', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS role_key VARCHAR(64);` },
-          { table: 'devices', column: 'hardware_model', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64);` },
-          { table: 'devices', column: 'firmware_version', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(32);` },
-          { table: 'devices', column: 'api_key_prefix', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);` },
-          { table: 'devices', column: 'api_key_hash', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);` },
-          { table: 'devices', column: 'is_simulated', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;` },
-          { table: 'devices', column: 'save_simulated_data_to_db', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS save_simulated_data_to_db BOOLEAN DEFAULT FALSE;` },
-          { table: 'devices', column: 'simulated_metrics', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS simulated_metrics JSONB DEFAULT '[]'::jsonb;` },
-          { table: 'devices', column: 'ota_status', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_status VARCHAR(32) DEFAULT 'IDLE';` },
-          { table: 'devices', column: 'ota_target_firmware_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_firmware_id VARCHAR(64);` },
-          { table: 'devices', column: 'ota_target_version', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_target_version VARCHAR(32);` },
-          { table: 'devices', column: 'ota_progress', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_progress INT DEFAULT 0;` },
-          { table: 'devices', column: 'ota_error_message', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_error_message TEXT;` },
-          { table: 'devices', column: 'ota_last_check_at', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_last_check_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'devices', column: 'ota_job_id', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS ota_job_id VARCHAR(64);` },
-          { table: 'devices', column: 'expected_interval_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS expected_interval_seconds INT DEFAULT 30;` },
-          { table: 'devices', column: 'auto_detected_interval_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS auto_detected_interval_seconds INT DEFAULT 30;` },
-          { table: 'devices', column: 'heartbeat_timeout_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS heartbeat_timeout_seconds INT DEFAULT 60;` },
-          { table: 'devices', column: 'interval_mode', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS interval_mode VARCHAR(16) DEFAULT 'auto';` },
-          { table: 'devices', column: 'custom_interval_seconds', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS custom_interval_seconds INT;` },
-          { table: 'devices', column: 'recent_intervals', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS recent_intervals JSONB DEFAULT '[]'::jsonb;` },
-          { table: 'devices', column: 'websocket_connected', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS websocket_connected BOOLEAN DEFAULT FALSE;` },
-          { table: 'devices', column: 'last_message_at', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'devices', column: 'output_definitions', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS output_definitions JSONB DEFAULT '[]'::jsonb;` },
-          { table: 'devices', column: 'capabilities', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '[]'::jsonb;` },
-          { table: 'devices', column: 'supported_outputs', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_outputs JSONB DEFAULT '[]'::jsonb;` },
-          { table: 'devices', column: 'supported_commands', ddl: `ALTER TABLE devices ADD COLUMN IF NOT EXISTS supported_commands JSONB DEFAULT '[]'::jsonb;` },
-          // Telemetry Packets & Readings
-          { table: 'telemetry_packets', column: 'boot_id', ddl: `ALTER TABLE telemetry_packets ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';` },
-          { table: 'telemetry_packets', column: 'idempotency_key', ddl: `ALTER TABLE telemetry_packets ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);` },
-          { table: 'telemetry_readings', column: 'tenant_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'telemetry_readings', column: 'customer_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'telemetry_readings', column: 'user_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'telemetry_readings', column: 'packet_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);` },
-          { table: 'telemetry_readings', column: 'sequence', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;` },
-          { table: 'telemetry_readings', column: 'boot_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';` },
-          { table: 'telemetry_readings', column: 'idempotency_key', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);` },
-          { table: 'telemetry_readings', column: 'source', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';` },
-          { table: 'telemetry_readings', column: 'environment', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';` },
-          { table: 'telemetry_readings', column: 'simulation_run_id', ddl: `ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);` },
-          // Simulation Readings
-          { table: 'simulation_telemetry_readings', column: 'tenant_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'simulation_telemetry_readings', column: 'customer_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'simulation_telemetry_readings', column: 'user_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'simulation_telemetry_readings', column: 'packet_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS packet_id VARCHAR(128);` },
-          { table: 'simulation_telemetry_readings', column: 'sequence', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS sequence BIGINT;` },
-          { table: 'simulation_telemetry_readings', column: 'boot_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS boot_id VARCHAR(64) DEFAULT 'default';` },
-          { table: 'simulation_telemetry_readings', column: 'idempotency_key', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(192);` },
-          { table: 'simulation_telemetry_readings', column: 'source', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'simulator';` },
-          { table: 'simulation_telemetry_readings', column: 'environment', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'sandbox';` },
-          { table: 'simulation_telemetry_readings', column: 'simulation_run_id', ddl: `ALTER TABLE simulation_telemetry_readings ADD COLUMN IF NOT EXISTS simulation_run_id VARCHAR(128);` },
-          // Threshold Rules
-          { table: 'threshold_rules', column: 'tenant_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'threshold_rules', column: 'user_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'threshold_rules', column: 'user_name', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
-          { table: 'threshold_rules', column: 'device_id', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS device_id VARCHAR(64) DEFAULT 'all';` },
-          { table: 'threshold_rules', column: 'hysteresis', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS hysteresis NUMERIC DEFAULT 0;` },
-          { table: 'threshold_rules', column: 'min_breach_duration_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;` },
-          { table: 'threshold_rules', column: 'repeat_interval_sec', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;` },
-          { table: 'threshold_rules', column: 'notification_channels', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS notification_channels JSONB DEFAULT '["app"]'::jsonb;` },
-          { table: 'threshold_rules', column: 'active_hours', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours VARCHAR(64) DEFAULT '00:00-23:59';` },
-          { table: 'threshold_rules', column: 'recipients', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;` },
-          { table: 'threshold_rules', column: 'silenced_until', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;` },
-          { table: 'threshold_rules', column: 'message_template', ddl: `ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS message_template TEXT;` },
-          // Active Alarms
-          { table: 'active_alarms', column: 'user_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'active_alarms', column: 'tenant_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'active_alarms', column: 'device_name', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS device_name VARCHAR(128) DEFAULT '';` },
-          { table: 'active_alarms', column: 'operator', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS operator VARCHAR(32) DEFAULT '>';` },
-          { table: 'active_alarms', column: 'current_value', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS current_value NUMERIC DEFAULT 0;` },
-          { table: 'active_alarms', column: 'trigger_value', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS trigger_value NUMERIC;` },
-          { table: 'active_alarms', column: 'first_breach_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS first_breach_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          { table: 'active_alarms', column: 'last_notified_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_notified_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'active_alarms', column: 'silenced_until', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;` },
-          { table: 'active_alarms', column: 'repeat_count', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;` },
-          { table: 'active_alarms', column: 'message', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS message TEXT;` },
-          { table: 'active_alarms', column: 'note', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS note TEXT;` },
-          { table: 'active_alarms', column: 'source', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'physical';` },
-          { table: 'active_alarms', column: 'environment', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS environment VARCHAR(32) DEFAULT 'production';` },
-          { table: 'active_alarms', column: 'is_simulation', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS is_simulation BOOLEAN DEFAULT FALSE;` },
-          { table: 'active_alarms', column: 'incident_id', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS incident_id VARCHAR(128);` },
-          { table: 'active_alarms', column: 'last_evaluated_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS last_evaluated_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'active_alarms', column: 'acknowledged_by', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);` },
-          { table: 'active_alarms', column: 'acknowledged_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'active_alarms', column: 'resolved_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'active_alarms', column: 'updated_at', ddl: `ALTER TABLE active_alarms ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          // Dashboard layouts
-          { table: 'dashboard_layouts', column: 'user_id', ddl: `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'dashboard_layouts', column: 'title', ddl: `ALTER TABLE dashboard_layouts ADD COLUMN IF NOT EXISTS title VARCHAR(128) DEFAULT 'Özel Dashboard';` },
-          // Notifications
-          { table: 'notifications', column: 'user_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'notifications', column: 'tenant_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'notifications', column: 'type', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type VARCHAR(64) DEFAULT 'alert';` },
-          { table: 'notifications', column: 'source', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'system';` },
-          { table: 'notifications', column: 'alarm_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_id VARCHAR(128);` },
-          { table: 'notifications', column: 'rule_id', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS rule_id VARCHAR(64);` },
-          { table: 'notifications', column: 'alarm_state', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS alarm_state VARCHAR(32);` },
-          { table: 'notifications', column: 'severity', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
-          { table: 'notifications', column: 'device_name', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS device_name VARCHAR(128);` },
-          { table: 'notifications', column: 'acknowledged', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN DEFAULT FALSE;` },
-          { table: 'notifications', column: 'acknowledged_at', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'notifications', column: 'acknowledged_by', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS acknowledged_by VARCHAR(128);` },
-          { table: 'notifications', column: 'repeat_count', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS repeat_count INT DEFAULT 0;` },
-          { table: 'notifications', column: 'current_value', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS current_value NUMERIC;` },
-          { table: 'notifications', column: 'threshold_value', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS threshold_value NUMERIC;` },
-          { table: 'notifications', column: 'is_read', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;` },
-          { table: 'notifications', column: 'read', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE;` },
-          { table: 'notifications', column: 'updated_at', ddl: `ALTER TABLE notifications ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          // Audit logs
-          { table: 'audit_logs', column: 'user_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'audit_logs', column: 'user_name', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
-          { table: 'audit_logs', column: 'tenant_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';` },
-          { table: 'audit_logs', column: 'resource_type', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';` },
-          { table: 'audit_logs', column: 'resource_id', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_id VARCHAR(64);` },
-          { table: 'audit_logs', column: 'details', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS details JSONB;` },
-          { table: 'audit_logs', column: 'ip_address', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);` },
-          { table: 'audit_logs', column: 'severity', ddl: `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'low';` },
-          // User sessions
-          { table: 'user_sessions', column: 'id', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS id VARCHAR(64);` },
-          { table: 'user_sessions', column: 'user_id', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'user_sessions', column: 'user_role', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_role VARCHAR(32) DEFAULT 'operator';` },
-          { table: 'user_sessions', column: 'user_email', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_email VARCHAR(128);` },
-          { table: 'user_sessions', column: 'user_name', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
-          { table: 'user_sessions', column: 'created_at', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          { table: 'user_sessions', column: 'expires_at', ddl: `ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days');` },
-          // Device WS Deduplication
-          { table: 'device_ws_messages_dedup', column: 'message_id', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);` },
-          { table: 'device_ws_messages_dedup', column: 'msg_id', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS msg_id VARCHAR(128);` },
-          { table: 'device_ws_messages_dedup', column: 'expires_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour');` },
-          { table: 'device_ws_messages_dedup', column: 'received_at', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          { table: 'device_ws_messages_dedup', column: 'message_type', ddl: `ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_type VARCHAR(32) DEFAULT 'telemetry';` },
-          // Dispatch logs
-          { table: 'dispatch_logs', column: 'tenant_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'dispatch_logs', column: 'user_id', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'dispatch_logs', column: 'user_name', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);` },
-          { table: 'dispatch_logs', column: 'severity', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
-          { table: 'dispatch_logs', column: 'attempt_count', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 1;` },
-          { table: 'dispatch_logs', column: 'latency_ms', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;` },
-          { table: 'dispatch_logs', column: 'error_details', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS error_details TEXT;` },
-          { table: 'dispatch_logs', column: 'title', ddl: `ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS title VARCHAR(256);` },
-          // Device commands
-          { table: 'device_commands', column: 'command_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_id VARCHAR(64);` },
-          { table: 'device_commands', column: 'tenant_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64);` },
-          { table: 'device_commands', column: 'customer_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64);` },
-          { table: 'device_commands', column: 'user_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);` },
-          { table: 'device_commands', column: 'source', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'manual';` },
-          { table: 'device_commands', column: 'idempotency_key', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);` },
-          { table: 'device_commands', column: 'command_type', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_type VARCHAR(64) DEFAULT 'GENERAL_COMMAND';` },
-          { table: 'device_commands', column: 'command_name', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command_name VARCHAR(64);` },
-          { table: 'device_commands', column: 'command', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS command VARCHAR(64);` },
-          { table: 'device_commands', column: 'value_payload', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS value_payload TEXT;` },
-          { table: 'device_commands', column: 'sent_by', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_by VARCHAR(64);` },
-          { table: 'device_commands', column: 'retry_count', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;` },
-          { table: 'device_commands', column: 'max_retries', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;` },
-          { table: 'device_commands', column: 'applied_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'device_commands', column: 'executed_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS executed_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'device_commands', column: 'sent_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'device_commands', column: 'acknowledged_at', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'device_commands', column: 'error_message', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS error_message TEXT;` },
-          { table: 'device_commands', column: 'timeout_seconds', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS timeout_seconds INT DEFAULT 300;` },
-          { table: 'device_commands', column: 'output_id', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS output_id VARCHAR(64);` },
-          { table: 'device_commands', column: 'parameters', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS parameters JSONB DEFAULT '{}'::jsonb;` },
-          { table: 'device_commands', column: 'result', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS result JSONB;` },
-          { table: 'device_commands', column: 'target_state', ddl: `ALTER TABLE device_commands ADD COLUMN IF NOT EXISTS target_state VARCHAR(64);` },
-          // Firmwares & OTA
-          { table: 'firmwares', column: 'role_key', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS role_key VARCHAR(64) DEFAULT 'ALL';` },
-          { table: 'firmwares', column: 'hardware_model', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS hardware_model VARCHAR(64) DEFAULT 'ALL';` },
-          { table: 'firmwares', column: 'binary_data', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS binary_data BYTEA;` },
-          { table: 'firmwares', column: 'binary_size', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS binary_size BIGINT DEFAULT 0;` },
-          { table: 'firmwares', column: 'signature', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS signature TEXT;` },
-          { table: 'firmwares', column: 'file_path', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS file_path TEXT;` },
-          { table: 'firmwares', column: 'min_hardware_revision', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS min_hardware_revision VARCHAR(32);` },
-          { table: 'firmwares', column: 'is_active', ddl: `ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;` },
-          { table: 'ota_deployment_jobs', column: 'download_token', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_token VARCHAR(128);` },
-          { table: 'ota_deployment_jobs', column: 'expires_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'ota_deployment_jobs', column: 'attempt_count', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 0;` },
-          { table: 'ota_deployment_jobs', column: 'max_attempts', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS max_attempts INT DEFAULT 3;` },
-          { table: 'ota_deployment_jobs', column: 'last_attempt_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'ota_deployment_jobs', column: 'next_retry_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'ota_deployment_jobs', column: 'download_started_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_started_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'ota_deployment_jobs', column: 'boot_confirmed_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS boot_confirmed_at TIMESTAMP WITH TIME ZONE;` },
-          { table: 'ota_deployment_jobs', column: 'completed_at', ddl: `ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;` },
-          // System Events
-          { table: 'system_events', column: 'created_at', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` },
-          { table: 'system_events', column: 'event_type', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS event_type VARCHAR(64);` },
-          { table: 'system_events', column: 'payload', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS payload JSONB;` },
-          { table: 'system_events', column: 'severity', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';` },
-          { table: 'system_events', column: 'level', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS level VARCHAR(32) DEFAULT 'info';` },
-          { table: 'system_events', column: 'category', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT 'system';` },
-          { table: 'system_events', column: 'message', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS message TEXT DEFAULT '';` },
-          { table: 'system_events', column: 'details', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS details TEXT;` },
-          { table: 'system_events', column: 'source', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'system';` },
-          { table: 'system_events', column: 'timestamp', ddl: `ALTER TABLE system_events ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;` }
-        ];
-
-        for (const req of requiredColumns) {
-          const key = `${req.table}.${req.column}`;
-          if (!existingColumns.has(key)) {
-            try {
-              await client.query(req.ddl);
-              existingColumns.add(key);
-            } catch {
-              // Ignore individual DDL notice
-            }
-          }
-        }
-
-        // 5. Cleanup foreign key and unique constraints that can block independent lifecycle or multi-tenant operation
+        // 2. Data synchronization for backwards compatibility
         await client.query(`
-          ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_firmware_id_fkey;
-          ALTER TABLE ota_deployment_jobs DROP CONSTRAINT IF EXISTS ota_deployment_jobs_device_id_fkey;
-          ALTER TABLE dashboard_layouts DROP CONSTRAINT IF EXISTS dashboard_layouts_user_id_fkey;
-          ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_user_id_fkey;
-          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_key;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_api_key_unique;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_tenant_id;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS fk_devices_user_id;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_user_id_fkey;
-          ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_tenant_id_fkey;
-          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_tenant_id;
-          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_user_id;
-          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_tenant_id_fkey;
-          ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_user_id_fkey;
-          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS fk_notifications_tenant_id;
-          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS fk_notifications_user_id;
-          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_tenant_id_fkey;
-          ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_user_id_fkey;
-          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS fk_active_alarms_tenant_id;
-          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS fk_active_alarms_user_id;
-          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS active_alarms_tenant_id_fkey;
-          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS active_alarms_user_id_fkey;
-          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS fk_alarm_events_tenant_id;
-          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS fk_alarm_events_user_id;
-          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS alarm_events_tenant_id_fkey;
-          ALTER TABLE alarm_events DROP CONSTRAINT IF EXISTS alarm_events_user_id_fkey;
-          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS fk_device_commands_tenant_id;
-          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS fk_device_commands_user_id;
-          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS device_commands_tenant_id_fkey;
-          ALTER TABLE device_commands DROP CONSTRAINT IF EXISTS device_commands_user_id_fkey;
-          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS fk_telemetry_readings_tenant_id;
-          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS fk_telemetry_readings_user_id;
-          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_tenant_id_fkey;
-          ALTER TABLE telemetry_readings DROP CONSTRAINT IF EXISTS telemetry_readings_user_id_fkey;
-          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS fk_simulation_telemetry_readings_tenant_id;
-          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS fk_simulation_telemetry_readings_user_id;
-          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_tenant_id_fkey;
-          ALTER TABLE simulation_telemetry_readings DROP CONSTRAINT IF EXISTS simulation_telemetry_readings_user_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_tenant_id;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_user_id;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS fk_threshold_rules_device_id;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_tenant_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_user_id_fkey;
-          ALTER TABLE threshold_rules DROP CONSTRAINT IF EXISTS threshold_rules_device_id_fkey;
-          ALTER TABLE dispatch_logs DROP CONSTRAINT IF EXISTS fk_dispatch_logs_tenant_id;
-          ALTER TABLE dispatch_logs DROP CONSTRAINT IF EXISTS fk_dispatch_logs_user_id;
-
-          CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_devices_api_key ON devices (api_key);
-          CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices (api_key_hash);
-          CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
-          CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id ON notifications (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
-          CREATE INDEX IF NOT EXISTS idx_threshold_rules_user_id ON threshold_rules (user_id);
-          CREATE INDEX IF NOT EXISTS idx_threshold_rules_tenant_id ON threshold_rules (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_threshold_rules_device_id ON threshold_rules (device_id);
-          CREATE INDEX IF NOT EXISTS idx_dispatch_logs_tenant_id ON dispatch_logs (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_devices_ip_address ON devices (ip_address);
-          CREATE INDEX IF NOT EXISTS idx_devices_ip ON devices (ip);
-          CREATE INDEX IF NOT EXISTS idx_active_alarms_device_id ON active_alarms (device_id);
-          CREATE INDEX IF NOT EXISTS idx_active_alarms_tenant_id ON active_alarms (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_alarm_events_tenant_id ON alarm_events (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands (device_id);
-          CREATE INDEX IF NOT EXISTS idx_device_commands_tenant_id ON device_commands (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_telemetry_readings_tenant_id ON telemetry_readings (tenant_id);
-          CREATE INDEX IF NOT EXISTS idx_simulation_telemetry_readings_tenant_id ON simulation_telemetry_readings (tenant_id);
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
           UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
           UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;
@@ -1190,65 +459,6 @@ export class PostgresRepository {
           UPDATE device_commands SET command = command_name WHERE (command IS NULL OR command = '') AND (command_name IS NOT NULL AND command_name != '');
           UPDATE device_commands SET command_name = command WHERE (command_name IS NULL OR command_name = '') AND (command IS NOT NULL AND command != '');
           UPDATE device_commands SET command_type = 'GENERAL_COMMAND' WHERE command_type IS NULL OR command_type = '';
-          UPDATE active_alarms SET current_value = trigger_value WHERE (current_value = 0 OR current_value IS NULL) AND trigger_value IS NOT NULL;
-        `).catch(() => {});
-
-        // 5.1 Enforce telemetry packet deduplication constraint retroactively for legacy deployments
-        await client.query(`
-          DO $$
-          BEGIN
-            IF NOT EXISTS (
-              SELECT 1
-              FROM pg_constraint
-              WHERE conrelid = 'telemetry_packets'::regclass
-                AND conname = 'unq_telemetry_device_boot_sequence'
-            ) THEN
-              ALTER TABLE telemetry_packets ADD CONSTRAINT unq_telemetry_device_boot_sequence UNIQUE (device_id, boot_id, sequence);
-            END IF;
-          EXCEPTION
-            WHEN OTHERS THEN
-              -- Ignore concurrent constraint additions or relation missing errors
-          END $$;
-        `).catch((err: any) => console.warn('[PostgreSQL Deduplication Constraint Setup]', err?.message));
-
-        // 5.2 Enforce device_ws_messages_dedup unique constraint and default msg_id
-        await client.query(`
-          ALTER TABLE device_ws_messages_dedup ADD COLUMN IF NOT EXISTS message_id VARCHAR(128);
-          UPDATE device_ws_messages_dedup SET message_id = msg_id WHERE message_id IS NULL AND msg_id IS NOT NULL;
-          ALTER TABLE device_ws_messages_dedup ALTER COLUMN msg_id SET DEFAULT gen_random_uuid()::text;
-          DO $$
-          BEGIN
-            IF NOT EXISTS (
-              SELECT 1 FROM pg_constraint WHERE conname = 'unq_device_ws_dedup'
-            ) THEN
-              ALTER TABLE device_ws_messages_dedup ADD CONSTRAINT unq_device_ws_dedup UNIQUE (device_id, message_id);
-            END IF;
-          EXCEPTION
-            WHEN OTHERS THEN NULL;
-          END $$;
-        `).catch(() => {});
-
-        // 5.3 Enforce user_sessions unique constraint on token and default id
-        await client.query(`
-          ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
-          DO $$
-          BEGIN
-            IF NOT EXISTS (
-              SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token'
-            ) THEN
-              ALTER TABLE user_sessions ADD CONSTRAINT unq_user_sessions_token UNIQUE (token);
-            END IF;
-          EXCEPTION
-            WHEN OTHERS THEN NULL;
-          END $$;
-        `).catch(() => {});
-
-        // 5.4 Ensure audit_logs resource_type is nullable with default
-        await client.query(`
-          ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resource_type VARCHAR(64) DEFAULT 'system';
-          ALTER TABLE audit_logs ALTER COLUMN resource_type DROP NOT NULL;
-          ALTER TABLE audit_logs ALTER COLUMN resource_type SET DEFAULT 'system';
-          UPDATE audit_logs SET resource_type = 'system' WHERE resource_type IS NULL;
         `).catch(() => {});
 
         // 6. Check existing user count to avoid resurrecting deleted users or force-seeding

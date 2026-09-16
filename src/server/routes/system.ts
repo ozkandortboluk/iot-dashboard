@@ -17,6 +17,8 @@ import { simulationTelemetryController } from '../controllers/simulationTelemetr
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
+import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
 
 const startTime = Date.now();
 
@@ -168,6 +170,27 @@ systemRouter.get('/system/postgres-schema', authenticateUser, requireAdmin, (req
   res.send(db.getPostgresSchemaSQL());
 });
 
+systemRouter.get('/system/canonical-schema', authenticateUser, requireAdmin, (req, res) => {
+  res.json({
+    success: true,
+    schemaContract: db.getCanonicalSchemaMetadata(),
+    ddl: db.getPostgresSchemaSQL()
+  });
+});
+
+systemRouter.get('/system/schema-harmony', authenticateUser, requireAdmin, (req, res) => {
+  const harmony = validateSchemaHarmony();
+  const drizzleAlignment = verifyDrizzleSchemaAlignment();
+
+  res.json({
+    success: true,
+    isHarmonized: harmony.isHarmonized && drizzleAlignment.isAligned,
+    harmony,
+    drizzleAlignment,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // System Event Logs
 systemRouter.get('/system/events', authenticateUser, requireAdmin, (req, res) => {
   const level = req.query.level as any;
@@ -295,6 +318,72 @@ databaseRouter.post('/postgres/sync-all', authenticateUser, requireAdmin, async 
 
 databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresSetupGuide());
+});
+
+// Canonical Schema Metadata & Schema Auditor Endpoints
+databaseRouter.get('/canonical-schema', authenticateUser, requireAdmin, (req, res) => {
+  res.json({
+    canonicalVersion: CANONICAL_SCHEMA_METADATA.version,
+    engine: CANONICAL_SCHEMA_METADATA.engine,
+    extensions: CANONICAL_SCHEMA_METADATA.extensions,
+    tables: CANONICAL_SCHEMA_METADATA.tables,
+    functions: CANONICAL_SCHEMA_METADATA.functions,
+    views: CANONICAL_SCHEMA_METADATA.views,
+  });
+});
+
+databaseRouter.get('/audit', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const auditResult = await db.postgresRepo.auditSchema();
+    const drizzleHarmony = verifyDrizzleSchemaAlignment();
+    const migrationHarmony = validateSchemaHarmony();
+
+    res.json({
+      success: true,
+      audit: auditResult,
+      alignment: {
+        drizzleMatchesCanonical: drizzleHarmony.isAligned,
+        migrationMatchesCanonical: migrationHarmony.isHarmonized,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: `Şema denetimi başarısız oldu: ${err?.message || err}`,
+    });
+  }
+});
+
+databaseRouter.post('/auto-heal', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const healResult = await db.postgresRepo.autoHealSchema();
+    res.json({
+      success: healResult.success,
+      stage: healResult.stage,
+      status: healResult.status,
+      verificationPassed: healResult.verificationPassed,
+      isHealthy: healResult.isHealthy,
+      actionsTaken: healResult.actionsTaken,
+      beforeReport: healResult.beforeReport,
+      afterReport: healResult.afterReport,
+      errors: healResult.errors,
+      remainingDiscrepancies: healResult.remainingDiscrepancies,
+      summaryMessage: healResult.summaryMessage,
+      message: healResult.summaryMessage || (healResult.actionsTaken.length > 0 
+        ? `${healResult.actionsTaken.length} adet şema düzeltmesi başarıyla uygulandı ve doğrulandı.`
+        : 'Veritabanı şeması zaten Canonical Schema ile %100 uyumlu.'),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      status: 'FAIL',
+      verificationPassed: false,
+      isHealthy: false,
+      error: `Otomatik şema onarımı başarısız oldu: ${err?.message || err}`,
+    });
+  }
 });
 
 // Database Explorer & Management Endpoints
