@@ -204,6 +204,8 @@ export interface Device {
   autoDetectedIntervalSeconds?: number; // Sistemin peş peşe gelen paketlerden ölçtüğü sıklık
   recentIntervals?: number[]; // Son N ardışık paket aralıkları (aykırı değer ve burst filtrelemesi için)
   isSimulated?: boolean;
+  powerSource?: 'battery' | 'mains' | 'unknown';
+  batteryLevel?: number;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
   supportedOutputs?: string[];

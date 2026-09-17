@@ -86,6 +86,8 @@ export const devices = pgTable('devices', {
   metrics: jsonb('metrics').default({}).notNull(),
   dataFlowActive: boolean('data_flow_active').default(true).notNull(),
   isSimulated: boolean('is_simulated').default(false).notNull(),
+  powerSource: varchar('power_source', { length: 32 }).default('mains').notNull(),
+  batteryLevel: integer('battery_level'),
   saveSimulatedDataToDb: boolean('save_simulated_data_to_db').default(false).notNull(),
   simulatedMetrics: jsonb('simulated_metrics').default([]).notNull(),
   expectedIntervalSeconds: integer('expected_interval_seconds').default(30).notNull(),

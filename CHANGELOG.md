@@ -1449,3 +1449,12 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 ---
 
 *Tüm yeni özellikler, hata düzeltmeleri ve dağıtım sürümleri için [GitHub Releases](https://github.com/ozkan-1403/iot-telemetry-platform/releases) sayfasını ziyaret edebilirsiniz.*
+
+## [1.23.3] - 2026-09-17
+### Added
+- Frontend: Cihaz listesinde (grid ve list görünümleri) ve gösterge panosu widget'ında cihazın güç kaynağını (pil/fiş) gösteren minimal `DevicePowerIcon` bileşeni eklendi.
+- Backend: Telemetri metrikleri ayrıştırılırken cihazın pil seviyesinin otomatik olarak güncellenmesi sağlandı (battery, bat, pil vb.).
+
+## [1.23.2] - 2026-09-17
+### Fixed
+- Fixed an issue where the "device is offline" notification would fire repeatedly every 3 minutes. It now strictly sends only a single notification after a device loses connection. The notification state is reset correctly upon device recovery.

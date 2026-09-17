@@ -366,6 +366,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       ],
       checkConstraints: [
         { name: 'chk_devices_status', condition: "status IN ('online', 'offline', 'warning', 'error')" },
+        { name: 'chk_devices_power_source', condition: "power_source IN ('battery', 'mains', 'unknown')" },
         { name: 'chk_devices_rate_limit', condition: "rate_limit_per_min > 0" },
         { name: 'chk_devices_ota_status', condition: "ota_status IN ('IDLE', 'PENDING', 'DOWNLOADING', 'FLASHING', 'SUCCESS', 'FAILED', 'CANCELLED')" }
       ],
@@ -408,6 +409,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'metrics', type: 'JSONB', nullable: false, defaultValue: "'{}'::jsonb" },
         { name: 'data_flow_active', type: 'BOOLEAN', nullable: false, defaultValue: 'TRUE' },
         { name: 'is_simulated', type: 'BOOLEAN', nullable: false, defaultValue: 'FALSE' },
+        { name: 'power_source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'mains'" },
+        { name: 'battery_level', type: 'INT', nullable: true },
         { name: 'save_simulated_data_to_db', type: 'BOOLEAN', nullable: false, defaultValue: 'FALSE' },
         { name: 'simulated_metrics', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'expected_interval_seconds', type: 'INT', nullable: false, defaultValue: '30' },

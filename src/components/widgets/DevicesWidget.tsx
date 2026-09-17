@@ -4,6 +4,7 @@ import { useRealtime } from '../../context/RealtimeContext';
 import { getStatusColor, generateMaskedKey, getStatusLabel, formatRelativeTime } from '../../lib/utils';
 import { Cpu, Server, Radio, Shield, Copy, Check } from 'lucide-react';
 import { DeviceStatusDot } from './DeviceStatusDot';
+import { DevicePowerIcon } from '../devices/DevicePowerIcon';
 
 interface DevicesWidgetProps {
   config: WidgetConfig;
@@ -57,7 +58,10 @@ export const DevicesWidget: React.FC<DevicesWidgetProps> = ({ config }) => {
                   <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors.dot}`}></span>
                 </span>
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-900 dark:text-white truncate">{dev.name}</p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="font-semibold text-slate-900 dark:text-white truncate">{dev.name}</p>
+                    <DevicePowerIcon device={dev} />
+                  </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
                     <span>{dev.location}</span>
                     <span>•</span>
