@@ -43,6 +43,7 @@ import { firmwareRouter } from './src/server/routes/firmware.js';
 import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
 import { systemLogsRouter } from './src/server/routes/systemLogs.js';
+import { setupRouter } from './src/server/routes/setup.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
@@ -148,8 +149,8 @@ app.use('/api', (req, res, next) => {
     return next();
   }
 
-  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair; auth allows login/logout
-  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database') || req.path.startsWith('/auth')) {
+  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair; auth allows login/logout; setup allows first-run initialization
+  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database') || req.path.startsWith('/auth') || req.path.startsWith('/setup')) {
     return next();
   }
 
@@ -166,6 +167,7 @@ app.use('/api', (req, res, next) => {
 });
 
 // Mount Modular API Routes
+app.use('/api/setup', setupRouter);
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/profile', profileRouter);

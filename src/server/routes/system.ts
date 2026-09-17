@@ -19,6 +19,7 @@ import { systemLogger } from '../services/systemLogger.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
+import { DataMaintenanceService } from '../database/dataMaintenance.js';
 
 const startTime = Date.now();
 
@@ -370,6 +371,7 @@ databaseRouter.post('/auto-heal', authenticateUser, requireAdmin, async (req, re
       errors: healResult.errors,
       remainingDiscrepancies: healResult.remainingDiscrepancies,
       summaryMessage: healResult.summaryMessage,
+      orphanReports: healResult.orphanReports || [],
       message: healResult.summaryMessage || (healResult.actionsTaken.length > 0 
         ? `${healResult.actionsTaken.length} adet şema düzeltmesi başarıyla uygulandı ve doğrulandı.`
         : 'Veritabanı şeması zaten Canonical Schema ile %100 uyumlu.'),
@@ -383,6 +385,75 @@ databaseRouter.post('/auto-heal', authenticateUser, requireAdmin, async (req, re
       isHealthy: false,
       error: `Otomatik şema onarımı başarısız oldu: ${err?.message || err}`,
     });
+  }
+});
+
+// Separate Data Maintenance Endpoints (Zero Data Loss Architecture: Schema Repair != Data Cleanup)
+databaseRouter.get('/maintenance/violations', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.json({ success: true, violations: [], count: 0, message: 'PostgreSQL havuzu aktif değil.' });
+    }
+    const violations = await DataMaintenanceService.scanDataIntegrityViolations(pool);
+    res.json({
+      success: true,
+      violations,
+      count: violations.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+databaseRouter.post('/maintenance/resolve', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.status(503).json({ success: false, error: 'PostgreSQL bağlantısı mevcut değil.' });
+    }
+    const { table, column, referencedTable, referencedColumn, resolutionStrategy, targetParentId, constraintName } = req.body;
+    if (!table || !column || !resolutionStrategy) {
+      return res.status(400).json({ success: false, error: 'table, column ve resolutionStrategy parametreleri zorunludur.' });
+    }
+    const adminUserId = req.user?.id || 'usr_admin';
+    const action: 'quarantine' | 'reassign_to_admin' | 'purge_with_snapshot' =
+      resolutionStrategy === 'REASSIGN_TO_PARENT'
+        ? 'reassign_to_admin'
+        : resolutionStrategy === 'DELETE_PURGE'
+        ? 'purge_with_snapshot'
+        : 'quarantine';
+
+    const result = await DataMaintenanceService.executeMaintenanceJob(pool, {
+      table,
+      constraintName: constraintName || `fk_${table}_${column}`,
+      action,
+      targetColumn: column,
+      referencedTable,
+      referencedColumn,
+      targetParentId,
+      adminUserId,
+    });
+    res.json({
+      success: result.success,
+      result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+databaseRouter.get('/maintenance/quarantine', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.json({ success: true, items: [] });
+    }
+    const items = await DataMaintenanceService.getQuarantineRecords(pool);
+    res.json({ success: true, items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
   }
 });
 
@@ -477,18 +548,31 @@ databaseRouter.post('/retention/cleanup-category', authenticateUser, requireAdmi
 // TimescaleDB Router
 const timescaleRouter = Router();
 
-timescaleRouter.get('/stats', authenticateUser, (req, res) => {
-  res.json(db.getTimescaleStats());
+timescaleRouter.get('/stats', authenticateUser, async (req, res) => {
+  try {
+    const stats = await db.getTimescaleStatsAsync();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB istatistikleri alınamadı: ' + (err.message || '') });
+  }
 });
 
 timescaleRouter.post('/compress-now', authenticateUser, requireAdmin, async (req, res) => {
-  const result = await db.compressTimescaleChunksNow();
-  res.json(result);
+  try {
+    const result = await db.compressTimescaleChunksNow();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB sıkıştırma işlemi başarısız: ' + (err.message || '') });
+  }
 });
 
-timescaleRouter.post('/policies', authenticateUser, requireAdmin, (req, res) => {
-  const result = db.updateTimescalePolicies(req.body);
-  res.json(result);
+timescaleRouter.post('/policies', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await db.updateTimescalePolicies(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB politikaları güncellenemedi: ' + (err.message || '') });
+  }
 });
 
 timescaleRouter.get('/time-bucket', authenticateUser, async (req, res) => {

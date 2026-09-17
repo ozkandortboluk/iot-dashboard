@@ -7,3 +7,6 @@ coverage
 .env
 .env.local
 .DS_Store
+data
+*.db_config.json
+.db_config.json

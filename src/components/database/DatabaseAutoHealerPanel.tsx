@@ -19,6 +19,10 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Archive,
+  Database,
+  AlertCircle,
+  Shield,
 } from 'lucide-react';
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import type { SystemEvent, SystemEventLevel, SystemEventCategory } from '../../types';
@@ -91,6 +95,32 @@ interface SchemaHealResponse {
   summaryMessage: string;
   beforeReport: any;
   afterReport: any;
+  orphanReports?: DataIntegrityViolation[];
+}
+
+interface DataIntegrityViolation {
+  table: string;
+  column: string;
+  referencedTable?: string;
+  referencedColumn?: string;
+  constraintName?: string;
+  violationType: 'FOREIGN_KEY_ORPHAN' | 'NOT_NULL_VIOLATION';
+  violationCount: number;
+  sampleIds: string[];
+  detectedAt: string;
+  message: string;
+}
+
+interface QuarantineItem {
+  id: string;
+  source_table: string;
+  source_row_id: string;
+  column_name: string;
+  invalid_value: string;
+  referenced_table: string;
+  full_row_data: any;
+  reason: string;
+  quarantined_at: string;
 }
 
 export const DatabaseAutoHealerPanel: React.FC = () => {
@@ -105,6 +135,16 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
   const [isHealVerifying, setIsHealVerifying] = useState(false);
   const [schemaHealResult, setSchemaHealResult] = useState<SchemaHealResponse | null>(null);
   const [healVerifyStep, setHealVerifyStep] = useState<'IDLE' | 'DETECT' | 'REPAIR' | 'RE_CHECK' | 'PASS' | 'FAIL'>('IDLE');
+
+  // Zero Data Loss & Separate Data Maintenance state
+  const [violations, setViolations] = useState<DataIntegrityViolation[]>([]);
+  const [isLoadingViolations, setIsLoadingViolations] = useState(false);
+  const [quarantineItems, setQuarantineItems] = useState<QuarantineItem[]>([]);
+  const [isLoadingQuarantine, setIsLoadingQuarantine] = useState(false);
+  const [selectedViolation, setSelectedViolation] = useState<DataIntegrityViolation | null>(null);
+  const [reassignTargetId, setReassignTargetId] = useState('dev_test_01');
+  const [isResolvingViolation, setIsResolvingViolation] = useState(false);
+  const [activeMaintenanceTab, setActiveMaintenanceTab] = useState<'violations' | 'quarantine'>('violations');
 
   // System Events state
   const [events, setEvents] = useState<SystemEvent[]>([]);
@@ -241,6 +281,81 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
     }
   };
 
+  const fetchViolations = async () => {
+    setIsLoadingViolations(true);
+    try {
+      const res = await fetch('/api/database/maintenance/violations');
+      if (res.ok) {
+        const data = await res.json();
+        setViolations(data.violations || []);
+      }
+    } catch (err) {
+      console.warn('Veri bütünlüğü ihlalleri alınamadı:', err);
+    } finally {
+      setIsLoadingViolations(false);
+    }
+  };
+
+  const fetchQuarantine = async () => {
+    setIsLoadingQuarantine(true);
+    try {
+      const res = await fetch('/api/database/maintenance/quarantine');
+      if (res.ok) {
+        const data = await res.json();
+        setQuarantineItems(data.items || []);
+      }
+    } catch (err) {
+      console.warn('Karantina kayıtları alınamadı:', err);
+    } finally {
+      setIsLoadingQuarantine(false);
+    }
+  };
+
+  const handleResolveViolation = async (
+    v: DataIntegrityViolation,
+    strategy: 'QUARANTINE_AND_NULLIFY' | 'REASSIGN_TO_PARENT' | 'DELETE_PURGE'
+  ) => {
+    setIsResolvingViolation(true);
+    setPanelNotification(null);
+    try {
+      const res = await fetch('/api/database/maintenance/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table: v.table,
+          column: v.column,
+          referencedTable: v.referencedTable,
+          referencedColumn: v.referencedColumn,
+          resolutionStrategy: strategy,
+          targetParentId: strategy === 'REASSIGN_TO_PARENT' ? reassignTargetId : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPanelNotification({
+          type: 'success',
+          text: `Ayrı Bakım İşi tamamlandı: ${data.result?.affectedRows ?? 0} kayıt işlendi (${strategy}). Sıfır Veri Kaybı korundu.`,
+        });
+        fetchViolations();
+        fetchQuarantine();
+        fetchSchemaAudit();
+        setSelectedViolation(null);
+      } else {
+        setPanelNotification({
+          type: 'error',
+          text: `Bakım işi başarısız oldu: ${data.error || 'Bilinmeyen hata'}`,
+        });
+      }
+    } catch (err: any) {
+      setPanelNotification({
+        type: 'error',
+        text: `Hata oluştu: ${err?.message || err}`,
+      });
+    } finally {
+      setIsResolvingViolation(false);
+    }
+  };
+
   const executeClearEvents = async () => {
     setConfirmingClear(false);
     setPanelNotification(null);
@@ -275,6 +390,8 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
     fetchHealth();
     fetchEvents();
     fetchSchemaAudit();
+    fetchViolations();
+    fetchQuarantine();
     const timer = setInterval(() => {
       fetchHealth();
     }, 15000);
@@ -645,6 +762,16 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
                 </span>
               </div>
               <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Tetikleyiciler (Triggers):</span>
+                <span className={`font-mono px-2 py-0.5 rounded border ${
+                  (schemaAudit.audit.summary.missingTriggersCount ?? 0) === 0
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                }`}>
+                  {(schemaAudit.audit.summary.missingTriggersCount ?? 0) === 0 ? 'Tam' : `${schemaAudit.audit.summary.missingTriggersCount} kusur/eksik`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Drizzle/Migration Uyumu:</span>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
                   %100 Uyumlu
@@ -694,6 +821,205 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ZERO DATA LOSS & SEPARATE DATA MAINTENANCE SECTION */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl border border-emerald-200 dark:border-emerald-800/50">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Sıfır Veri Kaybı Mimarisi & Ayrı Veri Bakımı (Separate Maintenance Job)
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                  Zero Data Loss
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Kural: Şema Onarımı ≠ Veri Temizliği.</span> Auto-Heal asla veri silmez! Yetim (orphan) ve NULL kayıtlar tespit edildiğinde Auto-Heal FAIL verir, yöneticiyi uyarır ve ayrı bakım işi ile karantinaya almayı sağlar.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { fetchViolations(); fetchQuarantine(); }}
+              disabled={isLoadingViolations || isLoadingQuarantine}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingViolations ? 'animate-spin' : ''}`} />
+              <span>Yenile</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tab switcher: Violations vs Quarantine */}
+        <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <button
+            onClick={() => setActiveMaintenanceTab('violations')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              activeMaintenanceTab === 'violations'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>Tespit Edilen Yetim / İhlal Kayıtları ({violations.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveMaintenanceTab('quarantine')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              activeMaintenanceTab === 'quarantine'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+            }`}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Karantina Arşivi (orphan_records_quarantine) ({quarantineItems.length})</span>
+          </button>
+        </div>
+
+        {activeMaintenanceTab === 'violations' ? (
+          <div>
+            {violations.length === 0 ? (
+              <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 flex items-center gap-3 text-xs">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <div className="font-bold">Veri Bütünlüğü Kusursuz</div>
+                  <div className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                    Veritabanında kısıtları ihlal eden hiçbir yetim (orphan) foreign key veya beklenmeyen NULL kayıt bulunamadı. Tüm kısıtlar doğrudan güvenle uygulanabilir.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Dikkat (Sıfır Veri Kaybı Devrede): </span>
+                    Aşağıdaki tablolarda ilişkisiz kayıtlar mevcuttur. Auto-Heal bu verileri bilerek silmemiştir. Lütfen aşağıdaki seçeneklerden birini kullanarak kayıtları güvenle karantinaya alın veya test cihazına bağlayın.
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {violations.map((v, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-xs space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-mono text-[10px]">
+                              {v.violationType === 'FOREIGN_KEY_ORPHAN' ? 'YETİM (ORPHAN) FK' : 'NULL İHLALİ'}
+                            </span>
+                            <span>{v.table}.{v.column}</span>
+                            {v.referencedTable && (
+                              <span className="text-slate-400 font-normal">→ {v.referencedTable}.{v.referencedColumn}</span>
+                            )}
+                          </div>
+                          <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                            {v.message}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-2.5 py-1 bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold rounded-lg text-xs">
+                            {v.violationCount} adet ihlal
+                          </span>
+                        </div>
+                      </div>
+
+                      {v.sampleIds && v.sampleIds.length > 0 && (
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          Örnek Değerler: {v.sampleIds.join(', ')}
+                        </div>
+                      )}
+
+                      {/* Resolution actions */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => handleResolveViolation(v, 'QUARANTINE_AND_NULLIFY')}
+                          disabled={isResolvingViolation}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                          <span>Karantinaya Al & Güvenle Ayır (Önerilen)</span>
+                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={reassignTargetId}
+                            onChange={(e) => setReassignTargetId(e.target.value)}
+                            placeholder="Hedef ID (Örn: dev_test_01)"
+                            className="px-2.5 py-1 text-xs border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 w-36 font-mono"
+                          />
+                          <button
+                            onClick={() => handleResolveViolation(v, 'REASSIGN_TO_PARENT')}
+                            disabled={isResolvingViolation || !reassignTargetId.trim()}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Yeniden Ata (Reassign)</span>
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`DİKKAT: "${v.table}" tablosundaki ${v.violationCount} adet yetim kayıt kalıcı olarak silinecektir. Audit log tutulacaktır. Devam etmek istiyor musunuz?`)) {
+                              handleResolveViolation(v, 'DELETE_PURGE');
+                            }
+                          }}
+                          disabled={isResolvingViolation}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-950 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-medium transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Yetkili Denetimli Silme (Purge)</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            {quarantineItems.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
+                Karantinaya alınmış herhangi bir kayıt bulunmamaktadır.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {quarantineItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 dark:text-slate-200 font-mono text-[11px]">
+                        {item.source_table} [Satır: {item.source_row_id}]
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(item.quarantined_at).toLocaleString('tr-TR')}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Geçersiz Değer: <code className="bg-slate-200 dark:bg-slate-700 px-1 py-0.5 rounded font-mono">{item.invalid_value}</code> (Referans: {item.referenced_table})
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded border border-slate-100 dark:border-slate-800 font-mono text-[10px] overflow-x-auto max-h-24">
+                      {JSON.stringify(item.full_row_data, null, 2)}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

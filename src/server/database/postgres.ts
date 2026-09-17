@@ -76,6 +76,56 @@ export function isTestOrEphemeralUser(id?: string, email?: string, name?: string
   return false;
 }
 
+/**
+ * Distinguishes true, production human administrators from test users,
+ * ephemeral test artifacts, and default static schema seed placeholders.
+ * Ensures the First Run Setup Wizard is NOT erroneously skipped when only
+ * canonical test accounts (e.g. usr_test_admin) exist in the system.
+ */
+export function isRealAdminUser(u?: {
+  id?: string;
+  email?: string;
+  role?: string;
+  status?: string;
+  name?: string;
+  deleted_at?: any;
+  deletedAt?: any;
+} | null): boolean {
+  if (!u || u.role !== 'admin') return false;
+  if (u.status === 'deleted' || u.deleted_at || u.deletedAt) return false;
+
+  const id = (u.id || '').trim().toLowerCase();
+  const email = (u.email || '').trim().toLowerCase();
+  const name = (u.name || '').trim().toLowerCase();
+
+  // 1. Strictly exclude Canonical Test Admin (Mandatory Rule 3) and test accounts
+  if (id === 'usr_test_admin' || email === 'test@nexusnodeiot.com.tr') {
+    return false;
+  }
+  if (id.startsWith('usr_test_') || id.startsWith('test_')) {
+    return false;
+  }
+  if (email.endsWith('@nexusnodeiot.com.tr') || email.startsWith('test_') || email.includes('test_')) {
+    return false;
+  }
+  if (name.startsWith('test ') || name.includes('test user') || name === 'test kullanıcısı') {
+    return false;
+  }
+
+  // 2. Strictly exclude canonical schema static seed placeholder (admin@nexusnode.io / usr_admin)
+  // if it hasn't been upgraded to a real human admin with their custom credentials
+  if (id === 'usr_admin' && email === 'admin@nexusnode.io') {
+    return false;
+  }
+
+  // 3. Ephemeral / integration test users
+  if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
+    return false;
+  }
+
+  return true;
+}
+
 export class PostgresRepository {
   private pool: Pool | null = null;
   private isConnected = false;
@@ -258,10 +308,23 @@ export class PostgresRepository {
     };
   }
 
-  public async checkIfAdminExists(): Promise<boolean> {
+  public async checkIfAdminExists(includeTestUsers: boolean = false): Promise<boolean> {
     if (!this.pool) return false;
     try {
-      const res = await this.pool.query("SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;");
+      const sql = includeTestUsers
+        ? "SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;"
+        : `SELECT 1 FROM users 
+           WHERE role = 'admin' 
+             AND (deleted_at IS NULL)
+             AND id != 'usr_test_admin'
+             AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+             AND id NOT LIKE 'usr_test_%'
+             AND id NOT LIKE 'test_%'
+             AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
+             AND LOWER(email) NOT LIKE 'test_%'
+             AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
+           LIMIT 1;`;
+      const res = await this.pool.query(sql);
       return (res.rowCount || 0) > 0;
     } catch {
       return false;

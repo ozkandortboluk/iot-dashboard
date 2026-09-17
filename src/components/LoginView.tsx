@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database, LogIn, UserPlus } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
+import { DatabaseSetupWizard } from './setup/DatabaseSetupWizard';
 
 export const LoginView: React.FC = () => {
   const { login, register, setup, checkSetupStatus, isLoading } = useAuth();
@@ -94,6 +95,18 @@ export const LoginView: React.FC = () => {
       }
     }
   };
+
+  if (needSetup) {
+    return (
+      <DatabaseSetupWizard
+        onComplete={() => {
+          setNeedSetup(false);
+          setAuthMode('login');
+          window.location.reload();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#020617] text-slate-800 dark:text-slate-100 flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-200">

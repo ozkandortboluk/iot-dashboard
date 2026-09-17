@@ -3,6 +3,8 @@ import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
+import { setupService } from '../services/setup.service.js';
+import { isRealAdminUser } from '../database/postgres.js';
 import {
   validateSetupInput,
   validateRegistrationInput,
@@ -44,17 +46,19 @@ export function clearSessionCookie(res: Response) {
 // Setup/Onboarding Endpoints
 router.get('/setup-status', async (req, res) => {
   // 1. Ensure database has completed initial hydration from PostgreSQL / disk cache
-  await db.waitForInitialization();
+  await db.waitForInitialization().catch(() => {});
+
+  const wizardStatus = await setupService.getStatus().catch(() => null);
 
   const users = db.getUsers();
-  let hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+  let hasAdmin = users.some(isRealAdminUser);
 
   // 2. Direct PostgreSQL fallback: If in-memory cache hasn't loaded admin yet, query PostgreSQL directly
-  if (!hasAdmin && (db.postgresRepo?.getPool() || db.getPostgresUrl())) {
+  if (db.postgresRepo?.getPool() || db.getPostgresUrl()) {
     try {
-      const pgAdminExists = await db.postgresRepo.checkIfAdminExists();
+      const pgAdminExists = await db.postgresRepo.checkIfAdminExists(false);
+      hasAdmin = pgAdminExists;
       if (pgAdminExists) {
-        hasAdmin = true;
         // Trigger background hydration to sync in-memory data
         db.initPostgresRepository().catch(() => {});
       }
@@ -63,7 +67,13 @@ router.get('/setup-status', async (req, res) => {
     }
   }
 
-  res.json({ needSetup: !hasAdmin, inProgress: isSetupInProgress });
+  const needSetup = wizardStatus ? wizardStatus.setupRequired : !hasAdmin;
+
+  res.json({
+    needSetup,
+    inProgress: isSetupInProgress,
+    setupDetails: wizardStatus || undefined,
+  });
 });
 
 router.post('/setup', async (req, res) => {
@@ -79,7 +89,7 @@ router.post('/setup', async (req, res) => {
 
   // Pre-check: Ensure admin account does not already exist
   const users = db.getUsers();
-  const hasAdmin = users.some((u) => u.role === 'admin');
+  const hasAdmin = users.some(isRealAdminUser);
   if (hasAdmin) {
     return res.status(400).json({ error: 'Kurulum zaten tamamlanmış. Sistemde en az bir yönetici bulunmaktadır.' });
   }
@@ -113,7 +123,7 @@ router.post('/setup', async (req, res) => {
   try {
     // Re-verify inside lock to guarantee mutual exclusion
     const currentUsers = db.getUsers();
-    if (currentUsers.some((u) => u.role === 'admin')) {
+    if (currentUsers.some(isRealAdminUser)) {
       throw new Error('Kurulum zaten başka bir oturum tarafından tamamlandı.');
     }
 
@@ -191,7 +201,7 @@ router.post('/register', async (req, res) => {
 
   // Guard: If system setup is not completed yet, prevent public registration to enforce admin onboarding first
   const users = db.getUsers();
-  const hasAdmin = users.some((u) => u.role === 'admin');
+  const hasAdmin = users.some(isRealAdminUser);
   if (!hasAdmin || isSetupInProgress) {
     return res.status(403).json({
       error: 'Sistem ilk kurulum aşamasındadır. Önce sistem yöneticisi hesabı oluşturulmalıdır.',

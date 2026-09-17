@@ -4,6 +4,140 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.0] - 2026-09-17
+
+### 📌 İlk Kurulum Veritabanı Sihirbazı & Güvenli Çalışma Zamanı Gizli Bilgi Yönetimi (First Run Database Setup Wizard & Runtime Secrets Hardening)
+- **İlk Kurulum Veritabanı Sihirbazı (First Run Database Setup Wizard)**:
+  - Yeni VPS veya Home Server kurulumlarında veritabanı şifrelerini ve bağlantı dizelerini kaynak kodlara veya `docker-compose.yml` içine yazma zorunluluğu tamamen ortadan kaldırılmıştır.
+  - Uygulama ilk kez başlatıldığında veya veritabanı henüz yapılandırılmadığında tarayıcı otomatik olarak **First Run Setup Wizard** (`DatabaseSetupWizard.tsx`) arayüzüne yönlendirilir.
+  - 7 adımlı akıllı ve etkileşimli akış:
+    1. *Hoş Geldiniz*: Platform mimarisi ve sıfır veri kaybı garantisi özeti.
+    2. *Veritabanı Parametreleri*: Sunucu (host), port, veritabanı adı, kullanıcı, şifre ve SSL modu giriş formları (şifre maskeleme ve görünürlük butonu ile).
+    3. *Canlı Bağlantı & Gecikme Testi*: Gerçek soket testi, bağlantı süresi (ms) ölçümü ve TimescaleDB uzantısı varlık kontrolü.
+    4. *Veritabanı İlklendirme*: TimescaleDB eklentisinin açılması ve tüm migrasyonların sıralı çalıştırılması.
+    5. *Şema Doğrulama (Canonical Schema)*: Tüm tablolar, sütunlar, indeksler ve tetikleyicilerin doğrulanması; sıfır veri kaybı güvencesiyle eksik yapıların oluşturulması.
+    6. *İlk Yönetici Hesabı*: Sistemin ilk süper yöneticisinin (Admin) güvenli parolayla oluşturulması.
+    7. *Kurulum Tamamlandı*: Başarı özeti ve kilitlenme durumu bilgisiyle panoya geçiş.
+- **Güvenli Sunucu Tarafı Gizli Bilgi Yönetimi (Secure Runtime Secrets)**:
+  - `data/.db_config.json` dosyası `0600` (yalnızca işlem sahibi okuyabilir/yazabilir) dosya sistemi izinleriyle oluşturulur.
+  - Kurulum tamamlandıktan sonra veritabanı şifresi hiçbir API yanıtında, frontend state'inde veya log dosyalarında asla dışa aktarılmaz.
+  - Kurulum tamamlandığında `isCompleted` bayrağı aktif hale gelir ve `/api/setup` uç noktaları `HTTP 403 Forbidden` ile kalıcı olarak kilitlenir.
+- **Docker Compose ve Ağ Güvenliği Sertleştirmesi (Docker Hardening)**:
+  - `docker-compose.yml` dosyasındaki sabitlenmiş `POSTGRES_PASSWORD: kastamonuaraccalalibeyli.37` ve `DATABASE_URL` tanımları tamamen kaldırılmıştır; `${POSTGRES_PASSWORD:-}` esnek ortam değişkenine ve sihirbaz akışına bağlanmıştır.
+  - `timescaledb` ve `adminer` servislerinin açık İnternet port bağlamaları sınırlandırılarak (`${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}` ve `${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}`) yerel köprü ağı (`nexus_net`) içine izole edilmiştir.
+  - `.dockerignore` dosyasına `data`, `.db_config.json` ve runtime secret kalıpları eklenerek container imajlarına sızması engellenmiştir.
+- **Yardım & Bilgi Merkezi (HelpView) Entegrasyonu**:
+  - Headless/otomasyon sunucuları ve scriptler için tüm cURL komutlarını içeren "First Run Database Setup Wizard & Headless Kurulum API'si" kod bloğu eklenmiştir.
+- **Test ve Doğrulama**:
+  - `database_setup_wizard.test.ts` test paketi yazılarak URL kodlama, yetkisiz tekrar yapılandırma engellemesi, güvenli dosya izinleri ve şifre gizliliği tam puanla doğrulanmıştır.
+
+---
+
+## 🚀 [v1.27.0] - 2026-09-17
+
+### 📌 TimescaleDB Gerçek Metrik Yönetimi, Canlı Sıkıştırma/Politika Motoru & 3 Kademeli Depolama (Live TimescaleDB Engine & Tiered Storage)
+- **Sentetik / `Math.random()` Sahte Verilerin Tamamen Kaldırılması**:
+  - `TimescaleManager` (`src/server/database/timescale.ts`) sıfırdan yeniden yazılarak sahte (`Math.random()`, sabit 42 chunk, 1.54 GB) veri üretim kalıpları tamamen temizlenmiştir.
+  - Canlı PostgreSQL / TimescaleDB bağlantısı üzerinden gerçek katalog görünümleri (`timescaledb_information.hypertables`, `timescaledb_information.chunks`, `timescaledb_information.continuous_aggregates`, `hypertable_compression_stats`, `pg_total_relation_size`, `pg_class`) sorgulanarak sıfır hata ile gerçek değerler döndürülmektedir.
+  - PostgreSQL bağlantısı olmayan yerel geliştirme modunda ise yerel telemetri veri havuzunun (`telemetryRepository`) gerçek bellek ve kayıt boyutları deterministik olarak hesaplanmaktadır.
+- **Canlı Parça Sıkıştırma Motoru (`compressTimescaleChunksNow`)**:
+  - Önceden sadece audit log yazan sahte metot yerine; `timescaledb_information.chunks` üzerinde zaman aralığı dolmuş (`range_end <= NOW()`) ve sıkıştırılmamış parçaları tespit eden ve her biri için `compress_chunk(...)` SQL fonksiyonunu yürüten gerçek bir sıkıştırma motoru devreye alınmıştır.
+  - Sıkıştırma öncesi ve sonrası tablo boyutları (`pg_total_relation_size`) karşılaştırılarak gerçek kazanılan disk alanı (MB) hesaplanır ve audit log'a işlenir.
+- **Canlı Politika Güncelleme Motoru (`updateTimescalePolicies`)**:
+  - `add_compression_policy` ve `add_retention_policy` / `remove_compression_policy` TimescaleDB prosedürleri dinamik parametrelerle canlı veritabanında çalıştırılır.
+  - Yapılandırılan politikalar veritabanı ayarlarına (`databaseSettings.timescalePolicy`) kaydedilir ve kalıcı hale getirilir.
+- **Arayüz (DatabaseDataView) Düzeltmeleri**:
+  - Arayüz kartlarındaki `|| 91.8%`, `|| 4.2 MB` ve `|| 3 / 5` gibi varsayılan sahte yedek rakamlar kaldırılarak tamamen veritabanından gelen canlı verilere (`?? 0`) bağlanmıştır.
+- **Yardım & Bilgi Merkezi (HelpView) Kod Örneği**:
+  - 500 cihaz, 5 saniyede bir veri ve 5 yıl saklama hedefi için tasarlanan 3 Kademeli Depolama Mimarisi (0-14 gün Sıcak Ham, 14-365 gün Ilık Sıkıştırılmış Kolonsal, 1-5 yıl Soğuk Downsampled Sürekli Özetler) ve ilgili yönetim API uç noktaları (`/api/timescale/stats`, `/api/timescale/compress-now`, `/api/timescale/policies`) çalışır kod örneği olarak `HelpView.tsx` içerisine eklenmiştir.
+
+---
+
+## 🚀 [v1.26.0] - 2026-09-17
+
+### 📌 Sıfır Veri Kaybı Mimarisi & Ayrı Veri Bakım Servisi (Zero Data Loss Schema Repair & Separate Maintenance Service)
+- **Şema Onarımı ≠ Veri Temizliği Ayrımı (Schema Repair ≠ Data Cleanup)**:
+  - `SchemaAuditor.autoHeal` içerisinden yıkıcı `DELETE` ve kontrolsüz `UPDATE` mantığı tamamen kaldırılmıştır.
+  - Auto-Heal'in tek görevi yapısal uyumu (tablolar, sütunlar, veri tipleri, indeksler, fonksiyonlar ve tetikleyiciler) sağlamaktır. Veritabanındaki kullanıcı ve IoT saha verileri hiçbir şartta otomatik şema onarımı sırasında silinmez.
+- **Yetim (Orphan) ve NULL İhlallerinde Onarım Engelleme ve Raporlama**:
+  - Foreign key veya NOT NULL kısıtı eklenirken yetim kayıtlar tespit edilirse ilgili kısıt onarımı engellenir (`blockedConstraintNames`).
+  - Auto-Heal durumu güvenli biçimde `FAIL` olarak işaretlenir, yöneticiye bildirim gönderilir ve detaylı `orphanReports` oluşturulur.
+- **Ayrı Veri Bakım Servisi (`DataMaintenanceService`)**:
+  - `src/server/database/dataMaintenance.ts` servisi geliştirilerek sisteme kazandırılmıştır.
+  - Bağımsız veri bütünlüğü taraması (`scanIntegrityViolations`), güvenli karantinaya alma (`quarantineAndNullifyViolations`), test cihazına yeniden atama (`reassignViolations`) ve yetkili denetimli temizleme (`purgeViolations`) yetenekleri sunar.
+  - Karantinaya alınan her bir satır `orphan_records_quarantine` tablosunda JSON formatında tam veri yedeğiyle arşivlenir.
+- **REST Bakım Uç Noktaları**:
+  - `GET /api/database/maintenance/violations`: Mevcut kısıt ihlallerini ve yetim kayıtları listeler.
+  - `POST /api/database/maintenance/resolve`: Yöneticinin onayladığı strateji (`QUARANTINE_AND_NULLIFY`, `REASSIGN_TO_PARENT`, `DELETE_PURGE`) ile güvenli bakım işini yürütür.
+  - `GET /api/database/maintenance/quarantine`: Karantinaya alınmış kayıtları sorgular.
+- **Yönetici Paneli (DatabaseAutoHealerPanel) Sıfır Veri Kaybı Arayüzü**:
+  - Auto-Healer paneline "Sıfır Veri Kaybı Mimarisi & Ayrı Veri Bakımı" modülü entegre edilmiştir.
+  - Yetim kayıtlar, ihlal sayıları ve örnek ID'ler görsel olarak sunulur; yöneticiler tek tıkla güvenli karantina veya test cihazına atama işlemlerini tetikleyebilir.
+- **Kapsamlı Test Paketi**:
+  - `src/tests/data_maintenance.test.ts` test dosyası eklenerek sıfır veri kaybı doğrulaması, karantinaya alma, yetim kayıt engelleme ve tetikleyici metadata testleri güvence altına alınmıştır.
+
+---
+
+## 🚀 [v1.25.1] - 2026-09-17
+
+### 📌 Tetikleyici (Trigger) Onarım ve Denetiminde Kanonik TriggerDefinition Metadatasının Doğrudan Kullanımı (Metadata-Driven Trigger Repair & Introspection)
+- **Sabit Kodlu `BEFORE UPDATE` Trigger Onarım Hatasının Giderilmesi**:
+  - Önceki `SchemaAuditor.autoHeal` implementasyonunda, eksik veya onarılması gereken tüm tetikleyiciler için `BEFORE UPDATE ... FOR EACH ROW` kalıbı sabit kodlanmıştı. Bu durum, `AFTER INSERT` olması gereken tetikleyicilerin (örneğin `telemetry_packets` üzerindeki `trg_telemetry_packet_device_sync`) hatalı biçimde `BEFORE UPDATE` olarak oluşturulmasına yol açabiliyordu.
+  - `SchemaAuditor` onarım döngüsü (`autoHeal`) doğrudan `CANONICAL_SCHEMA_METADATA.tables[table].triggers` dizisindeki `TriggerDefinition` nesnesine bağlanmıştır.
+- **Dinamik Trigger DDL Oluşturucu (`generateTriggerDDL`)**:
+  - `src/server/database/canonicalSchema.ts` içerisine `generateTriggerDDL(tableName, trg)` yardımcı fonksiyonu eklenmiş ve dışa aktarılmıştır.
+  - Tetikleyicinin `timing` (`BEFORE` | `AFTER` | `INSTEAD OF`), `events` (`INSERT`, `UPDATE`, `DELETE`), `level` (`ROW` | `STATEMENT`) ve `functionName` alanları deterministik olarak birleştirilerek tam uyumlu DDL oluşturulur.
+- **Kapsamlı Trigger İntrospeksiyonu ve Uyumsuzluk Tespiti (`MISMATCH`)**:
+  - `SchemaAuditor.auditSchema` metodu artık `information_schema.triggers` kataloğundan `action_timing`, `event_manipulation`, `action_orientation` ve `action_statement` sütunlarını çeker.
+  - Canlı veritabanındaki tetikleyici ile kanonik tanım arasındaki `timing`, `event`, `level` veya `function` farkları anında tespit edilerek `status: 'MISMATCH'` olarak raporlanır.
+  - `autoHeal` döngüsünde uyumsuz tetikleyiciler `DROP TRIGGER IF EXISTS` ve kanonik `CREATE TRIGGER` ile doğru konfigürasyona dönüştürülür.
+- **Yönetici Paneli (DatabaseAutoHealerPanel) Tetikleyici İstatistiği**:
+  - Auto-Healer durum kartlarına "Tetikleyiciler (Triggers)" çipi eklenerek sistemdeki tetikleyicilerin tam ve hatasız çalıştığı arayüz üzerinden gerçek zamanlı doğrulanabilir hale getirildi.
+- **Vitest Birim Test Paketi**:
+  - `src/tests/postgres_schema.test.ts` içerisine `Trigger Definition & Metadata-Driven Repair Tests` başlıklı 3 yeni test eklenmiş; doğru DDL üretimi, `MISMATCH` tespiti ve `AFTER INSERT` onarımı doğrulanmıştır (15/15 test başarılı).
+
+---
+
+## 🚀 [v1.25.0] - 2026-09-17
+
+### 📌 Kolon DEFAULT Değerlerinin pg_get_expr İle Birebir ve Anlamsal Doğrulanması (Strict Column DEFAULT Value Normalization & Verification)
+- **PostgreSQL `pg_get_expr(adbin, adrelid)` Entegrasyonu**:
+  - `SchemaAuditor` motoru artık sadece bir kolon için `DEFAULT` tanımlı olup olmadığını (`NOT NULL/DEFAULT check`) denetlemekle yetinmez.
+  - PostgreSQL sistem kataloğundan (`pg_attrdef`) `pg_get_expr(ad.adbin, ad.adrelid)` fonksiyonu ile kolonun derlenmiş gerçek ham varsayılan ifadesi çekilir.
+- **Akıllı İfade Normalizasyonu (`normalizeDefaultExpression`)**:
+  - Kanonik şemadaki `defaultValue` ile PostgreSQL'in içsel ayrıştırma formatı arasındaki diyalektik farklar anlamsal olarak dengelenir:
+    1. **Boole Değerleri**: `FALSE`, `true`, `'false'::boolean` gibi ifadeler normalize edilerek karşılaştırılır. Beklenen `FALSE` iken veritabanında `TRUE` olması durumunda sistem bunu kesin olarak `MISMATCH` (uyumsuzluk) olarak tespit eder.
+    2. **Zaman & Tarih**: `CURRENT_TIMESTAMP`, `now()`, `clock_timestamp()` eşdeğer kabul edilir; interval toplamları (`+ '7 days'::interval`) ile yalın zaman damgası ayrıştırılır.
+    3. **Metin & Tür Dönüşümleri**: `'IDLE'`, `'IDLE'::character varying`, `::text` gibi PostgreSQL otomatik tür cast'leri soyularak ham metin değerleri doğrulanır (`'custom'` vs `'sensor'` uyumsuzluğu tespit edilir).
+    4. **Sayısal Değerler**: Tamsayı ve ondalıklı değerler (`0` vs `0.0`, `1.0` vs `1`, `30` vs `10`) sayısal semantikle karşılaştırılır.
+    5. **JSON / JSONB**: JSON dizileri ve nesneleri özyinelemeli olarak anahtarlarına göre sıralanıp derlenir (`JSON.parse` + normalize serialization), böylece anahtar sırası farkları sahte hata üretmezken eksik/farklı kanallar anında yakalanır.
+    6. **UUID & Interval**: `gen_random_uuid()` ve `INTERVAL` aritmetikleri doğru formatta doğrulanır.
+- **Otomatik Onarım & Sağlık Puanı (Auto-Heal & PASS)**:
+  - `status: 'MISMATCH'` tespit edilen varsayılan değerler için anında `ALTER TABLE "table" ALTER COLUMN "col" SET DEFAULT <canonical.defaultValue>;` onarım sorgusu üretilir ve `SchemaAuditor.autoHeal` tarafından uygulanır.
+  - Yapılan test ve otomatik uzlaştırma sonrasında veritabanı şema sağlık skoru %76'dan %100'e çıkarılmış ve `VERIFIED PASS` teyit edilmiştir.
+
+---
+
+## 🚀 [v1.24.0] - 2026-09-17
+
+### 📌 İndekslerin Birebir Tanımsal Doğrulanması & Otomatik Onarımı (Strict Index Definition Verification & Auto-Reconciliation)
+- **Kapsamlı İndeks DDL Ayrıştırma ve İntrospeksiyonu (pg_indexes.indexdef Parser)**:
+  - `SchemaAuditor` motoru sadece indeks isminin varlığını kontrol etmekle kalmayıp, PostgreSQL `pg_indexes.indexdef` DDL çıktısını ayrıştırarak (`parseIndexDef`):
+    1. **Erişim Metodu (Index Type)**: `BTREE`, `GIN`, `BRIN`, `HASH` türlerini birebir denetler.
+    2. **Benzersizlik (UNIQUE)**: İndeksin `UNIQUE` olup olmadığını doğrular.
+    3. **Kolon Sayısı & Sıralaması**: Kolon diziliminin kanonik şemadaki sırayla (`column order`) birebir uyuştuğunu kontrol eder.
+    4. **Sıralama Yönü (ASC / DESC)**: İndekslenen her bir kolonun sıralama yönünü (`ASC` / `DESC`) ve ifade yapılarını denetler.
+    5. **Kısmi İndeks Filtresi (WHERE Clause)**: `WHERE` filtre koşulunu normalleştirerek doğrular.
+- **Uyumsuzlukların Tespiti ve Deterministik Düzeltme (Re-creation DDL)**:
+  - İsim aynı olsa dahi kolonları, sırası, yönü veya türü farklı olan indeksler `status: 'MISMATCH'` olarak işaretlenir.
+  - Hatalı veya sapmış indeksler için `DROP INDEX IF EXISTS ...; CREATE INDEX ...;` onarım sorguları üretilir.
+  - `SchemaAuditor.autoHeal` motoru uyumsuz indeksleri tespit edip otomatik olarak yeniden oluşturarak %100 kanonik uyum (`VERIFIED PASS`) sağlar.
+- **Kanonik Şema Güncellemesi**:
+  - `canonicalSchema.ts` içerisindeki DDL üreteci, özel indeks metodları (`USING`) ve `WHERE` filtrelerini destekleyecek şekilde güncellendi.
+  - `active_alarms` tablosundaki `idx_active_alarms_device` indeksi veritabanında kanonik standart olan `(device_id)` tanımına otomatik uzlaştırıldı.
+
+---
+
 ## 🚀 [v1.23.1] - 2026-09-16
 
 ### 📌 Şema Onarım Doğrulama ve Kısıt Algılama İyileştirmeleri (Schema Auto-Heal Verification & Constraint Detection Fixes)

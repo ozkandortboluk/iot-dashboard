@@ -122,6 +122,9 @@ export interface ViewDefinition {
     endOffset: string;
     scheduleInterval: string;
   };
+  retentionPolicy?: {
+    dropAfter: string;
+  };
 }
 
 export interface CanonicalSchemaContract {
@@ -219,6 +222,9 @@ GROUP BY date_trunc('hour', created_at), device_id, metric
         startOffset: '30 days',
         endOffset: '1 hour',
         scheduleInterval: '15 minutes'
+      },
+      retentionPolicy: {
+        dropAfter: '730 days' // Tier 3: 2-Year Hourly Rollup Retention
       }
     },
     telemetry_daily_summary: {
@@ -256,6 +262,9 @@ GROUP BY date_trunc('day', created_at), device_id, metric
         startOffset: '365 days',
         endOffset: '1 day',
         scheduleInterval: '1 hour'
+      },
+      retentionPolicy: {
+        dropAfter: '1825 days' // Tier 3: 5-Year Daily Rollup Retention (Architectural 5-Year Target)
       }
     },
     v_active_device_summary: {
@@ -317,7 +326,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       description: 'System users, operators, administrators, customer profiles, and notification preferences',
       primaryKey: ['id'],
       uniqueConstraints: [
-        { name: 'idx_users_email', columns: ['email'] }
+        { name: 'users_email_key', columns: ['email'] }
       ],
       checkConstraints: [
         { name: 'chk_users_role', condition: "role IN ('admin', 'operator', 'customer', 'viewer')" },
@@ -541,11 +550,11 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
           enabled: true,
           segmentBy: ['device_id', 'metric'],
           orderBy: 'created_at DESC',
-          compressAfter: '7 days'
+          compressAfter: '14 days'
         },
         retention: {
           enabled: true,
-          dropAfter: '90 days'
+          dropAfter: '365 days'
         }
       },
       rlsEnabled: true,
@@ -1116,6 +1125,14 @@ export function getCanonicalTableCreationOrder(): string[] {
 }
 
 /**
+ * Generates deterministic DDL SQL for a canonical table trigger.
+ */
+export function generateTriggerDDL(tableName: string, trg: TriggerDefinition): string {
+  const eventsStr = trg.events.join(' OR ');
+  return `DROP TRIGGER IF EXISTS "${trg.name}" ON "${tableName}";\nCREATE TRIGGER "${trg.name}"\n${trg.timing} ${eventsStr} ON "${tableName}"\nFOR EACH ${trg.level}\nEXECUTE FUNCTION ${trg.functionName}();\n`;
+}
+
+/**
  * Generates deterministic, isolated DDL SQL for a single canonical table, including
  * its columns, primary keys, composite indexes, triggers, and TimescaleDB settings if applicable.
  */
@@ -1167,16 +1184,17 @@ export function generateSingleTableDDL(tableName: string): string {
   if (table.indexes && table.indexes.length > 0) {
     for (const idx of table.indexes) {
       const uniqueStr = idx.unique ? 'UNIQUE ' : '';
+      const methodStr = idx.type ? ` USING ${idx.type.toLowerCase()}` : '';
       const colList = idx.columns.map((c) => (c.includes(' ') || c.includes('(') ? c : `"${c}"`)).join(', ');
-      ddl += `CREATE ${uniqueStr}INDEX IF NOT EXISTS "${idx.name}" ON "${tableName}" (${colList});\n`;
+      const whereStr = idx.where ? ` WHERE ${idx.where}` : '';
+      ddl += `CREATE ${uniqueStr}INDEX IF NOT EXISTS "${idx.name}" ON "${tableName}"${methodStr} (${colList})${whereStr};\n`;
     }
   }
 
   // Triggers
   if (table.triggers && table.triggers.length > 0) {
     for (const trg of table.triggers) {
-      ddl += `DROP TRIGGER IF EXISTS "${trg.name}" ON "${tableName}";\n`;
-      ddl += `CREATE TRIGGER "${trg.name}"\n${trg.timing} ${trg.events.join(' OR ')} ON "${tableName}"\nFOR EACH ${trg.level}\nEXECUTE FUNCTION ${trg.functionName}();\n`;
+      ddl += generateTriggerDDL(tableName, trg);
     }
   }
 
@@ -1538,8 +1556,8 @@ BEGIN
             timescaledb.compress_orderby = 'created_at DESC'
         );
         
-        PERFORM add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
-        PERFORM add_retention_policy('telemetry_readings', INTERVAL '90 days', if_not_exists => TRUE);
+        PERFORM add_compression_policy('telemetry_readings', INTERVAL '14 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('telemetry_readings', INTERVAL '365 days', if_not_exists => TRUE);
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
@@ -1952,6 +1970,10 @@ BEGIN
             end_offset => INTERVAL '1 day',
             schedule_interval => INTERVAL '1 hour',
             if_not_exists => TRUE);
+
+        -- Tier 3: 5-Year Downsampled Continuous Aggregate Retention Policies
+        PERFORM add_retention_policy('telemetry_hourly_summary', INTERVAL '730 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('telemetry_daily_summary', INTERVAL '1825 days', if_not_exists => TRUE);
     ELSE
         EXECUTE 'CREATE OR REPLACE VIEW telemetry_hourly_summary AS SELECT date_trunc(''hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY date_trunc(''hour'', created_at), device_id, metric;';
 
@@ -2004,8 +2026,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status;
 
 -- 4. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE simulation_telemetry_readings ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE simulation_telemetry_readings ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN OTHERS THEN NULL; END $$;
 ALTER TABLE threshold_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE active_alarms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;

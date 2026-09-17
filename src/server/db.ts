@@ -65,7 +65,7 @@ import type {
   OtaDeploymentJob,
 } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
-import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser } from './database/postgres.js';
+import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser, isRealAdminUser } from './database/postgres.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
@@ -754,8 +754,8 @@ class LocalDatabase {
       }
     }
 
-    // Check if there are any admin users
-    const hasAdmin = parsed.users.some((u) => u.role === 'admin');
+    // Check if there are any real admin users (excluding test accounts)
+    const hasAdmin = parsed.users.some(isRealAdminUser);
 
     if (!hasAdmin) {
       // Try to seed from Environment Variables
@@ -2290,8 +2290,9 @@ class LocalDatabase {
   }
 
   public getTimescaleStats(): import('../types.js').TimescaleDBStats { return this.timescaleManager.getTimescaleStats(); }
+  public async getTimescaleStatsAsync(): Promise<import('../types.js').TimescaleDBStats> { return this.timescaleManager.getTimescaleStatsAsync(); }
   public async compressTimescaleChunksNow(): Promise<any> { return this.timescaleManager.compressTimescaleChunksNow(); }
-  public updateTimescalePolicies(config: any): any { return this.timescaleManager.updateTimescalePolicies(config); }
+  public async updateTimescalePolicies(config: any): Promise<any> { return this.timescaleManager.updateTimescalePolicies(config); }
 
   public async queryTimeBucketTelemetryAsync(params: {
     deviceId?: string;
@@ -2631,7 +2632,7 @@ class LocalDatabase {
 services:
   # TimescaleDB (PostgreSQL 16 tabanlı, IoT ve zaman serisi optimize)
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.14.2-pg16
     container_name: iot_timescaledb
     restart: unless-stopped
     environment:

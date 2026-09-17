@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import pg from 'pg';
 const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
@@ -51,6 +53,23 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     const candidate = `postgresql://${auth}@${host}:${port}/${db}`;
     return candidate;
   }
+
+  // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret)
+  try {
+    const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+    if (fs.existsSync(secretPath)) {
+      const raw = fs.readFileSync(secretPath, 'utf8');
+      const cfg = JSON.parse(raw);
+      if (cfg && cfg.host && cfg.database) {
+        const encUser = encodeURIComponent(cfg.user || 'postgres');
+        const encPass = cfg.password !== undefined ? encodeURIComponent(cfg.password) : '';
+        const auth = encPass ? `${encUser}:${encPass}` : encUser;
+        const p = cfg.port || 5432;
+        const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
+        return `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
+      }
+    }
+  } catch {}
 
   return '';
 }
