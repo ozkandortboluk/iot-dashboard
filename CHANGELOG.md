@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.7] - 2026-09-18
+
+### 📌 Tüm Veritabanı Migrasyon Adımlarının İyileştirilmesi & Bağımlılık Onarımı (Full Migration Pipeline Audit & Healing)
+- **Migrasyon 005 `ota_deployment_jobs` Bağımlılık Onarımı**:
+  - `005_auto_heal_expires_at_and_session_columns.ts` dosyasında `ota_deployment_jobs` ve `firmwares` tabloları üzerinde `ALTER TABLE` çalıştırılmadan önce `CREATE TABLE IF NOT EXISTS` koruması eklendi; tablonun erken migrasyon aşamalarında henüz oluşmaması kaynaklı `relation "ota_deployment_jobs" does not exist` hatası tamamen giderildi.
+- **Tüm Çekirdek Tabloların Erken Tanımlanması (`001_core_relational_tables.ts`)**:
+  - `001_core_relational_tables.ts` içerisine `dispatch_logs`, `dashboard_layouts`, `firmwares` ve `ota_deployment_jobs` tablolarının `CREATE TABLE IF NOT EXISTS` tanımları eklendi. Böylece sonraki ara migrasyon adımlarının gereksinim duyduğu tüm ilişkisel tablolar baştan hazır hale getirildi.
+- **Kapsamlı Migrasyon Adımları Denetimi (001 - 013)**:
+  - **Migrasyon 007**: `dispatch_logs`, `firmwares` ve `ota_deployment_jobs` tabloları için `CREATE TABLE IF NOT EXISTS` güvenlik blokları eklendi.
+  - **Migrasyon 008**: Eksik tablolarda yabancı anahtar ve indeks düşürme adımlarının PostgreSQL transaction bloğunu kilitlememesi için `information_schema.tables` varlık denetimi ve `ALTER TABLE IF EXISTS` eklendi.
+  - **Migrasyon 012**: Kapsamlı kanonik şema uyumlaştırması için `disableTransaction: true` etkinleştirilerek TimescaleDB sürekli toplam görünüm (continuous aggregate) uyarılarının işlemi iptal etmesi önlendi.
+  - **Migrasyon 013**: `013_add_device_power_status.ts` TypeScript `Migration` arayüzüne uyarlanıp `migrationRunner.ts` içerisindeki `ALL_MIGRATIONS` kayıt dizisine dahil edildi.
+
+---
+
 ## 🚀 [v1.28.6] - 2026-09-18
 
 ### 📌 PostgreSQL İşlem Bloğu İptal Koruması (Transaction Aborted Resilience & Autocommit Migrations)

@@ -64,14 +64,62 @@ export const migration005: Migration = {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_api_key_hash VARCHAR(128);
     `);
 
-    // 4. ota_deployment_jobs table
+    // 4. firmwares & ota_deployment_jobs tables resilience
     await client.query(`
+      CREATE TABLE IF NOT EXISTS firmwares (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(128) NOT NULL,
+        device_type VARCHAR(64) NOT NULL,
+        role_key VARCHAR(64) NOT NULL,
+        hardware_model VARCHAR(64) DEFAULT 'ALL',
+        version VARCHAR(32) NOT NULL,
+        description TEXT,
+        binary_data TEXT,
+        binary_size INT DEFAULT 0,
+        sha256 VARCHAR(128) NOT NULL,
+        signature TEXT,
+        file_path TEXT,
+        min_hardware_revision VARCHAR(64),
+        is_active BOOLEAN DEFAULT TRUE,
+        uploaded_by VARCHAR(128) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
+        id VARCHAR(64) PRIMARY KEY,
+        firmware_id VARCHAR(64),
+        firmware_version VARCHAR(32) NOT NULL,
+        firmware_name VARCHAR(128) NOT NULL,
+        device_id VARCHAR(64),
+        device_name VARCHAR(128) NOT NULL,
+        device_type VARCHAR(64) NOT NULL,
+        role_key VARCHAR(64) NOT NULL,
+        target_scope VARCHAR(32) DEFAULT 'single',
+        status VARCHAR(32) DEFAULT 'PENDING',
+        progress_percent INT DEFAULT 0,
+        error_message TEXT,
+        initiated_by VARCHAR(128) NOT NULL,
+        download_token VARCHAR(128),
+        expires_at TIMESTAMP WITH TIME ZONE,
+        attempt_count INT DEFAULT 0,
+        max_attempts INT DEFAULT 3,
+        last_attempt_at TIMESTAMP WITH TIME ZONE,
+        next_retry_at TIMESTAMP WITH TIME ZONE,
+        download_started_at TIMESTAMP WITH TIME ZONE,
+        boot_confirmed_at TIMESTAMP WITH TIME ZONE,
+        completed_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS download_token VARCHAR(128);
     `);
 
     // 5. audit_logs fallback default for tenant_id to prevent null-constraint issues
     await client.query(`
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) DEFAULT 'usr_admin';
       ALTER TABLE audit_logs ALTER COLUMN tenant_id SET DEFAULT 'usr_admin';
       UPDATE audit_logs SET tenant_id = 'usr_admin' WHERE tenant_id IS NULL;
     `);

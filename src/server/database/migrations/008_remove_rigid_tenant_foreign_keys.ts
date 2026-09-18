@@ -20,12 +20,20 @@ export const migration008: Migration = {
 
     for (const table of tablesWithTenantFk) {
       try {
+        const tableCheck = await client.query(
+          "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1;",
+          [table]
+        );
+        if (tableCheck.rows.length === 0) {
+          continue;
+        }
+
         // Drop any foreign key constraints on tenant_id or user_id that block system/multi-tenant logging
         await client.query(`
-          ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS fk_${table}_tenant_id;
-          ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS fk_${table}_user_id;
-          ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${table}_tenant_id_fkey;
-          ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${table}_user_id_fkey;
+          ALTER TABLE IF EXISTS ${table} DROP CONSTRAINT IF EXISTS fk_${table}_tenant_id;
+          ALTER TABLE IF EXISTS ${table} DROP CONSTRAINT IF EXISTS fk_${table}_user_id;
+          ALTER TABLE IF EXISTS ${table} DROP CONSTRAINT IF EXISTS ${table}_tenant_id_fkey;
+          ALTER TABLE IF EXISTS ${table} DROP CONSTRAINT IF EXISTS ${table}_user_id_fkey;
         `);
 
         // Ensure performance index on tenant_id exists

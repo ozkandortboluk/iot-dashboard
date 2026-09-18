@@ -1,7 +1,7 @@
 {
   "name": "nexusnode-iot",
   "private": true,
-  "version": "1.28.6",
+  "version": "1.28.7",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
