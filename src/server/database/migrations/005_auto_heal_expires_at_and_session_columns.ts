@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration005: Migration = {
   version: '005',
   name: 'auto_heal_expires_at_and_session_columns',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. user_sessions table column resilience
     await client.query(`

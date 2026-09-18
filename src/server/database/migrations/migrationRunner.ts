@@ -133,6 +133,9 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
       if (!appliedVersions.has(migration.version)) {
         console.log(`[Migration Runner] Applying migration ${migration.version}: ${migration.name}...`);
         
+        // Ensure clean connection state before running each migration step
+        await client.query('ROLLBACK').catch(() => {});
+
         const useTx = !migration.disableTransaction;
         if (useTx) {
           await client.query('BEGIN');

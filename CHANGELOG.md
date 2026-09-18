@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.8] - 2026-09-18
+
+### 📌 Migrasyon 009 İşlem Bloğu İptal Koruması & Cihaz Güvenlik Sütunları Senkronizasyonu (Migration 009 Transaction Aborted Fix)
+- **Migrasyon 009 (`ensure_device_schema_resilience`) Düzeltmesi**:
+  - `idx_devices_api_key_hash` indeksi oluşturulmadan önce `devices` tablosuna `api_key_hash`, `api_key_prefix`, `api_key`, `previous_api_key_hash` ve güç yönetimi sütunları (`power_source`, `battery_level`) `ADD COLUMN IF NOT EXISTS` ile eklendi.
+  - Sütun düzenlemeleri ve indeks tanımları tekil bloklara ayrılarak güvenli hata yakalama mekanizması sağlandı.
+  - `disableTransaction: true` özelliği eklenerek olası DDL uyarılarının PostgreSQL transaction bloğunu `current transaction is aborted` durumuna düşürmesi engellendi.
+- **Tüm Ara Migrasyonların (001 - 013) DDL İzolasyonu**:
+  - `001_core_relational_tables.ts`, `003_idempotency_constraints.ts`, `004_multitenant_columns.ts`, `005_auto_heal_expires_at_and_session_columns.ts`, `006_fix_audit_logs_and_on_conflict_constraints.ts`, `007_comprehensive_schema_synchronization_and_column_healing.ts`, `008_remove_rigid_tenant_foreign_keys.ts`, `009`, `010`, `011`, `013` migrasyonları bağımsız DDL izolasyonu (`disableTransaction: true`) ile donatıldı.
+  - `001_core_relational_tables.ts` içindeki `devices` tablosuna `api_key_prefix`, `api_key_hash`, `previous_api_key_hash`, `power_source`, `battery_level` vb. tüm standart kanonik sütunlar ilk adımda tanımlandı.
+- **Migration Runner İstemci Temizliği**:
+  - `migrationRunner.ts` içerisinde her migrasyon adımı çalıştırılmadan önce `ROLLBACK` çağrılarak bağlantı havuzundaki olası bayat transaction kalıntıları otomatik temizlendi.
+
+---
+
 ## 🚀 [v1.28.7] - 2026-09-18
 
 ### 📌 Tüm Veritabanı Migrasyon Adımlarının İyileştirilmesi & Bağımlılık Onarımı (Full Migration Pipeline Audit & Healing)

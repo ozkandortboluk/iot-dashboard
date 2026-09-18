@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration001: Migration = {
   version: '001',
   name: 'core_relational_tables',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. Users
     await client.query(`
@@ -36,6 +37,7 @@ export const migration001: Migration = {
         role_key VARCHAR(64) DEFAULT 'device',
         location VARCHAR(128),
         ip VARCHAR(45),
+        ip_address VARCHAR(45),
         mac_address VARCHAR(32),
         hardware_model VARCHAR(64),
         firmware_version VARCHAR(32),
@@ -51,7 +53,10 @@ export const migration001: Migration = {
         assigned_user_id VARCHAR(64),
         created_by_user_id VARCHAR(64),
         auth_token VARCHAR(256),
-        api_key VARCHAR(128),
+        api_key VARCHAR(256),
+        api_key_prefix VARCHAR(32),
+        api_key_hash VARCHAR(128),
+        previous_api_key_hash VARCHAR(128),
         encryption_method VARCHAR(32) DEFAULT 'none',
         rate_limit_per_min INT DEFAULT 120,
         heartbeat_timeout_seconds INT DEFAULT 60,
@@ -63,6 +68,15 @@ export const migration001: Migration = {
         save_simulated_data_to_db BOOLEAN DEFAULT TRUE,
         simulated_metrics JSONB,
         last_seen TIMESTAMP WITH TIME ZONE,
+        data_flow_active BOOLEAN DEFAULT TRUE,
+        power_source VARCHAR(32) DEFAULT 'mains',
+        battery_level INT,
+        websocket_connected BOOLEAN DEFAULT FALSE,
+        last_message_at TIMESTAMP WITH TIME ZONE,
+        output_definitions JSONB DEFAULT '[]'::jsonb,
+        capabilities JSONB DEFAULT '[]'::jsonb,
+        supported_outputs JSONB DEFAULT '[]'::jsonb,
+        supported_commands JSONB DEFAULT '[]'::jsonb,
         metrics JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration003: Migration = {
   version: '003',
   name: 'idempotency_and_composite_pk_constraints',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. Ensure composite primary key on telemetry_readings
     try {

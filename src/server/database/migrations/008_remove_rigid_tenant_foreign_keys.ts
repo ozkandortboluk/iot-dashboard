@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration008: Migration = {
   version: '008',
   name: 'remove_rigid_tenant_foreign_keys',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     const tablesWithTenantFk = [
       'audit_logs',

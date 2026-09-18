@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration007: Migration = {
   version: '007',
   name: 'comprehensive_schema_synchronization_and_column_healing',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. DEVICES Table Column Completeness
     await client.query(`
@@ -12,6 +13,9 @@ export const migration007: Migration = {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(32);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key VARCHAR(256);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;

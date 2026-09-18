@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration013: Migration = {
   version: '013',
   name: 'add_device_power_status',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     await client.query(`
       ALTER TABLE devices 

@@ -5,7 +5,15 @@ import type { Migration } from './types.js';
 export const migration010: Migration = {
   version: '010',
   name: 'heal_device_tokens_and_prohibit_placeholders',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
+    // 0. Ensure columns exist before updating
+    await client.query(`
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key VARCHAR(256);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);
+    `);
+
     // 1. Kanonik test cihazını kesinlikle kuraldaki kalıcı anahtara eşitle
     const testKey = 'dev_key_test_0000000000000000';
     const testHash = crypto.createHash('sha256').update(testKey).digest('hex');

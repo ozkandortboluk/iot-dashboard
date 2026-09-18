@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration004: Migration = {
   version: '004',
   name: 'multitenant_columns_and_integrity',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. Ensure root admin user exists (do this first for FK integrity)
     await client.query(`
