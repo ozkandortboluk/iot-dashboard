@@ -4,6 +4,9 @@ import pg from 'pg';
 const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
 
+import { DatabaseState } from '../../types.js';
+export { DatabaseState };
+
 export type PgPoolType = pg.Pool;
 
 declare global {

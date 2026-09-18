@@ -9,7 +9,7 @@ import { SchemaAuditor } from '../database/schemaAuditor.js';
 import { getSharedPgPool, recycleSharedPgPool, getPostgresSslOption } from '../database/connection.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import { db } from '../db.js';
-import type { AuditLog, User } from '../../types.js';
+import { DatabaseState, type AuditLog, type User } from '../../types.js';
 
 export interface DatabaseConfigPayload {
   host: string;
@@ -133,7 +133,7 @@ export class SetupService {
             port: Number(parsed.port) || 5432,
             database: parsed.database || 'iot_dashboard',
             user: parsed.user || 'iot_user',
-            password: pass || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
+            password: pass || process.env.POSTGRES_PASSWORD || '',
             sslMode: parsed.sslMode || 'disable',
             rejectUnauthorized: parsed.rejectUnauthorized ?? false,
           };
@@ -146,7 +146,7 @@ export class SetupService {
         try {
           const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
           const isDisable = process.env.DATABASE_URL.includes('sslmode=disable');
-          const pass = decodeURIComponent(parsed.password || '') || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026';
+          const pass = decodeURIComponent(parsed.password || '') || process.env.POSTGRES_PASSWORD || '';
           this.runtimeConfig = {
             host: parsed.hostname || 'timescaledb',
             port: parseInt(parsed.port || '5432', 10),
@@ -166,7 +166,7 @@ export class SetupService {
           port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
           database: process.env.POSTGRES_DB || 'iot_dashboard',
           user: process.env.POSTGRES_USER || 'iot_user',
-          password: process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
+          password: process.env.POSTGRES_PASSWORD || '',
           sslMode: 'disable',
         };
         return this.runtimeConfig;
@@ -419,7 +419,7 @@ export class SetupService {
         port: 5432,
         database: 'iot_dashboard',
         user: 'iot_user',
-        defaultPassword: 'nexus_iot_secure_pass_2026',
+        defaultPassword: '',
         sslMode: 'disable',
       },
       stepsCompleted: {
@@ -439,7 +439,7 @@ export class SetupService {
   public async testConnection(config: DatabaseConfigPayload): Promise<DbTestResult> {
     const effectiveConfig: DatabaseConfigPayload = {
       ...config,
-      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || (config.host === 'timescaledb' || config.host === 'localhost' ? 'nexus_iot_secure_pass_2026' : ''),
+      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
     };
     const connStr = this.buildConnectionString(effectiveConfig);
     const startTime = Date.now();
@@ -778,52 +778,46 @@ export class SetupService {
       throw new Error('Şifreler birbiriyle eşleşmiyor.');
     }
 
-    // Ensure database is connected or standalone mode allowed
+    // Ensure PostgreSQL database is connected
     const connStr = this.getActiveConnectionString() || db.getPostgresUrl();
     const pool = connStr ? getSharedPgPool(connStr) : null;
-    if (!pool && !params.allowStandalone) {
-      throw new Error('Veritabanı bağlantısı bulunamadı. Lütfen önce veritabanını yapılandırın veya Bağımsız Mod ile devam edin.');
+    if (!pool) {
+      throw new Error('PostgreSQL veritabanı bağlantısı bulunamadı. Lütfen önce veritabanını yapılandırın.');
     }
 
     // Check if REAL admin already exists
     let hasAdmin = false;
     let placeholderExists = false;
 
-    if (pool) {
-      const client = await pool.connect();
-      try {
-        const adminCheck = await client.query(`
-          SELECT id, email FROM users 
-          WHERE role = 'admin' 
-            AND status != 'deleted' 
-            AND (deleted_at IS NULL)
-            AND id != 'usr_test_admin'
-            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-            AND id NOT LIKE 'usr_test_%'
-            AND id NOT LIKE 'test_%'
-            AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
-            AND LOWER(email) NOT LIKE 'test_%'
-          LIMIT 1;
-        `).catch(() => ({ rows: [] }));
+    const client = await pool.connect();
+    try {
+      const adminCheck = await client.query(`
+        SELECT id, email FROM users 
+        WHERE role = 'admin' 
+          AND status != 'deleted' 
+          AND (deleted_at IS NULL)
+          AND id != 'usr_test_admin'
+          AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+          AND id NOT LIKE 'usr_test_%'
+          AND id NOT LIKE 'test_%'
+          AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
+          AND LOWER(email) NOT LIKE 'test_%'
+        LIMIT 1;
+      `).catch(() => ({ rows: [] }));
 
-        if (adminCheck.rows.length > 0) {
-          hasAdmin = true;
-        }
-
-        // Check if placeholder usr_admin exists to upgrade it
-        const placeholderCheck = await client.query(`
-          SELECT id FROM users WHERE id = 'usr_admin' LIMIT 1;
-        `).catch(() => ({ rows: [] }));
-        if (placeholderCheck.rows.length > 0) {
-          placeholderExists = true;
-        }
-      } finally {
-        client.release();
+      if (adminCheck.rows.length > 0) {
+        hasAdmin = true;
       }
-    } else {
-      const currentUsers = db.getUsers();
-      hasAdmin = currentUsers.some(isRealAdminUser);
-      placeholderExists = currentUsers.some((u) => u.id === 'usr_admin');
+
+      // Check if placeholder usr_admin exists to upgrade it
+      const placeholderCheck = await client.query(`
+        SELECT id FROM users WHERE id = 'usr_admin' LIMIT 1;
+      `).catch(() => ({ rows: [] }));
+      if (placeholderCheck.rows.length > 0) {
+        placeholderExists = true;
+      }
+    } finally {
+      client.release();
     }
 
     if (hasAdmin) {
@@ -882,17 +876,17 @@ export class SetupService {
       (db as any).data.users.push(adminUser);
     }
     (db as any).data.passwords[adminId] = hashedPassword;
-    (db as any).saveData((db as any).data);
 
     // Generate session token via unified database service
     const token = await db.createSession(adminUser);
 
-    // Mark setup as completed permanently
+    // Mark setup as completed permanently and set READY state
     this.isCompletedState = true;
     this.completedAtDate = new Date().toISOString();
     if (this.runtimeConfig) {
       this.saveRuntimeSecretConfig(this.runtimeConfig, true);
     }
+    db.setDatabaseState(DatabaseState.READY);
 
     this.logAudit({
       action: 'ADMIN_CREATED',

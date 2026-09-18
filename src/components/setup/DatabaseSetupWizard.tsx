@@ -82,7 +82,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     port: 5432,
     database: 'iot_dashboard',
     user: 'iot_user',
-    password: 'nexus_iot_secure_pass_2026',
+    password: '',
     sslMode: 'disable' as 'disable' | 'require' | 'prefer' | 'verify-full',
   });
 
@@ -315,23 +315,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     setLoading(true);
 
     try {
-      const endpoint = isStandaloneMode ? '/api/setup/standalone-init' : '/api/setup/create-admin';
-      let res = await fetch(endpoint, {
+      const res = await fetch('/api/setup/create-admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(adminForm),
       });
 
-      let data = await res.json();
-      if (!res.ok && !isStandaloneMode && (data.message?.includes('Veritabanı bağlantısı bulunamadı') || data.message?.includes('database'))) {
-        // Fallback to standalone init if database is unreachable
-        res = await fetch('/api/setup/standalone-init', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(adminForm),
-        });
-        data = await res.json();
-      }
+      const data = await res.json();
 
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');

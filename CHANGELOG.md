@@ -4,6 +4,27 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.29.0] - 2026-09-18
+
+### 📌 Pure PostgreSQL/TimescaleDB Single Source of Truth Architecture Overhaul
+- **PostgreSQL Mandate & Complete LocalDatabase Production Fallback Removal**:
+  - Local JSON database (`data/db.json` / `LocalDatabase`) is completely eliminated as a production data source or fallback.
+  - PostgreSQL / TimescaleDB is now the sole authoritative database engine for all persistent entities (users, devices, telemetry, rules, alarms, notifications, audit logs, commands, firmwares, dashboards, and system settings).
+- **Standalone Mode Removal**:
+  - Removed `POST /api/setup/standalone-init` endpoint and all `allowStandalone` / `isStandaloneMode` logic from backend and frontend.
+  - Setup flow strictly enforces PostgreSQL credentials, connection validation, TimescaleDB hypertable setup, schema verification, and administrator creation in PostgreSQL.
+- **Server Startup & Worker Gating**:
+  - `server.ts` now strictly gates background workers (WebSocket, simulator, OTA worker, no-data worker, command expiry worker) on PostgreSQL connection state.
+  - Workers do not start if PostgreSQL is unconfigured or unavailable, preventing split-brain states or invalid background execution.
+- **Runtime Outage & State Machine**:
+  - Centralized database state machine (`BOOTSTRAP`, `SETUP`, `DB_CONNECTING`, `DB_INITIALIZING`, `READY`, `DB_UNAVAILABLE`, `MAINTENANCE`).
+  - If PostgreSQL disconnects during runtime, system transitions to `DB_UNAVAILABLE`. Normal CRUD operations are blocked or safely queued in memory until reconnect. No fallback to local JSON database!
+- **Security & Secret Sanitation**:
+  - Removed all hardcoded database passwords (`nexus_iot_secure_pass_2026`) and default credential fallbacks from source code and setup status endpoints.
+  - Protected database secret configuration storage (`0600` permissions).
+
+---
+
 ## 🚀 [v1.28.9] - 2026-09-18
 
 ### 📌 Yönetici Varlığında Kurulum Ekranına Yönlendirme Koruması & Yetkili Tespiti (Admin Presence Setup Loop Fix)
