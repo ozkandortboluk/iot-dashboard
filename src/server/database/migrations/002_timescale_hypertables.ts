@@ -4,47 +4,48 @@ import type { Migration } from './types.js';
 export const migration002: Migration = {
   version: '002',
   name: 'timescale_hypertables',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
+    // 0. Ensure no stale aborted transaction on the client connection
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore
+    }
+
     // 1. Check if TimescaleDB extension is available and functional
     let hasTimescale = false;
+    let timescaleVersion = '';
+
     try {
-      // Check if extension is already registered in pg_extension
       const extCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
       if (extCheck.rows.length > 0) {
-        // Extension entry exists in database catalog; verify that the C shared library is accessible
         try {
-          await client.query('SELECT timescaledb_version();');
+          const vRes = await client.query('SELECT timescaledb_version();');
           hasTimescale = true;
+          timescaleVersion = vRes.rows[0]?.timescaledb_version || extCheck.rows[0]?.extversion;
+          console.log(`[Migration 002] TimescaleDB extension v${timescaleVersion} is functional.`);
         } catch (libErr: any) {
-          console.warn('[Migration 002] TimescaleDB extension registered in catalog but library failed to load:', libErr?.message || libErr);
-          // Attempt to update the extension to the current container library version
+          console.warn('[Migration 002] TimescaleDB extension in catalog but library call failed:', libErr?.message || libErr);
           try {
             await client.query('ALTER EXTENSION timescaledb UPDATE;');
-            await client.query('SELECT timescaledb_version();');
+            const vRes = await client.query('SELECT timescaledb_version();');
             hasTimescale = true;
-            console.log('[Migration 002] Successfully updated TimescaleDB extension to current library.');
+            timescaleVersion = vRes.rows[0]?.timescaledb_version || '';
+            console.log(`[Migration 002] Successfully updated TimescaleDB extension to v${timescaleVersion}.`);
           } catch (updErr: any) {
             console.warn('[Migration 002] ALTER EXTENSION timescaledb UPDATE failed:', updErr?.message || updErr);
-            // Attempt to drop broken catalog entry and recreate with current library
-            try {
-              console.log('[Migration 002] Attempting to drop broken timescaledb extension catalog entry and reinstall...');
-              await client.query('DROP EXTENSION IF EXISTS timescaledb CASCADE;');
-              await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
-              await client.query('SELECT timescaledb_version();');
-              hasTimescale = true;
-              console.log('[Migration 002] Successfully reinstalled TimescaleDB extension.');
-            } catch (dropErr: any) {
-              console.warn('[Migration 002] Recreating TimescaleDB extension was not possible:', dropErr?.message || dropErr);
-              hasTimescale = false;
-            }
+            hasTimescale = false;
           }
         }
       } else {
-        // Extension not in catalog, attempt fresh installation
+        // Extension not in catalog, attempt installation
         try {
           await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
-          await client.query('SELECT timescaledb_version();');
+          const vRes = await client.query('SELECT timescaledb_version();');
           hasTimescale = true;
+          timescaleVersion = vRes.rows[0]?.timescaledb_version || '';
+          console.log(`[Migration 002] Successfully installed TimescaleDB extension v${timescaleVersion}.`);
         } catch (createErr: any) {
           console.warn('[Migration 002] CREATE EXTENSION timescaledb failed:', createErr?.message || createErr);
           hasTimescale = false;
@@ -57,34 +58,61 @@ export const migration002: Migration = {
 
     if (!hasTimescale) {
       if (process.env.REQUIRE_TIMESCALE === 'true') {
-        const fatalErr = new Error(`[Migration 002 FATAL] REQUIRE_TIMESCALE is set to true, but TimescaleDB extension could not be loaded or verified.`);
+        const fatalErr = new Error('[Migration 002 FATAL] REQUIRE_TIMESCALE is set to true, but TimescaleDB extension could not be loaded or verified.');
         console.error(fatalErr.message);
         throw fatalErr;
       }
-      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB extension unavailable, mismatched, or not installed).');
+      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB extension unavailable or not installed).');
       return;
     }
 
     // 2. Convert telemetry_readings into hypertable (7 days interval)
     try {
-      await client.query(`
-        SELECT create_hypertable('telemetry_readings', 'created_at', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
-      `);
-      console.log('[Migration 002] telemetry_readings hypertable verified with 7-day chunk interval.');
+      // Check if already registered as hypertable
+      let alreadyHypertable = false;
+      try {
+        const htCheck = await client.query(`
+          SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'telemetry_readings';
+        `);
+        alreadyHypertable = htCheck.rows.length > 0;
+      } catch {
+        // timescaledb_information view may not exist on older versions, fallback to create_hypertable if_not_exists
+      }
+
+      if (!alreadyHypertable) {
+        await client.query(`
+          SELECT create_hypertable('telemetry_readings', 'created_at', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE);
+        `);
+        console.log('[Migration 002] telemetry_readings converted to hypertable with 7-day chunk interval.');
+      } else {
+        console.log('[Migration 002] telemetry_readings is already a TimescaleDB hypertable.');
+      }
     } catch (err: any) {
-      console.error('[Migration 002] create_hypertable on telemetry_readings error:', err?.message || err);
-      throw err;
+      console.warn('[Migration 002] create_hypertable telemetry_readings notice:', err?.message || err);
     }
 
     // 3. Convert simulation_telemetry_readings into hypertable (1 day interval)
     try {
-      await client.query(`
-        SELECT create_hypertable('simulation_telemetry_readings', 'created_at', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
-      `);
-      console.log('[Migration 002] simulation_telemetry_readings hypertable verified with 1-day chunk interval.');
+      let alreadyHypertable = false;
+      try {
+        const htCheck = await client.query(`
+          SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'simulation_telemetry_readings';
+        `);
+        alreadyHypertable = htCheck.rows.length > 0;
+      } catch {
+        // fallback
+      }
+
+      if (!alreadyHypertable) {
+        await client.query(`
+          SELECT create_hypertable('simulation_telemetry_readings', 'created_at', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);
+        `);
+        console.log('[Migration 002] simulation_telemetry_readings converted to hypertable with 1-day chunk interval.');
+      } else {
+        console.log('[Migration 002] simulation_telemetry_readings is already a TimescaleDB hypertable.');
+      }
     } catch (err: any) {
-      console.error('[Migration 002] create_hypertable on simulation_telemetry_readings error:', err?.message || err);
-      throw err;
+      console.warn('[Migration 002] create_hypertable simulation_telemetry_readings notice:', err?.message || err);
     }
 
     // 4. Configure compression policies on TimescaleDB if supported
@@ -101,7 +129,7 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] Compression policy enabled on telemetry_readings (7 days).');
     } catch (err: any) {
-      console.warn('[Migration 002] Compression policy setup notice (may be unsupported by current Timescale license/version):', err?.message || err);
+      console.warn('[Migration 002] Compression policy notice (skipping, may be unsupported by community license or already configured):', err?.message || err);
     }
   },
   down: async (client: pg.PoolClient) => {

@@ -5,6 +5,7 @@ export interface Migration {
   name: string;
   up: (client: pg.PoolClient) => Promise<void>;
   down?: (client: pg.PoolClient) => Promise<void>;
+  disableTransaction?: boolean;
 }
 
 export interface AppliedMigration {

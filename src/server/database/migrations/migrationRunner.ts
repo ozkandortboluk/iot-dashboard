@@ -131,7 +131,10 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
       if (!appliedVersions.has(migration.version)) {
         console.log(`[Migration Runner] Applying migration ${migration.version}: ${migration.name}...`);
         
-        await client.query('BEGIN');
+        const useTx = !migration.disableTransaction;
+        if (useTx) {
+          await client.query('BEGIN');
+        }
         try {
           await migration.up(client);
           const checksum = computeMigrationChecksum(migration);
@@ -139,11 +142,19 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
             'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES ($1, $2, CURRENT_TIMESTAMP, $3);',
             [migration.version, migration.name, checksum]
           );
-          await client.query('COMMIT');
+          if (useTx) {
+            await client.query('COMMIT');
+          }
           console.log(`[Migration Runner] ✅ Successfully applied migration ${migration.version}: ${migration.name}`);
           appliedThisRun++;
         } catch (migErr: any) {
-          await client.query('ROLLBACK');
+          if (useTx) {
+            try {
+              await client.query('ROLLBACK');
+            } catch (rbErr) {
+              console.warn('[Migration Runner] ROLLBACK warning:', rbErr);
+            }
+          }
           const errorMsg = `[Migration Failed] Migration ${migration.version} (${migration.name}) failed: ${migErr?.message || migErr}`;
           console.error(errorMsg, migErr?.stack);
           

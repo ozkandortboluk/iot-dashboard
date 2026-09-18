@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.6] - 2026-09-18
+
+### 📌 PostgreSQL İşlem Bloğu İptal Koruması (Transaction Aborted Resilience & Autocommit Migrations)
+- **Migrasyon İşlem Bloğu Koruması (`disableTransaction`)**:
+  - `src/server/database/migrations/types.ts` ve `migrationRunner.ts` içerisine `disableTransaction` opsiyonu eklendi.
+  - PostgreSQL'de `BEGIN ... COMMIT` bloğu içinde çalıştırılan bir alt sorgu (örneğin TimescaleDB sürüm doğrulaması veya sıkıştırma politikası ekleme) uyarı veya hata verdiğinde oturumun `current transaction is aborted, commands ignored until end of transaction block` durumuna kilitlenmesi engellendi.
+- **TimescaleDB Migrasyon 002 Yeniden Tasarımı (`002_timescale_hypertables.ts`)**:
+  - Migrasyon 002 için `disableTransaction: true` tanımlanarak her DDL ve TimescaleDB sorgusunun bağımsız (autocommit) çalışması sağlandı.
+  - Olası eski askıda kalan işlem durumlarına karşı migrasyon başlangıcında korumalı temizleme (`ROLLBACK`) eklendi.
+  - `telemetry_readings` ve `simulation_telemetry_readings` tablolarının hypertable dönüşümü, var olan hypertables kayıtları (`timescaledb_information.hypertables`) kontrol edilerek çakışmasız hale getirildi.
+
+---
+
 ## 🚀 [v1.28.5] - 2026-09-18
 
 ### 📌 İlk Kurulum Sihirbazı İyileştirmesi & Hızlı Docker / Bağımsız Mod Desteği (Setup Wizard Quick Init & Standalone Resilience)
