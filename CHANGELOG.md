@@ -4,6 +4,22 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.9] - 2026-09-18
+
+### 📌 Yönetici Varlığında Kurulum Ekranına Yönlendirme Koruması & Yetkili Tespiti (Admin Presence Setup Loop Fix)
+- **Yönetici Varlığında Kurulum Ekranına Düşme Döngüsü Giderildi**:
+  - `auth.ts` `/api/auth/setup-status` uç noktasında sistemde herhangi bir yönetici hesabı mevcutsa (`hasAdmin === true`), `needSetup` değeri kesin olarak `false` olarak ayarlandı; böylece yönetici varken kurulum sihirbazına (`DatabaseSetupWizard`) yönlendirilmesi tamamen engellendi.
+  - `postgres.ts` içindeki `isRealAdminUser` fonksiyonu ve `checkIfAdminExists` sorgusu güncellenerek kanonik sistem yöneticisi hesaplarının (`usr_admin` vb.) yapay filtrelemelere takılmadan gerçek yönetici olarak tanınması sağlandı (Zorunlu Kural 3 uyarınca yalnızca `usr_test_admin` ve sentetik test hesapları hariç tutulmaktadır).
+- **Kurulum Durumu Kalıcılığı & Durum Denetimi (`setup.service.ts`)**:
+  - `setupService.getStatus()` içerisinde veritabanında veya bellek tablosunda yönetici tespit edildiğinde `markSetupCompleted()` çağrılarak kurulumun kalıcı olarak tamamlandığı (`isCompleted: true`, `setupRequired: false`) koruma altına alındı.
+  - Veritabanı soket bağlantı testi zaman aşımı süresi 1000ms'den 8000ms'ye çıkarılarak gecikmeli ağ durumlarında kurulum durumunun yanlışlıkla `false` dönmesi önlendi.
+- **Kullanıcı Arayüzü & Giriş Ekranı İyileştirmeleri (`LoginView.tsx` & `DatabaseSetupWizard.tsx`)**:
+  - `LoginView.tsx` içerisinde `DatabaseSetupWizard` tamamlandığında (`onComplete`) gereksiz `window.location.reload()` kaldırıldı; sihirbaz doğrudan kapanıp temiz `login` oturum açma formuna geçiş yapacak şekilde refaktör edildi.
+  - `DatabaseSetupWizard.tsx` başlık alanına "Giriş Ekranına Dön" (`wizard-back-to-login`) butonu entegre edildi.
+  - Sihirbaz `fetchStatus` esnasında yönetici tespit ettiğinde otomatik olarak `onComplete()` çağırarak beklemeden giriş ekranına yönlenmesi sağlandı.
+
+---
+
 ## 🚀 [v1.28.8] - 2026-09-18
 
 ### 📌 Migrasyon 009 İşlem Bloğu İptal Koruması & Cihaz Güvenlik Sütunları Senkronizasyonu (Migration 009 Transaction Aborted Fix)

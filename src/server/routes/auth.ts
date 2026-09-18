@@ -57,8 +57,8 @@ router.get('/setup-status', async (req, res) => {
   if (db.postgresRepo?.getPool() || db.getPostgresUrl()) {
     try {
       const pgAdminExists = await db.postgresRepo.checkIfAdminExists(false);
-      hasAdmin = pgAdminExists;
       if (pgAdminExists) {
+        hasAdmin = true;
         // Trigger background hydration to sync in-memory data
         db.initPostgresRepository().catch(() => {});
       }
@@ -67,10 +67,17 @@ router.get('/setup-status', async (req, res) => {
     }
   }
 
-  const needSetup = wizardStatus ? wizardStatus.setupRequired : !hasAdmin;
+  // If setupService detected an administrator, also respect it
+  if (wizardStatus?.hasAdmin) {
+    hasAdmin = true;
+  }
+
+  // Under NO circumstances should needSetup be true if an administrator exists in the system!
+  const needSetup = hasAdmin ? false : (wizardStatus ? wizardStatus.setupRequired : true);
 
   res.json({
     needSetup,
+    hasAdmin,
     inProgress: isSetupInProgress,
     setupDetails: wizardStatus || undefined,
   });

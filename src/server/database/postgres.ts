@@ -112,13 +112,7 @@ export function isRealAdminUser(u?: {
     return false;
   }
 
-  // 2. Strictly exclude canonical schema static seed placeholder (admin@nexusnode.io / usr_admin)
-  // if it hasn't been upgraded to a real human admin with their custom credentials
-  if (id === 'usr_admin' && email === 'admin@nexusnode.io') {
-    return false;
-  }
-
-  // 3. Ephemeral / integration test users
+  // 2. Ephemeral / integration test users
   if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
     return false;
   }
@@ -328,7 +322,6 @@ export class PostgresRepository {
              AND id NOT LIKE 'test_%'
              AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
              AND LOWER(email) NOT LIKE 'test_%'
-             AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
            LIMIT 1;`;
       const res = await this.pool.query(sql);
       return (res.rowCount || 0) > 0;

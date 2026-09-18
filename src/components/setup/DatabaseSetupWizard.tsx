@@ -20,6 +20,7 @@ import {
   HelpCircle,
   Zap,
   Terminal,
+  LogIn,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../../config/version';
 
@@ -116,7 +117,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       const res = await fetch('/api/setup/status');
       if (res.ok) {
         const data = await res.json();
-        if (data.isCompleted && !data.setupRequired) {
+        if ((data.isCompleted && !data.setupRequired) || data.hasAdmin) {
           onComplete();
           return;
         }
@@ -386,9 +387,20 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Sıfır Veri Kaybı Mimarisi (Zero Data Loss)</span>
+          <div className="flex items-center gap-2">
+            <button
+              id="wizard-back-to-login"
+              type="button"
+              onClick={onComplete}
+              className="flex items-center gap-1.5 text-xs text-indigo-300 hover:text-white bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-700/60 px-3 py-1.5 rounded-lg transition cursor-pointer shadow-sm"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Giriş Ekranına Dön</span>
+            </button>
+            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Sıfır Veri Kaybı Mimarisi</span>
+            </div>
           </div>
         </div>
       </header>

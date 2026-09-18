@@ -96,13 +96,12 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  if (needSetup) {
+  if (needSetup && authMode !== 'login') {
     return (
       <DatabaseSetupWizard
         onComplete={() => {
           setNeedSetup(false);
           setAuthMode('login');
-          window.location.reload();
         }}
       />
     );

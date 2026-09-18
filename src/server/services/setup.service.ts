@@ -259,6 +259,37 @@ export class SetupService {
   }
 
   /**
+   * Marks installation as permanently completed and persists state to disk
+   */
+  public markSetupCompleted(): void {
+    this.isCompletedState = true;
+    this.completedAtDate = this.completedAtDate || new Date().toISOString();
+    try {
+      if (!fs.existsSync(RUNTIME_SECRET_DIR)) {
+        fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+      }
+      let existingPayload: any = {};
+      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+        try {
+          existingPayload = JSON.parse(fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8'));
+        } catch {}
+      }
+      const updated = {
+        ...existingPayload,
+        isCompleted: true,
+        completedAt: this.completedAtDate,
+        updatedAt: new Date().toISOString(),
+      };
+      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(updated, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+    } catch (e) {
+      console.warn('[SetupService] Could not persist completed flag:', e);
+    }
+  }
+
+  /**
    * Full status detection for the First Run Setup Wizard
    */
   public async getStatus(): Promise<SetupStatusResponse> {
@@ -277,7 +308,7 @@ export class SetupService {
       try {
         const client: any = await Promise.race([
           pool.connect(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('DB_CONNECT_TIMEOUT')), 1000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('DB_CONNECT_TIMEOUT')), 8000)),
         ]);
         try {
           // Connection test
@@ -286,7 +317,6 @@ export class SetupService {
 
           // Admin check in PostgreSQL:
           // Strictly query for REAL production administrator, excluding test accounts (usr_test_admin)
-          // and unconfigured canonical schema placeholders (admin@nexusnode.io).
           const adminCheck = await client.query(`
             SELECT id, email, name FROM users 
             WHERE role = 'admin' 
@@ -298,16 +328,14 @@ export class SetupService {
               AND id NOT LIKE 'test_%'
               AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
               AND LOWER(email) NOT LIKE 'test_%'
-              AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
             LIMIT 1;
           `).catch(() => ({ rows: [] }));
 
           if (adminCheck.rows.length > 0) {
             hasAdmin = true;
+          } else if (users.some(isRealAdminUser)) {
+            hasAdmin = true;
           } else {
-            // When PostgreSQL is connected, PostgreSQL is the single source of truth.
-            // If PostgreSQL does NOT have a real administrator, hasAdmin MUST be false,
-            // even if local in-memory state or stale cache had test administrators.
             hasAdmin = false;
           }
 
@@ -343,21 +371,21 @@ export class SetupService {
       }
     }
 
-    // Determine overall completion
-    // The installation is complete ONLY if there is a real admin and DB is connected and migrations are done,
-    // OR if runtime config explicitly marked it completed AND a real admin exists.
-    const isCompleted = Boolean(this.isCompletedState && hasAdmin) || Boolean(hasAdmin && isDbConnected && migrationsComplete);
+    // If an administrator exists, mark setup completed permanently
+    if (hasAdmin) {
+      this.markSetupCompleted();
+    }
 
-    // Determine if setup is required
-    // If environment explicitly forces SETUP_REQUIRED=true, obey it
-    // If setup is not completed or there is no real admin or DB is not connected, setup is required
+    const isCompleted = this.isCompletedState || hasAdmin || Boolean(isDbConnected && migrationsComplete);
+
+    // If an administrator already exists in the system, setup is NEVER required unless explicitly forced
     const setupRequired = process.env.SETUP_REQUIRED === 'true'
       ? true
-      : (!isCompleted || !hasAdmin || !isDbConnected);
+      : !hasAdmin;
 
     // Calculate current step (1 to 7)
     let currentStep = 1;
-    if (isCompleted && hasAdmin) {
+    if (isCompleted || hasAdmin) {
       currentStep = 7;
     } else if (schemaVerified && migrationsComplete && !hasAdmin) {
       currentStep = 6;
@@ -775,7 +803,6 @@ export class SetupService {
             AND id NOT LIKE 'test_%'
             AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
             AND LOWER(email) NOT LIKE 'test_%'
-            AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
           LIMIT 1;
         `).catch(() => ({ rows: [] }));
 
@@ -783,9 +810,9 @@ export class SetupService {
           hasAdmin = true;
         }
 
-        // Check if unconfigured placeholder usr_admin exists to upgrade it
+        // Check if placeholder usr_admin exists to upgrade it
         const placeholderCheck = await client.query(`
-          SELECT id FROM users WHERE id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io' LIMIT 1;
+          SELECT id FROM users WHERE id = 'usr_admin' LIMIT 1;
         `).catch(() => ({ rows: [] }));
         if (placeholderCheck.rows.length > 0) {
           placeholderExists = true;
@@ -796,15 +823,11 @@ export class SetupService {
     } else {
       const currentUsers = db.getUsers();
       hasAdmin = currentUsers.some(isRealAdminUser);
-      placeholderExists = currentUsers.some((u) => u.id === 'usr_admin' && u.email === 'admin@nexusnode.io');
+      placeholderExists = currentUsers.some((u) => u.id === 'usr_admin');
     }
 
     if (hasAdmin) {
-      this.isCompletedState = true;
-      this.completedAtDate = new Date().toISOString();
-      if (this.runtimeConfig) {
-        this.saveRuntimeSecretConfig(this.runtimeConfig, true);
-      }
+      this.markSetupCompleted();
       throw new Error('Sistemde zaten bir yönetici hesabı mevcut. Yeni yönetici oluşturulamaz.');
     }
 
