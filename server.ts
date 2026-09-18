@@ -276,20 +276,6 @@ startCommandExpiryWorker();
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
-  console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
-  try {
-    const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
-    await db.waitForInitialization(startupTimeout);
-  } catch (err: any) {
-    console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
-  }
-
-  if (db.postgresRepo?.isReady()) {
-    console.log("[Startup] PostgreSQL hazır ve şema doğrulandı. API trafiğe açılıyor...");
-  } else {
-    console.warn("[Startup] PostgreSQL bağlantısı veya şeması henüz tamamlanmadı. Sunucu 503 veri koruma moduyla başlatılıyor.");
-  }
-
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -320,6 +306,22 @@ async function setupViteOrStatic() {
     console.log(` Modüler Mimari (Routes / Services / DB) Başlatıldı.`);
     console.log(`====================================================`);
   });
+
+  // Background non-blocking database initialization
+  (async () => {
+    console.log("[Startup] Veritabanı bağlantısı arka planda doğrulanıyor...");
+    try {
+      const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
+      await db.waitForInitialization(startupTimeout);
+      if (db.postgresRepo?.isReady()) {
+        console.log("[Startup] PostgreSQL hazır ve şema doğrulandı. API tam trafiğe açıldı.");
+      } else {
+        console.warn("[Startup] PostgreSQL bağlantısı veya şeması henüz tamamlanmadı. İlk kurulum sihirbazı veya 503 koruma modu aktif.");
+      }
+    } catch (err: any) {
+      console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
+    }
+  })();
 }
 
 setupViteOrStatic();

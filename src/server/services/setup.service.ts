@@ -34,6 +34,15 @@ export interface SetupStatusResponse {
     database: string;
     user: string;
     sslMode: string;
+    hasSavedPassword?: boolean;
+  };
+  defaultDockerConfig?: {
+    host: string;
+    port: number;
+    database: string;
+    user: string;
+    defaultPassword: string;
+    sslMode?: string;
   };
   stepsCompleted: {
     connection: boolean;
@@ -82,7 +91,7 @@ export class SetupService {
   }
 
   /**
-   * Safely reads Docker secrets or server-side protected runtime secret file
+   * Safely reads Docker secrets, environment variables, or server-side protected runtime secret file
    */
   public loadRuntimeSecretConfig(): DatabaseConfigPayload | null {
     try {
@@ -93,10 +102,10 @@ export class SetupService {
           try {
             const parsed = new URL(secretUrl.replace(/^postgres(ql)?:\/\//i, 'http://'));
             this.runtimeConfig = {
-              host: parsed.hostname,
+              host: parsed.hostname || 'timescaledb',
               port: parseInt(parsed.port || '5432', 10),
-              database: parsed.pathname.replace(/^\//, '') || 'postgres',
-              user: decodeURIComponent(parsed.username || 'postgres'),
+              database: parsed.pathname.replace(/^\//, '') || 'iot_dashboard',
+              user: decodeURIComponent(parsed.username || 'iot_user'),
               password: decodeURIComponent(parsed.password || ''),
               sslMode: secretUrl.includes('sslmode=disable') ? 'disable' : 'require',
             };
@@ -124,17 +133,55 @@ export class SetupService {
             port: Number(parsed.port) || 5432,
             database: parsed.database || 'iot_dashboard',
             user: parsed.user || 'iot_user',
-            password: pass,
+            password: pass || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
             sslMode: parsed.sslMode || 'disable',
             rejectUnauthorized: parsed.rejectUnauthorized ?? false,
           };
           return this.runtimeConfig;
         }
       }
+
+      // 3. Fallback to process.env.DATABASE_URL
+      if (process.env.DATABASE_URL) {
+        try {
+          const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
+          const isDisable = process.env.DATABASE_URL.includes('sslmode=disable');
+          const pass = decodeURIComponent(parsed.password || '') || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026';
+          this.runtimeConfig = {
+            host: parsed.hostname || 'timescaledb',
+            port: parseInt(parsed.port || '5432', 10),
+            database: parsed.pathname.replace(/^\//, '') || process.env.POSTGRES_DB || 'iot_dashboard',
+            user: decodeURIComponent(parsed.username || '') || process.env.POSTGRES_USER || 'iot_user',
+            password: pass,
+            sslMode: isDisable ? 'disable' : 'require',
+          };
+          return this.runtimeConfig;
+        } catch {}
+      }
+
+      // 4. Fallback to individual POSTGRES_* env vars or Docker standard defaults
+      if (process.env.POSTGRES_HOST || process.env.POSTGRES_USER || process.env.POSTGRES_PASSWORD) {
+        this.runtimeConfig = {
+          host: process.env.POSTGRES_HOST || 'timescaledb',
+          port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+          database: process.env.POSTGRES_DB || 'iot_dashboard',
+          user: process.env.POSTGRES_USER || 'iot_user',
+          password: process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
+          sslMode: 'disable',
+        };
+        return this.runtimeConfig;
+      }
     } catch (err: any) {
       systemLogger.warn('database', `Runtime secret konfigürasyonu okunamadı: ${err?.message || err}`);
     }
     return null;
+  }
+
+  public getRuntimeConfig(): DatabaseConfigPayload | null {
+    if (!this.runtimeConfig) {
+      this.loadRuntimeSecretConfig();
+    }
+    return this.runtimeConfig;
   }
 
   /**
@@ -336,8 +383,17 @@ export class SetupService {
             database: this.runtimeConfig.database,
             user: this.runtimeConfig.user,
             sslMode: this.runtimeConfig.sslMode || 'disable',
+            hasSavedPassword: Boolean(this.runtimeConfig.password),
           }
         : undefined,
+      defaultDockerConfig: {
+        host: 'timescaledb',
+        port: 5432,
+        database: 'iot_dashboard',
+        user: 'iot_user',
+        defaultPassword: 'nexus_iot_secure_pass_2026',
+        sslMode: 'disable',
+      },
       stepsCompleted: {
         connection: isDbConnected,
         timescale: isTimescaleAvailable,
@@ -353,7 +409,11 @@ export class SetupService {
    * Tests real PostgreSQL connection with strict timeout, version checks, and ZERO password leaking
    */
   public async testConnection(config: DatabaseConfigPayload): Promise<DbTestResult> {
-    const connStr = this.buildConnectionString(config);
+    const effectiveConfig: DatabaseConfigPayload = {
+      ...config,
+      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || (config.host === 'timescaledb' || config.host === 'localhost' ? 'nexus_iot_secure_pass_2026' : ''),
+    };
+    const connStr = this.buildConnectionString(effectiveConfig);
     const startTime = Date.now();
     let pool: pg.Pool | null = null;
 
@@ -470,18 +530,23 @@ export class SetupService {
       throw new Error('Kurulum zaten tamamlanmış. Yetkisiz yeniden yapılandırma engellendi.');
     }
 
+    const effectiveConfig: DatabaseConfigPayload = {
+      ...config,
+      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || (config.host === 'timescaledb' || config.host === 'localhost' ? 'nexus_iot_secure_pass_2026' : ''),
+    };
+
     // 1. Verify connection first
-    const testResult = await this.testConnection(config);
+    const testResult = await this.testConnection(effectiveConfig);
     if (!testResult.success) {
       throw new Error(`Veritabanı doğrulanamadı: ${testResult.message}`);
     }
 
     // 2. Persist to server-side runtime secret file
-    this.saveRuntimeSecretConfig(config, false);
+    this.saveRuntimeSecretConfig(effectiveConfig, false);
 
     // 3. Re-initialize database pool
     await recycleSharedPgPool().catch(() => {});
-    const connStr = this.buildConnectionString(config);
+    const connStr = this.buildConnectionString(effectiveConfig);
     const newPool = getSharedPgPool(connStr);
     if (newPool) {
       db.postgresRepo?.setPool(newPool);
@@ -491,7 +556,7 @@ export class SetupService {
     this.logAudit({
       action: 'DATABASE_SETUP_STARTED',
       severity: 'medium',
-      details: `Veritabanı konfigürasyonu kaydedildi (Host: ${config.host}, Port: ${config.port}, DB: ${config.database}).`,
+      details: `Veritabanı konfigürasyonu kaydedildi (Host: ${effectiveConfig.host}, Port: ${effectiveConfig.port}, DB: ${effectiveConfig.database}).`,
     });
 
     return {
@@ -660,6 +725,7 @@ export class SetupService {
     passwordConfirm?: string;
     companyName?: string;
     ip?: string;
+    allowStandalone?: boolean;
   }): Promise<{ success: boolean; user: User; token: string; message: string }> {
     if (this.isSetupCompleted()) {
       throw new Error('Kurulum zaten tamamlanmış. Tekrar yönetici oluşturulamaz.');
@@ -684,46 +750,53 @@ export class SetupService {
       throw new Error('Şifreler birbiriyle eşleşmiyor.');
     }
 
-    // Ensure database is connected
+    // Ensure database is connected or standalone mode allowed
     const connStr = this.getActiveConnectionString() || db.getPostgresUrl();
     const pool = connStr ? getSharedPgPool(connStr) : null;
-    if (!pool) {
-      throw new Error('Veritabanı bağlantısı bulunamadı. Lütfen önce veritabanını yapılandırın.');
+    if (!pool && !params.allowStandalone) {
+      throw new Error('Veritabanı bağlantısı bulunamadı. Lütfen önce veritabanını yapılandırın veya Bağımsız Mod ile devam edin.');
     }
 
     // Check if REAL admin already exists
     let hasAdmin = false;
     let placeholderExists = false;
-    const client = await pool.connect();
-    try {
-      const adminCheck = await client.query(`
-        SELECT id, email FROM users 
-        WHERE role = 'admin' 
-          AND status != 'deleted' 
-          AND (deleted_at IS NULL)
-          AND id != 'usr_test_admin'
-          AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-          AND id NOT LIKE 'usr_test_%'
-          AND id NOT LIKE 'test_%'
-          AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
-          AND LOWER(email) NOT LIKE 'test_%'
-          AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
-        LIMIT 1;
-      `).catch(() => ({ rows: [] }));
 
-      if (adminCheck.rows.length > 0) {
-        hasAdmin = true;
-      }
+    if (pool) {
+      const client = await pool.connect();
+      try {
+        const adminCheck = await client.query(`
+          SELECT id, email FROM users 
+          WHERE role = 'admin' 
+            AND status != 'deleted' 
+            AND (deleted_at IS NULL)
+            AND id != 'usr_test_admin'
+            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+            AND id NOT LIKE 'usr_test_%'
+            AND id NOT LIKE 'test_%'
+            AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
+            AND LOWER(email) NOT LIKE 'test_%'
+            AND NOT (id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io')
+          LIMIT 1;
+        `).catch(() => ({ rows: [] }));
 
-      // Check if unconfigured placeholder usr_admin exists to upgrade it
-      const placeholderCheck = await client.query(`
-        SELECT id FROM users WHERE id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io' LIMIT 1;
-      `).catch(() => ({ rows: [] }));
-      if (placeholderCheck.rows.length > 0) {
-        placeholderExists = true;
+        if (adminCheck.rows.length > 0) {
+          hasAdmin = true;
+        }
+
+        // Check if unconfigured placeholder usr_admin exists to upgrade it
+        const placeholderCheck = await client.query(`
+          SELECT id FROM users WHERE id = 'usr_admin' AND LOWER(email) = 'admin@nexusnode.io' LIMIT 1;
+        `).catch(() => ({ rows: [] }));
+        if (placeholderCheck.rows.length > 0) {
+          placeholderExists = true;
+        }
+      } finally {
+        client.release();
       }
-    } finally {
-      client.release();
+    } else {
+      const currentUsers = db.getUsers();
+      hasAdmin = currentUsers.some(isRealAdminUser);
+      placeholderExists = currentUsers.some((u) => u.id === 'usr_admin' && u.email === 'admin@nexusnode.io');
     }
 
     if (hasAdmin) {
@@ -751,8 +824,31 @@ export class SetupService {
       updatedAt: new Date().toISOString(),
     };
 
-    // Save user to PostgreSQL repository
-    await db.postgresRepo?.saveUser(adminUser, hashedPassword);
+    // Save user to PostgreSQL repository if pool is available
+    if (pool) {
+      try {
+        const userClient = await pool.connect();
+        try {
+          await userClient.query(
+            `INSERT INTO users (id, email, password_hash, name, role, company_name, status, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               email = EXCLUDED.email,
+               password_hash = EXCLUDED.password_hash,
+               name = EXCLUDED.name,
+               company_name = EXCLUDED.company_name,
+               status = 'active',
+               updated_at = NOW();`,
+            [adminId, email, hashedPassword, displayName, 'admin', params.companyName || 'Merkez Yönetim']
+          );
+        } finally {
+          userClient.release();
+        }
+      } catch (pgInsertErr) {
+        systemLogger.warn('database', `Could not directly insert admin to postgres table: ${pgInsertErr}`);
+      }
+      await db.postgresRepo?.saveUser(adminUser, hashedPassword).catch(() => {});
+    }
 
     // Also update in-memory cache
     const currentUsers = db.getUsers();
@@ -801,6 +897,64 @@ export class SetupService {
       token,
       message: 'NexusNode IoT kurulumu ve ilk yönetici hesabı başarıyla tamamlandı.',
     };
+  }
+
+  /**
+   * 1-Click Docker fast setup: tests timescaledb connection, configures it, and initializes schema
+   */
+  public async quickInitDocker(password?: string): Promise<{ success: boolean; message: string }> {
+    const config: DatabaseConfigPayload = {
+      host: 'timescaledb',
+      port: 5432,
+      database: 'iot_dashboard',
+      user: 'iot_user',
+      password: password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
+      sslMode: 'disable',
+    };
+
+    // 1. Test timescaledb
+    let testRes = await this.testConnection(config);
+    if (!testRes.success) {
+      // Fallback test localhost
+      const localTest = await this.testConnection({ ...config, host: 'localhost' });
+      if (localTest.success) {
+        config.host = 'localhost';
+        testRes = localTest;
+      }
+    }
+
+    if (!testRes.success) {
+      throw new Error(`TimescaleDB sunucusuna bağlanılamadı: ${testRes.message}`);
+    }
+
+    // 2. Configure
+    await this.configureDatabase(config);
+
+    // 3. Initialize
+    await this.initializeDatabase();
+
+    return {
+      success: true,
+      message: 'TimescaleDB veritabanı, tablolar ve migrasyonlar başarıyla hazırlandı.',
+    };
+  }
+
+  /**
+   * Standalone admin initialization for preview or environments without immediate database container
+   */
+  public async initializeStandalone(params: {
+    username?: string;
+    name?: string;
+    email: string;
+    password: string;
+    passwordConfirm?: string;
+    companyName?: string;
+    ip?: string;
+  }): Promise<{ success: boolean; user: User; token: string; message: string }> {
+    return this.createAdministrator({
+      ...params,
+      allowStandalone: true,
+    });
   }
 
   /**

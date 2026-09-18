@@ -19,6 +19,7 @@ import {
   XCircle,
   HelpCircle,
   Zap,
+  Terminal,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../../config/version';
 
@@ -80,9 +81,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     port: 5432,
     database: 'iot_dashboard',
     user: 'iot_user',
-    password: '',
+    password: 'nexus_iot_secure_pass_2026',
     sslMode: 'disable' as 'disable' | 'require' | 'prefer' | 'verify-full',
   });
+
+  // Standalone / Preview Mode (allows proceeding if database container is not ready yet)
+  const [isStandaloneMode, setIsStandaloneMode] = useState<boolean>(false);
+  const [quickDockerLoading, setQuickDockerLoading] = useState<boolean>(false);
 
   // Test Connection Result
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -124,6 +129,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
             database: data.dbConfig.database || prev.database,
             user: data.dbConfig.user || prev.user,
             sslMode: data.dbConfig.sslMode || prev.sslMode,
+            password: prev.password || 'nexus_iot_secure_pass_2026',
+          }));
+        } else if (data.defaultDockerConfig) {
+          setDbConfig((prev) => ({
+            ...prev,
+            ...data.defaultDockerConfig,
+            password: data.defaultDockerConfig.password || prev.password || 'nexus_iot_secure_pass_2026',
           }));
         }
 
@@ -146,6 +158,33 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
   useEffect(() => {
     fetchStatus();
   }, []);
+
+  // 1-Click Automated Docker Setup
+  const handleQuickDockerSetup = async () => {
+    setError(null);
+    setQuickDockerLoading(true);
+    try {
+      const res = await fetch('/api/setup/quick-init-docker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: dbConfig.password || 'nexus_iot_secure_pass_2026' }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Hızlı Docker kurulumu başarısız.');
+      }
+
+      setTestSuccess(true);
+      setInitComplete(true);
+      setIsStandaloneMode(false);
+      setCurrentStep(6);
+    } catch (err: any) {
+      setError(err?.message || 'Hızlı Docker kurulumu başarısız. Lütfen parametreleri manuel yapılandırın.');
+    } finally {
+      setQuickDockerLoading(false);
+    }
+  };
 
   // Step 3: Run real database connection test
   const handleTestConnection = async () => {
@@ -275,13 +314,24 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     setLoading(true);
 
     try {
-      const res = await fetch('/api/setup/create-admin', {
+      const endpoint = isStandaloneMode ? '/api/setup/standalone-init' : '/api/setup/create-admin';
+      let res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(adminForm),
       });
 
-      const data = await res.json();
+      let data = await res.json();
+      if (!res.ok && !isStandaloneMode && (data.message?.includes('Veritabanı bağlantısı bulunamadı') || data.message?.includes('database'))) {
+        // Fallback to standalone init if database is unreachable
+        res = await fetch('/api/setup/standalone-init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(adminForm),
+        });
+        data = await res.json();
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');
       }
@@ -438,14 +488,50 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      id="wizard-step1-quick-docker"
+                      type="button"
+                      disabled={quickDockerLoading}
+                      onClick={handleQuickDockerSetup}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
+                    >
+                      {quickDockerLoading ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Docker TimescaleDB Kuruluyor...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-3.5 h-3.5 text-emerald-200" />
+                          <span>🚀 1-Tıkla Hızlı Docker Kurulumu</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      id="wizard-step1-standalone"
+                      type="button"
+                      onClick={() => {
+                        setIsStandaloneMode(true);
+                        setCurrentStep(6);
+                      }}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer border border-slate-700/60"
+                      title="PostgreSQL olmadan doğrudan yönetici hesabı oluşturup paneli açar"
+                    >
+                      <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>⚡ Bağımsız Mod</span>
+                    </button>
+                  </div>
+
                   <button
                     id="wizard-step1-next"
                     type="button"
                     onClick={() => setCurrentStep(2)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition cursor-pointer"
                   >
-                    <span>Kuruluma Başla</span>
+                    <span>Manuel Yapılandır</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -467,8 +553,46 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     <span>Veritabanı Yapılandırması</span>
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    PostgreSQL veya TimescaleDB sunucunuzun bağlantı parametrelerini giriniz. Şifreniz tarayıcı kalıcı belleğinde (localStorage) saklanmaz.
+                    PostgreSQL veya TimescaleDB sunucunuzun bağlantı parametrelerini giriniz. Şifreniz sunucuda 0600 korumalı gizli dosyada saklanır.
                   </p>
+                </div>
+
+                {/* Quick Preset Buttons */}
+                <div className="flex flex-wrap items-center gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                  <span className="text-[11px] font-medium text-slate-400 mr-1">Hızlı Şablonlar:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDbConfig({
+                        host: 'timescaledb',
+                        port: 5432,
+                        database: 'iot_dashboard',
+                        user: 'iot_user',
+                        password: 'nexus_iot_secure_pass_2026',
+                        sslMode: 'disable',
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-300 rounded-lg text-xs font-mono transition cursor-pointer"
+                  >
+                    🐳 Docker Compose (timescaledb)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDbConfig({
+                        host: 'localhost',
+                        port: 5432,
+                        database: 'iot_dashboard',
+                        user: 'iot_user',
+                        password: 'nexus_iot_secure_pass_2026',
+                        sslMode: 'disable',
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg text-xs font-mono transition cursor-pointer"
+                  >
+                    💻 Yerel (localhost:5432)
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -658,12 +782,79 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </div>
 
                     {!testResult.success && (
-                      <div className="p-3.5 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1.5">
-                        <span className="font-semibold text-slate-300 block">💡 Sorun Giderme İpuçları:</span>
-                        <ul className="list-disc pl-4 space-y-1 text-[11px]">
-                          <li>Host adresi olarak Docker ortamındaysanız <code className="text-indigo-400">timescaledb</code> veya <code className="text-indigo-400">postgres</code> kullanın.</li>
-                          <li>Kullanıcı adı ve şifrenin doğru olduğundan emin olun.</li>
-                          <li>Veritabanının oluşturulduğunu ve 5432 portunun erişilebilir olduğunu kontrol edin.</li>
+                      <div className="p-4 bg-slate-950/70 rounded-xl border border-rose-900/40 text-xs text-slate-300 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-rose-300 block">💡 Otomatik Düzeltme & Çözüm Önerileri:</span>
+                          <span className="font-mono text-[10px] bg-rose-950/60 px-2 py-0.5 rounded text-rose-400">
+                            {testResult.errorCode || 'CONN_ERROR'}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {dbConfig.host !== 'localhost' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = { ...dbConfig, host: 'localhost' };
+                                setDbConfig(updated);
+                                fetch('/api/setup/test-database', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(updated),
+                                })
+                                  .then((r) => r.json())
+                                  .then((d) => {
+                                    setTestResult(d);
+                                    setTestSuccess(!!d.success);
+                                  })
+                                  .catch(() => {});
+                              }}
+                              className="px-3 py-1.5 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-300 rounded-lg text-xs font-medium cursor-pointer transition"
+                            >
+                              🔄 Host Olarak 'localhost' Dene
+                            </button>
+                          )}
+
+                          {dbConfig.host !== 'timescaledb' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = { ...dbConfig, host: 'timescaledb' };
+                                setDbConfig(updated);
+                                fetch('/api/setup/test-database', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify(updated),
+                                })
+                                  .then((r) => r.json())
+                                  .then((d) => {
+                                    setTestResult(d);
+                                    setTestSuccess(!!d.success);
+                                  })
+                                  .catch(() => {});
+                              }}
+                              className="px-3 py-1.5 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-300 rounded-lg text-xs font-medium cursor-pointer transition"
+                            >
+                              🐳 Host Olarak 'timescaledb' Dene
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsStandaloneMode(true);
+                              setCurrentStep(6);
+                            }}
+                            className="px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-700/50 text-amber-300 rounded-lg text-xs font-semibold cursor-pointer transition"
+                          >
+                            ⚡ Önizleme / Bağımsız Mod ile Devam Et (Veritabanı Sonra)
+                          </button>
+                        </div>
+
+                        <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-400">
+                          <li>Host adresi olarak Docker ortamındaysanız <code className="text-indigo-400">timescaledb</code> veya yerelde <code className="text-indigo-400">localhost</code> kullanın.</li>
+                          <li>Kullanıcı adı (<code className="text-indigo-400">iot_user</code>) ve varsayılan şifrenin (<code className="text-indigo-400">nexus_iot_secure_pass_2026</code>) doğru olduğundan emin olun.</li>
+                          <li>Docker TimescaleDB konteynerinin çalıştığını kontrol edin: <code className="text-slate-300 font-mono">docker compose ps</code></li>
                         </ul>
                       </div>
                     )}
@@ -692,20 +883,35 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </button>
                   </div>
 
-                  <button
-                    id="wizard-step3-next"
-                    type="button"
-                    disabled={!testSuccess || loading}
-                    onClick={handleSaveAndProceedToInit}
-                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition cursor-pointer ${
-                      testSuccess && !loading
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                    }`}
-                  >
-                    <span>Kaydet ve İlklendirmeye Geç</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {!testSuccess && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsStandaloneMode(true);
+                          setCurrentStep(6);
+                        }}
+                        className="text-amber-400 hover:text-amber-300 text-xs font-medium underline cursor-pointer"
+                      >
+                        ⚡ Bağımsız Mod ile Devam Et
+                      </button>
+                    )}
+
+                    <button
+                      id="wizard-step3-next"
+                      type="button"
+                      disabled={!testSuccess || loading}
+                      onClick={handleSaveAndProceedToInit}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition cursor-pointer ${
+                        testSuccess && !loading
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <span>Kaydet ve İlklendirmeye Geç</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -818,6 +1024,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   </p>
                 </div>
 
+                {isStandaloneMode && (
+                  <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-amber-200 text-xs flex items-center gap-2.5">
+                    <Terminal className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>⚡ <strong>Bağımsız / Önizleme Modu:</strong> Yönetici oluşturulduktan sonra panel hemen açılır. PostgreSQL bağlantısını dilediğiniz zaman paneli açtıktan sonra da yapabilirsiniz.</span>
+                  </div>
+                )}
+
                 <form onSubmit={handleCreateAdmin} className="space-y-4 text-xs">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
@@ -897,7 +1110,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   <div className="flex items-center justify-between pt-4 border-t border-slate-800">
                     <button
                       type="button"
-                      onClick={() => setCurrentStep(4)}
+                      onClick={() => setCurrentStep(isStandaloneMode ? 1 : 4)}
                       disabled={loading}
                       className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
                     >

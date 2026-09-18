@@ -60,7 +60,7 @@ setupRouter.post('/test-database', async (req: Request, res: Response) => {
     port: parseInt(String(port), 10) || 5432,
     database: String(database).trim(),
     user: String(user).trim(),
-    password: password ? String(password) : '',
+    password: password ? String(password) : (setupService.getRuntimeConfig()?.password || process.env.POSTGRES_PASSWORD || (String(host).trim() === 'timescaledb' || String(host).trim() === 'localhost' ? 'nexus_iot_secure_pass_2026' : '')),
     sslMode: sslMode || 'disable',
   };
 
@@ -71,6 +71,75 @@ setupRouter.post('/test-database', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Veritabanı bağlantı testi sırasında beklenmeyen bir hata oluştu.',
+    });
+  }
+});
+
+/**
+ * POST /api/setup/quick-init-docker
+ * 1-Click automated Docker TimescaleDB setup (test, config, schema, migrations)
+ */
+setupRouter.post('/quick-init-docker', async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`setup_quick:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: 'Çok fazla istek gönderildi.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  const { password } = req.body || {};
+  try {
+    const result = await setupService.quickInitDocker(password);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || 'Hızlı Docker veritabanı kurulumu başarısız oldu.',
+    });
+  }
+});
+
+/**
+ * POST /api/setup/standalone-init
+ * Fast standalone administrator initialization (preview/file-backed mode)
+ */
+setupRouter.post('/standalone-init', async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`setup_standalone:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: 'Çok fazla istek gönderildi.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  const { username, name, email, password, passwordConfirm, companyName } = req.body || {};
+  try {
+    const result = await setupService.initializeStandalone({
+      username,
+      name,
+      email,
+      password,
+      passwordConfirm,
+      companyName,
+      ip: clientIp,
+    });
+
+    if (result.token) {
+      setSessionCookie(res, result.token);
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    const msg = err?.message || 'Bağımsız mod yönetici hesabı oluşturulamadı.';
+    const statusCode = msg.includes('Kurulum zaten tamamlanmış') || msg.includes('zaten bir yönetici') ? 403 : 400;
+    return res.status(statusCode).json({
+      success: false,
+      message: msg,
     });
   }
 });

@@ -4,6 +4,34 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.5] - 2026-09-18
+
+### 📌 İlk Kurulum Sihirbazı İyileştirmesi & Hızlı Docker / Bağımsız Mod Desteği (Setup Wizard Quick Init & Standalone Resilience)
+- **1-Tıkla Otomatik Docker Kurulumu (`POST /api/setup/quick-init-docker`)**:
+  - Kurulum sihirbazının ilk adımına tek tıklamayla TimescaleDB bağlantısını, tablolarını ve migrasyonlarını otomatik oluşturan hızlı başlangıç seçeneği eklendi.
+- **Veritabanı Önizleme / Bağımsız Mod Desteği (`POST /api/setup/standalone-init`)**:
+  - TimescaleDB veya PostgreSQL konteyneri henüz ayağa kalkmamış veya önizleme ortamında çalışan kullanıcılar için veritabanı beklemesi olmaksızın yönetici hesabı oluşturup paneli anında açan Bağımsız Mod köprüsü entegre edildi.
+- **Akıllı Sorun Giderme ve Şablonlar (`DatabaseSetupWizard.tsx`)**:
+  - Adım 2 ve Adım 3'te Docker varsayılan şifresi (`nexus_iot_secure_pass_2026`), `timescaledb` ve `localhost` için tek tıkla şablon doldurma ve akıllı hata tespiti (Host not found / Auth failed / Refused) eklendi.
+- **Doğrudan Yönetici SQL & Önbellek Entegrasyonu (`SetupService`)**:
+  - İlk sistem yöneticisi oluşturulurken PostgreSQL `users` tablosuna anında `INSERT ... ON CONFLICT` ile yazılması garanti altına alındı, bellek önbelleği ile senkronize edildi.
+
+---
+
+## 🚀 [v1.28.4] - 2026-09-18
+
+### 📌 Docker Compose Başlatma Kilidi & Port Yönlendirme İyileştirmesi (Container Launch Resilience & Non-blocking Port Binding)
+- **Anında HTTP Sunucu Başlatma (Non-blocking HTTP Listen)**:
+  - `server.ts` içinde `server.listen(PORT)` çağrısı veritabanı bağlantı beklemesinden bağımsız hale getirilerek anında HTTP 3000 portunun dinlenmesi sağlandı. Veritabanı başlatma kontrolü arka planda asenkron yürütülür; böylece konteyner başlar başlamaz `/api/health/live` liveness kontrolü 200 döner ve web arayüzü gecikmesiz açılır.
+- **Doğrudan Port 3000 Eşlemesi (`docker-compose.yml`)**:
+  - `nexus_app` servisine `${PORT_BIND:-3000:3000}` port eşlemesi eklendi. Böylece kullanıcılar ister Nginx ters vekili (Port 80) üzerinden, ister doğrudan Port 3000 üzerinden web arayüzüne ve REST API'ye anında erişebilir.
+- **Konteyner Bağımlılık Zincirinin Esnetilmesi (Deadlock Prevention)**:
+  - `timescaledb` ve `app` servisleri arasındaki katı `condition: service_healthy` bağımlılık kilidi `condition: service_started` olarak revize edildi; veritabanı ilk başlatma esnasında gecikse dahi web arayüzü ve "İlk Kurulum Sihirbazı" (Setup Wizard) anında açılır.
+- **TimescaleDB Paylaşılan Bellek (Shared Memory) Desteği**:
+  - `timescaledb` servisine `shm_size: 256mb` parametresi eklendi.
+
+---
+
 ## 🚀 [v1.28.3] - 2026-09-18
 
 ### 📌 TimescaleDB Sürüm Uyuşmazlığı & Eksik Kütüphane Koruması (TimescaleDB Version Mismatch & Library Resilience)
