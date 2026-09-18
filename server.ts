@@ -151,7 +151,12 @@ app.use('/api', (req, res, next) => {
   }
 
   // Allowed endpoints even when DB is not ready
-  if (req.path.startsWith('/setup') || req.path.startsWith('/auth/setup-status') || req.path === '/system/status') {
+  if (
+    req.path.startsWith('/setup') ||
+    req.path.startsWith('/auth/setup-status') ||
+    req.path === '/system/status' ||
+    req.path.startsWith('/health')
+  ) {
     return next();
   }
 
@@ -159,11 +164,14 @@ app.use('/api', (req, res, next) => {
   const isPgReady = db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
 
   if (!isPgReady) {
+    const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
     return res.status(503).json({
       success: false,
-      code: 'DB_UNAVAILABLE',
+      code: isMaintenance ? 'DB_MAINTENANCE' : 'DB_UNAVAILABLE',
       state: dbState,
-      error: 'NexusNode IoT veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
+      error: isMaintenance
+        ? 'NexusNode IoT veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
+        : 'NexusNode IoT veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
       message: 'Veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı kurulumunu tamamlayın.',
     });
   }
@@ -274,18 +282,25 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 let backgroundWorkersStarted = false;
 export function startBackgroundWorkers() {
   if (backgroundWorkersStarted) return;
-  if (!db.postgresRepo?.isReady()) {
-    console.log('[Workers] PostgreSQL hazır olmadığı için arka plan servisleri başlatılmadı.');
+  if (!db.postgresRepo?.isReady() || db.getDatabaseState() !== DatabaseState.READY) {
+    console.log('[Workers] PostgreSQL ve şema tam olarak hazır (READY) olmadığı için arka plan servisleri başlatılmadı.');
     return;
   }
   backgroundWorkersStarted = true;
-  console.log('[Workers] PostgreSQL veritabanı hazır. Arka plan servisleri başlatılıyor (WebSocket, Simulator, OTA, NoData, CommandExpiry)...');
+  console.log('[Workers] PostgreSQL veritabanı READY durumunda. Arka plan servisleri başlatılıyor (WebSocket, Simulator, OTA, NoData, CommandExpiry)...');
   initWebSocketServer(server);
   initSimulator();
   startOtaWorker();
   startNoDataWorker();
   startCommandExpiryWorker();
 }
+
+// Automatically start background workers whenever the DB state transitions to READY
+db.onStateChange((newState) => {
+  if (newState === DatabaseState.READY && db.postgresRepo?.isReady()) {
+    startBackgroundWorkers();
+  }
+});
 
 
 // Serve Vite in dev mode or static bundled files in production

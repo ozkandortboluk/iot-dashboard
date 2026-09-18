@@ -1,5 +1,6 @@
 import { Router, type Response, type Request } from 'express';
 import { db } from '../db.js';
+import { DatabaseState } from '../../types.js';
 import { broadcast } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -50,7 +51,7 @@ router.get('/setup-status', async (req, res) => {
 
   const wizardStatus = await setupService.getStatus().catch(() => null);
 
-  const users = db.getUsers();
+  const users = await db.getUsersAsync();
   let hasAdmin = users.some(isRealAdminUser);
 
   // 2. Direct PostgreSQL fallback: If in-memory cache hasn't loaded admin yet, query PostgreSQL directly
@@ -95,7 +96,7 @@ router.post('/setup', async (req, res) => {
   }
 
   // Pre-check: Ensure admin account does not already exist
-  const users = db.getUsers();
+  const users = await db.getUsersAsync();
   const hasAdmin = users.some(isRealAdminUser);
   if (hasAdmin) {
     return res.status(400).json({ error: 'Kurulum zaten tamamlanmış. Sistemde en az bir yönetici bulunmaktadır.' });
@@ -129,7 +130,7 @@ router.post('/setup', async (req, res) => {
 
   try {
     // Re-verify inside lock to guarantee mutual exclusion
-    const currentUsers = db.getUsers();
+    const currentUsers = await db.getUsersAsync();
     if (currentUsers.some(isRealAdminUser)) {
       throw new Error('Kurulum zaten başka bir oturum tarafından tamamlandı.');
     }
@@ -141,6 +142,10 @@ router.post('/setup', async (req, res) => {
     }
 
     const token = await db.createSession(adminUser);
+
+    // Mark setup as permanently completed and transition DB state to READY
+    setupService.markSetupCompleted();
+    db.setDatabaseState(DatabaseState.READY);
 
     // Set HttpOnly, Secure cookie
     setSessionCookie(res, token);
@@ -207,7 +212,7 @@ router.post('/register', async (req, res) => {
   }
 
   // Guard: If system setup is not completed yet, prevent public registration to enforce admin onboarding first
-  const users = db.getUsers();
+  const users = await db.getUsersAsync();
   const hasAdmin = users.some(isRealAdminUser);
   if (!hasAdmin || isSetupInProgress) {
     return res.status(403).json({
@@ -265,10 +270,11 @@ export const authRouter = router;
 // Profile Router
 const profileRouter = Router();
 
-profileRouter.get('/', authenticateUser, (req, res) => {
+profileRouter.get('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
-  const user = db.getUsers().find((u) => u.id === currentUser.id);
+  const users = await db.getUsersAsync();
+  const user = users.find((u) => u.id === currentUser.id);
   if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
   res.json(user);
 });

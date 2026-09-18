@@ -866,17 +866,7 @@ export class SetupService {
       await db.postgresRepo?.saveUser(adminUser, hashedPassword).catch(() => {});
     }
 
-    // Also update in-memory cache
-    const currentUsers = db.getUsers();
-    const existingIdx = currentUsers.findIndex((u) => u.id === adminId);
-    if (existingIdx >= 0) {
-      (db as any).data.users[existingIdx] = adminUser;
-    } else {
-      (db as any).data.users.push(adminUser);
-    }
-    (db as any).data.passwords[adminId] = hashedPassword;
-
-    // Generate session token via unified database service
+    // Generate session token via unified database service (persisted to PostgreSQL user_sessions)
     const token = await db.createSession(adminUser);
 
     // Mark setup as completed permanently and set READY state

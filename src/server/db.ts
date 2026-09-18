@@ -259,16 +259,32 @@ class LocalDatabase {
   private pgPool: PgPoolType | null = null;
   private pgPoolUrl: string = '';
   private dbState: DatabaseState = DatabaseState.BOOTSTRAP;
+  private stateChangeListeners: Array<(newState: DatabaseState, oldState: DatabaseState) => void> = [];
 
   public getDatabaseState(): DatabaseState {
     return this.dbState;
   }
 
+  public onStateChange(listener: (newState: DatabaseState, oldState: DatabaseState) => void): () => void {
+    this.stateChangeListeners.push(listener);
+    return () => {
+      this.stateChangeListeners = this.stateChangeListeners.filter((l) => l !== listener);
+    };
+  }
+
   public setDatabaseState(newState: DatabaseState): void {
     if (this.dbState !== newState) {
-      console.log(`[Database State Machine] Durum değişti: ${this.dbState} -> ${newState}`);
-      systemLogger.info('database', `[Database State Machine] Durum değişti: ${this.dbState} -> ${newState}`);
+      const oldState = this.dbState;
+      console.log(`[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
+      systemLogger.info('database', `[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
       this.dbState = newState;
+      for (const listener of this.stateChangeListeners) {
+        try {
+          listener(newState, oldState);
+        } catch (e) {
+          console.error('[Database State Machine] Listener error:', e);
+        }
+      }
     }
   }
 
@@ -317,6 +333,9 @@ class LocalDatabase {
   private startAutoBackupWorker(): void {
     if (this.autoBackupInterval) return;
     this.autoBackupInterval = setInterval(() => {
+      if (!this.postgresRepo?.isReady() || this.getDatabaseState() !== DatabaseState.READY) {
+        return;
+      }
       this.createBackup().catch((err: any) => {
         systemLogger.error('backup', `Otomatik yedekleme hatası: ${err?.message || err}`);
       });
@@ -386,124 +405,132 @@ class LocalDatabase {
     this.postgresRepo.setPool(pool);
     this.setDatabaseState(DatabaseState.DB_CONNECTING);
 
+    let client: any = null;
     try {
-      const client = await pool.connect();
-      try {
-        await client.query('SELECT 1;');
-      } finally {
-        client.release();
-      }
-
-      this.postgresRepo.setConnected(true, true);
-      this.setDatabaseState(DatabaseState.DB_INITIALIZING);
-
-      if (!this.data.databaseSettings) {
-        this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
-      }
-      this.data.databaseSettings.isPostgresConnected = true;
-      this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-
-      // 1. Authoritative Schema Auto-Healing & Verification before hydration
-      try {
-        await this.postgresRepo.ensureTelemetrySchema(true);
-      } catch (tErr: any) {
-        systemLogger.warn('database', 'PostgreSQL Şema Doğrulama/Onarım Uyarısı:', tErr?.message || tErr);
-      }
-
-      // 2. FAST-PATH HYDRATION: Hydrate users, devices, and rules into memory
-      try {
-        const hydrated = await this.postgresRepo.hydrateFromPostgres();
-        if (hydrated) {
-          // Filter out any ephemeral test artifacts from hydrated data
-          hydrated.devices = hydrated.devices.filter((d: any) => !isTestOrEphemeralArtifact(d.id));
-          hydrated.rules = hydrated.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
-          hydrated.users = hydrated.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
-
-          if (hydrated.users.length > 0) {
-            this.data.users = hydrated.users;
-            this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
-          }
-
-          if (hydrated.devices.length > 0) {
-            this.data.devices = hydrated.devices;
-          }
-
-          if (hydrated.rules.length > 0) {
-            this.data.rules = hydrated.rules;
-          }
-
-          if (hydrated.dashboards.length > 0) {
-            this.data.dashboards = hydrated.dashboards;
-          }
-
-          if (hydrated.alarms.length > 0) {
-            this.data.activeAlarms = hydrated.alarms;
-          }
-
-          if (hydrated.sessions && hydrated.sessions.length > 0) {
-            const sessionMap = new Map<string, UserSession>();
-            if (this.data.sessions) {
-              this.data.sessions.forEach((s) => sessionMap.set(s.token, s));
-            }
-            hydrated.sessions.forEach((s) => sessionMap.set(s.token, s));
-            this.data.sessions = Array.from(sessionMap.values());
-          }
-
-          if (hydrated.firmwares && hydrated.firmwares.length > 0) {
-            this.data.firmwares = hydrated.firmwares;
-          }
-
-          if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
-            this.data.otaJobs = hydrated.otaJobs;
-          }
-
-          console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
-        }
-      } catch (hydrateErr: any) {
-        console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
-      }
-
-      // Check if REAL admin user exists in PostgreSQL table
-      let hasAdmin = false;
-      const verifyClient = await pool.connect();
-      try {
-        const adminCheck = await verifyClient.query(`
-          SELECT id FROM users 
-          WHERE role = 'admin' 
-            AND status != 'deleted' 
-            AND (deleted_at IS NULL)
-            AND id != 'usr_test_admin'
-            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-            AND id NOT LIKE 'usr_test_%'
-            AND id NOT LIKE 'test_%'
-            AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
-            AND LOWER(email) NOT LIKE 'test_%'
-          LIMIT 1;
-        `).catch(() => ({ rows: [] }));
-
-        if (adminCheck.rows.length > 0) {
-          hasAdmin = true;
-        }
-      } finally {
-        verifyClient.release();
-      }
-
-      if (hasAdmin) {
-        this.setDatabaseState(DatabaseState.READY);
-      } else {
-        this.setDatabaseState(DatabaseState.SETUP);
-      }
-
-      return true;
-    } catch (err: any) {
+      client = await pool.connect();
+      await client.query('SELECT 1;');
+    } catch (connErr: any) {
       this.postgresRepo.setConnected(false);
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
       }
-      this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${err?.code || err?.message || 'bağlantı yok'}). Sistem DB_UNAVAILABLE (Servis Dışı) moduna alındı.`);
+      this.setDatabaseState(DatabaseState.MAINTENANCE);
+      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Sistem MAINTENANCE moduna alındı.`);
+      return false;
+    } finally {
+      if (client) {
+        try { client.release(); } catch {}
+      }
+    }
+
+    this.postgresRepo.setConnected(true, true);
+    this.setDatabaseState(DatabaseState.DB_INITIALIZING);
+
+    if (!this.data.databaseSettings) {
+      this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
+    }
+    this.data.databaseSettings.isPostgresConnected = true;
+    this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+
+    // 1. Authoritative Schema Auto-Healing & Verification before hydration
+    try {
+      await this.postgresRepo.ensureTelemetrySchema(true);
+    } catch (tErr: any) {
+      systemLogger.error('database', 'PostgreSQL Şema Doğrulama/Onarım Hatası:', tErr?.message || tErr);
+      this.setDatabaseState(DatabaseState.MAINTENANCE);
       return false;
     }
+
+    // 2. FAST-PATH HYDRATION: Hydrate users, devices, and rules into memory
+    try {
+      const hydrated = await this.postgresRepo.hydrateFromPostgres();
+      if (hydrated) {
+        // Filter out any ephemeral test artifacts from hydrated data
+        hydrated.devices = hydrated.devices.filter((d: any) => !isTestOrEphemeralArtifact(d.id));
+        hydrated.rules = hydrated.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
+        hydrated.users = hydrated.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
+
+        if (hydrated.users.length > 0) {
+          this.data.users = hydrated.users;
+          this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
+        }
+
+        if (hydrated.devices.length > 0) {
+          this.data.devices = hydrated.devices;
+        }
+
+        if (hydrated.rules.length > 0) {
+          this.data.rules = hydrated.rules;
+        }
+
+        if (hydrated.dashboards.length > 0) {
+          this.data.dashboards = hydrated.dashboards;
+        }
+
+        if (hydrated.alarms.length > 0) {
+          this.data.activeAlarms = hydrated.alarms;
+        }
+
+        if (hydrated.sessions && hydrated.sessions.length > 0) {
+          const sessionMap = new Map<string, UserSession>();
+          if (this.data.sessions) {
+            this.data.sessions.forEach((s) => sessionMap.set(s.token, s));
+          }
+          hydrated.sessions.forEach((s) => sessionMap.set(s.token, s));
+          this.data.sessions = Array.from(sessionMap.values());
+        }
+
+        if (hydrated.firmwares && hydrated.firmwares.length > 0) {
+          this.data.firmwares = hydrated.firmwares;
+        }
+
+        if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
+          this.data.otaJobs = hydrated.otaJobs;
+        }
+
+        console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
+      }
+    } catch (hydrateErr: any) {
+      console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
+    }
+
+    // Check if REAL admin user exists in PostgreSQL table
+    let hasAdmin = false;
+    let verifyClient: any = null;
+    try {
+      verifyClient = await pool.connect();
+      const adminCheck = await verifyClient.query(`
+        SELECT id FROM users 
+        WHERE role = 'admin' 
+          AND status != 'deleted' 
+          AND (deleted_at IS NULL)
+          AND id != 'usr_test_admin'
+          AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+          AND id NOT LIKE 'usr_test_%'
+          AND id NOT LIKE 'test_%'
+          AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
+          AND LOWER(email) NOT LIKE 'test_%'
+        LIMIT 1;
+      `).catch(() => ({ rows: [] }));
+
+      if (adminCheck.rows.length > 0) {
+        hasAdmin = true;
+      }
+    } catch (vErr: any) {
+      console.warn('[Admin check error]:', vErr?.message || vErr);
+    } finally {
+      if (verifyClient) {
+        try { verifyClient.release(); } catch {}
+      }
+    }
+
+    if (hasAdmin) {
+      this.setDatabaseState(DatabaseState.READY);
+    } else {
+      this.setDatabaseState(DatabaseState.SETUP);
+    }
+
+    return true;
   }
 
   public async syncAllToPostgres(): Promise<{ success: boolean; message: string; counts?: Record<string, number> }> {
@@ -530,6 +557,9 @@ class LocalDatabase {
 
   private startQueueWorker() {
     setInterval(async () => {
+      if (!this.postgresRepo?.isReady() || this.getDatabaseState() !== DatabaseState.READY) {
+        return;
+      }
       try {
         await this.processQueue();
       } catch (err) {
@@ -1067,9 +1097,11 @@ class LocalDatabase {
 
   // User Auth & Session Management
   public getUsers(): User[] { return this.userRepository.getUsers(); }
+  public async getUsersAsync(): Promise<User[]> { return await this.userRepository.getUsersAsync(); }
   public async createSession(user: User): Promise<string> { return await this.userRepository.createSession(user); }
   public async deleteSession(token: string): Promise<boolean> { return await this.userRepository.deleteSession(token); }
   public verifySession(token: string): { user: User; session?: UserSession } | null { return this.userRepository.verifySession(token); }
+  public async verifySessionAsync(token: string): Promise<{ user: User; session?: UserSession } | null> { return await this.userRepository.verifySessionAsync(token); }
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> { return await this.userRepository.authenticate(email, pass); }
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
   public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }
@@ -3375,6 +3407,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
   private startAutoRetentionWorker() {
     const runWorkerCheck = async () => {
       try {
+        if (!this.postgresRepo?.isReady() || this.getDatabaseState() !== DatabaseState.READY) {
+          return;
+        }
         const policies = this.getRetentionPolicies();
         if (!policies.enabled) return;
 

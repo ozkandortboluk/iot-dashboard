@@ -2,6 +2,7 @@ import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import { db } from '../db.js';
+import { DatabaseState } from '../../types.js';
 import { broadcast, getWebSocketClientsCount } from '../services/websocket.js';
 import {
   simulatorActive,
@@ -37,7 +38,8 @@ systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
 });
 
 systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
-  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
@@ -45,6 +47,7 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
     return res.status(200).json({
       status: 'ready',
       ready: true,
+      state: dbState,
       database: {
         status: 'connected',
         engine: 'PostgreSQL / TimescaleDB',
@@ -64,12 +67,13 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
   return res.status(503).json({
     status: 'not_ready',
     ready: false,
+    state: dbState,
     database: {
-      status: 'disconnected',
+      status: dbState === DatabaseState.DB_CONNECTING || dbState === DatabaseState.DB_INITIALIZING ? 'initializing' : 'disconnected',
       engine: 'PostgreSQL / TimescaleDB',
       ready: false,
       pool: poolStats,
-      error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya bağlantı hazır değil.',
+      error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya kurulum/şema hazır değil.',
     },
     retryQueue: {
       pendingPacketCount: retryStats?.pendingPacketCount || 0,
@@ -83,17 +87,19 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
 });
 
 systemRouter.get('/health', (req, res) => {
-  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   const statusCode = isPostgresReady ? 200 : 503;
   return res.status(statusCode).json({
-    status: isPostgresReady ? 'healthy' : 'degraded',
+    status: isPostgresReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'degraded'),
     live: true,
     ready: isPostgresReady,
+    state: dbState,
     database: {
-      status: isPostgresReady ? 'connected' : 'disconnected',
+      status: isPostgresReady ? 'connected' : (dbState === DatabaseState.SETUP ? 'setup' : 'disconnected'),
       engine: 'PostgreSQL / TimescaleDB',
       ready: isPostgresReady,
       pool: poolStats,
@@ -103,6 +109,22 @@ systemRouter.get('/health', (req, res) => {
       pendingReadingCount: retryStats?.pendingReadingCount || 0,
       microBatch: retryStats?.microBatch,
     },
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// System Status Endpoint for Frontend / Diagnostics
+systemRouter.get(['/system/status', '/system-status'], (req, res) => {
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
+  const poolStats = db.postgresRepo?.getPoolStats() || undefined;
+
+  res.json({
+    status: isPostgresReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
+    databaseState: dbState,
+    isReady: isPostgresReady,
+    pool: poolStats,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
   });

@@ -46,7 +46,7 @@ describe('P0.1 & P0.9: PostgreSQL-Only Health and Readiness Contract', () => {
     const res = await request(app).get('/health');
 
     expect(res.status).toBe(503);
-    expect(res.body.status).toBe('degraded');
+    expect(['degraded', 'setup_required']).toContain(res.body.status);
     expect(res.body.database.engine).toBe('PostgreSQL / TimescaleDB');
     expect(JSON.stringify(res.body)).not.toContain('embedded_fallback');
     expect(JSON.stringify(res.body)).not.toContain('LowDB');
@@ -67,7 +67,10 @@ describe('P0.1 & P0.9: PostgreSQL-Only Health and Readiness Contract', () => {
     testApp.use('/api/database', databaseRouter);
 
     const originalVerify = db.verifySession;
-    db.verifySession = () => ({ user: { id: 'test_admin', role: 'admin' }, token: 'dummy', expiresAt: '2099' } as any);
+    const originalVerifyAsync = db.verifySessionAsync;
+    const mockSession = () => ({ user: { id: 'test_admin', role: 'admin' }, token: 'dummy', expiresAt: '2099' } as any);
+    db.verifySession = mockSession;
+    db.verifySessionAsync = async () => mockSession();
 
     const res = await request(testApp)
       .post('/api/database/config')
@@ -75,6 +78,7 @@ describe('P0.1 & P0.9: PostgreSQL-Only Health and Readiness Contract', () => {
       .send({ engine: 'local' });
     
     db.verifySession = originalVerify;
+    db.verifySessionAsync = originalVerifyAsync;
     process.env.NODE_ENV = originalEnv;
 
     expect(res.status).toBe(403);

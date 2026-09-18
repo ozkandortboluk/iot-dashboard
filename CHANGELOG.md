@@ -4,6 +4,55 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.33.0] - 2026-09-18
+
+### 📌 PostgreSQL-Only Administrator Creation & Authentication Architecture
+- **Elimination of Dual-Write Pattern**:
+  - `createAdministrator()` in `setup.service.ts` completely decoupled from `LocalDatabase` in-memory arrays and `db.json`. No credentials or user records are written to disk JSON in production mode.
+  - Primary administrator account creation is dispatched purely to PostgreSQL (`users` and `user_sessions` tables).
+- **PostgreSQL Repository Authentication & Session Validation**:
+  - `UserRepository` refactored to treat PostgreSQL as the authoritative source of truth whenever `postgresRepo.isReady()` is true.
+  - Implemented async PostgreSQL user query routines: `getUserById`, `getUserByEmail`, `getUserWithPassword`, `getUsers`, `getSession`, and `verifySession`.
+  - Upgraded session authentication middleware (`authenticateUser`) to perform asynchronous, secure token lookups against the PostgreSQL `user_sessions` table.
+- **Tenant & Admin Operations Decoupled from In-Memory State**:
+  - `admin/tenants.ts` routes (`GET /`, `GET /:id`, `POST /`, `PATCH /:id`, `POST /:id/suspend`, `DELETE /:id`) updated to query and manipulate user records via `db.getUsersAsync()` and PostgreSQL user repository.
+
+---
+
+## 🚀 [v1.32.0] - 2026-09-18
+
+### 📌 Setup Flow, Setup Service & DatabaseSetupWizard Modernization
+- **Strict Verification Sequence & State Transitions**:
+  - Fully integrated `setup.service.ts`, `setup.ts`, and `DatabaseSetupWizard.tsx` with the central `DatabaseState` machine.
+  - Linear, predictable wizard lifecycle: `Connection Test` -> `Configure Database` -> `TimescaleDB Verification` -> `Migrations & Schema Verification` -> `Primary Admin Creation` -> `State.READY`.
+- **Zero Standalone Fallback & Password Sanitization**:
+  - Removed all remaining standalone mode artifacts and default password fallbacks across API responses and configuration templates.
+  - Password inputs are securely transmitted and written to protected server-side secrets (`data/.db_config.json`) with `0600` permissions.
+- **Admin Creation & Immediate Readiness**:
+  - Creating the primary administrator in the wizard or via auth setup triggers `setupService.markSetupCompleted()` and transitions database state directly to `DatabaseState.READY`.
+  - Background workers and real-time WebSocket ingestion automatically spawn upon completion.
+
+---
+
+## 🚀 [v1.31.0] - 2026-09-18
+
+### 📌 Strict Database State Machine & Lifecycle Gating Overhaul
+- **PostgreSQL As Sole Gatekeeper & Deterministic Startup Flow**:
+  - Implemented strict state machine (`BOOTSTRAP` -> `SETUP` / `DB_CONNECTING` -> `DB_INITIALIZING` -> `READY` / `MAINTENANCE`).
+  - If no database configuration is present, the system cleanly defaults to `DatabaseState.SETUP`.
+  - If connection fails or schema fails to verify, the system enters `DatabaseState.MAINTENANCE`.
+  - `DatabaseState.READY` is strictly reached only when PostgreSQL connection is established, TimescaleDB hypertables & schemas are verified, and administrator presence is confirmed.
+- **Worker & Simulator Execution Gating**:
+  - Gated background workers (WebSocket server, OTA worker, NoData worker, command expiry worker, telemetry auto-retention cleanup, queue processor) and virtual simulator on `DatabaseState.READY && db.postgresRepo.isReady()`.
+  - Added reactive state listeners (`db.onStateChange`) in `server.ts` to automatically spawn background services immediately when database initialization or setup completes.
+- **API Availability Middleware & Health Endpoint Upgrades**:
+  - Restricted non-setup `/api/*` endpoints with HTTP 503 while database is in non-READY states (`DB_MAINTENANCE` / `DB_UNAVAILABLE`), while keeping `/setup/*`, `/auth/setup-status`, `/health/*`, and `/system/status` accessible.
+  - Enhanced `/health/ready`, `/health`, and `/system/status` to accurately report `state` and PostgreSQL pool status.
+- **Synchronized Multi-File Version Bump**:
+  - Synchronized `package.json`, `src/config/version.ts`, and `CHANGELOG.md` to `1.31.0`.
+
+---
+
 ## 🚀 [v1.30.0] - 2026-09-18
 
 ### 📌 PostgreSQL/TimescaleDB Sole Persistence Engine Finalization & Zero-Credentials Security

@@ -960,6 +960,96 @@ export class PostgresRepository {
   // ==========================================
   // USERS & PASSWORDS
   // ==========================================
+  public mapUserRow(r: any): User {
+    let notifPrefs = {};
+    if (typeof r.notification_preferences === 'string') {
+      try { notifPrefs = JSON.parse(r.notification_preferences); } catch {}
+    } else if (r.notification_preferences && typeof r.notification_preferences === 'object') {
+      notifPrefs = r.notification_preferences;
+    }
+
+    return {
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      phone: r.phone || undefined,
+      notificationEmail: r.notification_email || undefined,
+      whatsappNumber: r.whatsapp_number || undefined,
+      telegramChatId: r.telegram_chat_id || undefined,
+      role: r.role || 'customer',
+      companyName: r.company_name || undefined,
+      notificationPreferences: notifPrefs,
+      status: r.status || 'active',
+      deletedAt: r.deleted_at ? new Date(r.deleted_at).toISOString() : undefined,
+      created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+    };
+  }
+
+  public async getUserById(userId: string): Promise<User | null> {
+    if (!this.pool || !this.isConnected || !userId) return null;
+    try {
+      const res = await this.query(
+        `SELECT * FROM users WHERE id = $1 AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        [userId]
+      );
+      if (res.rows && res.rows.length > 0) {
+        return this.mapUserRow(res.rows[0]);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async getUserByEmail(email: string): Promise<User | null> {
+    if (!this.pool || !this.isConnected || !email) return null;
+    try {
+      const res = await this.query(
+        `SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        [email.trim()]
+      );
+      if (res.rows && res.rows.length > 0) {
+        return this.mapUserRow(res.rows[0]);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async getUserWithPassword(emailOrId: string): Promise<{ user: User; passwordHash: string } | null> {
+    if (!this.pool || !this.isConnected || !emailOrId) return null;
+    try {
+      const res = await this.query(
+        `SELECT * FROM users WHERE (LOWER(email) = LOWER($1) OR id = $1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        [emailOrId.trim()]
+      );
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          user: this.mapUserRow(r),
+          passwordHash: r.password_hash || '',
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async getUsers(): Promise<User[]> {
+    if (!this.pool || !this.isConnected) return [];
+    try {
+      const res = await this.query(
+        `SELECT * FROM users WHERE (deleted_at IS NULL OR status != 'deleted') ORDER BY created_at ASC;`
+      );
+      return (res.rows || []).map((r) => this.mapUserRow(r));
+    } catch {
+      return [];
+    }
+  }
+
   public async saveUser(user: User, passwordHash?: string): Promise<void> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
@@ -2683,6 +2773,44 @@ export class PostgresRepository {
   // ==========================================
   // USER SESSIONS
   // ==========================================
+  public async getSession(token: string): Promise<UserSession | null> {
+    if (!this.pool || !this.isConnected || !token) return null;
+    try {
+      const res = await this.query(
+        `SELECT * FROM user_sessions WHERE token = $1 AND expires_at > NOW() LIMIT 1;`,
+        [token.trim()]
+      );
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          token: r.token,
+          userId: r.user_id,
+          userRole: r.user_role as any,
+          userEmail: r.user_email,
+          userName: r.user_name,
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+          expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : new Date().toISOString(),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async verifySession(token: string): Promise<{ user: User; session: UserSession } | null> {
+    if (!this.pool || !this.isConnected || !token) return null;
+    try {
+      const session = await this.getSession(token);
+      if (!session) return null;
+      const user = await this.getUserById(session.userId);
+      if (!user) return null;
+      return { user, session };
+    } catch {
+      return null;
+    }
+  }
+
   public async deleteUserSessions(userId: string): Promise<void> {
     if (!this.pool) return;
     await this.query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);
