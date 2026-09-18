@@ -1318,11 +1318,9 @@ export class PostgresRepository {
         try {
           // Fallback: Belirtilen tenant_id veritabanında yoksa, 'usr_admin' garantisi altında 'usr_admin'e yönlendir ve kaydet
           if (this.pool) {
-            await this.pool.query(`
-              INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-              VALUES ('usr_admin', 'Sistem Yöneticisi', 'admin@nexusnode.io', '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 'admin', 'Merkez Yönetim', 'active', CURRENT_TIMESTAMP)
-              ON CONFLICT (id) DO NOTHING;
-            `);
+            // Do NOT silently create a phantom user to bypass foreign key checks.
+            // If the user doesn't exist, the device insertion should fail rather than silently creating an admin.
+            // Just redirect it to 'usr_admin', which should be created legitimately during system setup.
           }
           const fallbackParams = [...params];
           fallbackParams[1] = 'usr_admin';

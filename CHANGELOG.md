@@ -1584,6 +1584,18 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 *Tüm yeni özellikler, hata düzeltmeleri ve dağıtım sürümleri için [GitHub Releases](https://github.com/ozkan-1403/iot-telemetry-platform/releases) sayfasını ziyaret edebilirsiniz.*
 
+## [1.28.1] - 2026-09-18
+### Fixed
+- Fixed Docker build process by adding data directory to .dockerignore so it can be copied correctly in the build stage.
+
+## [1.23.4] - 2026-09-17
+### Fixed
+- Frontend: Sistem genelindeki tüm Checkbox (onay kutusu) ve Radio (seçenek düğmesi) bileşenleri için, özellikle karanlık temada ("dark mode") okunabilirliği ve zıtlığı bozan yerel tarayıcı görünümleri düzeltildi. Tailwind form eklentisi olmadan da çalışan, karanlık temada göz yormayan özel küresel (global) CSS yapılandırması (src/index.css) eklendi.
+
+## [1.23.4] - 2026-09-17
+### Fixed
+- Frontend: Sistem genelindeki tüm Checkbox (onay kutusu) ve Radio (seçenek düğmesi) bileşenleri için, özellikle karanlık temada ("dark mode") okunabilirliği ve zıtlığı bozan yerel tarayıcı görünümleri düzeltildi. Tailwind form eklentisi olmadan da çalışan, karanlık temada göz yormayan özel küresel (global) CSS yapılandırması (src/index.css) eklendi.
+
 ## [1.23.4] - 2026-09-17
 ### Fixed
 - Frontend: Sistem genelindeki tüm Checkbox (onay kutusu) ve Radio (seçenek düğmesi) bileşenleri için, özellikle karanlık temada ("dark mode") okunabilirliği ve zıtlığı bozan yerel tarayıcı görünümleri düzeltildi. Tailwind form eklentisi olmadan da çalışan, karanlık temada göz yormayan özel küresel (global) CSS yapılandırması (src/index.css) eklendi.
