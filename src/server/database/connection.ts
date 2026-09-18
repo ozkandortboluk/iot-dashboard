@@ -38,11 +38,11 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
   }
 
   // 3. Structured / Deconstructed Environment Variables (Cloud SQL, Docker, standard Postgres conventions)
-  const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST;
-  const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER;
-  const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
-  const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE;
-  const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || '5432';
+  const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
+  const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
+  const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
+  const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME;
+  const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
 
   // If host is explicitly configured, construct standard PostgreSQL URL
   if (host && host.trim() !== '') {
@@ -130,8 +130,8 @@ export function getPostgresPoolLimits(): {
   const envIdleTimeout = parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10);
   const idleTimeoutMillis = Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : 30000;
 
-  const envStatementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '20000', 10);
-  const statementTimeoutMillis = Number.isFinite(envStatementTimeout) && envStatementTimeout > 0 ? envStatementTimeout : 20000;
+  const envStatementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '60000', 10);
+  const statementTimeoutMillis = Number.isFinite(envStatementTimeout) && envStatementTimeout > 0 ? envStatementTimeout : 60000;
 
   return { max, connectionTimeoutMillis, idleTimeoutMillis, statementTimeoutMillis };
 }

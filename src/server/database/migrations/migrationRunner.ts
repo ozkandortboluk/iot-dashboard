@@ -74,6 +74,8 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
 }> {
   console.log('[Migration Runner] Starting database migration check...');
   const client = await pool.connect();
+  // Ensure migration DDL queries do not timeout prematurely
+  await client.query('SET statement_timeout = 300000;').catch(() => {});
 
   let lockAcquired = false;
   try {

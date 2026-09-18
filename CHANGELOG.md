@@ -4,7 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
-## 🚀 [v1.28.0] - 2026-09-17
+## 🚀 [v1.28.2] - 2026-09-18
+
+### 📌 Docker Compose Veritabanı Otomatik Bağlantı ve Zaman Aşımı İyileştirmeleri (Database Connection & Timeout Resilience)
+- **`DB_HOST` Ortam Değişkeni Desteği**:
+  - `src/server/database/connection.ts` içindeki `resolvePostgresConnectionString()` fonksiyonuna `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` ve `DB_PORT` değişkenleri eklenerek Docker Compose ortamında doğrudan konteyner isimleriyle (`timescaledb`) eşleşmesi sağlandı.
+- **Docker Compose Güvenli Geri Dönüş Parolası**:
+  - `docker-compose.yml` içinde `timescaledb` ve `app` servisleri için varsayılan `POSTGRES_PASSWORD` ve `DATABASE_URL` fallback yapılandırması tanımlandı; böylece kullanıcı `.env` dosyasını oluşturmasa dahi TimescaleDB başlatma hatası almadan otomatik olarak devreye girer.
+- **Migrasyon ve DDL Zaman Aşımı Direnci**:
+  - Veritabanı şema migrasyonları ve TimescaleDB hypertable ilklendirme süreçlerinde `Query read timeout` hatasını önlemek için `migrationRunner.ts` içerisindeki istemciye 300 saniyelik DDL zaman aşımı tanımlandı ve genel havuz statement zaman aşımı 60 saniyeye yükseltildi.
+
+---
+
+## 🚀 [v1.28.1] - 2026-09-18
+
+### 📌 Docker Build Dosya Sistemi Kapsama Düzeltmesi (Docker Build Context Fix)
+- `.dockerignore` dosyasından `data` dizini istisnası kaldırılarak imaj derleme aşamasında `COPY --from=builder /app/data ./data` adımının hatasız tamamlanması sağlandı.
+
+---
 
 ### 📌 İlk Kurulum Veritabanı Sihirbazı & Güvenli Çalışma Zamanı Gizli Bilgi Yönetimi (First Run Database Setup Wizard & Runtime Secrets Hardening)
 - **İlk Kurulum Veritabanı Sihirbazı (First Run Database Setup Wizard)**:
