@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.30.0] - 2026-09-18
+
+### 📌 PostgreSQL/TimescaleDB Sole Persistence Engine Finalization & Zero-Credentials Security
+- **TimescaleDB Strict Requirement Enforced**:
+  - `setup.service.ts` now strictly enforces TimescaleDB extension availability during database initialization. If TimescaleDB is not detected or enabled, initialization fails fast with actionable diagnostics rather than silently downgrading to standard PostgreSQL.
+- **Complete Elimination of Standalone Mode & Dual-Writes**:
+  - Removed all remaining standalone mode UI buttons, state variables (`isStandaloneMode`), and fallback endpoints.
+  - Eliminated dual-writes and background `db.json` disk flushes across Firmwares, OTA deployment jobs, and Retention policy operations when operating in PostgreSQL production mode.
+- **Total Hardcoded Credential Cleanup**:
+  - Purged all occurrences of default/fallback passwords (`nexus_iot_secure_pass_2026`) across source files (`setup.service.ts`, `DatabaseSetupWizard.tsx`, `docker-compose.yml`).
+  - Database connection presets and quick-setup actions now require explicit user passwords or environment-configured credentials (`POSTGRES_PASSWORD`).
+- **PostgresRepository Firmware & OTA Direct Querying**:
+  - Added dedicated `getFirmwares()`, `getFirmwareById()`, `getOtaJobs()`, `getOtaJobById()`, and `deleteOtaJob()` methods to `PostgresRepository`.
+- **Synchronized Multi-File Version Bump**:
+  - Synchronized `package.json`, `src/config/version.ts`, and `CHANGELOG.md` to `1.30.0`.
+
+---
+
 ## 🚀 [v1.29.0] - 2026-09-18
 
 ### 📌 Pure PostgreSQL/TimescaleDB Single Source of Truth Architecture Overhaul

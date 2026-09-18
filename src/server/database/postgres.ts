@@ -3375,6 +3375,147 @@ export class PostgresRepository {
     ]);
   }
 
+  public async getFirmwares(): Promise<Firmware[]> {
+    if (!this.pool || !this.isConnected) {
+      return [];
+    }
+    const fwRes = await this.query(`SELECT * FROM firmwares ORDER BY created_at DESC;`).catch(() => null);
+    const firmwares: Firmware[] = [];
+    if (fwRes?.rows) {
+      fwRes.rows.forEach((r: any) => {
+        firmwares.push({
+          id: r.id,
+          name: r.name,
+          deviceType: r.device_type,
+          roleKey: r.role_key,
+          hardwareModel: r.hardware_model || 'ALL',
+          version: r.version,
+          description: r.description || undefined,
+          binaryData: r.binary_data ? (Buffer.isBuffer(r.binary_data) ? r.binary_data.toString('base64') : String(r.binary_data)) : undefined,
+          binarySize: Number(r.binary_size || 0),
+          sha256: r.sha256,
+          signature: r.signature || undefined,
+          filePath: r.file_path || undefined,
+          minHardwareRevision: r.min_hardware_revision || undefined,
+          isActive: r.is_active !== false,
+          uploadedBy: r.uploaded_by,
+          created_at: new Date(r.created_at).toISOString(),
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        });
+      });
+    }
+    return firmwares;
+  }
+
+  public async getFirmwareById(id: string): Promise<Firmware | null> {
+    if (!this.pool || !this.isConnected) {
+      return null;
+    }
+    const fwRes = await this.query(`SELECT * FROM firmwares WHERE id = $1 LIMIT 1;`, [id]).catch(() => null);
+    if (!fwRes?.rows?.[0]) return null;
+    const r = fwRes.rows[0];
+    return {
+      id: r.id,
+      name: r.name,
+      deviceType: r.device_type,
+      roleKey: r.role_key,
+      hardwareModel: r.hardware_model || 'ALL',
+      version: r.version,
+      description: r.description || undefined,
+      binaryData: r.binary_data ? (Buffer.isBuffer(r.binary_data) ? r.binary_data.toString('base64') : String(r.binary_data)) : undefined,
+      binarySize: Number(r.binary_size || 0),
+      sha256: r.sha256,
+      signature: r.signature || undefined,
+      filePath: r.file_path || undefined,
+      minHardwareRevision: r.min_hardware_revision || undefined,
+      isActive: r.is_active !== false,
+      uploadedBy: r.uploaded_by,
+      created_at: new Date(r.created_at).toISOString(),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+    };
+  }
+
+  public async getOtaJobs(): Promise<OtaDeploymentJob[]> {
+    if (!this.pool || !this.isConnected) {
+      return [];
+    }
+    const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs ORDER BY created_at DESC LIMIT 500;`).catch(() => null);
+    const otaJobs: OtaDeploymentJob[] = [];
+    if (otaRes?.rows) {
+      otaRes.rows.forEach((r: any) => {
+        otaJobs.push({
+          id: r.id,
+          firmwareId: r.firmware_id,
+          firmwareVersion: r.firmware_version,
+          firmwareName: r.firmware_name,
+          deviceId: r.device_id,
+          deviceName: r.device_name,
+          deviceType: r.device_type,
+          roleKey: r.role_key,
+          targetScope: r.target_scope,
+          status: r.status,
+          progressPercent: Number(r.progress_percent || 0),
+          errorMessage: r.error_message || undefined,
+          initiatedBy: r.initiated_by,
+          downloadToken: r.download_token || undefined,
+          expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
+          attemptCount: Number(r.attempt_count || 0),
+          maxAttempts: Number(r.max_attempts || 3),
+          lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
+          nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
+          downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
+          bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
+          created_at: new Date(r.created_at).toISOString(),
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+          completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
+        });
+      });
+    }
+    return otaJobs;
+  }
+
+  public async getOtaJobById(id: string): Promise<OtaDeploymentJob | null> {
+    if (!this.pool || !this.isConnected) {
+      return null;
+    }
+    const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs WHERE id = $1 LIMIT 1;`, [id]).catch(() => null);
+    if (!otaRes?.rows?.[0]) return null;
+    const r = otaRes.rows[0];
+    return {
+      id: r.id,
+      firmwareId: r.firmware_id,
+      firmwareVersion: r.firmware_version,
+      firmwareName: r.firmware_name,
+      deviceId: r.device_id,
+      deviceName: r.device_name,
+      deviceType: r.device_type,
+      roleKey: r.role_key,
+      targetScope: r.target_scope,
+      status: r.status,
+      progressPercent: Number(r.progress_percent || 0),
+      errorMessage: r.error_message || undefined,
+      initiatedBy: r.initiated_by,
+      downloadToken: r.download_token || undefined,
+      expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
+      attemptCount: Number(r.attempt_count || 0),
+      maxAttempts: Number(r.max_attempts || 3),
+      lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
+      nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
+      downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
+      bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
+      created_at: new Date(r.created_at).toISOString(),
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+      completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
+    };
+  }
+
+  public async deleteOtaJob(id: string): Promise<void> {
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    await this.query(`DELETE FROM ota_deployment_jobs WHERE id = $1;`, [id]);
+  }
+
 
   // ==========================================
   // FULL SEED / SYNC-ALL TO POSTGRES

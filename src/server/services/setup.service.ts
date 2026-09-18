@@ -294,7 +294,8 @@ export class SetupService {
    */
   public async getStatus(): Promise<SetupStatusResponse> {
     // 1. Check if an admin exists in memory or PostgreSQL (strictly excluding test accounts)
-    await db.waitForInitialization().catch(() => {});
+    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    await db.waitForInitialization(isTestEnv ? 200 : 5000).catch(() => {});
     const users = db.getUsers();
     let hasAdmin = users.some(isRealAdminUser);
 
@@ -306,9 +307,10 @@ export class SetupService {
 
     if (pool) {
       try {
+        const connectTimeout = isTestEnv ? 300 : 8000;
         const client: any = await Promise.race([
           pool.connect(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('DB_CONNECT_TIMEOUT')), 8000)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('DB_CONNECT_TIMEOUT')), connectTimeout)),
         ]);
         try {
           // Connection test
@@ -560,7 +562,7 @@ export class SetupService {
 
     const effectiveConfig: DatabaseConfigPayload = {
       ...config,
-      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || (config.host === 'timescaledb' || config.host === 'localhost' ? 'nexus_iot_secure_pass_2026' : ''),
+      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
     };
 
     // 1. Verify connection first
@@ -635,15 +637,17 @@ export class SetupService {
       const pgVer = verRes.rows[0]?.version?.split(' on ')[0] || 'PostgreSQL';
       steps.push({ name: 'PostgreSQL detected', status: 'done', details: pgVer });
 
-      // 3. TimescaleDB Check / Creation
+      // 3. TimescaleDB Check / Creation (Mandatory for NexusNode IoT)
       let timescaleOk = false;
+      let timescaleVer = '';
       try {
         const tsCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
         if (tsCheck.rows.length > 0) {
           try {
             await client.query('SELECT timescaledb_version();');
             timescaleOk = true;
-            steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${tsCheck.rows[0].extversion}` });
+            timescaleVer = tsCheck.rows[0].extversion;
+            steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${timescaleVer}` });
           } catch (funcErr: any) {
             console.warn('[SetupService] TimescaleDB registered in catalog but library missing or mismatched:', funcErr?.message);
             try {
@@ -652,11 +656,7 @@ export class SetupService {
               timescaleOk = true;
               steps.push({ name: 'TimescaleDB detected', status: 'done', details: 'TimescaleDB güncellendi ve doğrulandı.' });
             } catch {
-              steps.push({
-                name: 'TimescaleDB check',
-                status: 'skipped',
-                details: `TimescaleDB kütüphanesi (${tsCheck.rows[0].extversion}) diskte bulunamadı. Standart PostgreSQL moduyla devam ediliyor.`,
-              });
+              timescaleOk = false;
             }
           }
         } else {
@@ -667,20 +667,20 @@ export class SetupService {
             timescaleOk = true;
             steps.push({ name: 'TimescaleDB detected', status: 'done', details: 'TimescaleDB eklentisi aktif edildi.' });
           } catch {
-            steps.push({
-              name: 'TimescaleDB check',
-              status: 'skipped',
-              details: 'TimescaleDB eklentisi sunucuda mevcut değil, standart PostgreSQL hypertable fallback modu kullanılacak.',
-            });
+            timescaleOk = false;
           }
         }
       } catch (tsErr: any) {
-        // Not fatal if running standard PostgreSQL without Timescale package
+        timescaleOk = false;
+      }
+
+      if (!timescaleOk) {
         steps.push({
           name: 'TimescaleDB check',
-          status: 'skipped',
-          details: 'TimescaleDB eklentisi sunucuda mevcut değil, standart PostgreSQL hypertable fallback modu kullanılacak.',
+          status: 'failed',
+          details: 'TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi. NexusNode IoT mimarisi TimescaleDB gerektirir.',
         });
+        throw new Error('TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi. NexusNode IoT mimarisinde TimescaleDB zorunludur. Lütfen TimescaleDB yüklü bir PostgreSQL sunucusu kullanın.');
       }
 
       client.release();
@@ -753,7 +753,6 @@ export class SetupService {
     passwordConfirm?: string;
     companyName?: string;
     ip?: string;
-    allowStandalone?: boolean;
   }): Promise<{ success: boolean; user: User; token: string; message: string }> {
     if (this.isSetupCompleted()) {
       throw new Error('Kurulum zaten tamamlanmış. Tekrar yönetici oluşturulamaz.');
@@ -925,7 +924,7 @@ export class SetupService {
       port: 5432,
       database: 'iot_dashboard',
       user: 'iot_user',
-      password: password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || 'nexus_iot_secure_pass_2026',
+      password: password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
       sslMode: 'disable',
     };
 
@@ -954,24 +953,6 @@ export class SetupService {
       success: true,
       message: 'TimescaleDB veritabanı, tablolar ve migrasyonlar başarıyla hazırlandı.',
     };
-  }
-
-  /**
-   * Standalone admin initialization for preview or environments without immediate database container
-   */
-  public async initializeStandalone(params: {
-    username?: string;
-    name?: string;
-    email: string;
-    password: string;
-    passwordConfirm?: string;
-    companyName?: string;
-    ip?: string;
-  }): Promise<{ success: boolean; user: User; token: string; message: string }> {
-    return this.createAdministrator({
-      ...params,
-      allowStandalone: true,
-    });
   }
 
   /**

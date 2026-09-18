@@ -8,7 +8,10 @@ describe('First Run Database Setup Wizard Service & Security', () => {
   const testSecretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
 
   beforeEach(() => {
-    // Clean up test runtime secret file if exists
+    // Clean up test runtime secret file if exists and reset setupService state
+    (setupService as any).isCompletedState = false;
+    (setupService as any).completedAtDate = null;
+    (setupService as any).runtimeConfig = null;
     try {
       if (fs.existsSync(testSecretPath)) {
         fs.unlinkSync(testSecretPath);
@@ -17,6 +20,9 @@ describe('First Run Database Setup Wizard Service & Security', () => {
   });
 
   afterEach(() => {
+    (setupService as any).isCompletedState = false;
+    (setupService as any).completedAtDate = null;
+    (setupService as any).runtimeConfig = null;
     try {
       if (fs.existsSync(testSecretPath)) {
         fs.unlinkSync(testSecretPath);

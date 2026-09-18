@@ -1766,27 +1766,27 @@ if __name__ == "__main__":
 # 1. HIZLI METİN FORMATINDA TELEMETRİ GÖNDERİMİ
 curl -X POST "${originUrl}/api/v1/telemetry" \\
   -H "Content-Type: text/plain" \\
-  -d "YOUR_API_KEY, Saha_Cihazi_01, sıcaklık:28.4, nem:62.5, basınç:1013.2"
+  -d "dev_key_test_0000000000000000, dev_test_01, sıcaklık:28.4, nem:62.5, basınç:1013.2"
 
 # 2. HEARTBEAT / PING SİNYALİ GÖNDERME (Cihazı Canlı Tutma / Çevrimiçi Yapma)
 curl -X POST "${originUrl}/api/telemetry/ping" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: YOUR_API_KEY" \\
-  -d '{"deviceId":"dev_esp32_01","ping":1,"rssi":-58}'
+  -H "X-API-Key: dev_key_test_0000000000000000" \\
+  -d '{"deviceId":"dev_test_01","ping":1,"rssi":-58}'
 
 # 3. JSON FORMATINDA TELEMETRİ GÖNDERİMİ
 curl -X POST "${originUrl}/api/telemetry" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: YOUR_API_KEY" \\
+  -H "X-API-Key: dev_key_test_0000000000000000" \\
   -d '{
-    "deviceId": "dev_esp32_01",
+    "deviceId": "dev_test_01",
     "metric": "temperature",
     "value": 31.2,
     "unit": "°C"
   }'
 
 # 4. RÖLE / PWM ÇIKIŞI TETİKLEME (Kontrol API)
-curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
+curl -X POST "${originUrl}/api/devices/dev_test_01/control" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
   -d '{
@@ -1797,7 +1797,7 @@ curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
 
 # 5. KULLANICI -> CİHAZ YENİ KOMUT GÖNDERME (PostgreSQL Multi-Tenant Command API)
 # 5 Aşamalı Doğrulama: Oturum + Tenant İzolasyonu + Cihaz Sahipliği + Rol Kontrolü + Çıkış Pini Desteği
-curl -X POST "${originUrl}/api/devices/dev_esp32_01/commands" \\
+curl -X POST "${originUrl}/api/devices/dev_test_01/commands" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
   -d '{
@@ -1809,7 +1809,7 @@ curl -X POST "${originUrl}/api/devices/dev_esp32_01/commands" \\
   }'
 
 # 6. CİHAZ KOMUT LİSTESİ SORGULAMA (GET /api/devices/:id/commands)
-curl -X GET "${originUrl}/api/devices/dev_esp32_01/commands" \\
+curl -X GET "${originUrl}/api/devices/dev_test_01/commands" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN"
 
 # 7. BEKLEYEN KOMUTU İPTAL ETME (POST /api/commands/:id/cancel)

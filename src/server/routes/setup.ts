@@ -103,17 +103,6 @@ setupRouter.post('/quick-init-docker', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/setup/standalone-init
- * Disabled per PostgreSQL single source of truth architecture
- */
-setupRouter.post('/standalone-init', (_req: Request, res: Response) => {
-  return res.status(400).json({
-    success: false,
-    message: 'Bağımsız mod (Standalone) kaldırılmıştır. Sistem yalnızca PostgreSQL/TimescaleDB veritabanı ile çalışır.',
-  });
-});
-
-/**
  * POST /api/setup/configure-database
  * Saves valid database credentials to secure runtime secret storage and restarts pool.
  */

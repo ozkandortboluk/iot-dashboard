@@ -86,8 +86,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     sslMode: 'disable' as 'disable' | 'require' | 'prefer' | 'verify-full',
   });
 
-  // Standalone / Preview Mode (allows proceeding if database container is not ready yet)
-  const [isStandaloneMode, setIsStandaloneMode] = useState<boolean>(false);
+  // Quick Docker Loading State
   const [quickDockerLoading, setQuickDockerLoading] = useState<boolean>(false);
 
   // Test Connection Result
@@ -130,13 +129,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
             database: data.dbConfig.database || prev.database,
             user: data.dbConfig.user || prev.user,
             sslMode: data.dbConfig.sslMode || prev.sslMode,
-            password: prev.password || 'nexus_iot_secure_pass_2026',
+            password: prev.password || '',
           }));
         } else if (data.defaultDockerConfig) {
           setDbConfig((prev) => ({
             ...prev,
             ...data.defaultDockerConfig,
-            password: data.defaultDockerConfig.password || prev.password || 'nexus_iot_secure_pass_2026',
+            password: data.defaultDockerConfig.password || prev.password || '',
           }));
         }
 
@@ -168,7 +167,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       const res = await fetch('/api/setup/quick-init-docker', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: dbConfig.password || 'nexus_iot_secure_pass_2026' }),
+        body: JSON.stringify({ password: dbConfig.password || '' }),
       });
 
       const data = await res.json();
@@ -178,7 +177,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
 
       setTestSuccess(true);
       setInitComplete(true);
-      setIsStandaloneMode(false);
       setCurrentStep(6);
     } catch (err: any) {
       setError(err?.message || 'Hızlı Docker kurulumu başarısız. Lütfen parametreleri manuel yapılandırın.');
@@ -511,20 +509,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                         </>
                       )}
                     </button>
-
-                    <button
-                      id="wizard-step1-standalone"
-                      type="button"
-                      onClick={() => {
-                        setIsStandaloneMode(true);
-                        setCurrentStep(6);
-                      }}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition cursor-pointer border border-slate-700/60"
-                      title="PostgreSQL olmadan doğrudan yönetici hesabı oluşturup paneli açar"
-                    >
-                      <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>⚡ Bağımsız Mod</span>
-                    </button>
                   </div>
 
                   <button
@@ -565,14 +549,14 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   <button
                     type="button"
                     onClick={() => {
-                      setDbConfig({
+                      setDbConfig((prev) => ({
+                        ...prev,
                         host: 'timescaledb',
                         port: 5432,
                         database: 'iot_dashboard',
                         user: 'iot_user',
-                        password: 'nexus_iot_secure_pass_2026',
                         sslMode: 'disable',
-                      });
+                      }));
                     }}
                     className="px-2.5 py-1 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-300 rounded-lg text-xs font-mono transition cursor-pointer"
                   >
@@ -582,14 +566,14 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   <button
                     type="button"
                     onClick={() => {
-                      setDbConfig({
+                      setDbConfig((prev) => ({
+                        ...prev,
                         host: 'localhost',
                         port: 5432,
                         database: 'iot_dashboard',
                         user: 'iot_user',
-                        password: 'nexus_iot_secure_pass_2026',
                         sslMode: 'disable',
-                      });
+                      }));
                     }}
                     className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg text-xs font-mono transition cursor-pointer"
                   >
@@ -840,22 +824,11 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                               🐳 Host Olarak 'timescaledb' Dene
                             </button>
                           )}
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsStandaloneMode(true);
-                              setCurrentStep(6);
-                            }}
-                            className="px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-700/50 text-amber-300 rounded-lg text-xs font-semibold cursor-pointer transition"
-                          >
-                            ⚡ Önizleme / Bağımsız Mod ile Devam Et (Veritabanı Sonra)
-                          </button>
                         </div>
 
                         <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-400">
                           <li>Host adresi olarak Docker ortamındaysanız <code className="text-indigo-400">timescaledb</code> veya yerelde <code className="text-indigo-400">localhost</code> kullanın.</li>
-                          <li>Kullanıcı adı (<code className="text-indigo-400">iot_user</code>) ve varsayılan şifrenin (<code className="text-indigo-400">nexus_iot_secure_pass_2026</code>) doğru olduğundan emin olun.</li>
+                          <li>Kullanıcı adı (<code className="text-indigo-400">iot_user</code>) ve veritabanı şifrenizin doğru girildiğinden emin olun.</li>
                           <li>Docker TimescaleDB konteynerinin çalıştığını kontrol edin: <code className="text-slate-300 font-mono">docker compose ps</code></li>
                         </ul>
                       </div>
@@ -886,19 +859,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   </div>
 
                   <div className="flex items-center gap-3">
-                    {!testSuccess && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsStandaloneMode(true);
-                          setCurrentStep(6);
-                        }}
-                        className="text-amber-400 hover:text-amber-300 text-xs font-medium underline cursor-pointer"
-                      >
-                        ⚡ Bağımsız Mod ile Devam Et
-                      </button>
-                    )}
-
                     <button
                       id="wizard-step3-next"
                       type="button"
@@ -1022,16 +982,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     <span>İlk Sistem Yöneticisini Oluşturun</span>
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Bu hesap sistemin birincil yöneticisi (Admin) olacaktır. Şifre bcrypt ile güvenli biçimde hashlenir.
+                    Bu hesap sistemin birincil yöneticisi (Admin) olacaktır. Şifre bcrypt ile güvenli biçimde hashlenir ve doğrudan PostgreSQL tablosuna kaydedilir.
                   </p>
                 </div>
-
-                {isStandaloneMode && (
-                  <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-amber-200 text-xs flex items-center gap-2.5">
-                    <Terminal className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>⚡ <strong>Bağımsız / Önizleme Modu:</strong> Yönetici oluşturulduktan sonra panel hemen açılır. PostgreSQL bağlantısını dilediğiniz zaman paneli açtıktan sonra da yapabilirsiniz.</span>
-                  </div>
-                )}
 
                 <form onSubmit={handleCreateAdmin} className="space-y-4 text-xs">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1112,7 +1065,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   <div className="flex items-center justify-between pt-4 border-t border-slate-800">
                     <button
                       type="button"
-                      onClick={() => setCurrentStep(isStandaloneMode ? 1 : 4)}
+                      onClick={() => setCurrentStep(4)}
                       disabled={loading}
                       className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
                     >

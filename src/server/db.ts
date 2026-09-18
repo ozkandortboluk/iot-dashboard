@@ -3030,7 +3030,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       ...current,
       ...newPolicies,
     };
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
     this.addAuditLog(
       'usr_admin',
       'Yönetici',
@@ -3163,7 +3165,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     this.data.retentionPolicies.lastCleanupAt = cleanupTime;
     this.data.retentionPolicies.lastCleanedCounts = { ...cleaned };
 
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
 
     const actionText = isAuto
       ? 'Otomatik Veri Saklama Temizliği (Zamanlanmış Görev)'
@@ -3244,7 +3248,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       cleaned.deviceCommands;
 
     const cleanupTime = new Date().toISOString();
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
 
     this.addAuditLog(
       'usr_admin',
@@ -3354,7 +3360,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       cleaned.deviceCommands;
 
     const cleanupTime = new Date().toISOString();
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
 
     return {
       success: true,
@@ -3411,7 +3419,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     } else {
       this.data.firmwares.push(fw);
     }
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
 
     if (this.postgresRepo.isReady()) {
       this.postgresRepo.saveFirmware(fw).catch((err) => {
@@ -3427,7 +3437,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     const idx = this.data.firmwares.findIndex((f) => f.id === id);
     if (idx !== -1) {
       this.data.firmwares.splice(idx, 1);
-      this.saveData(this.data);
+      if (!this.isPostgresProductionMode()) {
+        this.saveData(this.data);
+      }
 
       if (this.postgresRepo.isReady()) {
         this.postgresRepo.deleteFirmware(id).catch((err) => {
@@ -3457,7 +3469,9 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     } else {
       this.data.otaJobs.push(job);
     }
-    this.saveData(this.data);
+    if (!this.isPostgresProductionMode()) {
+      this.saveData(this.data);
+    }
 
     if (this.postgresRepo.isReady()) {
       (async () => {
