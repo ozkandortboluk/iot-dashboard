@@ -46,8 +46,7 @@ adminTenantsRouter.get('/', requireAdminOrStaff, async (req, res) => {
     const query = PaginationQuerySchema.parse(req.query);
     
     // Tüm kullanıcıları veya yetkiye göre olanları getir
-    const allUsers = await db.getUsersAsync();
-    let tenants = [...allUsers];
+    let tenants = db.data.users || [];
 
     if (query.search) {
       const s = query.search.toLowerCase();
@@ -117,8 +116,7 @@ adminTenantsRouter.get('/', requireAdminOrStaff, async (req, res) => {
 
 // GET /api/admin/tenants/:id
 adminTenantsRouter.get('/:id', requireAdminOrStaff, async (req, res) => {
-  const allUsers = await db.getUsersAsync();
-  const tenant = allUsers.find((u: any) => u.id === req.params.id);
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id);
   if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
   
   const deviceCount = (db.data.devices || []).filter((d: any) => d.tenantId === tenant.id).length;
@@ -142,8 +140,8 @@ adminTenantsRouter.get('/:id', requireAdminOrStaff, async (req, res) => {
 
 // GET /api/admin/tenants/:id/members
 adminTenantsRouter.get('/:id/members', requireAdminOrStaff, async (req, res) => {
-  const allUsers = await db.getUsersAsync();
-  const tenant = allUsers.find((u: any) => u.id === req.params.id);
+  // Şimdilik sadece ana müşteriyi (tenant sahibi) döndürüyoruz
+  const tenant = db.data.users.find((u: any) => u.id === req.params.id);
   if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
   
   res.json([{
@@ -161,20 +159,20 @@ adminTenantsRouter.post('/', requireAdmin, async (req, res) => {
     const data = CreateTenantSchema.parse(req.body);
     
     if (data.role === "admin" || data.role === "operator" || data.role === "analyst") {
+      // Sadece customer oluşturulabilir.
       return res.status(403).json({ error: "Sistem yöneticisi/operatör oluşturmak için ayrı bir onay/MFA akışı gereklidir." });
     }
 
-    const allUsers = await db.getUsersAsync();
     
     // Benzersiz e-posta kontrolü
-    const existing = allUsers.find((u: any) => u.email.toLowerCase() === data.email);
+    const existing = db.data.users.find((u: any) => u.email.toLowerCase() === data.email);
     if (existing) {
       return res.status(400).json({ error: 'Bu e-posta adresi ile zaten kayıtlı bir hesap var.' });
     }
 
     // Benzersiz firma adı kontrolü (opsiyonel)
     if (data.companyName) {
-      const existingCompany = allUsers.find((u: any) => u.companyName && u.companyName.toLowerCase() === data.companyName!.toLowerCase());
+      const existingCompany = db.data.users.find((u: any) => u.companyName && u.companyName.toLowerCase() === data.companyName!.toLowerCase());
       if (existingCompany) {
         return res.status(400).json({ error: 'Bu firma adıyla kayıtlı bir hesap var.' });
       }
@@ -201,12 +199,11 @@ adminTenantsRouter.post('/', requireAdmin, async (req, res) => {
 const handleUpdateTenant = async (req: any, res: any) => {
   try {
     const data = UpdateTenantSchema.parse(req.body);
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === req.params.id);
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
-    // Alanları güncelle
+    // Alanları güncelle - eğer boş string gönderilmişse ve eski değer varsa veya silinmek isteniyorsa temizle
     if (data.name !== undefined && data.name.trim() !== '') tenant.name = data.name.trim();
     if (data.companyName !== undefined) tenant.companyName = data.companyName.trim();
     if (data.phone !== undefined) tenant.phone = data.phone.trim();
@@ -219,14 +216,9 @@ const handleUpdateTenant = async (req: any, res: any) => {
     tenant.updatedAt = new Date().toISOString();
     tenant.version = (tenant.version || 1) + 1;
 
-    // PostgreSQL veya kullanıcı repository'sine kaydet
-    if (db.postgresRepo?.isReady()) {
-      await db.postgresRepo.saveUser(tenant);
-    } else {
-      const idx = (db.data.users || []).findIndex((u: any) => u.id === tenant.id);
-      if (idx >= 0) db.data.users[idx] = tenant;
-      db.saveData(db.data);
-    }
+    // PostgreSQL ve yerel belleğe yaz
+    await db.postgresRepo.saveUser(tenant);
+    db.saveData(db.data);
 
     res.json({
       id: tenant.id,
@@ -256,8 +248,7 @@ adminTenantsRouter.put('/:id', requireAdmin, handleUpdateTenant);
 // POST /api/admin/tenants/:id/suspend
 adminTenantsRouter.post('/:id/suspend', requireAdmin, async (req, res) => {
   try {
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === req.params.id);
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
     const newStatus = tenant.status === 'suspended' ? 'active' : 'suspended';
@@ -267,13 +258,8 @@ adminTenantsRouter.post('/:id/suspend', requireAdmin, async (req, res) => {
     } else {
       tenant.status = 'active';
       tenant.deletedAt = undefined;
-      if (db.postgresRepo?.isReady()) {
-        await db.postgresRepo.saveUser(tenant);
-      } else {
-        const idx = (db.data.users || []).findIndex((u: any) => u.id === tenant.id);
-        if (idx >= 0) db.data.users[idx] = tenant;
-        db.saveData(db.data);
-      }
+      await db.postgresRepo.saveUser(tenant);
+      db.saveData(db.data);
     }
 
     res.json({ message: `Müşteri hesabı ${newStatus === 'active' ? 'aktifleştirildi' : 'donduruldu'}.`, status: newStatus });
@@ -285,8 +271,7 @@ adminTenantsRouter.post('/:id/suspend', requireAdmin, async (req, res) => {
 // POST /api/admin/tenants/:id/terminate-sessions
 adminTenantsRouter.post('/:id/terminate-sessions', requireAdmin, async (req, res) => {
   try {
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === req.params.id);
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
     
     await db.userRepository.terminateUserSessions(tenant.id);
@@ -299,8 +284,7 @@ adminTenantsRouter.post('/:id/terminate-sessions', requireAdmin, async (req, res
 // POST /api/admin/tenants/:id/reset-password
 adminTenantsRouter.post('/:id/reset-password', requireAdmin, async (req, res) => {
   try {
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === req.params.id);
+    const tenant = db.data.users.find((u: any) => u.id === req.params.id);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
     
     // In a real app, send an email. For now, just return success.
@@ -324,11 +308,10 @@ adminTenantsRouter.post('/bulk-advanced-delete', requireAdmin, async (req, res) 
     }
 
     const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };
-    const allUsers = await db.getUsersAsync();
 
     let successCount = 0;
     for (const tenantId of tenantIds) {
-      const tenant = allUsers.find((u: any) => u.id === tenantId);
+      const tenant = db.data.users.find((u: any) => u.id === tenantId);
       if (tenant) {
         await db.userRepository.advancedDeleteUser(tenantId, adminUser.id, adminUser.name, {
           deleteDevices,
@@ -358,8 +341,7 @@ adminTenantsRouter.post('/:id/advanced-delete', requireAdmin, async (req, res) =
     if (tenantId === 'usr_admin') {
       return res.status(400).json({ error: 'Kanonik sistem yöneticisi hesabı (usr_admin) silinemez.' });
     }
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === tenantId);
+    const tenant = db.data.users.find((u: any) => u.id === tenantId);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
     const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };
@@ -387,8 +369,7 @@ adminTenantsRouter.delete('/:id', requireAdmin, async (req, res) => {
     if (tenantId === 'usr_admin') {
       return res.status(400).json({ error: 'Kanonik sistem yöneticisi hesabı (usr_admin) silinemez.' });
     }
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === tenantId);
+    const tenant = db.data.users.find((u: any) => u.id === tenantId);
     if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
 
     const adminUser = (req as any).user || { id: 'usr_admin', name: 'Yönetici' };

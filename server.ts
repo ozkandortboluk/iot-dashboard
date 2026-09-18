@@ -43,7 +43,6 @@ import { firmwareRouter } from './src/server/routes/firmware.js';
 import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
 import { systemLogsRouter } from './src/server/routes/systemLogs.js';
-import { setupRouter } from './src/server/routes/setup.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
@@ -139,47 +138,34 @@ app.use((req, res, next) => {
 app.use(systemRouter);
 
 // PostgreSQL Availability Guard
-// Critical Requirement: PostgreSQL/TimescaleDB is the single source of truth.
-// If PostgreSQL is not connected or in READY state, block non-setup API calls with 503.
+// Critical Change for P0: PostgreSQL is the single authoritative source of truth.
+// If PostgreSQL is offline, prevent critical CRUD operations to avoid split-brain with local RAM cache.
 import { db } from './src/server/db.js';
-import { DatabaseState } from './src/types.js';
 
 app.use('/api', (req, res, next) => {
   // Allow OPTIONS preflight
-  if (req.method === 'OPTIONS') {
+  if (req.method === 'OPTIONS' || req.method === 'GET') {
     return next();
   }
 
-  // Allowed endpoints even when DB is not ready
-  if (
-    req.path.startsWith('/setup') ||
-    req.path.startsWith('/auth/setup-status') ||
-    req.path === '/system/status' ||
-    req.path.startsWith('/health')
-  ) {
+  // Telemetry has durable local WAL buffer fallback; database route is for connection diagnostics/repair; auth allows login/logout
+  if (req.path.startsWith('/telemetry') || req.path.startsWith('/database') || req.path.startsWith('/auth')) {
     return next();
   }
 
-  const dbState = db.getDatabaseState();
-  const isPgReady = db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
-
-  if (!isPgReady) {
-    const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
-    return res.status(503).json({
-      success: false,
-      code: isMaintenance ? 'DB_MAINTENANCE' : 'DB_UNAVAILABLE',
-      state: dbState,
-      error: isMaintenance
-        ? 'NexusNode IoT veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
-        : 'NexusNode IoT veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
-      message: 'Veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı kurulumunu tamamlayın.',
+  const isPgConfigured = Boolean(db.getPostgresUrl());
+  if (isPgConfigured && !db.postgresRepo?.isReady()) {
+    return res.status(503).json({ 
+      success: false, 
+      code: 'DB_UNAVAILABLE',
+      error: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are disabled to protect data integrity.',
+      message: 'Service Unavailable: PostgreSQL database is currently offline or reconnecting. Write operations are disabled to protect data integrity.' 
     });
   }
   next();
 });
 
 // Mount Modular API Routes
-app.use('/api/setup', setupRouter);
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/profile', profileRouter);
@@ -278,33 +264,30 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   }
 });
 
-// Initialize WebSocket, OTA Worker & Background Simulation Engines ONLY after PostgreSQL is ready
-let backgroundWorkersStarted = false;
-export function startBackgroundWorkers() {
-  if (backgroundWorkersStarted) return;
-  if (!db.postgresRepo?.isReady() || db.getDatabaseState() !== DatabaseState.READY) {
-    console.log('[Workers] PostgreSQL ve şema tam olarak hazır (READY) olmadığı için arka plan servisleri başlatılmadı.');
-    return;
-  }
-  backgroundWorkersStarted = true;
-  console.log('[Workers] PostgreSQL veritabanı READY durumunda. Arka plan servisleri başlatılıyor (WebSocket, Simulator, OTA, NoData, CommandExpiry)...');
-  initWebSocketServer(server);
-  initSimulator();
-  startOtaWorker();
-  startNoDataWorker();
-  startCommandExpiryWorker();
-}
-
-// Automatically start background workers whenever the DB state transitions to READY
-db.onStateChange((newState) => {
-  if (newState === DatabaseState.READY && db.postgresRepo?.isReady()) {
-    startBackgroundWorkers();
-  }
-});
+// Initialize WebSocket, OTA Worker & Background Simulation Engines
+initWebSocketServer(server);
+initSimulator();
+startOtaWorker();
+startNoDataWorker();
+startCommandExpiryWorker();
 
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
+  console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
+  try {
+    const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
+    await db.waitForInitialization(startupTimeout);
+  } catch (err: any) {
+    console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
+  }
+
+  if (db.postgresRepo?.isReady()) {
+    console.log("[Startup] PostgreSQL hazır ve şema doğrulandı. API trafiğe açılıyor...");
+  } else {
+    console.warn("[Startup] PostgreSQL bağlantısı veya şeması henüz tamamlanmadı. Sunucu 503 veri koruma moduyla başlatılıyor.");
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -335,23 +318,6 @@ async function setupViteOrStatic() {
     console.log(` Modüler Mimari (Routes / Services / DB) Başlatıldı.`);
     console.log(`====================================================`);
   });
-
-  // Background non-blocking database initialization
-  (async () => {
-    console.log("[Startup] Veritabanı bağlantısı arka planda doğrulanıyor...");
-    try {
-      const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
-      await db.waitForInitialization(startupTimeout);
-      if (db.postgresRepo?.isReady() && db.getDatabaseState() === DatabaseState.READY) {
-        console.log("[Startup] PostgreSQL hazır ve şema doğrulandı. API ve arka plan servisleri aktif.");
-        startBackgroundWorkers();
-      } else {
-        console.warn(`[Startup] PostgreSQL henüz hazır değil (Durum: ${db.getDatabaseState()}). Kurulum modu aktif.`);
-      }
-    } catch (err: any) {
-      console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);
-    }
-  })();
 }
 
 setupViteOrStatic();

@@ -160,7 +160,7 @@ BEGIN
             timescaledb.compress_segmentby = 'device_id, metric',
             timescaledb.compress_orderby = 'created_at DESC'
         );
-        PERFORM add_compression_policy('telemetry_readings', INTERVAL '14 days', if_not_exists => TRUE);
+        PERFORM add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
     END IF;
 END $$;
 
@@ -213,15 +213,11 @@ BEGIN
     END IF;
 END $$;
 
--- 8. Data Retention Policies (Tiered Storage Architecture)
--- Tier 2: Purging of raw telemetry older than 365 days (1 year)
--- Tier 3: Retention of continuous aggregates (2 years hourly, 5 years daily)
+-- 8. Data Retention Policy (Automated purging of raw telemetry older than 90 days, keeping aggregated views)
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
-        PERFORM add_retention_policy('telemetry_readings', INTERVAL '365 days', if_not_exists => TRUE);
-        PERFORM add_retention_policy('telemetry_hourly_summary', INTERVAL '730 days', if_not_exists => TRUE);
-        PERFORM add_retention_policy('telemetry_daily_summary', INTERVAL '1825 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('telemetry_readings', INTERVAL '90 days', if_not_exists => TRUE);
     END IF;
 END $$;
 

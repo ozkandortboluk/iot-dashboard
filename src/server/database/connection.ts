@@ -1,11 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import pg from 'pg';
 const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
-
-import { DatabaseState } from '../../types.js';
-export { DatabaseState };
 
 export type PgPoolType = pg.Pool;
 
@@ -41,11 +36,11 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
   }
 
   // 3. Structured / Deconstructed Environment Variables (Cloud SQL, Docker, standard Postgres conventions)
-  const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
-  const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
-  const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
-  const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME;
-  const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+  const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST;
+  const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER;
+  const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
+  const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE;
+  const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || '5432';
 
   // If host is explicitly configured, construct standard PostgreSQL URL
   if (host && host.trim() !== '') {
@@ -56,23 +51,6 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     const candidate = `postgresql://${auth}@${host}:${port}/${db}`;
     return candidate;
   }
-
-  // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret)
-  try {
-    const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
-    if (fs.existsSync(secretPath)) {
-      const raw = fs.readFileSync(secretPath, 'utf8');
-      const cfg = JSON.parse(raw);
-      if (cfg && cfg.host && cfg.database) {
-        const encUser = encodeURIComponent(cfg.user || 'postgres');
-        const encPass = cfg.password !== undefined ? encodeURIComponent(cfg.password) : '';
-        const auth = encPass ? `${encUser}:${encPass}` : encUser;
-        const p = cfg.port || 5432;
-        const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
-        return `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
-      }
-    }
-  } catch {}
 
   return '';
 }
@@ -133,8 +111,8 @@ export function getPostgresPoolLimits(): {
   const envIdleTimeout = parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10);
   const idleTimeoutMillis = Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : 30000;
 
-  const envStatementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '60000', 10);
-  const statementTimeoutMillis = Number.isFinite(envStatementTimeout) && envStatementTimeout > 0 ? envStatementTimeout : 60000;
+  const envStatementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '20000', 10);
+  const statementTimeoutMillis = Number.isFinite(envStatementTimeout) && envStatementTimeout > 0 ? envStatementTimeout : 20000;
 
   return { max, connectionTimeoutMillis, idleTimeoutMillis, statementTimeoutMillis };
 }

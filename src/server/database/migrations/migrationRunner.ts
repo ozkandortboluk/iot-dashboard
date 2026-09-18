@@ -12,7 +12,6 @@ import { migration009 } from './009_ensure_device_schema_resilience.js';
 import { migration010 } from './010_heal_device_tokens_and_prohibit_placeholders.js';
 import { migration011 } from './011_fix_threshold_rules_active_hours_json_syntax.js';
 import { migration012 } from './012_canonical_schema_full_harmonization.js';
-import { migration013 } from './013_add_device_power_status.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -35,7 +34,6 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration010,
   migration011,
   migration012,
-  migration013,
 ];
 
 let lastMigrationStatus: {
@@ -76,8 +74,6 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
 }> {
   console.log('[Migration Runner] Starting database migration check...');
   const client = await pool.connect();
-  // Ensure migration DDL queries do not timeout prematurely
-  await client.query('SET statement_timeout = 300000;').catch(() => {});
 
   let lockAcquired = false;
   try {
@@ -88,20 +84,10 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
     lockAcquired = lockRes.rows[0]?.locked === true;
 
     if (!lockAcquired) {
-      console.warn('[Migration Runner] Advisory lock could not be acquired immediately. Retrying for up to 3 seconds...');
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await new Promise((r) => setTimeout(r, 500));
-        const retryRes = await client.query('SELECT pg_try_advisory_lock($1) as locked;', [
-          MIGRATION_ADVISORY_LOCK_ID,
-        ]);
-        if (retryRes.rows[0]?.locked === true) {
-          lockAcquired = true;
-          break;
-        }
-      }
-      if (!lockAcquired) {
-        console.warn('[Migration Runner] Advisory lock still busy or orphaned. Proceeding with migration execution under transaction isolation.');
-      }
+      console.warn('[Migration Runner] Advisory lock could not be acquired. Another node is currently running migrations. Waiting...');
+      // Wait for lock release (max 10s)
+      await client.query('SELECT pg_advisory_lock($1);', [MIGRATION_ADVISORY_LOCK_ID]);
+      lockAcquired = true;
     }
 
     // 2. Ensure schema_migrations table
@@ -133,13 +119,7 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
       if (!appliedVersions.has(migration.version)) {
         console.log(`[Migration Runner] Applying migration ${migration.version}: ${migration.name}...`);
         
-        // Ensure clean connection state before running each migration step
-        await client.query('ROLLBACK').catch(() => {});
-
-        const useTx = !migration.disableTransaction;
-        if (useTx) {
-          await client.query('BEGIN');
-        }
+        await client.query('BEGIN');
         try {
           await migration.up(client);
           const checksum = computeMigrationChecksum(migration);
@@ -147,19 +127,11 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
             'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES ($1, $2, CURRENT_TIMESTAMP, $3);',
             [migration.version, migration.name, checksum]
           );
-          if (useTx) {
-            await client.query('COMMIT');
-          }
+          await client.query('COMMIT');
           console.log(`[Migration Runner] ✅ Successfully applied migration ${migration.version}: ${migration.name}`);
           appliedThisRun++;
         } catch (migErr: any) {
-          if (useTx) {
-            try {
-              await client.query('ROLLBACK');
-            } catch (rbErr) {
-              console.warn('[Migration Runner] ROLLBACK warning:', rbErr);
-            }
-          }
+          await client.query('ROLLBACK');
           const errorMsg = `[Migration Failed] Migration ${migration.version} (${migration.name}) failed: ${migErr?.message || migErr}`;
           console.error(errorMsg, migErr?.stack);
           

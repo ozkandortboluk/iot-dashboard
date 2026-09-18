@@ -7,22 +7,14 @@ import type { User, UserSession } from '../../types.js';
 export class UserRepository {
   constructor(private db: any) {}
 
-  private isPgReady(): boolean {
-    return typeof this.db?.postgresRepo?.isReady === 'function' && Boolean(this.db.postgresRepo.isReady());
-  }
-
   public getUsers(): User[] {
-    return this.db.data.users || [];
-  }
-
-  public async getUsersAsync(): Promise<User[]> {
-    if (this.isPgReady()) {
-      return await this.db.postgresRepo.getUsers();
-    }
-    return this.getUsers();
+    return this.db.data.users;
   }
 
   public async createSession(user: User): Promise<string> {
+    if (!this.db.data.sessions) {
+      this.db.data.sessions = [];
+    }
     const token = crypto.randomBytes(32).toString('hex');
     const session: UserSession = {
       token,
@@ -33,37 +25,28 @@ export class UserRepository {
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     };
-
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.saveSession(session).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return token;
-    }
-
-    if (!this.db.data.sessions) {
-      this.db.data.sessions = [];
-    }
     this.db.data.sessions = this.db.data.sessions.filter(
       (s: any) => new Date(s.expiresAt).getTime() > Date.now()
     );
     this.db.data.sessions.push(session);
     this.db.saveData(this.db.data, true);
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveSession(session).catch((e) => console.warn('[PG Error]', e.message)); }
+    }
     return token;
   }
 
   public async deleteSession(token: string): Promise<boolean> {
     if (!token) return false;
     const cleanToken = token.trim();
-
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.deleteSession(cleanToken).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return true;
-    }
-
     const initialLength = (this.db.data.sessions || []).length;
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.token !== cleanToken);
     const removed = (this.db.data.sessions || []).length < initialLength;
     if (removed) {
       this.db.saveData(this.db.data, true);
+    }
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteSession(cleanToken).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     return removed;
   }
@@ -93,73 +76,34 @@ export class UserRepository {
     return { user, session };
   }
 
-  public async verifySessionAsync(token: string): Promise<{ user: User; session: UserSession } | null> {
-    if (!token) return null;
-    const cleanToken = token.trim();
-
-    if (this.isPgReady()) {
-      return await this.db.postgresRepo.verifySession(cleanToken);
-    }
-
-    return this.verifySession(cleanToken);
-  }
-
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> {
     const cleanEmail = email.trim().toLowerCase();
-
-    // 1. PostgreSQL Production Mode: PostgreSQL is the SOLE source of truth
-    if (this.isPgReady()) {
-      const record = await this.db.postgresRepo.getUserWithPassword(cleanEmail);
-      if (!record) {
-        this.addAuditLog('unknown', email, 'Hatalı Giriş Denemesi (Kullanıcı Bulunamadı)', 'high');
-        return null;
-      }
-      const { user, passwordHash: storedHash } = record;
-      if (storedHash && verifyPassword(pass, storedHash)) {
-        if (!storedHash.startsWith('$2')) {
-          const newHashed = hashPassword(pass);
-          await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch((e: any) =>
-            console.warn('[PG Error]', e?.message || e)
-          );
-        }
-        const token = await this.createSession(user);
-        this.addAuditLog(user.id, user.name, 'Giriş Başarılı (PostgreSQL Bcrypt Verified)', 'low');
-        return { user, token };
-      }
-      this.addAuditLog(user.id, email, 'Hatalı Giriş Denemesi (Şifre Hatalı)', 'high');
-      return null;
-    }
-
-    // Fallback for non-postgres local/test mode
-    const user = (this.db.data.users || []).find((u: any) => u.email.toLowerCase() === cleanEmail);
+    const user = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (!user) return null;
-    const storedHash = (this.db.data.passwords || {})[user.id];
+    const storedHash = this.db.data.passwords[user.id];
     if (storedHash && verifyPassword(pass, storedHash)) {
       if (!storedHash.startsWith('$2')) {
         this.db.data.passwords[user.id] = hashPassword(pass);
         this.db.saveData(this.db.data, true);
       }
       const token = await this.createSession(user);
-      this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
+      this.db.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
       return { user, token };
     }
-    this.addAuditLog(user ? user.id : 'unknown', email, 'Hatalı Giriş Denemesi', 'high');
+    this.db.addAuditLog(user ? user.id : 'unknown', email, 'Hatalı Giriş Denemesi', 'high');
     return null;
   }
 
-  public async registerUser(
-    name: string,
-    email: string,
-    pass: string,
-    role: User['role'] = 'customer',
-    companyName?: string
-  ): Promise<User> {
+  public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> {
     const emailRes = validateEmail(email);
     if (!emailRes.valid) throw new Error(emailRes.error || 'Geçersiz e-posta adresi.');
     const cleanEmail = emailRes.normalized;
 
     const passRes = validatePassword(pass);
     if (!passRes.valid) throw new Error(passRes.error || 'Geçersiz şifre.');
+
+    const existing = this.db.data.users.find((u: any) => u.email.toLowerCase() === cleanEmail);
+    if (existing) throw new Error('Bu e-posta adresi zaten kayıtlı.');
 
     const newUser: User = {
       id: `usr_${Date.now()}`,
@@ -169,7 +113,7 @@ export class UserRepository {
       companyName: companyName || undefined,
       created_at: new Date().toISOString(),
     };
-
+    
     const dashboard = {
       id: `dash_${newUser.id}`,
       tenantId: newUser.id,
@@ -190,14 +134,10 @@ export class UserRepository {
 
     const hashedPassword = hashPassword(pass);
 
-    // 1. PostgreSQL is the SOLE source of truth in production
-    if (this.isPgReady()) {
-      const existingPgUser = await this.db.postgresRepo.getUserByEmail(cleanEmail);
-      if (existingPgUser) {
-        throw new Error('Bu e-posta adresi zaten kayıtlı.');
-      }
+    // 1. Yazma önceliği: PostgreSQL (aktif ise doğrudan yazılır ve gerçek SQL hataları yukarı fırlatılır)
+    if (this.db.postgresRepo?.isReady()) {
       try {
-        await this.db.postgresRepo.saveUser(newUser, hashedPassword);
+        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(newUser, hashedPassword).catch((e) => console.warn('[PG Error]', e.message)); }
       } catch (err: any) {
         const errMsg = err?.message || String(err);
         if (errMsg.includes('unique constraint') || errMsg.includes('users_email_key') || err.code === '23505') {
@@ -205,21 +145,16 @@ export class UserRepository {
         }
         throw err;
       }
-
-      await this.db.postgresRepo.saveDashboard(dashboard).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      await this.db.postgresRepo.saveAuditLog(auditLog).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-
-      return newUser;
+      
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(dashboard).catch((e) => console.warn('[PG Error]', e.message)); }
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAuditLog(auditLog).catch((e) => console.warn('[PG Error]', e.message)); }
     }
 
-    // Fallback for non-postgres local/test mode
-    const existing = (this.db.data.users || []).find((u: any) => u.email.toLowerCase() === cleanEmail);
-    if (existing) throw new Error('Bu e-posta adresi zaten kayıtlı.');
-
+    // 2. Local cache güncellemesi (Postgres başarılı olduktan sonra)
     if (companyName) {
       if (!this.db.data.tenants) this.db.data.tenants = [];
       if (!this.db.data.tenantMemberships) this.db.data.tenantMemberships = [];
-
+      
       const tenant = {
         id: `tnt_${Date.now()}`,
         name: companyName,
@@ -229,87 +164,69 @@ export class UserRepository {
           plan: 'basic' as const,
           maxDevices: 50,
           maxUsers: 5,
-          status: 'active' as const,
+          status: 'active' as const
         },
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
       };
-
+      
       const membership = {
         id: `mem_${Date.now()}`,
         userId: newUser.id,
         tenantId: tenant.id,
         role: 'admin' as import('../../types.js').TenantRole,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
       };
-
+      
       this.db.data.tenants.push(tenant);
       this.db.data.tenantMemberships.push(membership);
     }
-
-    if (!this.db.data.users) this.db.data.users = [];
-    if (!this.db.data.passwords) this.db.data.passwords = {};
-    if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    if (!this.db.data.auditLogs) this.db.data.auditLogs = [];
 
     this.db.data.users.push(newUser);
     this.db.data.passwords[newUser.id] = hashedPassword;
     this.db.data.dashboards.push(dashboard);
     this.db.data.auditLogs.push(auditLog);
-
+    
     this.db.saveData(this.db.data, true);
-
+    
     return newUser;
   }
 
   public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> {
-    const passRes = validatePassword(newPass);
-    if (!passRes.valid) {
-      throw new Error(passRes.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.');
-    }
-    const newHash = hashPassword(newPass.trim());
-
-    if (this.isPgReady()) {
-      const record = await this.db.postgresRepo.getUserWithPassword(userId);
-      if (!record) throw new Error('Kullanıcı bulunamadı.');
-      const { user, passwordHash: currentHash } = record;
-      if (!currentHash || !verifyPassword(oldPass, currentHash)) {
-        this.addAuditLog(userId, user.name, 'Başarısız Şifre Değiştirme Denemesi (Eski Şifre Hatalı)', 'high');
-        throw new Error('Mevcut şifreniz hatalı.');
-      }
-      await this.db.postgresRepo.updateUserPassword(userId, newHash);
-      this.addAuditLog(userId, user.name, 'Kullanıcı Şifresini Başarıyla Güncelledi (PostgreSQL Verified)', 'low');
-      return;
-    }
-
-    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
+    const user = this.db.data.users.find((u: any) => u.id === userId);
     if (!user) throw new Error('Kullanıcı bulunamadı.');
 
-    const currentHash = (this.db.data.passwords || {})[userId];
+    const currentHash = this.db.data.passwords[userId];
     if (!currentHash || !verifyPassword(oldPass, currentHash)) {
       this.addAuditLog(userId, user.name, 'Başarısız Şifre Değiştirme Denemesi (Eski Şifre Hatalı)', 'high');
       throw new Error('Mevcut şifreniz hatalı.');
     }
 
+    const passRes = validatePassword(newPass);
+    if (!passRes.valid) {
+      throw new Error(passRes.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.');
+    }
+
+    const newHash = hashPassword(newPass.trim());
+    
+    // Postgres'e yazılmasını bekle (aktif ise)
+    if (this.db.postgresRepo?.isReady()) {
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(user, newHash).catch((e) => console.warn('[PG Error]', e.message)); }
+    }
+    
     this.db.data.passwords[userId] = newHash;
     this.db.saveData(this.db.data, true);
     this.addAuditLog(userId, user.name, 'Kullanıcı Şifresini Başarıyla Güncelledi', 'low');
   }
 
   public async updateUserRole(userId: string, newRole: User['role']): Promise<User> {
-    if (this.isPgReady()) {
-      const user = await this.db.postgresRepo.getUserById(userId);
-      if (!user) throw new Error('Kullanıcı bulunamadı.');
-      const oldRole = user.role;
-      user.role = newRole;
-      await this.db.postgresRepo.saveUser(user);
-      this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
-      return user;
-    }
-
-    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
+    const user = this.db.data.users.find((u: any) => u.id === userId);
     if (!user) throw new Error('Kullanıcı bulunamadı.');
     const oldRole = user.role;
     user.role = newRole;
+
+    if (this.db.postgresRepo?.isReady()) {
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveUser(user).catch((e) => console.warn('[PG Error]', e.message)); }
+    }
 
     this.db.addAuditLog('system', 'Admin', `Kullanıcı Rolü Güncellendi: ${user.name} (${oldRole} -> ${newRole})`, 'high');
     this.db.saveData(this.db.data, true);
@@ -317,20 +234,14 @@ export class UserRepository {
   }
 
   public deleteUser(userId: string, adminId = 'system', adminName = 'Admin') {
-    if (this.isPgReady()) {
-      this.db.postgresRepo.deleteUser(userId).catch((err: any) => {
-        console.warn('[Postgres deleteUser Error]:', err?.message || err);
-      });
-      this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Silindi: ID ${userId}`, 'high');
-      return;
-    }
-
-    const index = (this.db.data.users || []).findIndex((u: any) => u.id === userId);
+    const index = this.db.data.users.findIndex((u: any) => u.id === userId);
     if (index === -1) return;
 
     const removed = this.db.data.users[index];
 
     // 1. CİHAZ SAHİPLİĞİNİ KORUMA & KANONİK AKTARIM:
+    // Kullanıcı silindiğinde cihaz korunur; kimsesiz veya sahipsiz kalmaması için
+    // kanonik olarak 'usr_admin' (Merkez Yönetim) hesabına devredilir ve geçmiş kayıtları saklanır.
     const now = new Date().toISOString();
     const ownedDevices = (this.db.data.devices || []).filter(
       (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
@@ -358,35 +269,25 @@ export class UserRepository {
 
     // 2. Kullanıcıyı ve oturumları kaldır
     this.db.data.users.splice(index, 1);
-    if (this.db.data.passwords) {
-      delete this.db.data.passwords[userId];
-    }
+    delete this.db.data.passwords[userId];
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
 
     this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
     this.db.saveData(this.db.data, true);
+
+    // 3. PostgreSQL Transaction: Cihazları güncelle ve kullanıcıyı sil
+    this.db.postgresRepo?.deleteUser(userId).catch((err: any) => {
+      console.warn('[Postgres deleteUser Error]:', err?.message || err);
+    });
   }
 
-  public async advancedDeleteUser(
-    userId: string,
-    adminId: string,
-    adminName: string,
-    options: {
-      deleteDevices?: boolean;
-      deleteDashboards?: boolean;
-      deleteAlarms?: boolean;
-      deleteTelemetry?: boolean;
-    }
-  ) {
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.advancedDeleteUser(userId, options).catch((err: any) => {
-        console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
-      });
-      this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Gelişmiş Silindi: ID ${userId}`, 'high');
-      return;
-    }
-
-    const index = (this.db.data.users || []).findIndex((u: any) => u.id === userId);
+  public async advancedDeleteUser(userId: string, adminId: string, adminName: string, options: {
+    deleteDevices?: boolean;
+    deleteDashboards?: boolean;
+    deleteAlarms?: boolean;
+    deleteTelemetry?: boolean;
+  }) {
+    const index = this.db.data.users.findIndex((u: any) => u.id === userId);
     if (index === -1) return;
 
     const removed = this.db.data.users[index];
@@ -396,11 +297,13 @@ export class UserRepository {
     );
 
     if (options.deleteDevices) {
+      // Memory cleanup for devices
       this.db.data.devices = (this.db.data.devices || []).filter(
         (d: any) => !(d.tenantId === userId || d.userId === userId || d.customerId === userId)
       );
       this.db.addAuditLog(adminId, adminName, `Müşteri Silindi & ${ownedDevices.length} Cihazı Kalıcı Olarak Silindi: ${removed.name}`, 'high');
     } else {
+      // Transfer to usr_admin
       const now = new Date().toISOString();
       for (const dev of ownedDevices) {
         dev.previousTenantId = userId;
@@ -459,12 +362,17 @@ export class UserRepository {
 
     // Kullanıcıyı ve oturumları kaldır
     this.db.data.users.splice(index, 1);
-    if (this.db.data.passwords) {
-      delete this.db.data.passwords[userId];
-    }
+    delete this.db.data.passwords[userId];
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
 
     this.db.saveData(this.db.data, true);
+
+    // PostgreSQL Transaction
+    if (this.db.postgresRepo) {
+      await this.db.postgresRepo.advancedDeleteUser(userId, options).catch((err: any) => {
+        console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
+      });
+    }
 
     // Real-time broadcast updates
     this.db.notifyNotificationListeners('devices:updated', this.db.data.devices);
@@ -476,45 +384,39 @@ export class UserRepository {
   }
 
   public async terminateUserSessions(userId: string) {
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return;
-    }
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
     this.db.saveData(this.db.data, true);
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) { 
+      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e)); 
+    }
   }
 
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {
-    if (this.isPgReady()) {
+    const user = this.db.data.users.find((u: any) => u.id === userId);
+    if (!user) throw new Error("Kullanıcı bulunamadı");
+    
+    // Postgres Transaction (aktif ise)
+    if (typeof this.db.postgresRepo?.isReady === 'function' && this.db.postgresRepo.isReady()) {
       await this.db.postgresRepo.softDeleteUser(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});
-      this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Askıya Alındı (Soft Delete): ID ${userId}`, 'high');
-      return;
     }
-
-    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
-    if (!user) throw new Error('Kullanıcı bulunamadı');
-
+    
+    // In-memory update
     user.status = 'suspended';
     user.deletedAt = new Date().toISOString();
-
+    
     // Remove active sessions
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
-
+    
     this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Askıya Alındı (Soft Delete): ${user.name} (${user.email})`, 'high');
     this.db.saveData(this.db.data, true);
   }
 
+
   public getAuditLogs(): import('../../types.js').AuditLog[] {
-    return (this.db.data.auditLogs || []).slice(-100).reverse();
+    return this.db.data.auditLogs.slice(-100).reverse();
   }
 
-  public async addAuditLog(
-    userId: string,
-    userName: string,
-    action: string,
-    severity: import('../../types.js').AuditLog['severity'] = 'low'
-  ) {
+  public async addAuditLog(userId: string, userName: string, action: string, severity: import('../../types.js').AuditLog['severity'] = 'low') {
     const logItem: import('../../types.js').AuditLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
@@ -524,14 +426,8 @@ export class UserRepository {
       ip: '127.0.0.1',
       severity,
     };
-
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.saveAuditLog(logItem).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return;
-    }
-
-    if (!this.db.data.auditLogs) this.db.data.auditLogs = [];
     this.db.data.auditLogs.push(logItem);
     this.db.saveData(this.db.data);
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAuditLog(logItem).catch((e) => console.warn('[PG Error]', e.message)); }
   }
 }

@@ -1,10 +1,7 @@
-import type pg from 'pg';
-import type { Migration } from './types.js';
+import pg from 'pg';
 
-export const migration013: Migration = {
-  version: '013',
-  name: 'add_device_power_status',
-  disableTransaction: true,
+export default {
+  name: '013_add_device_power_status',
   up: async (client: pg.PoolClient) => {
     await client.query(`
       ALTER TABLE devices 
@@ -34,4 +31,3 @@ export const migration013: Migration = {
     `);
   }
 };
-

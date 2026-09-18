@@ -1,4 +1,5 @@
-export const APP_NAME = 'NexusNode IoT Cloud';
-export const APP_VERSION = '1.34.2';
-export const APP_RELEASE_TAG = 'v1.34.2';
-export const RELEASE_DATE = new Date().toISOString().split('T')[0];
+export const APP_VERSION = '1.23.3';
+export const APP_RELEASE_DATE = '2026-09-17';
+export const APP_NAME = 'NexusNode IoT';
+export const APP_DOMAIN = 'nexusnodeiot.com.tr';
+export const APP_RELEASE_TAG = 'v1.23.3';

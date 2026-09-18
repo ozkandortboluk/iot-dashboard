@@ -4,7 +4,6 @@ import type { Migration } from './types.js';
 export const migration006: Migration = {
   version: '006',
   name: 'fix_audit_logs_and_on_conflict_constraints',
-  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. audit_logs table resilience: remove strict NOT NULL from resource_type and provide default
     await client.query(`

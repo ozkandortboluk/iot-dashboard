@@ -15,7 +15,6 @@ import { generateCanonicalSchemaDDL } from '../canonicalSchema.js';
 export const migration012: Migration = {
   version: '012',
   name: 'canonical_schema_full_harmonization',
-  disableTransaction: true,
   async up(client: pg.PoolClient): Promise<void> {
     console.log('[Migration 012] Starting Full Canonical Schema Harmonization...');
 

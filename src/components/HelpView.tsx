@@ -1766,27 +1766,27 @@ if __name__ == "__main__":
 # 1. HIZLI METİN FORMATINDA TELEMETRİ GÖNDERİMİ
 curl -X POST "${originUrl}/api/v1/telemetry" \\
   -H "Content-Type: text/plain" \\
-  -d "dev_key_test_0000000000000000, dev_test_01, sıcaklık:28.4, nem:62.5, basınç:1013.2"
+  -d "YOUR_API_KEY, Saha_Cihazi_01, sıcaklık:28.4, nem:62.5, basınç:1013.2"
 
 # 2. HEARTBEAT / PING SİNYALİ GÖNDERME (Cihazı Canlı Tutma / Çevrimiçi Yapma)
 curl -X POST "${originUrl}/api/telemetry/ping" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: dev_key_test_0000000000000000" \\
-  -d '{"deviceId":"dev_test_01","ping":1,"rssi":-58}'
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{"deviceId":"dev_esp32_01","ping":1,"rssi":-58}'
 
 # 3. JSON FORMATINDA TELEMETRİ GÖNDERİMİ
 curl -X POST "${originUrl}/api/telemetry" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: dev_key_test_0000000000000000" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
-    "deviceId": "dev_test_01",
+    "deviceId": "dev_esp32_01",
     "metric": "temperature",
     "value": 31.2,
     "unit": "°C"
   }'
 
 # 4. RÖLE / PWM ÇIKIŞI TETİKLEME (Kontrol API)
-curl -X POST "${originUrl}/api/devices/dev_test_01/control" \\
+curl -X POST "${originUrl}/api/devices/dev_esp32_01/control" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
   -d '{
@@ -1797,7 +1797,7 @@ curl -X POST "${originUrl}/api/devices/dev_test_01/control" \\
 
 # 5. KULLANICI -> CİHAZ YENİ KOMUT GÖNDERME (PostgreSQL Multi-Tenant Command API)
 # 5 Aşamalı Doğrulama: Oturum + Tenant İzolasyonu + Cihaz Sahipliği + Rol Kontrolü + Çıkış Pini Desteği
-curl -X POST "${originUrl}/api/devices/dev_test_01/commands" \\
+curl -X POST "${originUrl}/api/devices/dev_esp32_01/commands" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN" \\
   -d '{
@@ -1809,7 +1809,7 @@ curl -X POST "${originUrl}/api/devices/dev_test_01/commands" \\
   }'
 
 # 6. CİHAZ KOMUT LİSTESİ SORGULAMA (GET /api/devices/:id/commands)
-curl -X GET "${originUrl}/api/devices/dev_test_01/commands" \\
+curl -X GET "${originUrl}/api/devices/dev_esp32_01/commands" \\
   -H "Authorization: Bearer YOUR_USER_JWT_TOKEN"
 
 # 7. BEKLEYEN KOMUTU İPTAL ETME (POST /api/commands/:id/cancel)
@@ -2064,128 +2064,6 @@ curl -X POST "${originUrl}/api/simulator/v1/inject" \\
 #   - Bağlantı açıldığında varsayılan: { "event": "subscribe", "channels": ["physical"] }
 #   - Sanal Veri Üreteci sayfasına girildiğinde: { "event": "subscribe", "channels": ["simulation"] }
 #   - Sayfadan çıkıldığında: { "event": "unsubscribe", "channels": ["simulation"] }
-`,
-    },
-    {
-      id: 'code_timescaledb_tiered_storage',
-      title: 'TimescaleDB Kademeli Depolama (3-Tiered Storage) & Sıkıştırma Yönetim API\'si',
-      category: 'curl',
-      categoryLabel: 'Veritabanı & Kademeli Saklama',
-      badge: '5 Yıl Saklama Mimarisi',
-      description: '500 cihaz, 5 saniyede bir veri ve 5 yıl saklama hedefine uygun 3 Kademeli Depolama Mimarisi (0-14 gün Sıcak Ham, 14-365 gün Ilık Sıkıştırılmış, 1-5 yıl Soğuk Downsample Özetler) ve yönetim API uç noktaları.',
-      tags: ['timescaledb', 'retention', 'compression', 'continuous-aggregates', '5-year-storage', 'tiering', 'api'],
-      endpoint: 'GET /api/timescale/stats, POST /api/timescale/compress-now & POST /api/timescale/policies',
-      code: `#!/bin/bash
-# =========================================================================
-# NEXUSNODE IoT - TIMESCALEDB 3 KADEMELİ SAKLAMA (3-TIER RETENTION) & YÖNETİM
-# =========================================================================
-# Mimari Tasarım (500 Cihaz * 5s Veri Aralığı = Günde 8.64 Milyon Kayıt):
-#  - KADEME 1 (0 – 14 Gün): Sıcak Ham Veri (Hot Raw Telemetry)
-#      -> 7 günlük TimescaleDB chunk parçalarında uncompressed saklanır.
-#      -> Anlık alarm kuralları, canlı grafikler ve ham veri incelemeleri buradan beslenir.
-#  - KADEME 2 (14 Gün – 1 Yıl / 365 Gün): Ilık Sıkıştırılmış Veri (Warm Compressed Telemetry)
-#      -> TimescaleDB columnar compression ile otomatik sıkıştırılır (segmentBy: device_id, metric).
-#      -> Disk alanı %80–%92 oranında küçülür. 365 gün boyunca saklanır.
-#  - KADEME 3 (1 Yıl – 5 Yıl / 1825 Gün): Soğuk Sürekli Özetler (Cold Downsampled Rollups)
-#      -> telemetry_hourly_summary (Saatlik rollup): 730 gün (2 yıl) saklanır.
-#      -> telemetry_daily_summary (Günlük rollup): 1825 gün (5 yıl) saklanır.
-#
-# 1. CANLI TIMESCALEDB PARÇA (CHUNK) VE SIKIŞTIRMA İSTATİSTİKLERİNİ ALMA
-# Uç Nokta: GET /api/timescale/stats
-# Kimlik: Yönetici Oturum Token'ı (usr_test_admin)
-curl -X GET "${originUrl}/api/timescale/stats" \\
-  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
-
-# 2. ELDEKİ TÜM UYGUN PARÇALARI DERHAL SIKIŞTIRMA (MANUEL TETİKLEME)
-# Uç Nokta: POST /api/timescale/compress-now
-curl -X POST "${originUrl}/api/timescale/compress-now" \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN"
-
-# 3. SIKIŞTIRMA VE SAKLAMA (RETENTION) POLİTİKALARINI DİNAMİK GÜNCELLEME
-# Uç Nokta: POST /api/timescale/policies
-# Gövde:
-#   - compressOlderThanDays: Kaç günden eski ham verilerin sıkıştırılacağı (Örn: 14)
-#   - dropOlderThanDays: Ham verinin kaçıncı günde silineceği (Örn: 365 -> 1 yıl)
-#   - continuousAggregates: Saatlik ve günlük özet tablolarının aktifliği (true)
-curl -X POST "${originUrl}/api/timescale/policies" \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \\
-  -d '{
-    "compressOlderThanDays": 14,
-    "dropOlderThanDays": 365,
-    "continuousAggregates": true
-  }'
-`,
-    },
-    {
-      id: 'code_first_run_setup_api',
-      title: 'First Run Database Setup Wizard & Headless Kurulum API\'si',
-      category: 'curl',
-      categoryLabel: 'İlk Kurulum & Veritabanı',
-      badge: 'First Run Setup API',
-      description: 'Yeni bir VPS veya Home Server kurulumunda veritabanı bağlantısı testi, konfigürasyon kaydetme, TimescaleDB ve migrasyon ilklendirme ile ilk yönetici hesabı oluşturma uç noktaları.',
-      tags: ['setup', 'wizard', 'database', 'timescaledb', 'first run', 'migrations', 'admin', 'headless'],
-      endpoint: 'GET /api/setup/status, POST /api/setup/test-database, POST /api/setup/initialize, POST /api/setup/create-admin',
-      code: `#!/bin/bash
-# =========================================================================
-# NEXUSNODE IoT - FIRST RUN DATABASE SETUP WIZARD & HEADLESS KURULUM API
-# =========================================================================
-# Güvenlik Kuralı:
-#  - Kurulum tamamlandıktan sonra setup uç noktaları kalıcı olarak kilitlenir (HTTP 403).
-#  - Veritabanı şifresi hiçbir API yanıtında veya loglarda saklanmaz.
-#  - Veriler (telemetri ve cihazlar) sıfır veri kaybı garantisiyle korunur.
-#
-# 1. KURULUM DURUMUNU SORGULAMA
-# Uç Nokta: GET /api/setup/status
-curl -s -X GET "\${originUrl}/api/setup/status"
-
-# 2. VERİTABANI BAĞLANTISINI TEST ETME
-# Uç Nokta: POST /api/setup/test-database
-# PostgreSQL soketini doğrular ve TimescaleDB varlığını kontrol eder.
-curl -s -X POST "\${originUrl}/api/setup/test-database" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "host": "timescaledb",
-    "port": 5432,
-    "database": "iot_dashboard",
-    "user": "iot_user",
-    "password": "YOUR_STRONG_PASSWORD",
-    "sslMode": "disable"
-  }'
-
-# 3. VERİTABANI KONFİGÜRASYONUNU GÜVENLE KAYDETME
-# Uç Nokta: POST /api/setup/configure-database
-# Sunucu 0600 izinli protected secret dosyasında saklar ve bağlantı havuzunu başlatır.
-curl -s -X POST "\${originUrl}/api/setup/configure-database" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "host": "timescaledb",
-    "port": 5432,
-    "database": "iot_dashboard",
-    "user": "iot_user",
-    "password": "YOUR_STRONG_PASSWORD",
-    "sslMode": "disable"
-  }'
-
-# 4. VERİTABANINI İLKLENDİRME & MİGRASYONLARI ÇALIŞTIRMA
-# Uç Nokta: POST /api/setup/initialize
-# TimescaleDB eklentisini açar, migrasyonları uygular ve Canonical Schema'yı doğrular.
-curl -s -X POST "\${originUrl}/api/setup/initialize" \\
-  -H "Content-Type: application/json"
-
-# 5. İLK SİSTEM YÖNETİCİSİNİ OLUŞTURMA VE KURULUMU KİLİTLEME
-# Uç Nokta: POST /api/setup/create-admin
-# İlk yöneticiyi oluşturur, şifreyi bcrypt ile hashler ve setup mode'u kalıcı kilitler.
-curl -s -X POST "\${originUrl}/api/setup/create-admin" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "name": "Sistem Yöneticisi",
-    "email": "test@nexusnodeiot.com.tr",
-    "password": "YOUR_STRONG_ADMIN_PASSWORD",
-    "passwordConfirm": "YOUR_STRONG_ADMIN_PASSWORD",
-    "companyName": "Merkez Yönetim"
-  }'
 `,
     },
     {

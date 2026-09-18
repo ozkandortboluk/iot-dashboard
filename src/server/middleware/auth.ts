@@ -8,7 +8,7 @@ export interface AuthenticatedRequest extends express.Request {
 }
 
 // Authentication Middleware: Verifies authorization token from cookies (HttpOnly) or headers
-export async function authenticateUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+export function authenticateUser(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers['authorization'];
   let token = req.headers['x-auth-token'] as string;
 
@@ -31,7 +31,7 @@ export async function authenticateUser(req: express.Request, res: express.Respon
     });
   }
 
-  const verified = await db.verifySessionAsync(token.trim());
+  const verified = db.verifySession(token.trim());
   if (!verified) {
     return res.status(401).json({
       error: 'Erişim Engellendi (401): Geçersiz veya süresi dolmuş oturum jetonu. Lütfen yeniden giriş yapın.',

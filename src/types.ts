@@ -1075,16 +1075,6 @@ export interface ServerStats {
   uptimeSeconds: number;
 }
 
-export enum DatabaseState {
-  BOOTSTRAP = 'BOOTSTRAP',
-  SETUP = 'SETUP',
-  DB_CONNECTING = 'DB_CONNECTING',
-  DB_INITIALIZING = 'DB_INITIALIZING',
-  READY = 'READY',
-  DB_UNAVAILABLE = 'DB_UNAVAILABLE',
-  MAINTENANCE = 'MAINTENANCE',
-}
-
 export type DatabaseEngineType = 'postgres' | 'timescaledb' | 'local';
 
 export interface DatabaseEngineConfig {

@@ -4,7 +4,6 @@ import type { Migration } from './types.js';
 export const migration011: Migration = {
   version: '011',
   name: 'fix_threshold_rules_active_hours_json_syntax',
-  disableTransaction: true,
   async up(client: pg.PoolClient): Promise<void> {
     // 1. Ensure threshold_rules table exists
     await client.query(`

@@ -54,7 +54,6 @@ describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', (
     };
 
     if (!db.data.firmwares) db.data.firmwares = [];
-    db.data.firmwares = db.data.firmwares.filter((f) => f.id !== testFirmwareId);
     db.data.firmwares.push(fw);
   });
 

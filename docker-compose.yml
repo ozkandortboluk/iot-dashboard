@@ -1,21 +1,18 @@
 services:
   timescaledb:
-    image: timescale/timescaledb:2.14.2-pg16
+    image: timescale/timescaledb:latest-pg15
     container_name: nexus_timescaledb
     restart: unless-stopped
-    shm_size: 256mb
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
-      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
-    # Security: In production, database is isolated inside nexus_net.
-    # To expose port locally for external tools, set POSTGRES_PORT_BIND=127.0.0.1:5432:5432 in .env
+      POSTGRES_USER: iot_user
+      POSTGRES_PASSWORD: kastamonuaraccalalibeyli.37
+      POSTGRES_DB: iot_dashboard
     ports:
-      - "${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}"
+      - "5432:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_user} -d ${POSTGRES_DB:-iot_dashboard}"]
+      test: ["CMD-SHELL", "pg_isready -U iot_user -d iot_dashboard"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -33,22 +30,14 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    ports:
-      - "${PORT_BIND:-3000:3000}"
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: ${DATABASE_URL:-}
-      DB_HOST: ${DB_HOST:-timescaledb}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_USER: ${POSTGRES_USER:-iot_user}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-}
-      DB_NAME: ${POSTGRES_DB:-iot_dashboard}
-      POSTGRES_HOST: ${DB_HOST:-timescaledb}
-      POSTGRES_PORT: ${DB_PORT:-5432}
-      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
-      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_USER: iot_user
+      DB_PASSWORD: kastamonuaraccalalibeyli.37
+      DB_NAME: iot_dashboard
     volumes:
       - app_data:/app/data
     healthcheck:
@@ -56,7 +45,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
     networks:
       - nexus_net
 
@@ -66,7 +55,7 @@ services:
     restart: unless-stopped
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
@@ -85,9 +74,8 @@ services:
     image: adminer:latest
     container_name: nexus_adminer
     restart: unless-stopped
-    # Security: Restrict Adminer to localhost interface only to prevent public web exposure
     ports:
-      - "${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}"
+      - "8080:8080"
     networks:
       - nexus_net
     depends_on:

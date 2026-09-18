@@ -4,7 +4,6 @@ import type { Migration } from './types.js';
 export const migration001: Migration = {
   version: '001',
   name: 'core_relational_tables',
-  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. Users
     await client.query(`
@@ -37,7 +36,6 @@ export const migration001: Migration = {
         role_key VARCHAR(64) DEFAULT 'device',
         location VARCHAR(128),
         ip VARCHAR(45),
-        ip_address VARCHAR(45),
         mac_address VARCHAR(32),
         hardware_model VARCHAR(64),
         firmware_version VARCHAR(32),
@@ -53,10 +51,7 @@ export const migration001: Migration = {
         assigned_user_id VARCHAR(64),
         created_by_user_id VARCHAR(64),
         auth_token VARCHAR(256),
-        api_key VARCHAR(256),
-        api_key_prefix VARCHAR(32),
-        api_key_hash VARCHAR(128),
-        previous_api_key_hash VARCHAR(128),
+        api_key VARCHAR(128),
         encryption_method VARCHAR(32) DEFAULT 'none',
         rate_limit_per_min INT DEFAULT 120,
         heartbeat_timeout_seconds INT DEFAULT 60,
@@ -68,15 +63,6 @@ export const migration001: Migration = {
         save_simulated_data_to_db BOOLEAN DEFAULT TRUE,
         simulated_metrics JSONB,
         last_seen TIMESTAMP WITH TIME ZONE,
-        data_flow_active BOOLEAN DEFAULT TRUE,
-        power_source VARCHAR(32) DEFAULT 'mains',
-        battery_level INT,
-        websocket_connected BOOLEAN DEFAULT FALSE,
-        last_message_at TIMESTAMP WITH TIME ZONE,
-        output_definitions JSONB DEFAULT '[]'::jsonb,
-        capabilities JSONB DEFAULT '[]'::jsonb,
-        supported_outputs JSONB DEFAULT '[]'::jsonb,
-        supported_commands JSONB DEFAULT '[]'::jsonb,
         metrics JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -286,77 +272,6 @@ export const migration001: Migration = {
         msg_id VARCHAR(128) PRIMARY KEY,
         device_id VARCHAR(64) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS dispatch_logs (
-        id VARCHAR(64) PRIMARY KEY,
-        tenant_id VARCHAR(64),
-        user_id VARCHAR(64),
-        user_name VARCHAR(128),
-        channel VARCHAR(32) NOT NULL,
-        recipient VARCHAR(128) NOT NULL,
-        title VARCHAR(256),
-        message TEXT NOT NULL,
-        severity VARCHAR(32) DEFAULT 'info',
-        status VARCHAR(32) DEFAULT 'delivered',
-        latency_ms INT DEFAULT 0,
-        error_details TEXT,
-        sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS dashboard_layouts (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(64),
-        title VARCHAR(128) NOT NULL,
-        widgets_json JSONB NOT NULL,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS firmwares (
-        id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(128) NOT NULL,
-        device_type VARCHAR(64) NOT NULL,
-        role_key VARCHAR(64) NOT NULL,
-        hardware_model VARCHAR(64) DEFAULT 'ALL',
-        version VARCHAR(32) NOT NULL,
-        description TEXT,
-        binary_data TEXT,
-        binary_size INT DEFAULT 0,
-        sha256 VARCHAR(128) NOT NULL,
-        signature TEXT,
-        file_path TEXT,
-        min_hardware_revision VARCHAR(64),
-        is_active BOOLEAN DEFAULT TRUE,
-        uploaded_by VARCHAR(128) NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
-        id VARCHAR(64) PRIMARY KEY,
-        firmware_id VARCHAR(64),
-        firmware_version VARCHAR(32) NOT NULL,
-        firmware_name VARCHAR(128) NOT NULL,
-        device_id VARCHAR(64),
-        device_name VARCHAR(128) NOT NULL,
-        device_type VARCHAR(64) NOT NULL,
-        role_key VARCHAR(64) NOT NULL,
-        target_scope VARCHAR(32) DEFAULT 'single',
-        status VARCHAR(32) DEFAULT 'PENDING',
-        progress_percent INT DEFAULT 0,
-        error_message TEXT,
-        initiated_by VARCHAR(128) NOT NULL,
-        download_token VARCHAR(128),
-        expires_at TIMESTAMP WITH TIME ZONE,
-        attempt_count INT DEFAULT 0,
-        max_attempts INT DEFAULT 3,
-        last_attempt_at TIMESTAMP WITH TIME ZONE,
-        next_retry_at TIMESTAMP WITH TIME ZONE,
-        download_started_at TIMESTAMP WITH TIME ZONE,
-        boot_confirmed_at TIMESTAMP WITH TIME ZONE,
-        completed_at TIMESTAMP WITH TIME ZONE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
   },

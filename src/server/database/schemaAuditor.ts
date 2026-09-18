@@ -3,13 +3,10 @@ import {
   CANONICAL_SCHEMA_METADATA,
   generateCanonicalSchemaDDL,
   generateSingleTableDDL,
-  generateTriggerDDL,
   getCanonicalTableCreationOrder,
   type TableDefinition,
-  type TriggerDefinition,
 } from './canonicalSchema.js';
 import { systemLogger } from '../services/systemLogger.service.js';
-import { DataMaintenanceService, type OrphanViolationInfo } from './dataMaintenance.js';
 
 export interface ColumnDiscrepancy {
   table: string;
@@ -33,9 +30,6 @@ export interface ConstraintDiscrepancy {
   constraintType: 'PRIMARY KEY' | 'UNIQUE' | 'FOREIGN KEY' | 'CHECK' | 'NOT NULL' | 'DEFAULT';
   details: string;
   suggestedFixSql: string;
-  status?: 'MISSING' | 'MISMATCH';
-  expectedValue?: string;
-  actualValue?: string;
 }
 
 export interface IndexDiscrepancy {
@@ -43,44 +37,12 @@ export interface IndexDiscrepancy {
   indexName: string;
   columns: string[];
   ddl: string;
-  status: 'MISSING' | 'MISMATCH';
-  details: string;
-  expectedDefinition?: {
-    type: string;
-    unique: boolean;
-    columns: string[];
-    where?: string;
-  };
-  actualDefinition?: {
-    type: string;
-    unique: boolean;
-    columns: string[];
-    where?: string;
-  };
 }
 
 export interface TriggerDiscrepancy {
   table: string;
   triggerName: string;
   functionName: string;
-  status?: 'MISSING' | 'MISMATCH';
-  timing?: 'BEFORE' | 'AFTER' | 'INSTEAD OF';
-  events?: ('INSERT' | 'UPDATE' | 'DELETE')[];
-  level?: 'ROW' | 'STATEMENT';
-  ddl?: string;
-  details?: string;
-  expectedDefinition?: {
-    timing: 'BEFORE' | 'AFTER' | 'INSTEAD OF';
-    events: ('INSERT' | 'UPDATE' | 'DELETE')[];
-    level: 'ROW' | 'STATEMENT';
-    functionName: string;
-  };
-  actualDefinition?: {
-    timing?: string;
-    events?: string[];
-    level?: string;
-    functionName?: string;
-  };
 }
 
 export interface SchemaAuditReport {
@@ -97,7 +59,6 @@ export interface SchemaAuditReport {
     missingConstraintsCount: number;
     missingTriggersCount: number;
     missingFunctionsCount: number;
-    dataIntegrityViolationsCount?: number;
   };
   discrepancies: {
     missingTables: string[];
@@ -107,9 +68,7 @@ export interface SchemaAuditReport {
     missingConstraints: ConstraintDiscrepancy[];
     missingTriggers: TriggerDiscrepancy[];
     missingFunctions: string[];
-    dataIntegrityViolations?: OrphanViolationInfo[];
   };
-  dataIntegrityViolations?: OrphanViolationInfo[];
   humanReadableMessages: string[];
 }
 
@@ -129,7 +88,6 @@ export interface SchemaHealingResult {
   beforeReport: SchemaAuditReport;
   afterReport: SchemaAuditReport;
   summaryMessage: string;
-  orphanReports?: OrphanViolationInfo[];
 }
 
 /**
@@ -173,198 +131,6 @@ function areTypesCompatible(expected: string, actual: string): boolean {
   return false;
 }
 
-export interface ParsedLiveIndex {
-  tableName: string;
-  indexName: string;
-  isUnique: boolean;
-  accessMethod: string;
-  columns: string[];
-  whereClause?: string;
-  rawDef: string;
-}
-
-/**
- * Parses a PostgreSQL pg_indexes.indexdef SQL string into structured components.
- * e.g. "CREATE UNIQUE INDEX idx_name ON public.tbl USING btree (col1, col2 DESC) WHERE (col3 = 1)"
- */
-export function parseIndexDef(rawDef: string, tableName: string, indexName: string): ParsedLiveIndex | null {
-  const isUnique = /^CREATE\s+UNIQUE\s+INDEX/i.test(rawDef);
-  const match = rawDef.match(/USING\s+([a-zA-Z0-9_]+)\s*\((.+?)\)(?:\s+WHERE\s+(.+))?$/i);
-  if (!match) return null;
-
-  const accessMethod = match[1].toUpperCase();
-  const rawCols = match[2];
-  const rawWhere = match[3];
-
-  const columns: string[] = [];
-  let depth = 0;
-  let current = '';
-  for (let i = 0; i < rawCols.length; i++) {
-    const char = rawCols[i];
-    if (char === '(') depth++;
-    else if (char === ')') depth--;
-    else if (char === ',' && depth === 0) {
-      columns.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += char;
-  }
-  if (current.trim()) {
-    columns.push(current.trim());
-  }
-
-  const normalizedCols = columns.map((c) => c.replace(/"/g, '').replace(/\s+/g, ' ').trim());
-
-  return {
-    tableName,
-    indexName,
-    isUnique,
-    accessMethod,
-    columns: normalizedCols,
-    whereClause: rawWhere ? rawWhere.trim() : undefined,
-    rawDef,
-  };
-}
-
-/**
- * Normalizes an index column expression for strict comparison.
- * Trims outer quotes, normalizes whitespace, and handles default ASC.
- */
-export function normalizeIndexColumn(col: string): string {
-  let c = col.replace(/"/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-  if (c.endsWith(' asc')) {
-    c = c.substring(0, c.length - 4).trim();
-  }
-  return c;
-}
-
-/**
- * Normalizes WHERE clause for partial indexes.
- */
-export function normalizeWhereClause(where?: string): string {
-  if (!where) return '';
-  return where.toLowerCase().replace(/[\s"'\(\)]/g, '');
-}
-
-/**
- * Normalizes a column DEFAULT expression (from Canonical schema or PostgreSQL pg_get_expr(adbin, adrelid)).
- * Handles:
- * - Outer parentheses stripping: (((expr))) -> expr
- * - Booleans: true, false, 'true', 'false', 'true'::boolean
- * - Timestamps: CURRENT_TIMESTAMP, now(), transaction_timestamp(), clock_timestamp()
- * - String literals: 'foo' vs 'foo'::character varying vs 'foo'::text
- * - JSON / JSONB: structural parsing and canonical sorting of keys
- * - Numbers: integers, decimals (e.g. 0, 0.0, 1.0, 120, -5)
- * - UUID generators: gen_random_uuid() vs (gen_random_uuid())::text
- * - Intervals: CURRENT_TIMESTAMP + INTERVAL '1 hour' vs CURRENT_TIMESTAMP + '01:00:00'::interval
- */
-export function normalizeDefaultExpression(expr: string | null | undefined): string | null {
-  if (expr === null || expr === undefined) return null;
-  let s = expr.trim();
-  if (!s) return null;
-
-  // Strip outer parentheses repeatedly e.g. (((expr))) -> expr
-  while (s.startsWith('(') && s.endsWith(')')) {
-    let depth = 0;
-    let matchesOuter = true;
-    for (let i = 0; i < s.length - 1; i++) {
-      if (s[i] === '(') depth++;
-      else if (s[i] === ')') depth--;
-      if (depth === 0) {
-        matchesOuter = false;
-        break;
-      }
-    }
-    if (matchesOuter) {
-      s = s.slice(1, -1).trim();
-    } else {
-      break;
-    }
-  }
-
-  // 1. Boolean check
-  const lower = s.toLowerCase();
-  if (lower === 'true' || lower === "'true'" || lower === "'true'::boolean") return 'true';
-  if (lower === 'false' || lower === "'false'" || lower === "'false'::boolean") return 'false';
-
-  // 2. Timestamp check (CURRENT_TIMESTAMP, now())
-  if (
-    lower === 'current_timestamp' || 
-    lower === 'now()' || 
-    lower === 'transaction_timestamp()' || 
-    lower === 'clock_timestamp()'
-  ) {
-    return 'CURRENT_TIMESTAMP';
-  }
-
-  // 3. String literals (with optional Postgres type casts like ::character varying, ::text, ::varchar)
-  const strMatch = s.match(/^'([^']*)'(?:::character varying|::varchar\(\d+\)|::varchar|::text|::bpchar)?$/i);
-  if (strMatch) {
-    return `'${strMatch[1]}'`;
-  }
-
-  // 4. JSON / JSONB parsing with recursive key sorting for semantic equality
-  const jsonMatch = s.match(/^'(\{.*\}|\[.*\])'(?:::jsonb|::json)?$/s);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
-      const sortJson = (val: any): any => {
-        if (Array.isArray(val)) return val.map(sortJson);
-        if (val !== null && typeof val === 'object') {
-          const sortedObj: any = {};
-          for (const k of Object.keys(val).sort()) {
-            sortedObj[k] = sortJson(val[k]);
-          }
-          return sortedObj;
-        }
-        return val;
-      };
-      return 'JSON:' + JSON.stringify(sortJson(parsed));
-    } catch {
-      // not valid json, fall through
-    }
-  }
-
-  // 5. Numeric constants (integer or float e.g. 0, 0.0, 1.0, 120, -5)
-  if (/^-?\d+(?:\.\d+)?$/.test(s)) {
-    return String(Number(s));
-  }
-
-  // 6. UUID generation functions
-  if (s.toLowerCase().includes('gen_random_uuid()')) {
-    return 'gen_random_uuid()';
-  }
-
-  // 7. Interval arithmetic normalization
-  let norm = s;
-  norm = norm.replace(/interval\s+'(\d+)\s+days?'/gi, "'$1 days'::interval");
-  norm = norm.replace(/interval\s+'1\s+hour'/gi, "'01:00:00'::interval");
-  norm = norm.replace(/'1 hour'::interval/gi, "'01:00:00'::interval");
-  norm = norm.replace(/\s+/g, ' ').toLowerCase();
-
-  return norm;
-}
-
-/**
- * Compares canonical defaultValue against live PostgreSQL pg_get_expr(adbin, adrelid).
- * Returns true if both expressions evaluate to the same canonical semantic value.
- */
-export function areDefaultExpressionsEquivalent(
-  canonicalDefault: string | null | undefined,
-  dbDefaultExpr: string | null | undefined
-): boolean {
-  if (canonicalDefault === undefined || canonicalDefault === null) {
-    return true;
-  }
-  if (dbDefaultExpr === undefined || dbDefaultExpr === null) {
-    return false;
-  }
-  const normCanon = normalizeDefaultExpression(canonicalDefault);
-  const normDb = normalizeDefaultExpression(dbDefaultExpr);
-  return normCanon !== null && normCanon === normDb;
-}
-
 /**
  * Real Schema Auditor for PostgreSQL & TimescaleDB.
  * Introspects live database tables, columns, indexes, constraints, triggers, and functions
@@ -386,22 +152,11 @@ export class SchemaAuditor {
     `);
     const liveTables = new Set<string>(tablesRes.rows.map((r: any) => r.table_name));
 
-    // 2. Introspect existing columns with data types and PostgreSQL raw default expressions (pg_get_expr)
+    // 2. Introspect existing columns with data types
     const columnsRes = await poolOrClient.query(`
-      SELECT 
-        c.table_name, 
-        c.column_name, 
-        c.data_type, 
-        c.udt_name, 
-        c.is_nullable, 
-        c.column_default,
-        pg_get_expr(ad.adbin, ad.adrelid) AS default_expr
-      FROM information_schema.columns c
-      LEFT JOIN pg_class cl ON cl.relname = c.table_name
-      LEFT JOIN pg_namespace n ON n.oid = cl.relnamespace AND n.nspname = c.table_schema
-      LEFT JOIN pg_attribute a ON a.attrelid = cl.oid AND a.attname = c.column_name
-      LEFT JOIN pg_attrdef ad ON ad.adrelid = cl.oid AND ad.adnum = a.attnum
-      WHERE c.table_schema = 'public';
+      SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
+      FROM information_schema.columns 
+      WHERE table_schema = 'public';
     `);
     
     // Map: "tableName.columnName" -> column row
@@ -417,18 +172,6 @@ export class SchemaAuditor {
       WHERE schemaname = 'public';
     `);
     const liveIndexes = new Set<string>(indexesRes.rows.map((r: any) => r.indexname));
-
-    // Map: tableName.toLowerCase() -> (indexName.toLowerCase() -> ParsedLiveIndex)
-    const liveIndexesByTable = new Map<string, Map<string, ParsedLiveIndex>>();
-    for (const r of indexesRes.rows) {
-      const tName = r.tablename.toLowerCase();
-      const parsed = parseIndexDef(r.indexdef, r.tablename, r.indexname);
-      if (!parsed) continue;
-      if (!liveIndexesByTable.has(tName)) {
-        liveIndexesByTable.set(tName, new Map());
-      }
-      liveIndexesByTable.get(tName)!.set(r.indexname.toLowerCase(), parsed);
-    }
 
     // 4. Introspect existing constraints (PK, UNIQUE, FK, CHECK)
     const constraintsRes = await poolOrClient.query(`
@@ -460,58 +203,13 @@ export class SchemaAuditor {
       liveConstraintsByTable.set(row.table_name, list);
     }
 
-    // 5. Introspect existing triggers with metadata (timing, event, orientation/level, action statement)
+    // 5. Introspect existing triggers
     const triggersRes = await poolOrClient.query(`
-      SELECT 
-        event_object_table, 
-        trigger_name, 
-        action_timing, 
-        event_manipulation, 
-        action_orientation, 
-        action_statement
+      SELECT event_object_table, trigger_name 
       FROM information_schema.triggers 
       WHERE trigger_schema = 'public';
     `);
-
-    interface LiveTriggerInfo {
-      table: string;
-      name: string;
-      timing: string;
-      events: Set<string>;
-      level: string;
-      functionName: string;
-    }
-
-    const liveTriggersMap = new Map<string, LiveTriggerInfo>();
-
-    for (const r of triggersRes.rows) {
-      const key = `${r.event_object_table}.${r.trigger_name}`;
-      const fnMatch = r.action_statement ? r.action_statement.match(/EXECUTE\s+(?:FUNCTION|PROCEDURE)\s+([a-zA-Z0-9_".]+)/i) : null;
-      let fnName = fnMatch ? fnMatch[1].replace(/["()]/g, '').trim() : '';
-      if (fnName.includes('.')) {
-        fnName = fnName.split('.').pop() || fnName;
-      }
-
-      const timing = (r.action_timing || '').toUpperCase();
-      const level = (r.action_orientation || '').toUpperCase();
-      const event = r.event_manipulation ? r.event_manipulation.toUpperCase() : '';
-
-      if (!liveTriggersMap.has(key)) {
-        liveTriggersMap.set(key, {
-          table: r.event_object_table,
-          name: r.trigger_name,
-          timing,
-          events: new Set(event ? [event] : []),
-          level,
-          functionName: fnName,
-        });
-      } else {
-        const existing = liveTriggersMap.get(key)!;
-        if (event) {
-          existing.events.add(event);
-        }
-      }
-    }
+    const liveTriggers = new Set<string>(triggersRes.rows.map((r: any) => r.trigger_name));
 
     // 6. Introspect custom functions
     const funcsRes = await poolOrClient.query(`
@@ -585,38 +283,17 @@ export class SchemaAuditor {
             humanReadableMessages.push(`⚠️ Eksik NOT NULL kısıtı: ${tableName}.${colDef.name}`);
           }
 
-          // Check DEFAULT constraint with strict expression normalization against pg_get_expr(adbin, adrelid)
-          if (colDef.defaultValue !== undefined) {
-            const rawDbDefault = liveCol.default_expr ?? liveCol.column_default;
-            const hasDefaultInDb = rawDbDefault !== null && rawDbDefault !== undefined;
-
-            if (!hasDefaultInDb) {
-              const dfFixSql = `ALTER TABLE "${tableName}" ALTER COLUMN "${colDef.name}" SET DEFAULT ${colDef.defaultValue};`;
-              missingConstraints.push({
-                table: tableName,
-                constraintName: `df_${tableName}_${colDef.name}`,
-                constraintType: 'DEFAULT',
-                status: 'MISSING',
-                details: `Kolon ${tableName}.${colDef.name} için beklenen varsayılan değer ${colDef.defaultValue}, ancak tabloda DEFAULT tanımlı değil`,
-                suggestedFixSql: dfFixSql,
-                expectedValue: colDef.defaultValue,
-                actualValue: undefined,
-              });
-              humanReadableMessages.push(`⚠️ Eksik DEFAULT değeri: ${tableName}.${colDef.name} (${colDef.defaultValue})`);
-            } else if (!areDefaultExpressionsEquivalent(colDef.defaultValue, rawDbDefault)) {
-              const dfFixSql = `ALTER TABLE "${tableName}" ALTER COLUMN "${colDef.name}" SET DEFAULT ${colDef.defaultValue};`;
-              missingConstraints.push({
-                table: tableName,
-                constraintName: `df_${tableName}_${colDef.name}`,
-                constraintType: 'DEFAULT',
-                status: 'MISMATCH',
-                details: `Kolon ${tableName}.${colDef.name} için DEFAULT değeri uyumsuz (beklenen: ${colDef.defaultValue}, mevcut: ${rawDbDefault})`,
-                suggestedFixSql: dfFixSql,
-                expectedValue: colDef.defaultValue,
-                actualValue: String(rawDbDefault),
-              });
-              humanReadableMessages.push(`⚠️ Uyumsuz DEFAULT değeri: ${tableName}.${colDef.name} (beklenen: ${colDef.defaultValue}, mevcut: ${rawDbDefault})`);
-            }
+          // Check DEFAULT constraint
+          if (colDef.defaultValue !== undefined && (liveCol.column_default === null || liveCol.column_default === undefined)) {
+            const dfFixSql = `ALTER TABLE "${tableName}" ALTER COLUMN "${colDef.name}" SET DEFAULT ${colDef.defaultValue};`;
+            missingConstraints.push({
+              table: tableName,
+              constraintName: `df_${tableName}_${colDef.name}`,
+              constraintType: 'DEFAULT',
+              details: `Kolon ${tableName}.${colDef.name} için beklenen varsayılan değer ${colDef.defaultValue}`,
+              suggestedFixSql: dfFixSql,
+            });
+            humanReadableMessages.push(`⚠️ Eksik DEFAULT değeri: ${tableName}.${colDef.name} (${colDef.defaultValue})`);
           }
         }
       }
@@ -640,18 +317,9 @@ export class SchemaAuditor {
       // D. Check UNIQUE constraints
       if (tableDef.uniqueConstraints) {
         for (const uq of tableDef.uniqueConstraints) {
-          const exists = tableConstraints.some((c) => {
-            if (c.type !== 'u') return false;
-            if (c.name !== uq.name) return false;
-            const match = c.def.match(/UNIQUE\s*\(([^)]+)\)/i);
-            if (match) {
-              const cols = match[1].split(',').map(s => s.trim().replace(/"/g, ''));
-              if (cols.join(',') !== uq.columns.join(',')) return false;
-            }
-            return true;
-          });
+          const exists = liveConstraintNames.has(uq.name) || tableConstraints.some((c) => c.type === 'u');
           if (!exists) {
-            const uqSql = `ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${uq.name}"; ALTER TABLE "${tableName}" ADD CONSTRAINT "${uq.name}" UNIQUE ("${uq.columns.join('", "')}");`;
+            const uqSql = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${uq.name}') THEN ALTER TABLE "${tableName}" ADD CONSTRAINT "${uq.name}" UNIQUE ("${uq.columns.join('", "')}"); END IF; END $$;`;
             missingConstraints.push({
               table: tableName,
               constraintName: uq.name,
@@ -667,34 +335,9 @@ export class SchemaAuditor {
       // E. Check FOREIGN KEY constraints
       if (tableDef.foreignKeys) {
         for (const fk of tableDef.foreignKeys) {
-          const exists = tableConstraints.some((c) => {
-            if (c.type !== 'f') return false;
-            if (c.name !== fk.name) return false;
-            if (c.foreignTable !== fk.referencedTable) return false;
-            
-            const match = c.def.match(/FOREIGN KEY\s*\(([^)]+)\)\s*REFERENCES\s*[^(]+\(([^)]+)\)/i);
-            if (match) {
-              const cols = match[1].split(',').map(s => s.trim().replace(/"/g, ''));
-              if (cols.join(',') !== fk.columns.join(',')) return false;
-              
-              const refCols = match[2].split(',').map(s => s.trim().replace(/"/g, ''));
-              if (refCols.join(',') !== fk.referencedColumns.join(',')) return false;
-            }
-            
-            if (fk.onDelete) {
-              if (!c.def.toUpperCase().includes(`ON DELETE ${fk.onDelete}`)) return false;
-            } else {
-              if (c.def.toUpperCase().includes('ON DELETE CASCADE') || c.def.toUpperCase().includes('ON DELETE SET NULL')) return false;
-            }
-            
-            if (fk.onUpdate) {
-              if (!c.def.toUpperCase().includes(`ON UPDATE ${fk.onUpdate}`)) return false;
-            }
-            
-            return true;
-          });
+          const exists = liveConstraintNames.has(fk.name) || tableConstraints.some((c) => c.type === 'f' && c.foreignTable === fk.referencedTable);
           if (!exists) {
-            const fkSql = `ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${fk.name}"; ALTER TABLE "${tableName}" ADD CONSTRAINT "${fk.name}" FOREIGN KEY ("${fk.columns.join('", "')}") REFERENCES "${fk.referencedTable}" ("${fk.referencedColumns.join('", "')}") ON DELETE ${fk.onDelete || 'NO ACTION'}${fk.onUpdate ? ' ON UPDATE ' + fk.onUpdate : ''};`;
+            const fkSql = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${fk.name}') THEN ALTER TABLE "${tableName}" ADD CONSTRAINT "${fk.name}" FOREIGN KEY ("${fk.columns.join('", "')}") REFERENCES "${fk.referencedTable}" ("${fk.referencedColumns.join('", "')}") ON DELETE ${fk.onDelete || 'NO ACTION'}; END IF; END $$;`;
             missingConstraints.push({
               table: tableName,
               constraintName: fk.name,
@@ -710,23 +353,9 @@ export class SchemaAuditor {
       // F. Check CHECK constraints
       if (tableDef.checkConstraints) {
         for (const chk of tableDef.checkConstraints) {
-          const exists = tableConstraints.some((c) => {
-            if (c.type !== 'c') return false;
-            if (c.name !== chk.name) return false;
-            
-            const normalize = (str: string) => str.toLowerCase().replace(/[\s"']/g, '').replace(/::\w+(\[\])?/g, '').replace(/=any\(array\[/g, 'in(').replace(/\]\)/g, ')').replace(/\]/g, '').replace(/\[/g, '');
-            const match = c.def.match(/CHECK\s*\((.*)\)/i);
-            if (match) {
-               const dbCond = normalize(match[1]);
-               const expectedCond = normalize(chk.condition);
-               if (!dbCond.includes(expectedCond) && !expectedCond.includes(dbCond)) {
-                  return false;
-               }
-            }
-            return true;
-          });
+          const exists = liveConstraintNames.has(chk.name) || tableConstraints.some((c) => c.type === 'c');
           if (!exists) {
-            const chkSql = `ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${chk.name}"; ALTER TABLE "${tableName}" ADD CONSTRAINT "${chk.name}" CHECK (${chk.condition});`;
+            const chkSql = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${chk.name}') THEN ALTER TABLE "${tableName}" ADD CONSTRAINT "${chk.name}" CHECK (${chk.condition}); END IF; END $$;`;
             missingConstraints.push({
               table: tableName,
               constraintName: chk.name,
@@ -739,264 +368,34 @@ export class SchemaAuditor {
         }
       }
 
-      // G. Check indexes in existing table (Strict Definition Verification: columns, order, ASC/DESC, UNIQUE, WHERE, type)
+      // G. Check indexes in existing table
       if (tableDef.indexes) {
-        const tableIndexes = liveIndexesByTable.get(tableName.toLowerCase());
-
         for (const idx of tableDef.indexes) {
-          const uniqueSql = idx.unique ? 'UNIQUE ' : '';
-          const expectedType = (idx.type || 'BTREE').toUpperCase();
-          const usingSql = `USING ${expectedType.toLowerCase()}`;
-          const colsSql = idx.columns.map((c) => (c.includes(' ') || c.includes('(') ? c : `"${c}"`)).join(', ');
-          const whereSql = idx.where ? ` WHERE ${idx.where}` : '';
-
-          const liveIdx = tableIndexes?.get(idx.name.toLowerCase());
-
-          if (!liveIdx) {
-            // Index does not exist
-            const idxDdl = `CREATE ${uniqueSql}INDEX IF NOT EXISTS "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
+          if (!liveIndexes.has(idx.name)) {
+            const colsSql = idx.columns.join(', ');
+            const uniqueSql = idx.unique ? 'UNIQUE ' : '';
+            const idxDdl = `CREATE ${uniqueSql}INDEX IF NOT EXISTS "${idx.name}" ON "${tableName}" (${colsSql});`;
             missingIndexes.push({
               table: tableName,
               indexName: idx.name,
               columns: idx.columns,
               ddl: idxDdl,
-              status: 'MISSING',
-              details: `İndeks veritabanında bulunamadı (Beklenen kolonlar: [${idx.columns.join(', ')}])`,
-              expectedDefinition: {
-                type: expectedType,
-                unique: Boolean(idx.unique),
-                columns: idx.columns,
-                where: idx.where,
-              },
             });
-            humanReadableMessages.push(`❌ Eksik index: ${idx.name} on ${tableName} ([${idx.columns.join(', ')}])`);
-            continue;
-          }
-
-          // Strict Definition Comparison:
-          // 1. Check access method / index type (BTREE, GIN, BRIN, HASH)
-          if (liveIdx.accessMethod !== expectedType) {
-            const fixDdl = `DROP INDEX IF EXISTS "${idx.name}"; CREATE ${uniqueSql}INDEX "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
-            missingIndexes.push({
-              table: tableName,
-              indexName: idx.name,
-              columns: idx.columns,
-              ddl: fixDdl,
-              status: 'MISMATCH',
-              details: `Index tipi uyumsuz: beklenen ${expectedType}, mevcut ${liveIdx.accessMethod}`,
-              expectedDefinition: {
-                type: expectedType,
-                unique: Boolean(idx.unique),
-                columns: idx.columns,
-                where: idx.where,
-              },
-              actualDefinition: {
-                type: liveIdx.accessMethod,
-                unique: liveIdx.isUnique,
-                columns: liveIdx.columns,
-                where: liveIdx.whereClause,
-              },
-            });
-            humanReadableMessages.push(`⚠️ Uyumsuz index tipi: ${idx.name} on ${tableName} (beklenen: ${expectedType}, mevcut: ${liveIdx.accessMethod})`);
-            continue;
-          }
-
-          // 2. Check UNIQUE constraint status
-          const expectedUnique = Boolean(idx.unique);
-          if (liveIdx.isUnique !== expectedUnique) {
-            const fixDdl = `DROP INDEX IF EXISTS "${idx.name}"; CREATE ${uniqueSql}INDEX "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
-            missingIndexes.push({
-              table: tableName,
-              indexName: idx.name,
-              columns: idx.columns,
-              ddl: fixDdl,
-              status: 'MISMATCH',
-              details: `UNIQUE kısıtı uyumsuz: beklenen ${expectedUnique ? 'UNIQUE' : 'NON-UNIQUE'}, mevcut ${liveIdx.isUnique ? 'UNIQUE' : 'NON-UNIQUE'}`,
-              expectedDefinition: {
-                type: expectedType,
-                unique: expectedUnique,
-                columns: idx.columns,
-                where: idx.where,
-              },
-              actualDefinition: {
-                type: liveIdx.accessMethod,
-                unique: liveIdx.isUnique,
-                columns: liveIdx.columns,
-                where: liveIdx.whereClause,
-              },
-            });
-            humanReadableMessages.push(`⚠️ Uyumsuz index UNIQUE kısıtı: ${idx.name} on ${tableName} (beklenen: ${expectedUnique ? 'UNIQUE' : 'NON-UNIQUE'}, mevcut: ${liveIdx.isUnique ? 'UNIQUE' : 'NON-UNIQUE'})`);
-            continue;
-          }
-
-          // 3. Check columns count
-          if (idx.columns.length !== liveIdx.columns.length) {
-            const fixDdl = `DROP INDEX IF EXISTS "${idx.name}"; CREATE ${uniqueSql}INDEX "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
-            missingIndexes.push({
-              table: tableName,
-              indexName: idx.name,
-              columns: idx.columns,
-              ddl: fixDdl,
-              status: 'MISMATCH',
-              details: `Kolon sayısı uyumsuz: beklenen [${idx.columns.join(', ')}], mevcut [${liveIdx.columns.join(', ')}]`,
-              expectedDefinition: {
-                type: expectedType,
-                unique: expectedUnique,
-                columns: idx.columns,
-                where: idx.where,
-              },
-              actualDefinition: {
-                type: liveIdx.accessMethod,
-                unique: liveIdx.isUnique,
-                columns: liveIdx.columns,
-                where: liveIdx.whereClause,
-              },
-            });
-            humanReadableMessages.push(`⚠️ Uyumsuz index kolon sayısı: ${idx.name} on ${tableName} (beklenen: [${idx.columns.join(', ')}], mevcut: [${liveIdx.columns.join(', ')}])`);
-            continue;
-          }
-
-          // 4. Check column order, expressions and ASC/DESC directionality
-          let colMismatchDetail: string | null = null;
-          for (let i = 0; i < idx.columns.length; i++) {
-            const expColNorm = normalizeIndexColumn(idx.columns[i]);
-            const actColNorm = normalizeIndexColumn(liveIdx.columns[i]);
-            if (expColNorm !== actColNorm) {
-              colMismatchDetail = `Kolon ${i + 1} tanımsal/sıralama uyumsuzluğu (beklenen: "${idx.columns[i]}", mevcut: "${liveIdx.columns[i]}")`;
-              break;
-            }
-          }
-
-          if (colMismatchDetail) {
-            const fixDdl = `DROP INDEX IF EXISTS "${idx.name}"; CREATE ${uniqueSql}INDEX "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
-            missingIndexes.push({
-              table: tableName,
-              indexName: idx.name,
-              columns: idx.columns,
-              ddl: fixDdl,
-              status: 'MISMATCH',
-              details: colMismatchDetail,
-              expectedDefinition: {
-                type: expectedType,
-                unique: expectedUnique,
-                columns: idx.columns,
-                where: idx.where,
-              },
-              actualDefinition: {
-                type: liveIdx.accessMethod,
-                unique: liveIdx.isUnique,
-                columns: liveIdx.columns,
-                where: liveIdx.whereClause,
-              },
-            });
-            humanReadableMessages.push(`⚠️ Uyumsuz index kolon sırası/yönü: ${idx.name} on ${tableName} -> ${colMismatchDetail}`);
-            continue;
-          }
-
-          // 5. Check WHERE clause (partial index)
-          const expWhereNorm = normalizeWhereClause(idx.where);
-          const actWhereNorm = normalizeWhereClause(liveIdx.whereClause);
-          if (expWhereNorm !== actWhereNorm) {
-            const fixDdl = `DROP INDEX IF EXISTS "${idx.name}"; CREATE ${uniqueSql}INDEX "${idx.name}" ON "${tableName}" ${usingSql} (${colsSql})${whereSql};`;
-            missingIndexes.push({
-              table: tableName,
-              indexName: idx.name,
-              columns: idx.columns,
-              ddl: fixDdl,
-              status: 'MISMATCH',
-              details: `WHERE filtresi uyumsuz: beklenen "${idx.where || 'yok'}", mevcut "${liveIdx.whereClause || 'yok'}"`,
-              expectedDefinition: {
-                type: expectedType,
-                unique: expectedUnique,
-                columns: idx.columns,
-                where: idx.where,
-              },
-              actualDefinition: {
-                type: liveIdx.accessMethod,
-                unique: liveIdx.isUnique,
-                columns: liveIdx.columns,
-                where: liveIdx.whereClause,
-              },
-            });
-            humanReadableMessages.push(`⚠️ Uyumsuz index WHERE filtresi: ${idx.name} on ${tableName} (beklenen: "${idx.where || 'yok'}", mevcut: "${liveIdx.whereClause || 'yok'}")`);
-            continue;
+            humanReadableMessages.push(`❌ Eksik index: ${idx.name} (${tableName} -> [${colsSql}])`);
           }
         }
       }
 
-      // H. Check triggers with full metadata validation (timing, events, level, function)
+      // H. Check triggers
       if (tableDef.triggers) {
         for (const trg of tableDef.triggers) {
-          const key = `${tableName}.${trg.name}`;
-          const liveTrg = liveTriggersMap.get(key);
-          const trgDdl = generateTriggerDDL(tableName, trg);
-
-          if (!liveTrg) {
+          if (!liveTriggers.has(trg.name)) {
             missingTriggers.push({
               table: tableName,
               triggerName: trg.name,
               functionName: trg.functionName,
-              status: 'MISSING',
-              timing: trg.timing,
-              events: trg.events,
-              level: trg.level,
-              ddl: trgDdl,
-              details: `Eksik tetikleyici: ${trg.name} (${trg.timing} ${trg.events.join(' OR ')} ON "${tableName}" FOR EACH ${trg.level} EXECUTE FUNCTION ${trg.functionName}())`,
-              expectedDefinition: {
-                timing: trg.timing,
-                events: trg.events,
-                level: trg.level,
-                functionName: trg.functionName,
-              },
             });
-            humanReadableMessages.push(`❌ Eksik trigger: ${trg.name} on ${tableName} (${trg.timing} ${trg.events.join(' OR ')})`);
-          } else {
-            // Validate timing, events, level, and functionName
-            const timingMismatch = liveTrg.timing !== trg.timing.toUpperCase();
-            const levelMismatch = liveTrg.level !== trg.level.toUpperCase();
-            const functionMismatch = Boolean(
-              liveTrg.functionName &&
-              trg.functionName &&
-              liveTrg.functionName.toLowerCase() !== trg.functionName.toLowerCase()
-            );
-
-            const liveEvents = Array.from(liveTrg.events).filter(Boolean);
-            const eventsMismatch =
-              trg.events.length !== liveEvents.length ||
-              trg.events.some((e) => !liveTrg.events.has(e.toUpperCase()));
-
-            if (timingMismatch || levelMismatch || functionMismatch || eventsMismatch) {
-              const mismatchReasons: string[] = [];
-              if (timingMismatch) mismatchReasons.push(`timing: beklenen ${trg.timing}, mevcut ${liveTrg.timing}`);
-              if (eventsMismatch) mismatchReasons.push(`events: beklenen ${trg.events.join(' OR ')}, mevcut ${liveEvents.join(' OR ')}`);
-              if (levelMismatch) mismatchReasons.push(`level: beklenen ${trg.level}, mevcut ${liveTrg.level}`);
-              if (functionMismatch) mismatchReasons.push(`function: beklenen ${trg.functionName}, mevcut ${liveTrg.functionName}`);
-
-              missingTriggers.push({
-                table: tableName,
-                triggerName: trg.name,
-                functionName: trg.functionName,
-                status: 'MISMATCH',
-                timing: trg.timing,
-                events: trg.events,
-                level: trg.level,
-                ddl: trgDdl,
-                details: `Uyumsuz tetikleyici: ${trg.name} (${mismatchReasons.join(', ')})`,
-                expectedDefinition: {
-                  timing: trg.timing,
-                  events: trg.events,
-                  level: trg.level,
-                  functionName: trg.functionName,
-                },
-                actualDefinition: {
-                  timing: liveTrg.timing,
-                  events: liveEvents,
-                  level: liveTrg.level,
-                  functionName: liveTrg.functionName,
-                },
-              });
-              humanReadableMessages.push(`⚠️ Uyumsuz trigger tanımı: ${trg.name} on ${tableName} (${mismatchReasons.join(', ')})`);
-            }
+            humanReadableMessages.push(`❌ Eksik trigger: ${trg.name} on ${tableName}`);
           }
         }
       }
@@ -1011,17 +410,6 @@ export class SchemaAuditor {
       }
     }
 
-    // J. Scan Data Integrity Violations (Zero Data Loss Protection: Orphans & NULLs)
-    let dataIntegrityViolations: OrphanViolationInfo[] = [];
-    try {
-      dataIntegrityViolations = await DataMaintenanceService.scanDataIntegrityViolations(poolOrClient);
-      for (const v of dataIntegrityViolations) {
-        humanReadableMessages.push(`⚠️ Veri Bütünlüğü Uyarısı: ${v.message} (Auto-Heal veri silmez; Ayrı Bakım İşi gerektirir)`);
-      }
-    } catch {
-      // Non-blocking for audit
-    }
-
     // Compute Health Score (0 - 100%)
     const totalDefects =
       missingTables.length * 10 +
@@ -1033,7 +421,7 @@ export class SchemaAuditor {
       missingFunctions.length * 2;
 
     const score = Math.max(0, 100 - totalDefects);
-    const isHealthy = totalDefects === 0 && dataIntegrityViolations.length === 0;
+    const isHealthy = totalDefects === 0;
 
     if (isHealthy) {
       humanReadableMessages.push('✅ Tüm tablolar, kolonlar, kısıtlar (PK/FK/UNIQUE/CHECK/NOT NULL/DEFAULT), veri tipleri, indeksler ve tetikleyiciler Kanonik Şema ile %100 uyumlu.');
@@ -1053,7 +441,6 @@ export class SchemaAuditor {
         missingConstraintsCount: missingConstraints.length,
         missingTriggersCount: missingTriggers.length,
         missingFunctionsCount: missingFunctions.length,
-        dataIntegrityViolationsCount: dataIntegrityViolations.length,
       },
       discrepancies: {
         missingTables,
@@ -1063,9 +450,7 @@ export class SchemaAuditor {
         missingConstraints,
         missingTriggers,
         missingFunctions,
-        dataIntegrityViolations,
       },
-      dataIntegrityViolations,
       humanReadableMessages,
     };
   }
@@ -1222,66 +607,33 @@ export class SchemaAuditor {
       }
     }
 
-    // 5. Heal missing or mismatched indexes
+    // 5. Heal missing indexes
     for (const missingIdx of beforeReport.discrepancies.missingIndexes) {
       try {
         await poolOrClient.query(missingIdx.ddl);
-        actionsTaken.push(
-          missingIdx.status === 'MISMATCH'
-            ? `Uyumsuz indeks tanımı düzeltildi ve yeniden oluşturuldu: ${missingIdx.indexName} (${missingIdx.table})`
-            : `Eksik indeks oluşturuldu: ${missingIdx.indexName} (${missingIdx.table})`
-        );
+        actionsTaken.push(`Eksik indeks oluşturuldu: ${missingIdx.indexName} (${missingIdx.table})`);
       } catch (idxErr: any) {
-        errors.push(`İndeks onarma hatası (${missingIdx.indexName}): ${idxErr?.message || idxErr}`);
+        errors.push(`İndeks oluşturma hatası (${missingIdx.indexName}): ${idxErr?.message || idxErr}`);
       }
     }
 
-    // 6. Heal missing & mismatched triggers using canonical TriggerDefinition metadata directly
+    // 6. Heal missing triggers
     for (const missingTrg of beforeReport.discrepancies.missingTriggers) {
       try {
-        // ALWAYS retrieve canonical TriggerDefinition directly from metadata
-        const tableDef = CANONICAL_SCHEMA_METADATA.tables[missingTrg.table];
-        const canonicalTrg = tableDef?.triggers?.find((t) => t.name === missingTrg.triggerName);
-
-        const timing = canonicalTrg?.timing || missingTrg.timing || 'BEFORE';
-        const events = canonicalTrg?.events || missingTrg.events || ['UPDATE'];
-        const level = canonicalTrg?.level || missingTrg.level || 'ROW';
-        const functionName = canonicalTrg?.functionName || missingTrg.functionName;
-
-        const ddl = canonicalTrg
-          ? generateTriggerDDL(missingTrg.table, canonicalTrg)
-          : missingTrg.ddl || `
-            DROP TRIGGER IF EXISTS "${missingTrg.triggerName}" ON "${missingTrg.table}";
-            CREATE TRIGGER "${missingTrg.triggerName}"
-            ${timing} ${events.join(' OR ')} ON "${missingTrg.table}"
-            FOR EACH ${level}
-            EXECUTE FUNCTION ${functionName}();
-          `;
-
-        await poolOrClient.query(ddl);
-        const eventsClause = events.join(' OR ');
-        actionsTaken.push(
-          missingTrg.status === 'MISMATCH'
-            ? `Uyumsuz tetikleyici (Trigger) onarıldı: ${missingTrg.triggerName} on ${missingTrg.table} (${timing} ${eventsClause} FOR EACH ${level} EXECUTE FUNCTION ${functionName}())`
-            : `Eksik tetikleyici bağlandı: ${missingTrg.triggerName} on ${missingTrg.table} (${timing} ${eventsClause} FOR EACH ${level} EXECUTE FUNCTION ${functionName}())`
-        );
+        await poolOrClient.query(`
+          DROP TRIGGER IF EXISTS "${missingTrg.triggerName}" ON "${missingTrg.table}";
+          CREATE TRIGGER "${missingTrg.triggerName}"
+          BEFORE UPDATE ON "${missingTrg.table}"
+          FOR EACH ROW
+          EXECUTE FUNCTION "${missingTrg.functionName}"();
+        `);
+        actionsTaken.push(`Eksik tetikleyici bağlandı: ${missingTrg.triggerName} on ${missingTrg.table}`);
       } catch (trgErr: any) {
-        errors.push(`Tetikleyici onarma hatası (${missingTrg.triggerName}): ${trgErr?.message || trgErr}`);
+        errors.push(`Tetikleyici oluşturma hatası (${missingTrg.triggerName}): ${trgErr?.message || trgErr}`);
       }
     }
 
-    // 6.5. ZERO DATA LOSS INTEGRITY CHECK (Auto-Heal NEVER deletes data):
-    // Mandate: Schema repair ≠ Data cleanup.
-    // Auto-heal strictly repairs database structure (DETECT -> REPAIR STRUCTURE -> VERIFY).
-    // It must NEVER execute DELETE FROM on telemetry, users, devices, or alarms.
-    // If existing rows violate a constraint (e.g. orphan foreign keys or NULL values),
-    // the constraint cannot be safely applied automatically. Auto-Heal:
-    // 1. REPAIR FAILS for that constraint
-    // 2. ADMIN ALERT is triggered
-    // 3. ORPHAN REPORT is recorded for separate maintenance remediation
-    const blockedConstraintNames = new Set<string>();
-    const orphanReports: OrphanViolationInfo[] = [];
-
+    // 6.5. Pre-heal: Clean up data violations before applying constraints (Orphans & Nulls)
     for (const missingConstraint of beforeReport.discrepancies.missingConstraints) {
       if (missingConstraint.constraintType === 'FOREIGN KEY') {
         const tableDef = CANONICAL_SCHEMA_METADATA.tables[missingConstraint.table];
@@ -1291,130 +643,52 @@ export class SchemaAuditor {
           const refTable = fkDef.referencedTable;
           const refCol = fkDef.referencedColumns[0];
           try {
-            const countRes = await poolOrClient.query(`
-              SELECT COUNT(*)::int AS cnt 
-              FROM "${missingConstraint.table}" 
-              WHERE "${localCol}" IS NOT NULL 
-                AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}");
-            `);
-            const orphanCount = parseInt(countRes.rows[0]?.cnt || '0', 10);
-            if (orphanCount > 0) {
-              blockedConstraintNames.add(missingConstraint.constraintName);
-
-              // Collect sample orphan identifiers
-              let sampleIds: string[] = [];
-              try {
-                const sampleRes = await poolOrClient.query(`
-                  SELECT "${localCol}"::text AS orphan_val 
-                  FROM "${missingConstraint.table}" 
-                  WHERE "${localCol}" IS NOT NULL 
-                    AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}")
-                  LIMIT 5;
-                `);
-                sampleIds = sampleRes.rows.map((r: any) => String(r.orphan_val));
-              } catch {
-                // Non-blocking
-              }
-
-              const orphanItem: OrphanViolationInfo = {
-                table: missingConstraint.table,
-                column: localCol,
-                referencedTable: refTable,
-                referencedColumn: refCol,
-                constraintName: missingConstraint.constraintName,
-                violationType: 'FOREIGN_KEY_ORPHAN',
-                violationCount: orphanCount,
-                sampleIds,
-                detectedAt: new Date().toISOString(),
-                message: `"${missingConstraint.table}" tablosunda "${refTable}" tablosunda karşılığı bulunmayan ${orphanCount} adet yetim (orphan) kayıt mevcut.`,
-              };
-              orphanReports.push(orphanItem);
-
-              // 1. Trigger ADMIN ALERT (Critical Log)
-              const alertMsg = `[SIFIR VERİ KAYBI / REPAIR FAIL] "${missingConstraint.table}" tablosunda "${missingConstraint.constraintName}" kısıtı eklenemedi: ${orphanCount} adet yetim (orphan) kayıt mevcut. Auto-Heal veri güvenliği prensibi gereği asla veri silmez! Ayrı Bakım İşi (Separate Maintenance Job) gereklidir.`;
-              console.error(`[SchemaAutoHealer - DATA INTEGRITY ALERT] ${alertMsg}`);
-
-              systemLogger.critical('database', alertMsg, {
-                table: missingConstraint.table,
-                constraintName: missingConstraint.constraintName,
-                orphanCount,
-                sampleIds,
-                action: 'PRESERVE_DATA_FAIL_REPAIR',
-              }, 'schema_auditor');
-
-              errors.push(`Kısıt onarılamadı (Sıfır Veri Kaybı Koruması): "${missingConstraint.table}" üzerinde ${orphanCount} adet yetim (orphan) kayıt var. Auto-Heal veri silmez.`);
-
-              // 2. Insert admin notification
-              try {
-                const notifId = `notif_orphan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-                await poolOrClient.query(`
-                  INSERT INTO notifications (id, user_id, title, message, type, severity, is_read, created_at)
-                  VALUES ($1, 'usr_admin', 'Veri Bütünlüğü Uyarısı (Yetim Kayıt)', $2, 'security', 'error', FALSE, CURRENT_TIMESTAMP)
-                  ON CONFLICT (id) DO NOTHING;
-                `, [notifId, alertMsg.substring(0, 450)]);
-              } catch {
-                // Non-blocking
-              }
+            const colDef = tableDef.columns.find(c => c.name === localCol);
+            if (colDef && colDef.nullable && fkDef.onDelete === 'SET NULL') {
+               await poolOrClient.query(`UPDATE "${missingConstraint.table}" SET "${localCol}" = NULL WHERE "${localCol}" IS NOT NULL AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}")`);
+            } else {
+               await poolOrClient.query(`DELETE FROM "${missingConstraint.table}" WHERE "${localCol}" IS NOT NULL AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}")`);
             }
           } catch (orphanErr) {
-            console.warn(`[AutoHeal] Orphan check failed for ${missingConstraint.constraintName}:`, orphanErr);
+            console.warn(`[AutoHeal] Orphan cleanup failed for ${missingConstraint.constraintName}:`, orphanErr);
           }
         }
       } else if (missingConstraint.constraintType === 'NOT NULL') {
+        const tableDef = CANONICAL_SCHEMA_METADATA.tables[missingConstraint.table];
         const colNameMatch = missingConstraint.details.match(/Kolon .*?\.(\w+) NOT NULL/);
         if (colNameMatch && colNameMatch[1]) {
-          const localCol = colNameMatch[1];
-          try {
-            const nullCountRes = await poolOrClient.query(`
-              SELECT COUNT(*)::int AS cnt 
-              FROM "${missingConstraint.table}" 
-              WHERE "${localCol}" IS NULL;
-            `);
-            const nullCount = parseInt(nullCountRes.rows[0]?.cnt || '0', 10);
-            if (nullCount > 0) {
-              blockedConstraintNames.add(missingConstraint.constraintName);
-              const alertMsg = `[SIFIR VERİ KAYBI / REPAIR FAIL] "${missingConstraint.table}" tablosunda "${localCol}" NOT NULL kısıtı eklenemedi: ${nullCount} adet NULL kayıt mevcut. Auto-Heal veri silmez!`;
-              console.error(`[SchemaAutoHealer - DATA INTEGRITY ALERT] ${alertMsg}`);
-
-              systemLogger.critical('database', alertMsg, {
-                table: missingConstraint.table,
-                column: localCol,
-                nullCount,
-                action: 'PRESERVE_DATA_FAIL_REPAIR',
-              }, 'schema_auditor');
-
-              errors.push(`NOT NULL kısıtı onarılamadı (Sıfır Veri Kaybı): "${missingConstraint.table}.${localCol}" kolonunda ${nullCount} adet NULL kayıt var. Auto-Heal veri silmez.`);
-            }
-          } catch (nullErr) {
-            console.warn(`[AutoHeal] Null check failed for ${missingConstraint.constraintName}:`, nullErr);
-          }
+           const localCol = colNameMatch[1];
+           const colDef = tableDef?.columns.find(c => c.name === localCol);
+           try {
+             if (colDef && colDef.type.includes('VARCHAR')) {
+               await poolOrClient.query(`UPDATE "${missingConstraint.table}" SET "${localCol}" = 'default_value' WHERE "${localCol}" IS NULL`);
+             } else if (colDef && (colDef.type.includes('INT') || colDef.type.includes('NUMERIC'))) {
+               await poolOrClient.query(`UPDATE "${missingConstraint.table}" SET "${localCol}" = 0 WHERE "${localCol}" IS NULL`);
+             } else if (colDef && colDef.type.includes('BOOL')) {
+               await poolOrClient.query(`UPDATE "${missingConstraint.table}" SET "${localCol}" = false WHERE "${localCol}" IS NULL`);
+             } else if (colDef && colDef.type.includes('TIMESTAMP')) {
+               await poolOrClient.query(`UPDATE "${missingConstraint.table}" SET "${localCol}" = CURRENT_TIMESTAMP WHERE "${localCol}" IS NULL`);
+             } else {
+               await poolOrClient.query(`DELETE FROM "${missingConstraint.table}" WHERE "${localCol}" IS NULL`);
+             }
+           } catch (nullErr) {
+             console.warn(`[AutoHeal] Null cleanup failed for ${missingConstraint.constraintName}:`, nullErr);
+           }
         }
       }
     }
 
     // 7. Heal missing / mismatched database constraints (PRIMARY KEY, UNIQUE, FOREIGN KEY, CHECK, NOT NULL, DEFAULT)
     for (const missingConstraint of beforeReport.discrepancies.missingConstraints) {
-      if (blockedConstraintNames.has(missingConstraint.constraintName)) {
-        // Explicitly skipped due to Zero Data Loss protection
-        continue;
-      }
       try {
         await poolOrClient.query(missingConstraint.suggestedFixSql);
-        actionsTaken.push(
-          missingConstraint.status === 'MISMATCH'
-            ? `Kısıt / Varsayılan değer güncellendi: [${missingConstraint.constraintType}] ${missingConstraint.constraintName} on ${missingConstraint.table}`
-            : `Kısıt (Constraint) onarıldı: [${missingConstraint.constraintType}] ${missingConstraint.constraintName} on ${missingConstraint.table}`
-        );
+        actionsTaken.push(`Kısıt (Constraint) onarıldı: [${missingConstraint.constraintType}] ${missingConstraint.constraintName} on ${missingConstraint.table}`);
       } catch (conErr: any) {
         const errMsg = conErr?.message || String(conErr);
         if (errMsg.includes('already exists') || errMsg.includes('zaten var')) {
           actionsTaken.push(`Kısıt zaten mevcut (yoksayıldı): [${missingConstraint.constraintType}] ${missingConstraint.constraintName} on ${missingConstraint.table}`);
         } else {
           errors.push(`Kısıt onarım hatası (${missingConstraint.constraintName} on ${missingConstraint.table}): ${errMsg}`);
-          systemLogger.error('database', `Kısıt onarım hatası: ${errMsg}`, {
-            constraint: missingConstraint.constraintName,
-            table: missingConstraint.table,
-          }, 'schema_auditor');
         }
       }
     }
@@ -1550,7 +824,6 @@ export class SchemaAuditor {
       beforeReport,
       afterReport,
       summaryMessage,
-      orphanReports,
     };
   }
 

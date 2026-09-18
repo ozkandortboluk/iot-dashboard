@@ -76,50 +76,6 @@ export function isTestOrEphemeralUser(id?: string, email?: string, name?: string
   return false;
 }
 
-/**
- * Distinguishes true, production human administrators from test users,
- * ephemeral test artifacts, and default static schema seed placeholders.
- * Ensures the First Run Setup Wizard is NOT erroneously skipped when only
- * canonical test accounts (e.g. usr_test_admin) exist in the system.
- */
-export function isRealAdminUser(u?: {
-  id?: string;
-  email?: string;
-  role?: string;
-  status?: string;
-  name?: string;
-  deleted_at?: any;
-  deletedAt?: any;
-} | null): boolean {
-  if (!u || u.role !== 'admin') return false;
-  if (u.status === 'deleted' || u.deleted_at || u.deletedAt) return false;
-
-  const id = (u.id || '').trim().toLowerCase();
-  const email = (u.email || '').trim().toLowerCase();
-  const name = (u.name || '').trim().toLowerCase();
-
-  // 1. Strictly exclude Canonical Test Admin (Mandatory Rule 3) and test accounts
-  if (id === 'usr_test_admin' || email === 'test@nexusnodeiot.com.tr') {
-    return false;
-  }
-  if (id.startsWith('usr_test_') || id.startsWith('test_')) {
-    return false;
-  }
-  if (email.endsWith('@nexusnodeiot.com.tr') || email.startsWith('test_') || email.includes('test_')) {
-    return false;
-  }
-  if (name.startsWith('test ') || name.includes('test user') || name === 'test kullanıcısı') {
-    return false;
-  }
-
-  // 2. Ephemeral / integration test users
-  if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
-    return false;
-  }
-
-  return true;
-}
-
 export class PostgresRepository {
   private pool: Pool | null = null;
   private isConnected = false;
@@ -276,21 +232,15 @@ export class PostgresRepository {
         "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
       );
       if (extRes.rows.length > 0) {
-        try {
-          await this.pool.query('SELECT timescaledb_version();');
-          isTimescale = true;
-          timescaleVersion = extRes.rows[0].extversion;
-          const tsMatch = timescaleVersion?.match(/^(\d+)\.(\d+)/);
-          if (tsMatch) {
-            const tsMajor = parseInt(tsMatch[1], 10);
-            const tsMinor = parseInt(tsMatch[2], 10);
-            if (tsMajor < 2 || (tsMajor === 2 && tsMinor < 11)) {
-              warnings.push(`TimescaleDB version ${timescaleVersion} detected. Production recommended version is >= 2.11.`);
-            }
+        isTimescale = true;
+        timescaleVersion = extRes.rows[0].extversion;
+        const tsMatch = timescaleVersion?.match(/^(\d+)\.(\d+)/);
+        if (tsMatch) {
+          const tsMajor = parseInt(tsMatch[1], 10);
+          const tsMinor = parseInt(tsMatch[2], 10);
+          if (tsMajor < 2 || (tsMajor === 2 && tsMinor < 11)) {
+            warnings.push(`TimescaleDB version ${timescaleVersion} detected. Production recommended version is >= 2.11.`);
           }
-        } catch (libErr: any) {
-          warnings.push(`TimescaleDB extension registered in catalog (${extRes.rows[0].extversion}) but C library cannot be loaded: ${libErr?.message || libErr}. Running in standard PostgreSQL mode.`);
-          isTimescale = false;
         }
       } else {
         warnings.push('TimescaleDB extension is not enabled in this database. Running in standard PostgreSQL mode.');
@@ -308,22 +258,10 @@ export class PostgresRepository {
     };
   }
 
-  public async checkIfAdminExists(includeTestUsers: boolean = false): Promise<boolean> {
+  public async checkIfAdminExists(): Promise<boolean> {
     if (!this.pool) return false;
     try {
-      const sql = includeTestUsers
-        ? "SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;"
-        : `SELECT 1 FROM users 
-           WHERE role = 'admin' 
-             AND (deleted_at IS NULL)
-             AND id != 'usr_test_admin'
-             AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-             AND id NOT LIKE 'usr_test_%'
-             AND id NOT LIKE 'test_%'
-             AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
-             AND LOWER(email) NOT LIKE 'test_%'
-           LIMIT 1;`;
-      const res = await this.pool.query(sql);
+      const res = await this.pool.query("SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;");
       return (res.rowCount || 0) > 0;
     } catch {
       return false;
@@ -960,96 +898,6 @@ export class PostgresRepository {
   // ==========================================
   // USERS & PASSWORDS
   // ==========================================
-  public mapUserRow(r: any): User {
-    let notifPrefs = {};
-    if (typeof r.notification_preferences === 'string') {
-      try { notifPrefs = JSON.parse(r.notification_preferences); } catch {}
-    } else if (r.notification_preferences && typeof r.notification_preferences === 'object') {
-      notifPrefs = r.notification_preferences;
-    }
-
-    return {
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      phone: r.phone || undefined,
-      notificationEmail: r.notification_email || undefined,
-      whatsappNumber: r.whatsapp_number || undefined,
-      telegramChatId: r.telegram_chat_id || undefined,
-      role: r.role || 'customer',
-      companyName: r.company_name || undefined,
-      notificationPreferences: notifPrefs,
-      status: r.status || 'active',
-      deletedAt: r.deleted_at ? new Date(r.deleted_at).toISOString() : undefined,
-      created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
-      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-    };
-  }
-
-  public async getUserById(userId: string): Promise<User | null> {
-    if (!this.pool || !this.isConnected || !userId) return null;
-    try {
-      const res = await this.query(
-        `SELECT * FROM users WHERE id = $1 AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
-        [userId]
-      );
-      if (res.rows && res.rows.length > 0) {
-        return this.mapUserRow(res.rows[0]);
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  public async getUserByEmail(email: string): Promise<User | null> {
-    if (!this.pool || !this.isConnected || !email) return null;
-    try {
-      const res = await this.query(
-        `SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
-        [email.trim()]
-      );
-      if (res.rows && res.rows.length > 0) {
-        return this.mapUserRow(res.rows[0]);
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  public async getUserWithPassword(emailOrId: string): Promise<{ user: User; passwordHash: string } | null> {
-    if (!this.pool || !this.isConnected || !emailOrId) return null;
-    try {
-      const res = await this.query(
-        `SELECT * FROM users WHERE (LOWER(email) = LOWER($1) OR id = $1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
-        [emailOrId.trim()]
-      );
-      if (res.rows && res.rows.length > 0) {
-        const r = res.rows[0];
-        return {
-          user: this.mapUserRow(r),
-          passwordHash: r.password_hash || '',
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  public async getUsers(): Promise<User[]> {
-    if (!this.pool || !this.isConnected) return [];
-    try {
-      const res = await this.query(
-        `SELECT * FROM users WHERE (deleted_at IS NULL OR status != 'deleted') ORDER BY created_at ASC;`
-      );
-      return (res.rows || []).map((r) => this.mapUserRow(r));
-    } catch {
-      return [];
-    }
-  }
-
   public async saveUser(user: User, passwordHash?: string): Promise<void> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
@@ -1407,9 +1255,11 @@ export class PostgresRepository {
         try {
           // Fallback: Belirtilen tenant_id veritabanında yoksa, 'usr_admin' garantisi altında 'usr_admin'e yönlendir ve kaydet
           if (this.pool) {
-            // Do NOT silently create a phantom user to bypass foreign key checks.
-            // If the user doesn't exist, the device insertion should fail rather than silently creating an admin.
-            // Just redirect it to 'usr_admin', which should be created legitimately during system setup.
+            await this.pool.query(`
+              INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+              VALUES ('usr_admin', 'Sistem Yöneticisi', 'admin@nexusnode.io', '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 'admin', 'Merkez Yönetim', 'active', CURRENT_TIMESTAMP)
+              ON CONFLICT (id) DO NOTHING;
+            `);
           }
           const fallbackParams = [...params];
           fallbackParams[1] = 'usr_admin';
@@ -2773,44 +2623,6 @@ export class PostgresRepository {
   // ==========================================
   // USER SESSIONS
   // ==========================================
-  public async getSession(token: string): Promise<UserSession | null> {
-    if (!this.pool || !this.isConnected || !token) return null;
-    try {
-      const res = await this.query(
-        `SELECT * FROM user_sessions WHERE token = $1 AND expires_at > NOW() LIMIT 1;`,
-        [token.trim()]
-      );
-      if (res.rows && res.rows.length > 0) {
-        const r = res.rows[0];
-        return {
-          token: r.token,
-          userId: r.user_id,
-          userRole: r.user_role as any,
-          userEmail: r.user_email,
-          userName: r.user_name,
-          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
-          expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : new Date().toISOString(),
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  public async verifySession(token: string): Promise<{ user: User; session: UserSession } | null> {
-    if (!this.pool || !this.isConnected || !token) return null;
-    try {
-      const session = await this.getSession(token);
-      if (!session) return null;
-      const user = await this.getUserById(session.userId);
-      if (!user) return null;
-      return { user, session };
-    } catch {
-      return null;
-    }
-  }
-
   public async deleteUserSessions(userId: string): Promise<void> {
     if (!this.pool) return;
     await this.query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);
@@ -3501,147 +3313,6 @@ export class PostgresRepository {
       now,
       job.completedAt || null,
     ]);
-  }
-
-  public async getFirmwares(): Promise<Firmware[]> {
-    if (!this.pool || !this.isConnected) {
-      return [];
-    }
-    const fwRes = await this.query(`SELECT * FROM firmwares ORDER BY created_at DESC;`).catch(() => null);
-    const firmwares: Firmware[] = [];
-    if (fwRes?.rows) {
-      fwRes.rows.forEach((r: any) => {
-        firmwares.push({
-          id: r.id,
-          name: r.name,
-          deviceType: r.device_type,
-          roleKey: r.role_key,
-          hardwareModel: r.hardware_model || 'ALL',
-          version: r.version,
-          description: r.description || undefined,
-          binaryData: r.binary_data ? (Buffer.isBuffer(r.binary_data) ? r.binary_data.toString('base64') : String(r.binary_data)) : undefined,
-          binarySize: Number(r.binary_size || 0),
-          sha256: r.sha256,
-          signature: r.signature || undefined,
-          filePath: r.file_path || undefined,
-          minHardwareRevision: r.min_hardware_revision || undefined,
-          isActive: r.is_active !== false,
-          uploadedBy: r.uploaded_by,
-          created_at: new Date(r.created_at).toISOString(),
-          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-        });
-      });
-    }
-    return firmwares;
-  }
-
-  public async getFirmwareById(id: string): Promise<Firmware | null> {
-    if (!this.pool || !this.isConnected) {
-      return null;
-    }
-    const fwRes = await this.query(`SELECT * FROM firmwares WHERE id = $1 LIMIT 1;`, [id]).catch(() => null);
-    if (!fwRes?.rows?.[0]) return null;
-    const r = fwRes.rows[0];
-    return {
-      id: r.id,
-      name: r.name,
-      deviceType: r.device_type,
-      roleKey: r.role_key,
-      hardwareModel: r.hardware_model || 'ALL',
-      version: r.version,
-      description: r.description || undefined,
-      binaryData: r.binary_data ? (Buffer.isBuffer(r.binary_data) ? r.binary_data.toString('base64') : String(r.binary_data)) : undefined,
-      binarySize: Number(r.binary_size || 0),
-      sha256: r.sha256,
-      signature: r.signature || undefined,
-      filePath: r.file_path || undefined,
-      minHardwareRevision: r.min_hardware_revision || undefined,
-      isActive: r.is_active !== false,
-      uploadedBy: r.uploaded_by,
-      created_at: new Date(r.created_at).toISOString(),
-      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-    };
-  }
-
-  public async getOtaJobs(): Promise<OtaDeploymentJob[]> {
-    if (!this.pool || !this.isConnected) {
-      return [];
-    }
-    const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs ORDER BY created_at DESC LIMIT 500;`).catch(() => null);
-    const otaJobs: OtaDeploymentJob[] = [];
-    if (otaRes?.rows) {
-      otaRes.rows.forEach((r: any) => {
-        otaJobs.push({
-          id: r.id,
-          firmwareId: r.firmware_id,
-          firmwareVersion: r.firmware_version,
-          firmwareName: r.firmware_name,
-          deviceId: r.device_id,
-          deviceName: r.device_name,
-          deviceType: r.device_type,
-          roleKey: r.role_key,
-          targetScope: r.target_scope,
-          status: r.status,
-          progressPercent: Number(r.progress_percent || 0),
-          errorMessage: r.error_message || undefined,
-          initiatedBy: r.initiated_by,
-          downloadToken: r.download_token || undefined,
-          expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
-          attemptCount: Number(r.attempt_count || 0),
-          maxAttempts: Number(r.max_attempts || 3),
-          lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
-          nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
-          downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
-          bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
-          created_at: new Date(r.created_at).toISOString(),
-          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-          completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
-        });
-      });
-    }
-    return otaJobs;
-  }
-
-  public async getOtaJobById(id: string): Promise<OtaDeploymentJob | null> {
-    if (!this.pool || !this.isConnected) {
-      return null;
-    }
-    const otaRes = await this.query(`SELECT * FROM ota_deployment_jobs WHERE id = $1 LIMIT 1;`, [id]).catch(() => null);
-    if (!otaRes?.rows?.[0]) return null;
-    const r = otaRes.rows[0];
-    return {
-      id: r.id,
-      firmwareId: r.firmware_id,
-      firmwareVersion: r.firmware_version,
-      firmwareName: r.firmware_name,
-      deviceId: r.device_id,
-      deviceName: r.device_name,
-      deviceType: r.device_type,
-      roleKey: r.role_key,
-      targetScope: r.target_scope,
-      status: r.status,
-      progressPercent: Number(r.progress_percent || 0),
-      errorMessage: r.error_message || undefined,
-      initiatedBy: r.initiated_by,
-      downloadToken: r.download_token || undefined,
-      expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : undefined,
-      attemptCount: Number(r.attempt_count || 0),
-      maxAttempts: Number(r.max_attempts || 3),
-      lastAttemptAt: r.last_attempt_at ? new Date(r.last_attempt_at).toISOString() : undefined,
-      nextRetryAt: r.next_retry_at ? new Date(r.next_retry_at).toISOString() : undefined,
-      downloadStartedAt: r.download_started_at ? new Date(r.download_started_at).toISOString() : undefined,
-      bootConfirmedAt: r.boot_confirmed_at ? new Date(r.boot_confirmed_at).toISOString() : undefined,
-      created_at: new Date(r.created_at).toISOString(),
-      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
-      completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : undefined,
-    };
-  }
-
-  public async deleteOtaJob(id: string): Promise<void> {
-    if (!this.pool || !this.isConnected) {
-      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
-    }
-    await this.query(`DELETE FROM ota_deployment_jobs WHERE id = $1;`, [id]);
   }
 
 
