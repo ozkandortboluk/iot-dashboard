@@ -21,19 +21,14 @@ export const LoginView: React.FC = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Detect if system is running for the first time and needs an admin account
+  // Detect if system is running for the first time and needs DB configuration or an admin account
   useEffect(() => {
     checkSetupStatus().then((val) => {
       setNeedSetup(val);
       if (val) {
         setAuthMode('setup');
-        setCompanyName('Merkez Yönetim');
-      } else {
-        setAuthMode('login');
       }
-    }).catch(() => {
-      setAuthMode('login');
-    });
+    }).catch(() => {});
   }, [checkSetupStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,28 +36,7 @@ export const LoginView: React.FC = () => {
     setError('');
     setSuccessMsg('');
 
-    if (authMode === 'setup') {
-      if (!name.trim()) {
-        setError('Lütfen yönetici adını ve soyadını giriniz.');
-        return;
-      }
-      if (password !== confirmPassword) {
-        setError('Şifreler birbiriyle eşleşmiyor.');
-        return;
-      }
-      if (password.length < 6) {
-        setError('Şifre en az 6 karakter olmalıdır.');
-        return;
-      }
-
-      try {
-        await setup(name, email, password, companyName || 'Merkez Yönetim', seedDemoData);
-        setSuccessMsg('Sistem kurulumu başarıyla tamamlandı!');
-        setNeedSetup(false);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Kurulum tamamlanamadı.');
-      }
-    } else if (authMode === 'register') {
+    if (authMode === 'register') {
       if (!name.trim()) {
         setError('Lütfen adınızı ve soyadınızı giriniz.');
         return;
@@ -80,7 +54,11 @@ export const LoginView: React.FC = () => {
         await register(name, email, password, role);
         setSuccessMsg('Kayıt başarılı! Hesabınız oluşturuldu ve giriş yapıldı.');
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Kayıt oluşturulamadı.');
+        const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
+        setError(msg);
+        if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
+          setNeedSetup(true);
+        }
       }
     } else {
       // Normal login
@@ -91,17 +69,22 @@ export const LoginView: React.FC = () => {
       try {
         await login(email, password);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol ediniz.');
+        const msg = err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol ediniz.';
+        setError(msg);
+        if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
+          setNeedSetup(true);
+        }
       }
     }
   };
 
-  if (needSetup && authMode !== 'login') {
+  if (needSetup || authMode === 'setup') {
     return (
       <DatabaseSetupWizard
         onComplete={() => {
           setNeedSetup(false);
           setAuthMode('login');
+          setSuccessMsg('Veritabanı kurulumu başarıyla tamamlandı. Lütfen giriş yapınız.');
         }}
       />
     );
@@ -438,6 +421,20 @@ export const LoginView: React.FC = () => {
                 Zaten bir hesabınız var mı? Giriş Yapın
               </button>
             )}
+
+            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setNeedSetup(true);
+                  setAuthMode('setup');
+                }}
+                className="text-[11px] text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Veritabanı Yapılandırma & Kurulum Sihirbazı</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

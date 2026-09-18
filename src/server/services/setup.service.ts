@@ -24,6 +24,7 @@ export interface DatabaseConfigPayload {
 export interface SetupStatusResponse {
   setupRequired: boolean;
   isCompleted: boolean;
+  isDbReady?: boolean;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -373,21 +374,20 @@ export class SetupService {
       }
     }
 
-    // If an administrator exists, mark setup completed permanently
-    if (hasAdmin) {
+    // If an administrator exists and DB is connected, mark setup completed permanently
+    if (hasAdmin && isDbConnected) {
       this.markSetupCompleted();
     }
 
-    const isCompleted = this.isCompletedState || hasAdmin || Boolean(isDbConnected && migrationsComplete);
+    const isDbReady = Boolean(isDbConnected && migrationsComplete && hasAdmin);
+    const isCompleted = this.isCompletedState || isDbReady;
 
-    // If an administrator already exists in the system, setup is NEVER required unless explicitly forced
-    const setupRequired = process.env.SETUP_REQUIRED === 'true'
-      ? true
-      : !hasAdmin;
+    // Setup is strictly required if PostgreSQL is not connected, migrations not applied, or admin not created
+    const setupRequired = !isDbReady || process.env.SETUP_REQUIRED === 'true';
 
     // Calculate current step (1 to 7)
     let currentStep = 1;
-    if (isCompleted || hasAdmin) {
+    if (isDbReady) {
       currentStep = 7;
     } else if (schemaVerified && migrationsComplete && !hasAdmin) {
       currentStep = 6;
@@ -397,11 +397,14 @@ export class SetupService {
       currentStep = 3;
     } else if (this.runtimeConfig?.host) {
       currentStep = 2;
+    } else {
+      currentStep = 1;
     }
 
     return {
       setupRequired,
       isCompleted,
+      isDbReady,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,

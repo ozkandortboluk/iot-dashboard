@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.34.0] - 2026-09-18
+
+### 📌 Explicit Database Readiness Startup Flow & Root Gatekeeper
+- **Root Startup Gatekeeper (`AppStartupGatekeeper` in `src/App.tsx`)**:
+  - Refactored application lifecycle to strictly evaluate PostgreSQL and TimescaleDB readiness before rendering authentication or dashboard views.
+  - If PostgreSQL is unconfigured or not ready (`!isDbReady` / `setupRequired`), the application directly routes to the **Database Setup Wizard (`DatabaseSetupWizard`)**, bypassing `LoginView`.
+- **End-to-End User Flow Execution**:
+  - `Site açılır` -> `PostgreSQL yapılandırılmış mı?` -> `[HAYIR]` -> `DB Kurulum ekranı (Host / Port / DB / User / Password)` -> `"Bağlantıyı Test Et"` -> `PostgreSQL ✓` -> `TimescaleDB ✓` -> `Migration / Schema ✓` -> `Admin oluştur ✓` -> `READY ✓` -> `Giriş ekranı`.
+  - Configured database state: `Site açılır` -> `DB config okunur` -> `PostgreSQL'e bağlan` -> `TimescaleDB kontrol` -> `DB READY` -> `Giriş ekranı`.
+- **Seamless Recovery & Setup Linking**:
+  - Enhanced `LoginView` to catch 503 database unavailability errors and provide a direct trigger to `DatabaseSetupWizard`.
+  - Added dedicated database configuration actions in login footer for administrative recovery.
+
+---
+
 ## 🚀 [v1.33.0] - 2026-09-18
 
 ### 📌 PostgreSQL-Only Administrator Creation & Authentication Architecture

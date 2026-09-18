@@ -69,16 +69,19 @@ router.get('/setup-status', async (req, res) => {
   }
 
   // If setupService detected an administrator, also respect it
-  if (wizardStatus?.hasAdmin) {
+  if (wizardStatus?.hasAdmin && wizardStatus?.isDbConnected) {
     hasAdmin = true;
   }
 
-  // Under NO circumstances should needSetup be true if an administrator exists in the system!
-  const needSetup = hasAdmin ? false : (wizardStatus ? wizardStatus.setupRequired : true);
+  const isDbReady = Boolean(wizardStatus?.isDbReady || (hasAdmin && wizardStatus?.isDbConnected));
+  const needSetup = !isDbReady || Boolean(wizardStatus?.setupRequired);
 
   res.json({
     needSetup,
     hasAdmin,
+    isDbReady,
+    isDbConnected: Boolean(wizardStatus?.isDbConnected),
+    isTimescaleAvailable: Boolean(wizardStatus?.isTimescaleAvailable),
     inProgress: isSetupInProgress,
     setupDetails: wizardStatus || undefined,
   });
