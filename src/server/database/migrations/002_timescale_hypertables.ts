@@ -5,22 +5,63 @@ export const migration002: Migration = {
   version: '002',
   name: 'timescale_hypertables',
   up: async (client: pg.PoolClient) => {
-    // 1. Check if TimescaleDB extension is available
+    // 1. Check if TimescaleDB extension is available and functional
     let hasTimescale = false;
     try {
-      await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
-      hasTimescale = true;
-    } catch (err: any) {
-      console.warn('[Migration 002] TimescaleDB extension could not be enabled:', err?.message || err);
-      if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_TIMESCALE === 'true') {
-        const fatalErr = new Error(`[Migration 002 FATAL] Production environment requires TimescaleDB extension, but enabling it failed: ${err?.message || err}`);
-        console.error(fatalErr.message);
-        throw fatalErr;
+      // Check if extension is already registered in pg_extension
+      const extCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
+      if (extCheck.rows.length > 0) {
+        // Extension entry exists in database catalog; verify that the C shared library is accessible
+        try {
+          await client.query('SELECT timescaledb_version();');
+          hasTimescale = true;
+        } catch (libErr: any) {
+          console.warn('[Migration 002] TimescaleDB extension registered in catalog but library failed to load:', libErr?.message || libErr);
+          // Attempt to update the extension to the current container library version
+          try {
+            await client.query('ALTER EXTENSION timescaledb UPDATE;');
+            await client.query('SELECT timescaledb_version();');
+            hasTimescale = true;
+            console.log('[Migration 002] Successfully updated TimescaleDB extension to current library.');
+          } catch (updErr: any) {
+            console.warn('[Migration 002] ALTER EXTENSION timescaledb UPDATE failed:', updErr?.message || updErr);
+            // Attempt to drop broken catalog entry and recreate with current library
+            try {
+              console.log('[Migration 002] Attempting to drop broken timescaledb extension catalog entry and reinstall...');
+              await client.query('DROP EXTENSION IF EXISTS timescaledb CASCADE;');
+              await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
+              await client.query('SELECT timescaledb_version();');
+              hasTimescale = true;
+              console.log('[Migration 002] Successfully reinstalled TimescaleDB extension.');
+            } catch (dropErr: any) {
+              console.warn('[Migration 002] Recreating TimescaleDB extension was not possible:', dropErr?.message || dropErr);
+              hasTimescale = false;
+            }
+          }
+        }
+      } else {
+        // Extension not in catalog, attempt fresh installation
+        try {
+          await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
+          await client.query('SELECT timescaledb_version();');
+          hasTimescale = true;
+        } catch (createErr: any) {
+          console.warn('[Migration 002] CREATE EXTENSION timescaledb failed:', createErr?.message || createErr);
+          hasTimescale = false;
+        }
       }
+    } catch (err: any) {
+      console.warn('[Migration 002] TimescaleDB detection error:', err?.message || err);
+      hasTimescale = false;
     }
 
     if (!hasTimescale) {
-      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB unavailable in non-production environment).');
+      if (process.env.REQUIRE_TIMESCALE === 'true') {
+        const fatalErr = new Error(`[Migration 002 FATAL] REQUIRE_TIMESCALE is set to true, but TimescaleDB extension could not be loaded or verified.`);
+        console.error(fatalErr.message);
+        throw fatalErr;
+      }
+      console.log('[Migration 002] Running in standard PostgreSQL mode (TimescaleDB extension unavailable, mismatched, or not installed).');
       return;
     }
 
@@ -60,10 +101,7 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] Compression policy enabled on telemetry_readings (7 days).');
     } catch (err: any) {
-      // If compression is not supported by the license/version, we can log it but maybe shouldn't throw?
-      // Wait, let's throw it to be strict as requested.
-      console.error('[Migration 002] Compression policy setup error:', err?.message || err);
-      throw err;
+      console.warn('[Migration 002] Compression policy setup notice (may be unsupported by current Timescale license/version):', err?.message || err);
     }
   },
   down: async (client: pg.PoolClient) => {

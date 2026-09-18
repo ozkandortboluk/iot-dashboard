@@ -282,15 +282,21 @@ export class PostgresRepository {
         "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
       );
       if (extRes.rows.length > 0) {
-        isTimescale = true;
-        timescaleVersion = extRes.rows[0].extversion;
-        const tsMatch = timescaleVersion?.match(/^(\d+)\.(\d+)/);
-        if (tsMatch) {
-          const tsMajor = parseInt(tsMatch[1], 10);
-          const tsMinor = parseInt(tsMatch[2], 10);
-          if (tsMajor < 2 || (tsMajor === 2 && tsMinor < 11)) {
-            warnings.push(`TimescaleDB version ${timescaleVersion} detected. Production recommended version is >= 2.11.`);
+        try {
+          await this.pool.query('SELECT timescaledb_version();');
+          isTimescale = true;
+          timescaleVersion = extRes.rows[0].extversion;
+          const tsMatch = timescaleVersion?.match(/^(\d+)\.(\d+)/);
+          if (tsMatch) {
+            const tsMajor = parseInt(tsMatch[1], 10);
+            const tsMinor = parseInt(tsMatch[2], 10);
+            if (tsMajor < 2 || (tsMajor === 2 && tsMinor < 11)) {
+              warnings.push(`TimescaleDB version ${timescaleVersion} detected. Production recommended version is >= 2.11.`);
+            }
           }
+        } catch (libErr: any) {
+          warnings.push(`TimescaleDB extension registered in catalog (${extRes.rows[0].extversion}) but C library cannot be loaded: ${libErr?.message || libErr}. Running in standard PostgreSQL mode.`);
+          isTimescale = false;
         }
       } else {
         warnings.push('TimescaleDB extension is not enabled in this database. Running in standard PostgreSQL mode.');

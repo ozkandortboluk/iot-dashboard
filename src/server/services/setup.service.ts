@@ -547,13 +547,39 @@ export class SetupService {
       try {
         const tsCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
         if (tsCheck.rows.length > 0) {
-          timescaleOk = true;
-          steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${tsCheck.rows[0].extversion}` });
+          try {
+            await client.query('SELECT timescaledb_version();');
+            timescaleOk = true;
+            steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${tsCheck.rows[0].extversion}` });
+          } catch (funcErr: any) {
+            console.warn('[SetupService] TimescaleDB registered in catalog but library missing or mismatched:', funcErr?.message);
+            try {
+              await client.query('ALTER EXTENSION timescaledb UPDATE;');
+              await client.query('SELECT timescaledb_version();');
+              timescaleOk = true;
+              steps.push({ name: 'TimescaleDB detected', status: 'done', details: 'TimescaleDB güncellendi ve doğrulandı.' });
+            } catch {
+              steps.push({
+                name: 'TimescaleDB check',
+                status: 'skipped',
+                details: `TimescaleDB kütüphanesi (${tsCheck.rows[0].extversion}) diskte bulunamadı. Standart PostgreSQL moduyla devam ediliyor.`,
+              });
+            }
+          }
         } else {
           // Attempt to create extension if installed on host
-          await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
-          timescaleOk = true;
-          steps.push({ name: 'TimescaleDB detected', status: 'done', details: 'TimescaleDB eklentisi aktif edildi.' });
+          try {
+            await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
+            await client.query('SELECT timescaledb_version();');
+            timescaleOk = true;
+            steps.push({ name: 'TimescaleDB detected', status: 'done', details: 'TimescaleDB eklentisi aktif edildi.' });
+          } catch {
+            steps.push({
+              name: 'TimescaleDB check',
+              status: 'skipped',
+              details: 'TimescaleDB eklentisi sunucuda mevcut değil, standart PostgreSQL hypertable fallback modu kullanılacak.',
+            });
+          }
         }
       } catch (tsErr: any) {
         // Not fatal if running standard PostgreSQL without Timescale package

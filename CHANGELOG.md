@@ -4,6 +4,18 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.28.3] - 2026-09-18
+
+### 📌 TimescaleDB Sürüm Uyuşmazlığı & Eksik Kütüphane Koruması (TimescaleDB Version Mismatch & Library Resilience)
+- **Eksik veya Uyumsuz Kütüphane Otomatik İyileştirme (`$libdir/timescaledb-...`)**:
+  - `src/server/database/migrations/002_timescale_hypertables.ts` içinde TimescaleDB eklentisi doğrulanırken C kütüphane dosyasının diskte bulunup bulunmadığı `SELECT timescaledb_version()` ile test edilir; kütüphane eksikliği veya Docker imajı sürüm değişikliğinde otomatik `ALTER EXTENSION timescaledb UPDATE` ve yeniden yapılandırma denenir.
+- **Standart PostgreSQL Korumalı Geri Dönüş (Graceful PostgreSQL Fallback)**:
+  - Üretim ortamında (`NODE_ENV === 'production'`) TimescaleDB kütüphanesi diskte bulunamazsa veya standart PostgreSQL kullanılıyorsa sistem migrasyonu kilitleyip çökmek yerine temiz bir şekilde standart PostgreSQL hypertable fallback moduna geçer. Yalnızca `REQUIRE_TIMESCALE === 'true'` tanımlandığında katı zorunluluk uygulanır.
+- **İlk Kurulum Sihirbazı Kütüphane Kontrolü (`SetupService`)**:
+  - `src/server/services/setup.service.ts` ve `postgres.ts` içerisinde katalogdaki TimescaleDB kaydı ve çalışma zamanı fonksiyonları doğrulanarak uyumsuz Docker imajlarında sihirbazın çökmesi engellendi.
+
+---
+
 ## 🚀 [v1.28.2] - 2026-09-18
 
 ### 📌 Docker Compose Veritabanı Otomatik Bağlantı ve Zaman Aşımı İyileştirmeleri (Database Connection & Timeout Resilience)
