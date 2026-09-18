@@ -39,58 +39,6 @@ interface HealthReport {
   lastRepairedAt: string | null;
   lastCheckedAt: string;
   healingEvents: string[];
-  isSchemaHealthy?: boolean;
-  schemaHealthScore?: number;
-  schemaRepairStatus?: 'PASS' | 'FAIL' | 'NO_OP';
-  remainingDiscrepancies?: string[];
-}
-
-interface SchemaAuditData {
-  success: boolean;
-  audit: {
-    timestamp: string;
-    isHealthy: boolean;
-    score: number;
-    summary: {
-      totalCanonicalTables: number;
-      existingTablesCount: number;
-      missingTablesCount: number;
-      missingColumnsCount: number;
-      typeMismatchCount: number;
-      missingIndexesCount: number;
-      missingConstraintsCount?: number;
-      missingTriggersCount: number;
-      missingFunctionsCount: number;
-    };
-    discrepancies: {
-      missingTables: string[];
-      missingColumns: any[];
-      typeMismatches: any[];
-      missingIndexes: any[];
-      missingConstraints?: any[];
-      missingTriggers: any[];
-      missingFunctions: string[];
-    };
-    humanReadableMessages: string[];
-  };
-  alignment: {
-    drizzleMatchesCanonical: boolean;
-    migrationMatchesCanonical: boolean;
-  };
-}
-
-interface SchemaHealResponse {
-  success: boolean;
-  stage: 'DETECT' | 'REPAIR' | 'RE_CHECK' | 'VERIFIED';
-  status: 'PASS' | 'FAIL' | 'NO_OP';
-  verificationPassed: boolean;
-  isHealthy: boolean;
-  actionsTaken: string[];
-  errors: string[];
-  remainingDiscrepancies: string[];
-  summaryMessage: string;
-  beforeReport: any;
-  afterReport: any;
 }
 
 export const DatabaseAutoHealerPanel: React.FC = () => {
@@ -98,13 +46,6 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
   const [isLoadingHealth, setIsLoadingHealth] = useState(false);
   const [isRepairing, setIsRepairing] = useState(false);
   const [repairSuccessMessage, setRepairSuccessMessage] = useState<string | null>(null);
-
-  // Schema Audit & Repair -> Verify state
-  const [schemaAudit, setSchemaAudit] = useState<SchemaAuditData | null>(null);
-  const [isLoadingSchemaAudit, setIsLoadingSchemaAudit] = useState(false);
-  const [isHealVerifying, setIsHealVerifying] = useState(false);
-  const [schemaHealResult, setSchemaHealResult] = useState<SchemaHealResponse | null>(null);
-  const [healVerifyStep, setHealVerifyStep] = useState<'IDLE' | 'DETECT' | 'REPAIR' | 'RE_CHECK' | 'PASS' | 'FAIL'>('IDLE');
 
   // System Events state
   const [events, setEvents] = useState<SystemEvent[]>([]);
@@ -133,68 +74,6 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
     }
   };
 
-  const fetchSchemaAudit = async () => {
-    setIsLoadingSchemaAudit(true);
-    try {
-      const res = await fetch('/api/database/audit');
-      if (res.ok) {
-        const data = await res.json();
-        setSchemaAudit(data);
-      }
-    } catch (err) {
-      console.warn('Şema denetimi alınamadı:', err);
-    } finally {
-      setIsLoadingSchemaAudit(false);
-    }
-  };
-
-  const triggerRepairVerifyLoop = async () => {
-    setIsHealVerifying(true);
-    setSchemaHealResult(null);
-    setHealVerifyStep('DETECT');
-    setPanelNotification(null);
-
-    try {
-      // Step 1: Detect
-      await new Promise((r) => setTimeout(r, 350));
-      setHealVerifyStep('REPAIR');
-
-      // Step 2 & 3: Repair and Re-check directly on server
-      const res = await fetch('/api/database/auto-heal', { method: 'POST' });
-      setHealVerifyStep('RE_CHECK');
-      await new Promise((r) => setTimeout(r, 350));
-
-      const data: SchemaHealResponse = await res.json();
-      setSchemaHealResult(data);
-
-      if (data.status === 'PASS' && data.verificationPassed && data.isHealthy) {
-        setHealVerifyStep('PASS');
-        setPanelNotification({
-          type: 'success',
-          text: `Repair → Verify döngüsü BAŞARILI (PASS). Sağlık skoru: %${data.afterReport?.score ?? 100}. Doğrulandı.`,
-        });
-      } else {
-        setHealVerifyStep('FAIL');
-        setPanelNotification({
-          type: 'error',
-          text: `Repair → Verify döngüsü BAŞARISIZ (FAIL). ${data.remainingDiscrepancies?.length || 0} adet kusur giderilemedi. Veritabanı "healthy" olarak gösterilmeyecek.`,
-        });
-      }
-
-      fetchHealth();
-      fetchEvents();
-      fetchSchemaAudit();
-    } catch (err: any) {
-      setHealVerifyStep('FAIL');
-      setPanelNotification({
-        type: 'error',
-        text: 'Repair → Verify işlemi sırasında sunucu hatası: ' + (err?.message || err),
-      });
-    } finally {
-      setIsHealVerifying(false);
-    }
-  };
-
   const triggerRepair = async () => {
     setIsRepairing(true);
     setRepairSuccessMessage(null);
@@ -208,7 +87,6 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
           `Onarım tamamlandı: ${data.report.hungQueriesCleared} askıda kilit/sorgu sonlandırıldı, şema kontrol edildi.`
         );
         fetchEvents();
-        fetchSchemaAudit();
       } else {
         setPanelNotification({ type: 'error', text: 'Onarım sırasında hata: ' + (data.error || 'Bilinmeyen hata') });
       }
@@ -274,7 +152,6 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
   useEffect(() => {
     fetchHealth();
     fetchEvents();
-    fetchSchemaAudit();
     const timer = setInterval(() => {
       fetchHealth();
     }, 15000);
@@ -493,212 +370,6 @@ export const DatabaseAutoHealerPanel: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* REPAIR -> VERIFY SCHEMA CONTRACT AUDIT & REPAIR SECTION */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-xl border border-indigo-200 dark:border-indigo-800/50">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Kanonik Şema Onarım & Doğrulama Döngüsü (Repair → Verify)
-                </h3>
-                {schemaAudit?.audit ? (
-                  schemaAudit.audit.isHealthy ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                      PASS (%{schemaAudit.audit.score})
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-                      FAIL (%{schemaAudit.audit.score})
-                    </span>
-                  )
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                    Beklemede
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Onarım yapıldıktan sonra veritabanı anında tekrar okunur (Re-check). Kusur kalmışsa sistem "healthy" durumuna geçirilmez ve admin uyarılır.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2.5 w-full md:w-auto">
-            <button
-              onClick={fetchSchemaAudit}
-              disabled={isLoadingSchemaAudit || isHealVerifying}
-              className="flex-1 md:flex-initial px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSchemaAudit ? 'animate-spin' : ''}`} />
-              <span>Şemayı Denetle</span>
-            </button>
-            <button
-              onClick={triggerRepairVerifyLoop}
-              disabled={isHealVerifying}
-              className="flex-1 md:flex-initial px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-semibold rounded-xl shadow-md shadow-indigo-600/20 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              <Zap className={`w-3.5 h-3.5 ${isHealVerifying ? 'animate-spin' : ''}`} />
-              <span>{isHealVerifying ? 'Repair → Verify Devrede...' : 'Repair → Verify Çalıştır'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 4-STAGE REPAIR-VERIFY FLOW PIPELINE */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className={`p-3 rounded-xl border text-center transition-all ${
-            healVerifyStep === 'DETECT'
-              ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-600 ring-2 ring-indigo-500/20'
-              : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
-          }`}>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">1. Adım</div>
-            <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5">
-              {healVerifyStep === 'DETECT' && <RefreshCw className="w-3 h-3 animate-spin text-indigo-500" />}
-              <span>Detect (Tespit)</span>
-            </div>
-            <div className="text-[10px] text-slate-500 mt-1">Eksik tablo/kolon/indeks tara</div>
-          </div>
-
-          <div className={`p-3 rounded-xl border text-center transition-all ${
-            healVerifyStep === 'REPAIR'
-              ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-400 dark:border-amber-600 ring-2 ring-amber-500/20'
-              : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
-          }`}>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">2. Adım</div>
-            <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5">
-              {healVerifyStep === 'REPAIR' && <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />}
-              <span>Repair (Onarım)</span>
-            </div>
-            <div className="text-[10px] text-slate-500 mt-1">DDL & Trigger yamalarını uygula</div>
-          </div>
-
-          <div className={`p-3 rounded-xl border text-center transition-all ${
-            healVerifyStep === 'RE_CHECK'
-              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 ring-2 ring-blue-500/20'
-              : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
-          }`}>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">3. Adım</div>
-            <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5">
-              {healVerifyStep === 'RE_CHECK' && <RefreshCw className="w-3 h-3 animate-spin text-blue-500" />}
-              <span>Re-check (Doğrulama)</span>
-            </div>
-            <div className="text-[10px] text-slate-500 mt-1">Canlı DB sözleşmesini tekrar oku</div>
-          </div>
-
-          <div className={`p-3 rounded-xl border text-center transition-all ${
-            healVerifyStep === 'PASS'
-              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-400 dark:border-emerald-600 ring-2 ring-emerald-500/20 text-emerald-800 dark:text-emerald-300'
-              : healVerifyStep === 'FAIL'
-              ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-400 dark:border-rose-600 ring-2 ring-rose-500/20 text-rose-800 dark:text-rose-300'
-              : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
-          }`}>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">4. Sonuç</div>
-            <div className="text-xs font-bold flex items-center justify-center gap-1.5">
-              {healVerifyStep === 'PASS' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
-              {healVerifyStep === 'FAIL' && <AlertOctagon className="w-3.5 h-3.5 text-rose-500" />}
-              <span>{healVerifyStep === 'PASS' ? 'PASS (Onaylandı)' : healVerifyStep === 'FAIL' ? 'FAIL (Kusur Var)' : 'PASS / FAIL'}</span>
-            </div>
-            <div className="text-[10px] text-slate-500 mt-1">
-              {healVerifyStep === 'PASS' ? 'Sistem Sağlıklı' : healVerifyStep === 'FAIL' ? 'Degraded Koruması Aktif' : 'Doğrulama Kontrolü'}
-            </div>
-          </div>
-        </div>
-
-        {/* SCHEMA AUDIT STATS & SUMMARY */}
-        {schemaAudit?.audit && (
-          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 text-xs space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Tablolar:</span>
-                <span className="font-mono bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                  {schemaAudit.audit.summary.existingTablesCount} / {schemaAudit.audit.summary.totalCanonicalTables} mevcut
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Eksik Kolonlar:</span>
-                <span className={`font-mono px-2 py-0.5 rounded border ${
-                  schemaAudit.audit.summary.missingColumnsCount === 0
-                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                }`}>
-                  {schemaAudit.audit.summary.missingColumnsCount} adet
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">İndeksler:</span>
-                <span className="font-mono bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                  {schemaAudit.audit.summary.missingIndexesCount === 0 ? 'Tam' : `${schemaAudit.audit.summary.missingIndexesCount} eksik`}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Kısıtlar (Constraints):</span>
-                <span className={`font-mono px-2 py-0.5 rounded border ${
-                  (schemaAudit.audit.summary.missingConstraintsCount ?? 0) === 0
-                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                }`}>
-                  {(schemaAudit.audit.summary.missingConstraintsCount ?? 0) === 0 ? 'Tam' : `${schemaAudit.audit.summary.missingConstraintsCount} eksik`}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Drizzle/Migration Uyumu:</span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  %100 Uyumlu
-                </span>
-              </div>
-            </div>
-
-            {/* If Discrepancies exist or Fail */}
-            {schemaAudit.audit.humanReadableMessages && schemaAudit.audit.humanReadableMessages.length > 0 && !schemaAudit.audit.isHealthy && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-lg text-rose-800 dark:text-rose-300 space-y-1">
-                <div className="font-bold flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Doğrulama Sonrası Giderilemeyen Şema Kusurları:</span>
-                </div>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                  {schemaAudit.audit.humanReadableMessages.map((msg, i) => (
-                    <li key={i}>{msg}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ACTIONS TAKEN AFTER REPAIR */}
-        {schemaHealResult && (
-          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-800 dark:text-slate-200">
-                Son Onarım Özeti: {schemaHealResult.summaryMessage}
-              </span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                schemaHealResult.status === 'PASS'
-                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-              }`}>
-                Döngü Sonucu: {schemaHealResult.status}
-              </span>
-            </div>
-            {schemaHealResult.actionsTaken && schemaHealResult.actionsTaken.length > 0 && (
-              <div className="space-y-1">
-                <span className="text-[11px] text-slate-500 font-semibold">Uygulanan DDL Adımları:</span>
-                <div className="space-y-1 max-h-32 overflow-y-auto font-mono text-[10px]">
-                  {schemaHealResult.actionsTaken.map((act, idx) => (
-                    <div key={idx} className="p-1.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
-                      {act}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* SYSTEM ARCHITECTURE & INSTALLATION DIAGNOSTIC AUDIT */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">

@@ -8,7 +8,7 @@ import { TimescaleManager } from "./database/timescale.js";
 import { DatabaseAutoHealer } from "./services/databaseAutoHealer.service.js";
 import { systemLogger } from "./services/systemLogger.service.js";
 import { seedDemoDataForDatabase } from "./db/demoData.js";
-import { postgresSchemaSQL, CANONICAL_SCHEMA_METADATA } from "./database/schema.js";
+import { postgresSchemaSQL } from "./database/schema.js";
 import {
   getSharedPgPool,
   recycleSharedPgPool,
@@ -377,21 +377,14 @@ class LocalDatabase {
         client.release();
       }
 
-      this.postgresRepo.setConnected(true, true);
+      this.postgresRepo.setConnected(true);
       if (!this.data.databaseSettings) {
         this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
       }
       this.data.databaseSettings.isPostgresConnected = true;
       this.data.databaseSettings.lastTestedAt = new Date().toISOString();
 
-      // 1. Authoritative Schema Auto-Healing & Verification before hydration
-      try {
-        await this.postgresRepo.ensureTelemetrySchema(true);
-      } catch (tErr: any) {
-        systemLogger.warn('database', 'PostgreSQL Şema Doğrulama/Onarım Uyarısı:', tErr?.message || tErr);
-      }
-
-      // 2. FAST-PATH HYDRATION: Hydrate users, devices, and rules into memory
+      // 1. FAST-PATH HYDRATION: Immediately hydrate users, devices, and rules into memory
       try {
         const hydrated = await this.postgresRepo.hydrateFromPostgres();
         if (hydrated) {
@@ -514,6 +507,13 @@ class LocalDatabase {
         console.warn('[PostgreSQL Hydration Warning]:', hydrateErr?.message || hydrateErr);
       }
 
+      // 2. Synchronous Schema & DDL Verification (ensures schema migration before readiness)
+      try {
+        await this.postgresRepo.ensureTelemetrySchema();
+      } catch (tErr: any) {
+        systemLogger.warn('database', 'PostgreSQL Telemetri Şema Kurulum Uyarısı:', tErr?.message || tErr);
+      }
+
       return true;
     } catch (err: any) {
       this.postgresRepo.setConnected(false);
@@ -531,7 +531,7 @@ class LocalDatabase {
       return { success: false, message: 'PostgreSQL bağlantısı bulunamadı veya DATABASE_URL tanımlı değil.' };
     }
     this.postgresRepo.setPool(pool);
-    this.postgresRepo.setConnected(true, true);
+    this.postgresRepo.setConnected(true);
     try {
       const res = await this.postgresRepo.syncAllToPostgres(this.data);
       return {
@@ -2350,7 +2350,7 @@ class LocalDatabase {
         }
       } catch (err: any) {
         // Fallback to in-memory computation
-        console.warn('[PostgreSQL queryTimeBucketTelemetry Notice]:', err?.message || err);
+        this.postgresRepo.setConnected(false);
       }
     }
     return this.queryTimeBucketTelemetry(params as any);
@@ -2717,11 +2717,6 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
     return postgresSchemaSQL;
   }
 
-  // Authoritative Single Source of Truth Canonical Schema Metadata
-  public getCanonicalSchemaMetadata() {
-    return CANONICAL_SCHEMA_METADATA;
-  }
-
   // Custom SQL Query Runner
   public async executeCustomSqlQuery(sql: string): Promise<{
     success: boolean;
@@ -2877,7 +2872,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
           await pool.query(`UPDATE "${safeTableName}" SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, recordId]);
         }
       } catch (err: any) {
-        console.warn('[PostgreSQL updateTableRecord Error]:', err?.message || err);
+        this.postgresRepo.setConnected(false);
       }
     }
 
@@ -2915,7 +2910,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       try {
         await pool.query(`DELETE FROM "${safeTableName}" WHERE id = $1`, [recordId]);
       } catch (err: any) {
-        console.warn('[PostgreSQL deleteTableRecord Error]:', err?.message || err);
+        this.postgresRepo.setConnected(false);
       }
     }
 
@@ -2961,7 +2956,7 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
 
         await pool.query(`INSERT INTO "${safeTableName}" (${colNames}) VALUES (${paramPlaceholders})`, values);
       } catch (err: any) {
-        console.warn('[PostgreSQL insertTableRecord Error]:', err?.message || err);
+        this.postgresRepo.setConnected(false);
       }
     }
 

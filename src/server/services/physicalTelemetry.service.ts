@@ -35,19 +35,11 @@ export class PhysicalTelemetryService {
     }
 
     if (!device.metrics) device.metrics = {};
-    
-    let batteryLevelUpdated: number | undefined = undefined;
-
     for (const m of metricsToProcess) {
       device.metrics[m.metric] = m.value;
       const lowerKey = m.metric.toLowerCase();
       if (lowerKey !== m.metric) {
         device.metrics[lowerKey] = m.value;
-      }
-      
-      // Extract battery level dynamically
-      if (['battery', 'batterylevel', 'bat', 'pil'].includes(lowerKey)) {
-         batteryLevelUpdated = Math.max(0, Math.min(100, Math.round(m.value)));
       }
     }
 
@@ -96,8 +88,8 @@ export class PhysicalTelemetryService {
       device.autoDetectedIntervalSeconds = processedDev.autoDetectedIntervalSeconds;
       device.heartbeatTimeoutSeconds = processedDev.heartbeatTimeoutSeconds;
     }
-    
-    const updatePayload: any = {
+
+    db.updateDevice(device.id, {
       metrics: device.metrics,
       lastSeen: device.lastSeen,
       status: device.status,
@@ -106,16 +98,7 @@ export class PhysicalTelemetryService {
       heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds,
       ipAddress: device.ipAddress,
       macAddress: device.macAddress,
-    };
-    
-    if (batteryLevelUpdated !== undefined) {
-      updatePayload.batteryLevel = batteryLevelUpdated;
-      updatePayload.powerSource = 'battery';
-      device.batteryLevel = batteryLevelUpdated;
-      device.powerSource = 'battery';
-    }
-
-    db.updateDevice(device.id, updatePayload);
+    });
 
     broadcast('device:updated', device);
 

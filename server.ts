@@ -276,7 +276,7 @@ startCommandExpiryWorker();
 async function setupViteOrStatic() {
   console.log("[Startup] Veritabanı bağlantısı bekleniyor...");
   try {
-    const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
+    const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 3000;
     await db.waitForInitialization(startupTimeout);
   } catch (err: any) {
     console.warn("[Startup] Veritabanı başlatma uyarısı:", err?.message || err);

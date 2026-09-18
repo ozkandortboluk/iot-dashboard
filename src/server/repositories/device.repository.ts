@@ -97,20 +97,26 @@ export class DeviceRepository {
       }
 
       // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery)
-      if (evalResult.newStatus === 'online' && dev.lastOfflineNotifiedAt) {
-        this.db.addAuditLog(
-          dev.tenantId || 'system',
-          'Sistem Sinyal Takibi',
-          `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) telemetri akışını yeniden sağladı.`,
-          'low'
-        );
-        dev.lastOfflineNotifiedAt = undefined;
-        hasChanges = true;
+      if (prevStatus === 'offline' && evalResult.newStatus === 'online') {
+        if (dev.lastOfflineNotifiedAt) {
+          this.db.addAuditLog(
+            dev.tenantId || 'system',
+            'Sistem Sinyal Takibi',
+            `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) telemetri akışını yeniden sağladı.`,
+            'low'
+          );
+          dev.lastOfflineNotifiedAt = undefined;
+          hasChanges = true;
+        }
       }
 
-      // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi (Sadece BİR KERE)
+      // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi (3 dk debouncing ile)
       if (evalResult.newStatus === 'offline' && evalResult.isConfirmedOffline) {
-        if (!dev.lastOfflineNotifiedAt) {
+        const lastNotifTime = dev.lastOfflineNotifiedAt ? new Date(dev.lastOfflineNotifiedAt).getTime() : 0;
+        const cooldownElapsed = now - lastNotifTime;
+        const NOTIFICATION_COOLDOWN_MS = 180_000; // 3 dakika bildirim debouncing
+
+        if (cooldownElapsed > NOTIFICATION_COOLDOWN_MS) {
           dev.lastOfflineNotifiedAt = new Date(now).toISOString();
           hasChanges = true;
 

@@ -9,7 +9,6 @@ import { DeviceHealthBadge } from './devices/DeviceHealthBadge';
 import { DeviceTagsEditor } from './devices/DeviceTagsEditor';
 import { DeviceMaintenanceModal } from './devices/DeviceMaintenanceModal';
 import { DeviceReplacementModal } from './devices/DeviceReplacementModal';
-import { DevicePowerIcon } from './devices/DevicePowerIcon';
 import { HierarchyManagementModal } from './devices/HierarchyManagementModal';
 import { BulkDeleteModal } from './common/BulkDeleteModal';
 import { ToastNotification } from './common/ToastNotification';
@@ -1699,9 +1698,8 @@ void sendHeartbeat() {
                         </div>
                       </div>
 
-                      {/* Badges: Hierarchy, Owner, Power */}
+                      {/* Badges: Hierarchy, Owner */}
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <DevicePowerIcon device={dev} />
                         {devSite && (
                           <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">
                             <Building2 className="w-2.5 h-2.5" />
@@ -1789,7 +1787,6 @@ void sendHeartbeat() {
                                 {dev.name}
                               </p>
                             </div>
-                            <DevicePowerIcon device={dev} />
 
                             {devSite && (
                               <span className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[9px] font-semibold rounded shrink-0 flex items-center gap-1">

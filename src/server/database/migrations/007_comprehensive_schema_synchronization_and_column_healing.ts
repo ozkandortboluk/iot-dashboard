@@ -184,7 +184,7 @@ export const migration007: Migration = {
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS notification_channels JSONB DEFAULT '["app"]'::jsonb;
-      ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours VARCHAR(64) DEFAULT '00:00-23:59';
+      ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);
