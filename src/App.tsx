@@ -306,6 +306,7 @@ function DashboardContent() {
  * 4. If YES -> Directly render LoginView / Dashboard
  */
 function AppStartupGatekeeper() {
+  const [bypassToLogin, setBypassToLogin] = useState(false);
   const [dbStatusState, setDbStatusState] = useState<{
     isLoading: boolean;
     setupRequired: boolean;
@@ -375,18 +376,18 @@ function AppStartupGatekeeper() {
     );
   }
 
-  // Database is NOT configured or NOT ready -> Render Database Setup Wizard directly
-  if (dbStatusState.setupRequired || !dbStatusState.isDbReady) {
+  // Database is NOT configured or NOT ready -> Render Database Setup Wizard directly (unless user intentionally bypassed to Login)
+  if (!bypassToLogin && (dbStatusState.setupRequired || !dbStatusState.isDbReady)) {
     return (
       <DatabaseSetupWizard
         onComplete={() => {
-          checkDatabaseReadiness();
+          setBypassToLogin(true);
         }}
       />
     );
   }
 
-  // Database is configured and ready -> Render regular Auth & Dashboard flow
+  // Database is configured and ready (or bypassed to login) -> Render regular Auth & Dashboard flow
   return (
     <AuthProvider>
       <RealtimeProvider>

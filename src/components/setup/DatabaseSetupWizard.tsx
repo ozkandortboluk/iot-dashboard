@@ -116,7 +116,14 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       const res = await fetch('/api/setup/status');
       if (res.ok) {
         const data = await res.json();
-        if ((data.isCompleted && !data.setupRequired) || data.hasAdmin) {
+        const isDbReady = Boolean(
+          data.isDbConnected &&
+          data.stepsCompleted?.migrations &&
+          data.hasAdmin &&
+          !data.setupRequired
+        );
+
+        if (isDbReady) {
           onComplete();
           return;
         }
@@ -139,13 +146,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           }));
         }
 
-        if (data.stepsCompleted?.schemaVerified && !data.hasAdmin) {
+        if (data.isDbConnected && data.stepsCompleted?.schemaVerified && !data.hasAdmin) {
           setCurrentStep(6);
         } else if (data.isDbConnected && !data.stepsCompleted?.migrations) {
           setCurrentStep(4);
         } else if (data.isDbConnected) {
           setCurrentStep(3);
           setTestSuccess(true);
+        } else {
+          // If database is not connected, stay on Step 1 / Step 2
+          setCurrentStep(1);
         }
       }
     } catch {
@@ -489,7 +499,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       id="wizard-step1-quick-docker"
                       type="button"
@@ -508,6 +518,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                           <span>🚀 1-Tıkla Hızlı Docker Kurulumu</span>
                         </>
                       )}
+                    </button>
+
+                    <button
+                      id="wizard-step1-bypass-login"
+                      type="button"
+                      onClick={onComplete}
+                      className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>⚡ Doğrudan Giriş Yap (Test Hesabı)</span>
                     </button>
                   </div>
 

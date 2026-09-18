@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.34.2] - 2026-09-18
+
+### 📌 Fast Access, Test Account Autofill & Seamless Gatekeeper Flow
+- **1-Click Test Account Autofill**: Added quick credential autofill banner on `LoginView` using the canonical test credentials (`test@nexusnodeiot.com.tr` / `test1234`).
+- **Direct Demo / Login Action on Setup Wizard**: Added a direct button on Step 1 of `DatabaseSetupWizard` to seamlessly transition to the Login view and dashboard without database setup delays.
+- **Gatekeeper Transition Optimization**: Streamlined the `AppStartupGatekeeper` bypass transition to prevent unnecessary loading spinner re-triggers when switching between wizard and login views.
+
+---
+
+## 🚀 [v1.34.1] - 2026-09-18
+
+### 📌 Login & Setup Wizard Loop Elimination & Resilience
+- **Clean Mode Transitions**: Removed recursive `needSetup` state overriding in `LoginView`, ensuring clean state switching between Login (`authMode: 'login'`), Register, and Setup Wizard without infinite loops.
+- **Direct Gatekeeper Bypass**: Enforced single-directional flow from Setup Wizard to Login with state persistence in `AppStartupGatekeeper`.
+- **Database Availability Recovery**: Gracefully handles 503 unavailable responses and provides instant access to database configuration.
+
+---
+
 ## 🚀 [v1.34.0] - 2026-09-18
 
 ### 📌 Explicit Database Readiness Startup Flow & Root Gatekeeper

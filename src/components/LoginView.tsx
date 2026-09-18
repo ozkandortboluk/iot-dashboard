@@ -6,30 +6,17 @@ import { NexusNodeLogo } from './NexusNodeLogo';
 import { DatabaseSetupWizard } from './setup/DatabaseSetupWizard';
 
 export const LoginView: React.FC = () => {
-  const { login, register, setup, checkSetupStatus, isLoading } = useAuth();
+  const { login, register, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   
-  const [needSetup, setNeedSetup] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'setup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
-  const [companyName, setCompanyName] = useState('');
   const [role, setRole] = useState<'customer' | 'operator'>('customer');
-  const [seedDemoData, setSeedDemoData] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
-  // Detect if system is running for the first time and needs DB configuration or an admin account
-  useEffect(() => {
-    checkSetupStatus().then((val) => {
-      setNeedSetup(val);
-      if (val) {
-        setAuthMode('setup');
-      }
-    }).catch(() => {});
-  }, [checkSetupStatus]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +44,7 @@ export const LoginView: React.FC = () => {
         const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
         setError(msg);
         if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
-          setNeedSetup(true);
+          setAuthMode('setup');
         }
       }
     } else {
@@ -72,17 +59,16 @@ export const LoginView: React.FC = () => {
         const msg = err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol ediniz.';
         setError(msg);
         if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
-          setNeedSetup(true);
+          setAuthMode('setup');
         }
       }
     }
   };
 
-  if (needSetup || authMode === 'setup') {
+  if (authMode === 'setup') {
     return (
       <DatabaseSetupWizard
         onComplete={() => {
-          setNeedSetup(false);
           setAuthMode('login');
           setSuccessMsg('Veritabanı kurulumu başarıyla tamamlandı. Lütfen giriş yapınız.');
         }}
@@ -142,84 +128,61 @@ export const LoginView: React.FC = () => {
         {/* Form Container Card */}
         <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 shadow-xl dark:shadow-2xl space-y-6">
           {/* Mode Switcher Tabs */}
-          {needSetup ? (
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('setup');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'setup'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>İlk Kurulum</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'login'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Mevcut Giriş</span>
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'login'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Giriş Yap</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('register');
-                  setError('');
-                  setSuccessMsg('');
-                }}
-                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  authMode === 'register'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Yeni Kayıt</span>
-              </button>
-            </div>
-          )}
+          <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('login');
+                setError('');
+                setSuccessMsg('');
+              }}
+              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'login'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Giriş Yap</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('register');
+                setError('');
+                setSuccessMsg('');
+              }}
+              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMode === 'register'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Yeni Kayıt</span>
+            </button>
+          </div>
 
-          {authMode === 'setup' && (
-            <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs rounded-xl flex items-center gap-2 font-medium leading-relaxed">
-              <Database className="w-4 h-4 shrink-0 text-indigo-500" />
-              <span>
-                <strong>Üretim Modu Güvenliği:</strong> Varsayılan şifreler kaldırılmıştır. Lütfen kendi yöneticinizi oluşturun.
-              </span>
+          {/* Quick Demo Test Account Helper Banner */}
+          {authMode === 'login' && (
+            <div className="p-3 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl flex items-center justify-between gap-2">
+              <div className="text-[11px] leading-tight text-indigo-950 dark:text-indigo-200">
+                <span className="font-bold flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+                  <KeyRound className="w-3 h-3" /> Hazır Test Hesabı:
+                </span>
+                <span className="font-mono text-[10px] text-slate-600 dark:text-slate-300">test@nexusnodeiot.com.tr / test1234</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('test@nexusnodeiot.com.tr');
+                  setPassword('test1234');
+                  setError('');
+                }}
+                className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[11px] rounded-lg shadow-sm transition cursor-pointer shrink-0"
+              >
+                Doldur
+              </button>
             </div>
           )}
 
@@ -238,11 +201,11 @@ export const LoginView: React.FC = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-            {(authMode === 'register' || authMode === 'setup') && (
+            {authMode === 'register' && (
               <>
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                    {authMode === 'setup' ? 'Sistem Yöneticisi Adı Soyadı' : 'Ad Soyad'}
+                    Ad Soyad
                   </label>
                   <input
                     type="text"
@@ -254,42 +217,25 @@ export const LoginView: React.FC = () => {
                   />
                 </div>
 
-                {authMode === 'register' && (
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                      Hesap Türü / Rol
-                    </label>
-                    <select
-                      value={role}
-                      onChange={(e) => setRole(e.target.value as 'customer' | 'operator')}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-                    >
-                      <option value="customer">Müşteri Portalı Hesabı (Kendi cihazlarını izleme)</option>
-                      <option value="operator">Saha / Sistem Operatörü</option>
-                    </select>
-                  </div>
-                )}
-
-                {(authMode === 'setup' || role === 'customer') && (
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                      {authMode === 'setup' ? 'Yönetici Kurum / Firma Adı' : 'Şirket / Kurum Adı (Opsiyonel)'}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={authMode === 'setup' ? 'ör. Merkez Yönetim' : 'ör. ABC Lojistik A.Ş.'}
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                    Hesap Türü / Rol
+                  </label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as 'customer' | 'operator')}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                  >
+                    <option value="customer">Müşteri Portalı Hesabı (Kendi cihazlarını izleme)</option>
+                    <option value="operator">Saha / Sistem Operatörü</option>
+                  </select>
+                </div>
               </>
             )}
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                {authMode === 'setup' ? 'Yönetici E-posta Adresi' : 'E-posta Adresi'}
+                E-posta Adresi
               </label>
               <input
                 type="email"
@@ -303,7 +249,7 @@ export const LoginView: React.FC = () => {
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                {authMode === 'setup' ? 'Güvenli Şifre' : 'Şifre'}
+                Şifre
               </label>
               <input
                 type="password"
@@ -315,7 +261,7 @@ export const LoginView: React.FC = () => {
               />
             </div>
 
-            {(authMode === 'register' || authMode === 'setup') && (
+            {authMode === 'register' && (
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
                   Şifre Tekrar
@@ -331,21 +277,6 @@ export const LoginView: React.FC = () => {
               </div>
             )}
 
-            {authMode === 'setup' && (
-              <div className="flex items-start gap-2.5 pt-1.5 pb-2">
-                <input
-                  id="seedDemo"
-                  type="checkbox"
-                  checked={seedDemoData}
-                  onChange={(e) => setSeedDemoData(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-indigo-600 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <label htmlFor="seedDemo" className="text-[11px] font-medium text-slate-600 dark:text-slate-300 leading-normal select-none cursor-pointer">
-                  Sistemi örnek sanal IoT cihazları, kurallar ve hazır telemetri verileriyle zenginleştir (Önerilen).
-                </label>
-              </div>
-            )}
-
             <button
               type="submit"
               disabled={isLoading}
@@ -353,13 +284,9 @@ export const LoginView: React.FC = () => {
             >
               <span>
                 {isLoading
-                  ? authMode === 'setup'
-                    ? 'Sistem Kuruluyor...'
-                    : authMode === 'register'
+                  ? authMode === 'register'
                     ? 'Kayıt Yapılıyor...'
                     : 'Giriş Yapılıyor...'
-                  : authMode === 'setup'
-                  ? 'Sistemi Başlat ve Kurulumu Tamamla'
                   : authMode === 'register'
                   ? 'Kayıt Ol ve Giriş Yap'
                   : 'Sisteme Giriş Yap'}
@@ -370,33 +297,7 @@ export const LoginView: React.FC = () => {
 
           {/* Toggle link below form */}
           <div className="text-center pt-2">
-            {needSetup ? (
-              authMode === 'login' ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('setup');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
-                >
-                  İlk kurulum sihirbazına dönmek için tıklayın
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('login');
-                    setError('');
-                    setSuccessMsg('');
-                  }}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
-                >
-                  Mevcut bir hesabınız varsa Giriş Yapın
-                </button>
-              )
-            ) : authMode === 'login' ? (
+            {authMode === 'login' ? (
               <button
                 type="button"
                 onClick={() => {
@@ -426,7 +327,6 @@ export const LoginView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setNeedSetup(true);
                   setAuthMode('setup');
                 }}
                 className="text-[11px] text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 flex items-center gap-1.5 transition cursor-pointer"
