@@ -8,7 +8,7 @@ See the GitHub **PROJE MERKEZİ Issue #1** for the current error list, prioritie
 
 ## Current release
 
-- Version: `1.2.10`
+- Version: `1.34.3`
 - Branch: `main`
 - Production runtime: bundled `dist/server.cjs`
 - Node.js: `>=20`
@@ -43,7 +43,7 @@ npm test
 npm run build
 ```
 
-Production build output is `dist/server.cjs` and the production start command is:
+VPS production deployment: [`docs/VPS_DEPLOYMENT.md`](docs/VPS_DEPLOYMENT.md)\n\nProduction build output is `dist/server.cjs` and the production start command is:
 
 ```bash
 npm start
