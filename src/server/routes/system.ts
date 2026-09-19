@@ -2,6 +2,7 @@ import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
 import { db } from '../db.js';
+import { DatabaseState } from '../../types.js';
 import { broadcast, getWebSocketClientsCount } from '../services/websocket.js';
 import {
   simulatorActive,
@@ -17,6 +18,9 @@ import { simulationTelemetryController } from '../controllers/simulationTelemetr
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
+import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
+import { DataMaintenanceService } from '../database/dataMaintenance.js';
 
 const startTime = Date.now();
 
@@ -34,7 +38,8 @@ systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
 });
 
 systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
-  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
@@ -42,6 +47,7 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
     return res.status(200).json({
       status: 'ready',
       ready: true,
+      state: dbState,
       database: {
         status: 'connected',
         engine: 'PostgreSQL / TimescaleDB',
@@ -61,12 +67,13 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
   return res.status(503).json({
     status: 'not_ready',
     ready: false,
+    state: dbState,
     database: {
-      status: 'disconnected',
+      status: dbState === DatabaseState.DB_CONNECTING || dbState === DatabaseState.DB_INITIALIZING ? 'initializing' : 'disconnected',
       engine: 'PostgreSQL / TimescaleDB',
       ready: false,
       pool: poolStats,
-      error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya bağlantı hazır değil.',
+      error: 'PostgreSQL / TimescaleDB ana veri tabanına henüz ulaşılamıyor veya kurulum/şema hazır değil.',
     },
     retryQueue: {
       pendingPacketCount: retryStats?.pendingPacketCount || 0,
@@ -80,17 +87,19 @@ systemRouter.get(['/health/ready', '/health/readiness'], (req, res) => {
 });
 
 systemRouter.get('/health', (req, res) => {
-  const isPostgresReady = !!db.postgresRepo?.isReady();
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const retryStats = typeof db.getRetryQueueStats === 'function' ? db.getRetryQueueStats() : undefined;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   const statusCode = isPostgresReady ? 200 : 503;
   return res.status(statusCode).json({
-    status: isPostgresReady ? 'healthy' : 'degraded',
+    status: isPostgresReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'degraded'),
     live: true,
     ready: isPostgresReady,
+    state: dbState,
     database: {
-      status: isPostgresReady ? 'connected' : 'disconnected',
+      status: isPostgresReady ? 'connected' : (dbState === DatabaseState.SETUP ? 'setup' : 'disconnected'),
       engine: 'PostgreSQL / TimescaleDB',
       ready: isPostgresReady,
       pool: poolStats,
@@ -100,6 +109,22 @@ systemRouter.get('/health', (req, res) => {
       pendingReadingCount: retryStats?.pendingReadingCount || 0,
       microBatch: retryStats?.microBatch,
     },
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// System Status Endpoint for Frontend / Diagnostics
+systemRouter.get(['/system/status', '/system-status'], (req, res) => {
+  const dbState = db.getDatabaseState();
+  const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
+  const poolStats = db.postgresRepo?.getPoolStats() || undefined;
+
+  res.json({
+    status: isPostgresReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
+    databaseState: dbState,
+    isReady: isPostgresReady,
+    pool: poolStats,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
   });
@@ -166,6 +191,27 @@ systemRouter.get('/system/postgres-schema', authenticateUser, requireAdmin, (req
   res.setHeader('Content-Type', 'text/plain');
   res.setHeader('Content-Disposition', 'attachment; filename="iot_timescaledb_schema.sql"');
   res.send(db.getPostgresSchemaSQL());
+});
+
+systemRouter.get('/system/canonical-schema', authenticateUser, requireAdmin, (req, res) => {
+  res.json({
+    success: true,
+    schemaContract: db.getCanonicalSchemaMetadata(),
+    ddl: db.getPostgresSchemaSQL()
+  });
+});
+
+systemRouter.get('/system/schema-harmony', authenticateUser, requireAdmin, (req, res) => {
+  const harmony = validateSchemaHarmony();
+  const drizzleAlignment = verifyDrizzleSchemaAlignment();
+
+  res.json({
+    success: true,
+    isHarmonized: harmony.isHarmonized && drizzleAlignment.isAligned,
+    harmony,
+    drizzleAlignment,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // System Event Logs
@@ -259,13 +305,13 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
 
 databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   const { engine, postgresUrl } = req.body;
-  if (engine === 'local') {
-    return res.status(403).json({
-      error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sistem yalnızca PostgreSQL / TimescaleDB desteklemektedir.',
-    });
+  if (!engine || !['postgres', 'timescaledb', 'local'].includes(engine)) {
+    return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi.' });
   }
-  if (!engine || !['postgres', 'timescaledb'].includes(engine)) {
-    return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi. Yerel veritabanı kullanımı tamamen devre dışı bırakılmıştır; yalnızca PostgreSQL ve TimescaleDB desteklenmektedir.' });
+
+  // P0.12 Enforce production database policy
+  if (process.env.NODE_ENV === 'production' && engine === 'local') {
+    return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
   }
 
   db.setActiveEngine(engine, postgresUrl);
@@ -295,6 +341,142 @@ databaseRouter.post('/postgres/sync-all', authenticateUser, requireAdmin, async 
 
 databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresSetupGuide());
+});
+
+// Canonical Schema Metadata & Schema Auditor Endpoints
+databaseRouter.get('/canonical-schema', authenticateUser, requireAdmin, (req, res) => {
+  res.json({
+    canonicalVersion: CANONICAL_SCHEMA_METADATA.version,
+    engine: CANONICAL_SCHEMA_METADATA.engine,
+    extensions: CANONICAL_SCHEMA_METADATA.extensions,
+    tables: CANONICAL_SCHEMA_METADATA.tables,
+    functions: CANONICAL_SCHEMA_METADATA.functions,
+    views: CANONICAL_SCHEMA_METADATA.views,
+  });
+});
+
+databaseRouter.get('/audit', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const auditResult = await db.postgresRepo.auditSchema();
+    const drizzleHarmony = verifyDrizzleSchemaAlignment();
+    const migrationHarmony = validateSchemaHarmony();
+
+    res.json({
+      success: true,
+      audit: auditResult,
+      alignment: {
+        drizzleMatchesCanonical: drizzleHarmony.isAligned,
+        migrationMatchesCanonical: migrationHarmony.isHarmonized,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: `Şema denetimi başarısız oldu: ${err?.message || err}`,
+    });
+  }
+});
+
+databaseRouter.post('/auto-heal', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const healResult = await db.postgresRepo.autoHealSchema();
+    res.json({
+      success: healResult.success,
+      stage: healResult.stage,
+      status: healResult.status,
+      verificationPassed: healResult.verificationPassed,
+      isHealthy: healResult.isHealthy,
+      actionsTaken: healResult.actionsTaken,
+      beforeReport: healResult.beforeReport,
+      afterReport: healResult.afterReport,
+      errors: healResult.errors,
+      remainingDiscrepancies: healResult.remainingDiscrepancies,
+      summaryMessage: healResult.summaryMessage,
+      orphanReports: healResult.orphanReports || [],
+      message: healResult.summaryMessage || (healResult.actionsTaken.length > 0 
+        ? `${healResult.actionsTaken.length} adet şema düzeltmesi başarıyla uygulandı ve doğrulandı.`
+        : 'Veritabanı şeması zaten Canonical Schema ile %100 uyumlu.'),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      status: 'FAIL',
+      verificationPassed: false,
+      isHealthy: false,
+      error: `Otomatik şema onarımı başarısız oldu: ${err?.message || err}`,
+    });
+  }
+});
+
+// Separate Data Maintenance Endpoints (Zero Data Loss Architecture: Schema Repair != Data Cleanup)
+databaseRouter.get('/maintenance/violations', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.json({ success: true, violations: [], count: 0, message: 'PostgreSQL havuzu aktif değil.' });
+    }
+    const violations = await DataMaintenanceService.scanDataIntegrityViolations(pool);
+    res.json({
+      success: true,
+      violations,
+      count: violations.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+databaseRouter.post('/maintenance/resolve', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.status(503).json({ success: false, error: 'PostgreSQL bağlantısı mevcut değil.' });
+    }
+    const { table, column, referencedTable, referencedColumn, resolutionStrategy, targetParentId, constraintName } = req.body;
+    if (!table || !column || !resolutionStrategy) {
+      return res.status(400).json({ success: false, error: 'table, column ve resolutionStrategy parametreleri zorunludur.' });
+    }
+    const adminUserId = req.user?.id || 'usr_admin';
+    const action: 'quarantine' | 'reassign_to_admin' | 'purge_with_snapshot' =
+      resolutionStrategy === 'REASSIGN_TO_PARENT'
+        ? 'reassign_to_admin'
+        : resolutionStrategy === 'DELETE_PURGE'
+        ? 'purge_with_snapshot'
+        : 'quarantine';
+
+    const result = await DataMaintenanceService.executeMaintenanceJob(pool, {
+      table,
+      constraintName: constraintName || `fk_${table}_${column}`,
+      action,
+      targetColumn: column,
+      referencedTable,
+      referencedColumn,
+      targetParentId,
+      adminUserId,
+    });
+    res.json({
+      success: result.success,
+      result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+databaseRouter.get('/maintenance/quarantine', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const pool = db.getPgPool();
+    if (!pool) {
+      return res.json({ success: true, items: [] });
+    }
+    const items = await DataMaintenanceService.getQuarantineRecords(pool);
+    res.json({ success: true, items });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
 });
 
 // Database Explorer & Management Endpoints
@@ -388,18 +570,31 @@ databaseRouter.post('/retention/cleanup-category', authenticateUser, requireAdmi
 // TimescaleDB Router
 const timescaleRouter = Router();
 
-timescaleRouter.get('/stats', authenticateUser, (req, res) => {
-  res.json(db.getTimescaleStats());
+timescaleRouter.get('/stats', authenticateUser, async (req, res) => {
+  try {
+    const stats = await db.getTimescaleStatsAsync();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB istatistikleri alınamadı: ' + (err.message || '') });
+  }
 });
 
 timescaleRouter.post('/compress-now', authenticateUser, requireAdmin, async (req, res) => {
-  const result = await db.compressTimescaleChunksNow();
-  res.json(result);
+  try {
+    const result = await db.compressTimescaleChunksNow();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB sıkıştırma işlemi başarısız: ' + (err.message || '') });
+  }
 });
 
-timescaleRouter.post('/policies', authenticateUser, requireAdmin, (req, res) => {
-  const result = db.updateTimescalePolicies(req.body);
-  res.json(result);
+timescaleRouter.post('/policies', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await db.updateTimescalePolicies(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'TimescaleDB politikaları güncellenemedi: ' + (err.message || '') });
+  }
 });
 
 timescaleRouter.get('/time-bucket', authenticateUser, async (req, res) => {

@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration005: Migration = {
   version: '005',
   name: 'auto_heal_expires_at_and_session_columns',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. user_sessions table column resilience
     await client.query(`
@@ -64,8 +65,28 @@ export const migration005: Migration = {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS previous_api_key_hash VARCHAR(128);
     `);
 
-    // 4. ota_deployment_jobs table resilience
+    // 4. firmwares & ota_deployment_jobs tables resilience
     await client.query(`
+      CREATE TABLE IF NOT EXISTS firmwares (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(128) NOT NULL,
+        device_type VARCHAR(64) NOT NULL,
+        role_key VARCHAR(64) NOT NULL,
+        hardware_model VARCHAR(64) DEFAULT 'ALL',
+        version VARCHAR(32) NOT NULL,
+        description TEXT,
+        binary_data TEXT,
+        binary_size INT DEFAULT 0,
+        sha256 VARCHAR(128) NOT NULL,
+        signature TEXT,
+        file_path TEXT,
+        min_hardware_revision VARCHAR(64),
+        is_active BOOLEAN DEFAULT TRUE,
+        uploaded_by VARCHAR(128) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
         id VARCHAR(64) PRIMARY KEY,
         firmware_id VARCHAR(64),
@@ -88,9 +109,9 @@ export const migration005: Migration = {
         next_retry_at TIMESTAMP WITH TIME ZONE,
         download_started_at TIMESTAMP WITH TIME ZONE,
         boot_confirmed_at TIMESTAMP WITH TIME ZONE,
+        completed_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        completed_at TIMESTAMP WITH TIME ZONE
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
       ALTER TABLE ota_deployment_jobs ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;

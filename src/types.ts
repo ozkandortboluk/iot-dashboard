@@ -204,6 +204,8 @@ export interface Device {
   autoDetectedIntervalSeconds?: number; // Sistemin peş peşe gelen paketlerden ölçtüğü sıklık
   recentIntervals?: number[]; // Son N ardışık paket aralıkları (aykırı değer ve burst filtrelemesi için)
   isSimulated?: boolean;
+  powerSource?: 'battery' | 'mains' | 'unknown';
+  batteryLevel?: number;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
   supportedOutputs?: string[];
@@ -1073,19 +1075,17 @@ export interface ServerStats {
   uptimeSeconds: number;
 }
 
-export type DatabaseEngineType = 'postgres' | 'timescaledb' | 'local';
-
-export interface SystemSetupStatus {
-  needSetup: boolean;
-  needAdminSetup: boolean;
-  needDatabaseConfig: boolean;
-  hasAdmin: boolean;
-  isPostgresConnected: boolean;
-  hasPostgresUrl: boolean;
-  isComplete: boolean;
-  inProgress?: boolean;
-  postgresConfig?: DatabaseEngineConfig | null;
+export enum DatabaseState {
+  BOOTSTRAP = 'BOOTSTRAP',
+  SETUP = 'SETUP',
+  DB_CONNECTING = 'DB_CONNECTING',
+  DB_INITIALIZING = 'DB_INITIALIZING',
+  READY = 'READY',
+  DB_UNAVAILABLE = 'DB_UNAVAILABLE',
+  MAINTENANCE = 'MAINTENANCE',
 }
+
+export type DatabaseEngineType = 'postgres' | 'timescaledb' | 'local';
 
 export interface DatabaseEngineConfig {
   activeEngine: DatabaseEngineType;

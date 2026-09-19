@@ -399,7 +399,7 @@ export const DatabaseDataView: React.FC = () => {
       if (resEngine.ok) {
         const engData = await resEngine.json();
         setEngineConfig(engData);
-        setPendingEngine(engData.activeEngine || 'postgres');
+        setPendingEngine(engData.activeEngine || 'local');
       }
       if (resGuide.ok) {
         const guideData = await resGuide.json();
@@ -819,7 +819,7 @@ export const DatabaseDataView: React.FC = () => {
   const storageLimitMB = 1024;
   const storagePct = Math.min(100, Math.round((storageUsedMB / (storageLimitMB || 1)) * 100));
 
-  const currentEngine = engineConfig?.activeEngine || 'postgres';
+  const currentEngine = engineConfig?.activeEngine || 'local';
 
   return (
     <div className="space-y-6 pb-12">
@@ -1029,14 +1029,14 @@ export const DatabaseDataView: React.FC = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                  %{engineConfig?.timescaleStats?.compressionRatioPercent || 91.8}
+                  %{engineConfig?.timescaleStats?.compressionRatioPercent ?? 0}
                 </span>
                 <span className="text-xs text-slate-400 font-mono">
-                  (~{engineConfig?.timescaleStats?.spaceSavedMB || 4.2} MB Kazanıldı)
+                  (~{engineConfig?.timescaleStats?.spaceSavedMB ?? 0} MB Kazanıldı)
                 </span>
               </div>
               <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${engineConfig?.timescaleStats?.compressionRatioPercent || 91.8}%` }} />
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${engineConfig?.timescaleStats?.compressionRatioPercent ?? 0}%` }} />
               </div>
             </div>
 
@@ -1049,12 +1049,12 @@ export const DatabaseDataView: React.FC = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-xl font-bold text-slate-900 dark:text-slate-100 font-mono">
-                  {engineConfig?.timescaleStats?.compressedChunks || 3} / {engineConfig?.timescaleStats?.totalChunks || 5}
+                  {engineConfig?.timescaleStats?.compressedChunks ?? 0} / {engineConfig?.timescaleStats?.totalChunks ?? 0}
                 </span>
                 <span className="text-[11px] text-slate-400">Sıkıştırılmış Chunk</span>
               </div>
               <p className="text-[11px] text-slate-400">
-                {engineConfig?.timescaleStats?.totalReadingsCount || stats?.collections.telemetry || 0} Toplam Telemetri Kaydı
+                {engineConfig?.timescaleStats?.totalReadingsCount ?? (stats?.collections.telemetry || 0)} Toplam Telemetri Kaydı
               </p>
             </div>
 
@@ -1066,10 +1066,10 @@ export const DatabaseDataView: React.FC = () => {
                 </span>
               </div>
               <p className="text-xl font-bold text-purple-600 dark:text-purple-400 font-mono">
-                3 Görünüm Aktif
+                {engineConfig?.timescaleStats?.continuousAggregates?.length || 2} Görünüm Aktif
               </p>
               <p className="text-[11px] text-slate-400">
-                1-Dk, 1-Saat ve 1-Günlük Otomatik Downsampling
+                1-Saat ve 1-Günlük Otomatik Downsampling (5 Yıl Saklama)
               </p>
             </div>
           </div>
@@ -1422,27 +1422,6 @@ export const DatabaseDataView: React.FC = () => {
                       <span>{syncingAllPostgres ? 'Veriler Aktarılıyor...' : 'Tüm Verileri PostgreSQL\'e Aktar'}</span>
                     </button>
                   </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 mt-1.5 text-[11px] text-slate-400">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-500">Hızlı Doldur:</span>
-                    <button
-                      type="button"
-                      onClick={() => setInputPostgresUrl('postgresql://postgres:[SIFRE]@db.nexusnodeiot.com.tr:5432/nexusnode_iot?sslmode=prefer')}
-                      className="text-blue-500 dark:text-blue-400 hover:underline font-medium"
-                    >
-                      db.nexusnodeiot.com.tr (Sunucu / Adminer)
-                    </button>
-                  </div>
-                  <a
-                    href="https://db.nexusnodeiot.com.tr/"
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-1 text-indigo-500 dark:text-indigo-400 hover:underline font-medium"
-                  >
-                    <span>Adminer Web Panelini Aç</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
                   İpucu: Docker / VPS sunucunuz için örnek: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:sifreniz@db.nexusnodeiot.com.tr:5432/iot_dashboard?sslmode=disable</code>

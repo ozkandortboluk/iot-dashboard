@@ -1,5 +1,7 @@
 import { systemLogger } from './systemLogger.service.js';
 import type { DatabaseEngineType } from '../../types.js';
+import { SchemaAuditor, type SchemaHealingResult } from '../database/schemaAuditor.js';
+import { CANONICAL_SCHEMA_METADATA, getCanonicalTableCreationOrder } from '../database/canonicalSchema.js';
 
 let activeAutoHealerInstance: DatabaseAutoHealer | null = null;
 
@@ -89,6 +91,10 @@ export interface DatabaseHealthReport {
   lastRepairedAt: string | null;
   lastCheckedAt: string;
   healingEvents: string[];
+  isSchemaHealthy?: boolean;
+  schemaHealthScore?: number;
+  schemaRepairStatus?: 'PASS' | 'FAIL' | 'NO_OP';
+  remainingDiscrepancies?: string[];
 }
 
 export class DatabaseAutoHealer {
@@ -189,21 +195,7 @@ export class DatabaseAutoHealer {
     const pool = this.dbInstance.getPgPool();
     if (!pool) return [];
 
-    const criticalTables = [
-      'users',
-      'devices',
-      'telemetry_readings',
-      'threshold_rules',
-      'active_alarms',
-      'alarm_events',
-      'dashboard_layouts',
-      'notifications',
-      'audit_logs',
-      'user_sessions',
-      'dispatch_logs',
-      'device_commands',
-      'system_events',
-    ];
+    const criticalTables = getCanonicalTableCreationOrder();
 
     const missing: string[] = [];
     try {
@@ -223,6 +215,16 @@ export class DatabaseAutoHealer {
           if (!existing.has(tbl)) {
             missing.push(tbl);
           }
+        }
+
+        // If any tables or schema discrepancies exist, run SchemaAuditor.autoHeal
+        if (missing.length > 0) {
+          recordDatabaseHealingEvent(
+            `Eksik tablolar tespit edildi: ${missing.join(', ')}. Otomatik onarım çalıştırılıyor...`,
+            { missingTables: missing },
+            'warn'
+          );
+          await SchemaAuditor.autoHeal(client);
         }
 
         // Ensure system_events table exists
@@ -500,35 +502,76 @@ export class DatabaseAutoHealer {
         status = 'recovering';
       }
 
-      // 3. Measure ping / latency
+      // 3. Measure ping / latency & conduct Canonical Schema Audit + Auto-Heal
       const t0 = Date.now();
+      let isSchemaVerifiedHealthy = false;
+      let schemaScore = 100;
+      let schemaStatus: 'PASS' | 'FAIL' | 'NO_OP' = 'NO_OP';
+      let remainingDiscrepancies: string[] = [];
+
       const client = await pool.connect();
       try {
-        await client.query("SET statement_timeout = '4s';");
+        await client.query("SET statement_timeout = '6s';");
         await client.query('SELECT 1;');
         latencyMs = Date.now() - t0;
+
+        // 4. Authoritative Schema Audit & Auto-Heal (Detect -> Repair -> Re-check)
+        const initialAudit = await SchemaAuditor.auditSchema(client);
+        
+        if (!initialAudit.isHealthy) {
+          const msg = `Şema uyumsuzlukları tespit edildi (${initialAudit.humanReadableMessages.length} adet). Repair -> Verify onarım döngüsü başlatılıyor...`;
+          this.recordHealingEvent(msg);
+          recordDatabaseHealingEvent(msg, { discrepancies: initialAudit.humanReadableMessages }, 'warn');
+
+          const healResult = await SchemaAuditor.autoHeal(client, initialAudit);
+          this.lastRepairedAt = now;
+          isSchemaVerifiedHealthy = healResult.isHealthy && healResult.verificationPassed;
+          schemaScore = healResult.afterReport.score;
+          schemaStatus = healResult.status;
+          remainingDiscrepancies = healResult.remainingDiscrepancies;
+          missingTables = healResult.afterReport.discrepancies.missingTables;
+
+          if (!isSchemaVerifiedHealthy) {
+            status = 'degraded';
+            const failMsg = `Şema onarım doğrulaması başarısız oldu (FAIL). Skor: %${schemaScore}. Kalan kusurlar: ${remainingDiscrepancies.length}`;
+            this.recordHealingEvent(failMsg);
+            recordDatabaseHealingEvent(failMsg, { errors: healResult.errors, remaining: remainingDiscrepancies }, 'error');
+          } else {
+            status = 'recovering';
+            const successMsg = `Şema başarıyla onarıldı ve doğrudan DB üzerinden doğrulandı (PASS). Skor: %${schemaScore}`;
+            this.recordHealingEvent(successMsg);
+            recordDatabaseHealingEvent(successMsg, { actionsTaken: healResult.actionsTaken }, 'info');
+          }
+        } else {
+          isSchemaVerifiedHealthy = true;
+          schemaScore = 100;
+          schemaStatus = 'PASS';
+          missingTables = [];
+          remainingDiscrepancies = [];
+        }
       } finally {
         client.release();
       }
 
-      // 4. Verify tables
-      missingTables = await this.verifyAndRepairTables();
-      if (missingTables.length > 0) {
+      // 5. Evaluate final overall status:
+      // STRICT RULE: If schema verification failed, NEVER show as healthy!
+      if (!isSchemaVerifiedHealthy) {
         status = 'degraded';
-        this.lastRepairedAt = now;
-      }
-
-      if (status === 'recovering' || status === 'degraded') {
-        // If we cleaned issues and latency is healthy, mark healthy
-        if (latencyMs >= 0 && latencyMs < 2000 && missingTables.length === 0) {
+      } else if (latencyMs >= 0 && latencyMs < 2000 && hungCleared === 0) {
+        status = 'healthy';
+      } else if (status === 'recovering' || status === 'degraded') {
+        if (latencyMs >= 0 && latencyMs < 2000 && isSchemaVerifiedHealthy) {
           status = 'healthy';
         }
       }
 
-      // Ensure repo state matches reality
-      this.dbInstance.postgresRepo.setConnected(true);
+      // Ensure repo state and databaseSettings reflect true verified state
+      const isPgReady = status === 'healthy' || status === 'recovering';
+      this.dbInstance.postgresRepo.setConnected(true, isPgReady);
       if (this.dbInstance.data.databaseSettings) {
         this.dbInstance.data.databaseSettings.isPostgresConnected = true;
+        this.dbInstance.data.databaseSettings.isSchemaHealthy = isSchemaVerifiedHealthy;
+        this.dbInstance.data.databaseSettings.schemaHealthScore = schemaScore;
         this.dbInstance.data.databaseSettings.lastTestedAt = now;
       }
     } catch (err: any) {
@@ -541,11 +584,8 @@ export class DatabaseAutoHealer {
       this.dbInstance.postgresRepo.setConnected(false);
       if (this.dbInstance.data.databaseSettings) {
         this.dbInstance.data.databaseSettings.isPostgresConnected = false;
+        this.dbInstance.data.databaseSettings.isSchemaHealthy = false;
       }
-
-      // We DO NOT recycle the entire pool on transient timeouts here.
-      // The 'pg' module's pool is self-healing and will automatically evict broken clients.
-      // Aggressive pool recycling causes thundering herd reconnection storms.
     } finally {
       this.isHealingInProgress = false;
     }
@@ -560,12 +600,14 @@ export class DatabaseAutoHealer {
         idleCount: pool?.idleCount || 0,
         waitingCount: pool?.waitingCount || 0,
       },
-      tableCount: 15,
+      tableCount: Object.keys(CANONICAL_SCHEMA_METADATA.tables).length,
       missingTables,
       hungQueriesCleared: hungCleared,
       lastRepairedAt: this.lastRepairedAt,
       lastCheckedAt: now,
       healingEvents: this.healingHistory.slice(-10),
+      isSchemaHealthy: this.dbInstance.data.databaseSettings?.isSchemaHealthy ?? true,
+      schemaHealthScore: this.dbInstance.data.databaseSettings?.schemaHealthScore ?? 100,
     };
   }
 
@@ -576,7 +618,7 @@ export class DatabaseAutoHealer {
       activeEngine: this.dbInstance.getActiveEngine(),
       latencyMs: 0,
       poolStats: { totalCount: 0, idleCount: 0, waitingCount: 0 },
-      tableCount: 15,
+      tableCount: Object.keys(CANONICAL_SCHEMA_METADATA.tables).length,
       missingTables: [],
       hungQueriesCleared: 0,
       lastRepairedAt: this.lastRepairedAt,

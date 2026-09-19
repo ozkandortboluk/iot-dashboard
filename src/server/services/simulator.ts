@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { broadcast } from './websocket.js';
 import { simulationTelemetryService } from './simulationTelemetry.service.js';
-import type { TelemetryReading, Device } from '../../types.js';
+import { DatabaseState, type TelemetryReading, type Device } from '../../types.js';
 
 export function isSimulatorEnabledFromEnv(): boolean {
   return process.env.ENABLE_SIMULATOR === 'true';
@@ -150,6 +150,10 @@ export function computeValueForMetric(
 
 export function runSimulationStep() {
   if (!simulatorActive) return;
+  const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+  if (!isTest && (!db.postgresRepo?.isReady() || db.getDatabaseState() !== DatabaseState.READY)) {
+    return;
+  }
 
   // CRITICAL PROTECTION RULE:
   // Simulator MUST ONLY generate fake data for explicitly marked SIMULATED devices (isSimulated === true).
@@ -165,6 +169,9 @@ export function runSimulationStep() {
 
   for (const dev of devices) {
     if (!dev.isSimulated) continue;
+
+    dev.status = 'online';
+    dev.lastSeen = new Date().toISOString();
 
     // Process simulated telemetry arrival through standard device telemetry pipeline
     db.processDeviceTelemetryArrival(dev.id);
@@ -241,6 +248,12 @@ export function initSimulator(): boolean {
   if (simTimeout) {
     clearTimeout(simTimeout);
     simTimeout = null;
+  }
+
+  const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+  if (!isTest && (!db.postgresRepo?.isReady() || db.getDatabaseState() !== DatabaseState.READY)) {
+    console.log('[Simulator] PostgreSQL henüz READY olmadığı için simülatör başlatılmadı.');
+    return false;
   }
 
   simulatorActive = isSimulatorEnabledFromEnv();

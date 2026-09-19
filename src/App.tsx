@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
@@ -17,12 +17,13 @@ import { DatabaseDataView } from './components/DatabaseDataView';
 import { NetworkDiscoveryView } from './components/NetworkDiscoveryView';
 import { AddWidgetModal } from './components/AddWidgetModal';
 import { LoginView } from './components/LoginView';
-import { SystemSetupWizard } from './components/SystemSetupWizard';
 import { HelpView } from './components/HelpView';
 import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { SystemLogsView } from './components/system/SystemLogsView';
+import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
+import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
 import {
@@ -35,6 +36,10 @@ import {
   Users,
   LogOut,
   Menu,
+  RefreshCw,
+  Database,
+  CheckCircle2,
+  Server,
 } from 'lucide-react';
 
 function DashboardContent() {
@@ -292,53 +297,110 @@ function DashboardContent() {
   );
 }
 
-function RootContent() {
-  const { user, setupStatus, isCheckingSetup, refreshSetupStatus } = useAuth();
+/**
+ * Startup Gatekeeper: Enforces strict PostgreSQL initialization before displaying Login or Dashboard
+ * Flow:
+ * 1. Site loads
+ * 2. Check: Is PostgreSQL configured, connected, TimescaleDB checked, migrations complete, and admin exists?
+ * 3. If NO -> Directly render DatabaseSetupWizard (Host / Port / DB / User / Password -> Test -> PostgreSQL ✓ -> TimescaleDB ✓ -> Migration -> Admin -> READY -> Login)
+ * 4. If YES -> Directly render LoginView / Dashboard
+ */
+function AppStartupGatekeeper() {
+  const [bypassToLogin, setBypassToLogin] = useState(false);
+  const [dbStatusState, setDbStatusState] = useState<{
+    isLoading: boolean;
+    setupRequired: boolean;
+    isDbReady: boolean;
+    errorMessage?: string;
+  }>({
+    isLoading: true,
+    setupRequired: false,
+    isDbReady: false,
+  });
 
-  // Show a clean minimal loader while discovering system setup status on cold start
-  if (isCheckingSetup) {
+  const checkDatabaseReadiness = useCallback(async () => {
+    setDbStatusState((prev) => ({ ...prev, isLoading: true, errorMessage: undefined }));
+    try {
+      const res = await fetch('/api/setup/status', {
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const isReady = Boolean(
+          data.isDbConnected &&
+          data.stepsCompleted?.migrations &&
+          data.hasAdmin &&
+          !data.setupRequired
+        );
+
+        setDbStatusState({
+          isLoading: false,
+          setupRequired: !isReady,
+          isDbReady: isReady,
+        });
+        return;
+      } else {
+        // Non-200 response (e.g. 503 database not ready)
+        setDbStatusState({
+          isLoading: false,
+          setupRequired: true,
+          isDbReady: false,
+        });
+      }
+    } catch (err: unknown) {
+      setDbStatusState({
+        isLoading: false,
+        setupRequired: true,
+        isDbReady: false,
+        errorMessage: err instanceof Error ? err.message : 'Veritabanı kontrol hatası',
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    checkDatabaseReadiness();
+  }, [checkDatabaseReadiness]);
+
+  // Loading state during initial startup check
+  if (dbStatusState.isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 space-y-4">
-        <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-        <p className="text-xs font-semibold tracking-wider uppercase text-slate-400">
-          Sistem Durumu Kontrol Ediliyor...
-        </p>
+      <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 space-y-6">
+        <NexusNodeLogo variant="stacked" size="lg" showDomain={true} animated={true} />
+        
+        <div className="flex items-center gap-3 px-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono shadow-xl">
+          <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
+          <span>PostgreSQL & TimescaleDB durumu kontrol ediliyor...</span>
+        </div>
       </div>
     );
   }
 
-  // Strict User Constraint: If no admin exists or PostgreSQL is not configured/connected,
-  // the user MUST NOT access the site. The SystemSetupWizard takes over!
-  if (setupStatus && !setupStatus.isComplete) {
+  // Database is NOT configured or NOT ready -> Render Database Setup Wizard directly (unless user intentionally bypassed to Login)
+  if (!bypassToLogin && (dbStatusState.setupRequired || !dbStatusState.isDbReady)) {
     return (
-      <SystemSetupWizard
-        setupStatus={setupStatus}
-        onComplete={async () => {
-          await refreshSetupStatus();
+      <DatabaseSetupWizard
+        onComplete={() => {
+          setBypassToLogin(true);
         }}
       />
     );
   }
 
-  // If setup is complete but no active user session, show login
-  if (!user) {
-    return <LoginView />;
-  }
-
-  // Once authenticated and system is fully verified, render full dashboard
+  // Database is configured and ready (or bypassed to login) -> Render regular Auth & Dashboard flow
   return (
-    <RealtimeProvider>
-      <DashboardContent />
-    </RealtimeProvider>
+    <AuthProvider>
+      <RealtimeProvider>
+        <DashboardContent />
+      </RealtimeProvider>
+    </AuthProvider>
   );
 }
 
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <RootContent />
-      </AuthProvider>
+      <AppStartupGatekeeper />
     </ThemeProvider>
   );
 }

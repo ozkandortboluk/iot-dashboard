@@ -4,6 +4,7 @@ import type { Migration } from './types.js';
 export const migration007: Migration = {
   version: '007',
   name: 'comprehensive_schema_synchronization_and_column_healing',
+  disableTransaction: true,
   up: async (client: pg.PoolClient) => {
     // 1. DEVICES Table Column Completeness
     await client.query(`
@@ -12,6 +13,9 @@ export const migration007: Migration = {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS mac_address VARCHAR(32);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key VARCHAR(256);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_prefix VARCHAR(32);
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS api_key_hash VARCHAR(128);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
@@ -128,6 +132,22 @@ export const migration007: Migration = {
 
     // 5. DISPATCH_LOGS Table Column Completeness
     await client.query(`
+      CREATE TABLE IF NOT EXISTS dispatch_logs (
+        id VARCHAR(64) PRIMARY KEY,
+        tenant_id VARCHAR(64),
+        user_id VARCHAR(64),
+        user_name VARCHAR(128),
+        channel VARCHAR(32) NOT NULL,
+        recipient VARCHAR(128) NOT NULL,
+        title VARCHAR(256),
+        message TEXT NOT NULL,
+        severity VARCHAR(32) DEFAULT 'info',
+        status VARCHAR(32) DEFAULT 'delivered',
+        latency_ms INT DEFAULT 0,
+        error_details TEXT,
+        sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS severity VARCHAR(32) DEFAULT 'info';
       ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS attempt_count INT DEFAULT 1;
       ALTER TABLE dispatch_logs ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;
@@ -184,7 +204,7 @@ export const migration007: Migration = {
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS min_breach_duration_sec INT DEFAULT 0;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS repeat_interval_sec INT DEFAULT 0;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS notification_channels JSONB DEFAULT '["app"]'::jsonb;
-      ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours JSONB;
+      ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS active_hours VARCHAR(64) DEFAULT '00:00-23:59';
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS recipients JSONB;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS silenced_until TIMESTAMP WITH TIME ZONE;
       ALTER TABLE threshold_rules ADD COLUMN IF NOT EXISTS user_name VARCHAR(128);
@@ -198,16 +218,16 @@ export const migration007: Migration = {
         id VARCHAR(64) PRIMARY KEY,
         name VARCHAR(128) NOT NULL,
         device_type VARCHAR(64) NOT NULL,
-        role_key VARCHAR(64) DEFAULT 'ALL',
+        role_key VARCHAR(64) NOT NULL,
         hardware_model VARCHAR(64) DEFAULT 'ALL',
         version VARCHAR(32) NOT NULL,
         description TEXT,
-        binary_data BYTEA,
-        binary_size BIGINT DEFAULT 0,
-        sha256 VARCHAR(64) NOT NULL,
+        binary_data TEXT,
+        binary_size INT DEFAULT 0,
+        sha256 VARCHAR(128) NOT NULL,
         signature TEXT,
         file_path TEXT,
-        min_hardware_revision VARCHAR(32),
+        min_hardware_revision VARCHAR(64),
         is_active BOOLEAN DEFAULT TRUE,
         uploaded_by VARCHAR(128) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -236,9 +256,9 @@ export const migration007: Migration = {
         next_retry_at TIMESTAMP WITH TIME ZONE,
         download_started_at TIMESTAMP WITH TIME ZONE,
         boot_confirmed_at TIMESTAMP WITH TIME ZONE,
+        completed_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        completed_at TIMESTAMP WITH TIME ZONE
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
       ALTER TABLE firmwares ADD COLUMN IF NOT EXISTS role_key VARCHAR(64) DEFAULT 'ALL';

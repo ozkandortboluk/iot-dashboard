@@ -1,13 +1,9 @@
-const fs = require('fs');
-let changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-const newEntry = `## [1.9.9] - 2026-09-12
-
+import * as fs from 'fs';
+let content = fs.readFileSync('CHANGELOG.md', 'utf-8');
+const newLog = `## [1.23.4] - 2026-09-17
 ### Fixed
-- Fixed widespread TypeScript 1064 errors regarding asynchronous return types in \`db.ts\`, \`device.repository.ts\`, \`alarm.repository.ts\`, \`notification.repository.ts\`, \`telemetry.repository.ts\`, and \`user.repository.ts\`.
-- Updated Express route handlers in \`alarms.ts\`, \`devices.ts\`, \`network.ts\`, and \`auth.ts\` to use \`async (req, res)\` when \`await\` is utilized.
-- Resolved various property access and parameter mismatched type errors (TS2339, TS2740) across repository methods.
-- Fixed un-awaited promises and sync/async logic mismatch in integration test files (\`alarm-engine.test.ts\`, \`simulator.test.ts\`, \`auth.test.ts\`, \`docker_postgres_proxy_ws.test.ts\`, \`automation_and_field_ops.test.ts\`).
+- Frontend: Sistem genelindeki tüm Checkbox (onay kutusu) ve Radio (seçenek düğmesi) bileşenleri için, özellikle karanlık temada ("dark mode") okunabilirliği ve zıtlığı bozan yerel tarayıcı görünümleri düzeltildi. Tailwind form eklentisi olmadan da çalışan, karanlık temada göz yormayan özel küresel (global) CSS yapılandırması (src/index.css) eklendi.
 
 `;
-changelog = changelog.replace('# Changelog\n\n', '# Changelog\n\n' + newEntry);
-fs.writeFileSync('CHANGELOG.md', changelog);
+content = content.replace('## [1.23.3]', newLog + '## [1.23.3]');
+fs.writeFileSync('CHANGELOG.md', content);
