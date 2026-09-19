@@ -588,6 +588,14 @@ export const SystemSetupWizard: React.FC<SystemSetupWizardProps> = ({
                         <span className="text-slate-500">Hızlı Şablonlar:</span>
                         <button
                           type="button"
+                          onClick={() => setPostgresUrl('postgresql://postgres:[SIFRE]@db.nexusnodeiot.com.tr:5432/nexusnode_iot?sslmode=prefer')}
+                          className="hover:text-indigo-400 underline underline-offset-2 text-indigo-300 font-medium"
+                        >
+                          db.nexusnodeiot.com.tr (Sunucu / Adminer)
+                        </button>
+                        <span>•</span>
+                        <button
+                          type="button"
                           onClick={() => setPostgresUrl('postgresql://postgres:postgres@localhost:5432/nexusnode_iot?sslmode=disable')}
                           className="hover:text-indigo-400 underline underline-offset-2"
                         >
@@ -609,6 +617,28 @@ export const SystemSetupWizard: React.FC<SystemSetupWizardProps> = ({
                         >
                           Neon
                         </button>
+                      </div>
+
+                      {/* Adminer Guidance Box */}
+                      <div className="mt-3 p-3 bg-slate-950/80 border border-slate-800 rounded-xl flex items-start justify-between gap-3 text-xs">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 text-indigo-400 font-semibold text-[12px]">
+                            <Database className="w-3.5 h-3.5" />
+                            <span>Adminer (https://db.nexusnodeiot.com.tr/) İle Nasıl Kullanılır?</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Adminer, veritabanınızı tarayıcı üzerinden yönetmenizi sağlayan web arayüzüdür. Platformumuz ise arka planda doğrudan PostgreSQL sunucusuna (5432 portu) bağlanır. Adminer üzerinde oturum açtığınız kullanıcı adı, şifre ve veritabanı adını yukarıya girerek bağlantıyı sağlayabilirsiniz.
+                          </p>
+                        </div>
+                        <a
+                          href="https://db.nexusnodeiot.com.tr/"
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="flex-shrink-0 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
+                        >
+                          <span>Adminer'ı Aç</span>
+                          <ExternalLink className="w-3 h-3 text-slate-400" />
+                        </a>
                       </div>
                     </div>
                   ) : (

@@ -1423,6 +1423,27 @@ export const DatabaseDataView: React.FC = () => {
                     </button>
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mt-1.5 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500">Hızlı Doldur:</span>
+                    <button
+                      type="button"
+                      onClick={() => setInputPostgresUrl('postgresql://postgres:[SIFRE]@db.nexusnodeiot.com.tr:5432/nexusnode_iot?sslmode=prefer')}
+                      className="text-blue-500 dark:text-blue-400 hover:underline font-medium"
+                    >
+                      db.nexusnodeiot.com.tr (Sunucu / Adminer)
+                    </button>
+                  </div>
+                  <a
+                    href="https://db.nexusnodeiot.com.tr/"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-indigo-500 dark:text-indigo-400 hover:underline font-medium"
+                  >
+                    <span>Adminer Web Panelini Aç</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-1">
                   İpucu: Docker / VPS sunucunuz için örnek: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:sifreniz@db.nexusnodeiot.com.tr:5432/iot_dashboard?sslmode=disable</code>
                 </p>

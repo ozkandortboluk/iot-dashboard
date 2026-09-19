@@ -33,6 +33,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      DATABASE_URL: postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard
       DB_HOST: timescaledb
       DB_PORT: 5432
       DB_USER: iot_user

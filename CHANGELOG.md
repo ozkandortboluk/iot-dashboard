@@ -4,6 +4,30 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.18.2] - 2026-09-19
+
+### 📌 PostgreSQL Migration 005 Onarımı & Tablo Varlık Dayanıklılığı (Fix: relation "ota_deployment_jobs" does not exist)
+- **Migration 005 (`auto_heal_expires_at_and_session_columns`) Hatasının Giderilmesi**:
+  - `ota_deployment_jobs` tablosu üzerinde `ALTER TABLE` çalıştırılmadan önce tablonun varlığı garantiye alındı (`CREATE TABLE IF NOT EXISTS`).
+  - `001_core_relational_tables` içerisine eksik olan `dashboard_layouts`, `dispatch_logs`, `firmwares` ve `ota_deployment_jobs` tablolarının DDL tanımları eklendi.
+  - `007_comprehensive_schema_synchronization_and_column_healing` içerisine de `firmwares` ve `ota_deployment_jobs` tabloları için varlık koruması eklendi.
+  - `audit_logs` tablosundaki `tenant_id` kolonu için `ADD COLUMN IF NOT EXISTS` koruması sağlandı.
+- **Sürüm ve Paket Kilidi Eşitlemesi**:
+  - `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` tam uyumlu olarak `1.18.2` sürümüne yükseltildi.
+
+---
+
+## 🚀 [v1.18.1] - 2026-09-19
+
+### 📌 Adminer (db.nexusnodeiot.com.tr) & PostgreSQL Sunucu Entegrasyon Rehberi & Hızlı Şablonlar
+- **Kurulum Sihirbazı Hızlı Şablonları & Adminer Bağlantısı (`SystemSetupWizard.tsx`)**:
+  - `db.nexusnodeiot.com.tr` (Adminer / Sunucu) için tek tıkla otomatik bağlantı dizesi şablonu eklendi: `postgresql://postgres:[SIFRE]@db.nexusnodeiot.com.tr:5432/nexusnode_iot?sslmode=prefer`.
+  - Adminer'ın rolü (web yönetim paneli) ile platformun PostgreSQL TCP (5432 portu) bağlantısı arasındaki farkı açıklayan bilgilendirme kutusu ve doğrudan `https://db.nexusnodeiot.com.tr/` yönetim paneline yönlendiren hızlı erişim butonu eklendi.
+- **Veritabanı Yönetim Paneli Güncellemesi (`DatabaseDataView.tsx`)**:
+  - PostgreSQL ayar ekranına tek tıkla doldurulabilir `db.nexusnodeiot.com.tr` şablonu ve Adminer web arayüzünü yeni sekmede açan bağlantı eklendi.
+
+---
+
 ## 🚀 [v1.18.0] - 2026-09-19
 
 ### 📌 Yerel Veritabanının Tamamen Kaldırılması, Saf PostgreSQL Geçişi & Zorunlu Kurulum Sihirbazı

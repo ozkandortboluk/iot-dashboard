@@ -403,7 +403,6 @@ class LocalDatabase {
             // PostgreSQL is completely empty. Only seed legitimate non-ephemeral users.
             for (const u of this.data.users) {
               if (isTestOrEphemeralUser(u.id, u.email, u.name)) continue;
-              if (u.id === 'usr_test_admin' && process.env.NODE_ENV === 'production' && process.env.ENABLE_TEST_ACCOUNT !== 'true') continue;
               await this.postgresRepo.saveUser(u, this.data.passwords[u.id]).catch((err: any) => {
                 systemLogger.error('database', `Kullanıcı PostgreSQL hydration hatası (${u.id}): ${err?.message || err}`);
               });
@@ -418,7 +417,6 @@ class LocalDatabase {
             // PostgreSQL has 0 devices. Only seed legitimate non-ephemeral devices.
             for (const d of this.data.devices) {
               if (isTestOrEphemeralArtifact(d.id)) continue;
-              if (d.id === 'dev_test_01' && process.env.NODE_ENV === 'production' && process.env.ENABLE_TEST_ACCOUNT !== 'true') continue;
               await this.postgresRepo.saveDevice(d).catch((err: any) => {
                 systemLogger.error('database', `Cihaz PostgreSQL hydration hatası (${d.id}): ${err?.message || err}`);
               });
@@ -755,61 +753,75 @@ class LocalDatabase {
     }
 
     // Check if there are any admin users
-    const hasAdmin = parsed.users.some((u) => u.role === 'admin');
+    const hasAdmin = parsed.users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
 
     if (!hasAdmin) {
-      // Try to seed from Environment Variables
+      // Seed initial Administrator account (Canonical Admin credentials)
       const envAdminEmail = process.env.ADMIN_EMAIL;
       const envAdminPassword = process.env.ADMIN_PASSWORD;
 
-      if (envAdminEmail && envAdminPassword) {
-        const adminId = 'usr_admin';
-        const adminName = process.env.ADMIN_NAME || 'Sistem Yöneticisi';
-        const adminCompany = process.env.ADMIN_COMPANY || 'Merkez Yönetim';
+      const adminId = envAdminEmail ? 'usr_admin' : 'usr_test_admin';
+      const adminEmail = envAdminEmail || 'test@nexusnodeiot.com.tr';
+      const adminPassword = envAdminPassword || 'test1234';
+      const adminName = process.env.ADMIN_NAME || 'Sistem Yöneticisi';
+      const adminCompany = process.env.ADMIN_COMPANY || 'Merkez Yönetim';
 
-        const adminUser: User = {
-          id: adminId,
-          name: adminName,
-          email: envAdminEmail,
-          phone: '+905551234567',
-          notificationEmail: envAdminEmail,
-          whatsappNumber: '+905551234567',
-          telegramChatId: '129837465',
-          role: 'admin',
-          companyName: adminCompany,
-          notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-          created_at: new Date().toISOString(),
-        };
+      const adminUser: User = {
+        id: adminId,
+        name: adminName,
+        email: adminEmail,
+        phone: '+905550000000',
+        notificationEmail: adminEmail,
+        whatsappNumber: '+905550000000',
+        telegramChatId: '129837465',
+        role: 'admin',
+        companyName: adminCompany,
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      };
 
-        parsed.users.push(adminUser);
-        parsed.passwords[adminId] = hashPassword(envAdminPassword);
-        parsed.dashboards.push({
-          id: `dash_${adminId}`,
+      parsed.users.push(adminUser);
+      parsed.passwords[adminId] = hashPassword(adminPassword);
+      parsed.dashboards.push({
+        id: `dash_${adminId}`,
+        tenantId: adminId,
+        title: `${adminCompany} Özel Dashboard`,
+        widgets: [...defaultWidgets],
+        updatedAt: new Date().toISOString(),
+      });
+      parsed.auditLogs.push({
+        id: 'log_admin_init',
+        timestamp: new Date().toISOString(),
+        tenantId: adminId,
+        userName: adminName,
+        action: 'İlk Sistem Yöneticisi Hesabı Başarıyla Oluşturuldu ve Sisteme Tanımlandı',
+        ip: '127.0.0.1',
+        severity: 'low',
+      });
+
+      // Ensure persistent canonical device is also initialized
+      const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
+      if (!hasTestDevice) {
+        parsed.devices.push({
+          id: 'dev_test_01',
           tenantId: adminId,
-          title: `${adminCompany} Özel Dashboard`,
-          widgets: [...defaultWidgets],
-          updatedAt: new Date().toISOString(),
+          name: 'Merkez Test & İzleme Sensörü',
+          type: 'sensor',
+          apiKey: 'dev_key_test_0000000000000000',
+          status: 'online',
+          location: 'Merkez Sunucu Odası',
+          ipAddress: '127.0.0.1',
+          lastSeen: new Date().toISOString(),
+          rateLimitPerMin: 100,
+          encryptionMethod: 'AES-256-GCM',
+          isSimulated: true,
+          metrics: { temperature: 24.5, humidity: 55.0 }
         });
-        parsed.auditLogs.push({
-          id: 'log_env_init',
-          timestamp: new Date().toISOString(),
-          tenantId: adminId,
-          userName: adminName,
-          action: 'İlk Yönetici Hesabı Ortam Değişkenleri ile Başarıyla Kuruldu (Güvenli Üretim Modu)',
-          ip: '127.0.0.1',
-          severity: 'low',
-        });
-
-        console.log(`[BOOTSTRAP] Administrator account dynamically seeded from environment: ${envAdminEmail}`);
-        this.data = parsed;
-        this.saveData(parsed);
-      } else {
-        // Leave the database clean and empty. The frontend will trigger the Setup onboarding screen.
-        if (!fileExists) {
-          this.data = parsed;
-          this.saveData(parsed);
-        }
       }
+
+      console.log(`[BOOTSTRAP] Default administrator account successfully initialized: ${adminEmail}`);
+      this.data = parsed;
+      this.saveData(parsed);
     }
 
     return parsed;

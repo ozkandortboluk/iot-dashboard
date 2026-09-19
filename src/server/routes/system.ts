@@ -259,6 +259,11 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
 
 databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   const { engine, postgresUrl } = req.body;
+  if (engine === 'local') {
+    return res.status(403).json({
+      error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sistem yalnızca PostgreSQL / TimescaleDB desteklemektedir.',
+    });
+  }
   if (!engine || !['postgres', 'timescaledb'].includes(engine)) {
     return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi. Yerel veritabanı kullanımı tamamen devre dışı bırakılmıştır; yalnızca PostgreSQL ve TimescaleDB desteklenmektedir.' });
   }
