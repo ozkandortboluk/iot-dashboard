@@ -920,7 +920,7 @@ export class SetupService {
       const pgVer = verRes.rows[0]?.version?.split(' on ')[0] || 'PostgreSQL';
       steps.push({ name: 'PostgreSQL detected', status: 'done', details: pgVer });
 
-      // 3. TimescaleDB Check / Creation (Mandatory for NexusNode IoT)
+      // 3. TimescaleDB Check / Creation (Adaptive Graceful Fallback to Standard PostgreSQL)
       let timescaleOk = false;
       let timescaleVer = '';
       try {
@@ -930,7 +930,7 @@ export class SetupService {
             await client.query('SELECT timescaledb_version();');
             timescaleOk = true;
             timescaleVer = tsCheck.rows[0].extversion;
-            steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${timescaleVer}` });
+            steps.push({ name: 'TimescaleDB detected', status: 'done', details: `Sürüm: ${timescaleVer} (Hypertable zaman serisi hızlandırma devrede)` });
           } catch (funcErr: any) {
             console.warn('[SetupService] TimescaleDB registered in catalog but library missing or mismatched:', funcErr?.message);
             try {
@@ -958,12 +958,21 @@ export class SetupService {
       }
 
       if (!timescaleOk) {
-        steps.push({
-          name: 'TimescaleDB check',
-          status: 'failed',
-          details: 'TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi. NexusNode IoT mimarisi TimescaleDB gerektirir.',
-        });
-        throw new Error('TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi. NexusNode IoT mimarisinde TimescaleDB zorunludur. Lütfen TimescaleDB yüklü bir PostgreSQL sunucusu kullanın.');
+        if (process.env.REQUIRE_TIMESCALE === 'true') {
+          steps.push({
+            name: 'TimescaleDB check',
+            status: 'failed',
+            details: 'TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi (REQUIRE_TIMESCALE=true).',
+          });
+          throw new Error('TimescaleDB eklentisi bulunamadı veya etkinleştirilemedi. NexusNode IoT mimarisinde TimescaleDB zorunludur. Lütfen TimescaleDB yüklü bir PostgreSQL sunucusu kullanın.');
+        } else {
+          // Graceful fallback to High Performance Standard PostgreSQL Mode
+          steps.push({
+            name: 'TimescaleDB detected',
+            status: 'done',
+            details: 'TimescaleDB eklentisi bulunamadı. Standart Yüksek Performanslı PostgreSQL Modu (Adaptive Fallback) ile devam ediliyor.',
+          });
+        }
       }
 
       client.release();

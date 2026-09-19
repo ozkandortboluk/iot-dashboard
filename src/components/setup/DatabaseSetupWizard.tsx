@@ -492,13 +492,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
         return;
       }
+
+      if (data.steps && Array.isArray(data.steps)) {
+        setInitLogs(data.steps);
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Veritabanı ilklendirme başarısız.');
       }
 
-      if (data.steps && Array.isArray(data.steps)) {
-        setInitLogs(data.steps);
-      } else {
+      if (!data.steps || !Array.isArray(data.steps)) {
         setInitLogs([
           { name: 'Database connection', status: 'done', details: 'PostgreSQL bağlantısı aktif.' },
           { name: 'PostgreSQL detected', status: 'done', details: 'PostgreSQL 16' },
@@ -511,9 +514,12 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       setInitComplete(true);
     } catch (err: any) {
       setError(err?.message || 'İlklendirme sırasında hata meydana geldi.');
-      setInitLogs((prev) => [
-        ...prev.map((l) => (l.status === 'running' ? { ...l, status: 'failed' as const, details: err?.message } : l)),
-      ]);
+      setInitLogs((prev) => {
+        if (prev.length === 0) {
+          return [{ name: 'Initialization', status: 'failed' as const, details: err?.message }];
+        }
+        return prev.map((l) => (l.status === 'running' ? { ...l, status: 'failed' as const, details: err?.message } : l));
+      });
     } finally {
       setLoading(false);
     }
@@ -1369,15 +1375,29 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 </div>
 
                 <div className="flex items-center justify-between pt-4 border-t border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentStep(3)}
-                    disabled={loading}
-                    className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Geri</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(3)}
+                      disabled={loading}
+                      className="flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold cursor-pointer"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      <span>Geri</span>
+                    </button>
+
+                    {!initComplete && initLogs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRunInitialization}
+                        disabled={loading}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg cursor-pointer transition"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                        <span>Tekrar Dene</span>
+                      </button>
+                    )}
+                  </div>
 
                   <button
                     id="wizard-step4-next"

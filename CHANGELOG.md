@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.8] - 2026-09-19
+
+### 🛡️ Kurulum Sihirbazı Adım 4 TimescaleDB / PostgreSQL Esnek İlklendirme Düzeltmesi (Step 4 DB Init & Adaptive TimescaleDB Fallback)
+- **TimescaleDB Eklentisi Eksikliği / İzin Hatası Engeli Kaldırıldı**:
+  - Kurulum Sihirbazı 4. Adımında (`initializeDatabase`), TimescaleDB eklentisi bulunamadığında veya etkinleştirilemediğinde kurulum sürecini tamamen durduran `throw new Error` engeli kaldırıldı.
+  - TimescaleDB mevcut olduğunda hypertable optimizasyonları uygulanır; bulunamadığında veya non-superuser izinlerinde ise sistem otomatik olarak **Standart Yüksek Performanslı PostgreSQL Modu (Adaptive Fallback)** ile kesintisiz devam ederek tüm migrasyonları ve Canonical Schema doğrulamasını başarıyla tamamlar.
+- **Frontend İlklendirme Log & Tekrar Dene Düğmesi (`DatabaseSetupWizard.tsx`)**:
+  - Adım 4 ilklendirme ekranında olası ağ veya izin aksaklıklarında anında müdahale için **"Tekrar Dene"** butonu ve ayrıştırılmış adım durumları eklendi.
+- **Birim Test Kapsamı**:
+  - Sürüm `1.36.8` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.7] - 2026-09-19
 
 ### 🛡️ Kesin Yönetici Varlığı & İlk Kurulum Ekranı Yönlendirmesi (Strict Admin Requirement & Auto Setup Route)
