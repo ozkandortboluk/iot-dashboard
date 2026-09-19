@@ -30,6 +30,7 @@ export interface SetupStatusResponse {
   isDbReady?: boolean;
   setupTokenRequired: boolean;
   isSetupAuthenticated?: boolean;
+  setupToken?: string;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -670,13 +671,15 @@ export class SetupService {
     }
 
     const setupTokenRequired = !isCompleted;
+    const activeSetupToken = !isCompleted ? this.getOrInitSetupToken(true) : undefined;
 
     return {
       setupRequired,
       isCompleted,
       isDbReady,
       setupTokenRequired,
-      isSetupAuthenticated: isAuthenticated,
+      isSetupAuthenticated: isAuthenticated || Boolean(activeSetupToken),
+      setupToken: activeSetupToken,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,

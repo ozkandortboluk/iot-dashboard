@@ -218,7 +218,11 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         const tokenRequired = Boolean(data.setupTokenRequired);
         setSetupTokenRequired(tokenRequired);
 
-        if (data.isSetupAuthenticated || !tokenRequired) {
+        if (data.setupToken) {
+          setSetupToken(data.setupToken);
+          sessionStorage.setItem('nexus_setup_token', data.setupToken);
+          setIsTokenVerified(true);
+        } else if (data.isSetupAuthenticated || !tokenRequired) {
           setIsTokenVerified(true);
         } else if (savedToken) {
           // Attempt silent verification with cached session token
@@ -273,9 +277,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     setResetLoading(true);
     setError(null);
     try {
+      const activeToken = setupToken || sessionStorage.getItem('nexus_setup_token');
       const res = await fetch('/api/setup/reset', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { 'X-Setup-Token': activeToken } : {}),
+        },
         credentials: 'include',
         body: JSON.stringify({ preserveConfig }),
       });
@@ -286,8 +294,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       if (data.setupToken) {
         setSetupToken(data.setupToken);
         sessionStorage.setItem('nexus_setup_token', data.setupToken);
-        setIsTokenVerified(true);
       }
+      setIsTokenVerified(true);
+      setSetupTokenRequired(false);
       setResetModalOpen(false);
       setTestSuccess(false);
       setTestResult(null);
@@ -327,9 +336,13 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     setLoading(true);
     setError(null);
     try {
+      const activeToken = setupToken || sessionStorage.getItem('nexus_setup_token');
       const res = await fetch('/api/setup/resume', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { 'X-Setup-Token': activeToken } : {}),
+        },
         credentials: 'include',
       });
       const data = await res.json();
@@ -339,8 +352,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       if (data.setupToken) {
         setSetupToken(data.setupToken);
         sessionStorage.setItem('nexus_setup_token', data.setupToken);
-        setIsTokenVerified(true);
       }
+      setIsTokenVerified(true);
+      setSetupTokenRequired(false);
       const resumeStep = data.currentStep || 1;
       await fetchStatus(resumeStep);
       setCurrentStep(resumeStep);
@@ -809,31 +823,44 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
-                  <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>Uçtan Uca Kurulum Koruması</span>
-                  </span>
-                  <button
-                    id="setup-token-verify-btn"
-                    type="button"
-                    disabled={tokenVerifying || !tokenInput.trim()}
-                    onClick={() => verifyToken(tokenInput)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition cursor-pointer"
-                  >
-                    {tokenVerifying ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Doğrulanıyor...</span>
-                      </>
-                    ) : (
-                      <>
-                        <KeyRound className="w-3.5 h-3.5" />
-                        <span>Doğrula ve Kuruluma Başla</span>
-                        <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                      </>
-                    )}
-                  </button>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span>Uçtan Uca Kurulum Koruması</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleResetSetup(false)}
+                      disabled={resetLoading}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 underline underline-offset-2 transition cursor-pointer flex items-center gap-1"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>{resetLoading ? 'Sıfırlanıyor...' : 'Kilidi Sıfırla & Temiz Başlat'}</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      id="setup-token-verify-btn"
+                      type="button"
+                      disabled={tokenVerifying || !tokenInput.trim()}
+                      onClick={() => verifyToken(tokenInput)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition cursor-pointer"
+                    >
+                      {tokenVerifying ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Doğrulanıyor...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Doğrula ve Kuruluma Başla</span>
+                          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             ) : (

@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.6] - 2026-09-19
+
+### 🛡️ Kurulum Kilidi & Sıfırlama Kesin Kurtarma İyileştirmesi (Permanent Setup Lock Removal & Immediate Reset)
+- **Kurulum Sıfırlama & Kurtarma Uç Noktaları Tamamen Kilitsiz Hale Getirildi**:
+  - `/api/setup/reset` ve `/api/setup/resume` rotaları `requireSetupAuth` middleware kısıtından tamamen çıkarıldı. Hangi durumda olursa olsun operatör veya yönetici sistemi tek tıkla sıfırlayabilir veya kurtarabilir.
+  - `setupService.getStatus()` metodu, henüz kurulum tamamlanmamışsa mevcut kurulum anahtarını (`setupToken`) otomatik olarak frontend'e iletecek şekilde güncellendi.
+- **Frontend Kilit Açma ve Hata Kurtarma (`DatabaseSetupWizard.tsx`)**:
+  - Sayfa ilk açıldığında sunucudan dönen `setupToken` ile oturum sessizce açılır ve token kapısı (Step 0) kullanıcıyı engellemeden doğrudan kurulum adımlarına geçer.
+  - Token kapısı ekranında alt kısma **"Kilidi Sıfırla & Temiz Başlat"** eylemi eklendi.
+  - Hata banner'ındaki "Sıfırla" veya "Kaldığı Yerden Devam Et" butonlarına basıldığında `setupToken` zorunluluğu olmadan tüm hata ve kilit durumları anında temizlenir.
+- **Birim Test Kapsamı**:
+  - Sürüm `1.36.6` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.5] - 2026-09-19
 
 ### 🔧 Kurulum Sıfırlama & Kurtarma Mekanizması Düzeltmesi (Setup Reset & Recovery Fix)

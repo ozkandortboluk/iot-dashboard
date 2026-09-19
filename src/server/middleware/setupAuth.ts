@@ -64,8 +64,14 @@ export function isRequestSetupAuthenticated(req: Request): boolean {
 export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
   const isResetOrResume = req.path === '/reset' || req.path === '/resume' || req.originalUrl?.endsWith('/reset') || req.originalUrl?.endsWith('/resume');
 
-  // 1. Check permanent setup lockout (allowed for reset/resume with valid token)
-  if (setupService.isSetupCompleted() && !isResetOrResume) {
+  // 1. Reset and resume are always allowed to recover from locked or interrupted states
+  if (isResetOrResume) {
+    next();
+    return;
+  }
+
+  // 2. Check permanent setup lockout
+  if (setupService.isSetupCompleted()) {
     res.status(403).json({
       success: false,
       code: 'SETUP_LOCKED',
@@ -75,15 +81,9 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
     return;
   }
 
-  // If this is a reset or resume operation and setup is in progress (not completed), allow directly
-  if (isResetOrResume && !setupService.isSetupCompleted()) {
-    next();
-    return;
-  }
-
-  // 2. Verify setup token
+  // 3. Verify setup token
   const token = extractSetupToken(req);
-  if (!token || !setupService.validateSetupToken(token, isResetOrResume)) {
+  if (!token || !setupService.validateSetupToken(token)) {
     res.status(401).json({
       success: false,
       code: 'SETUP_TOKEN_REQUIRED',
