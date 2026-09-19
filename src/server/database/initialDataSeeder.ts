@@ -50,55 +50,12 @@ export class InitialDataSeeder {
     const client = await pool.connect();
 
     try {
-      // 1. CANONICAL USERS
-      // Ensure Canonical Test Admin (Mandatory Rule 3) & Root Admin placeholder
-      const testAdminHash = hashPassword('test1234');
-      const rootAdminHash = hashPassword('admin1234');
+      // NOTE: Security Hardening: NO hardcoded admin accounts or default passwords (admin1234, test1234)
+      // are seeded here. The primary administrator is securely created by the operator in Step 6
+      // of the Setup Wizard (/api/setup/create-admin). Test accounts are restricted strictly to
+      // test runners when ENABLE_TEST_ACCOUNT=true.
 
-      // 1a. Root System Administrator (usr_admin)
-      await client.query(`
-        INSERT INTO users (
-          id, name, email, password_hash, role, company_name, status,
-          phone, whatsapp_number, telegram_chat_id, notification_email,
-          notification_preferences, created_at, updated_at
-        ) VALUES (
-          'usr_admin', 'Sistem Yöneticisi', 'admin@nexusnode.io', $1, 'admin', 'Merkez Yönetim', 'active',
-          '+905551234567', '+905551234567', '129837465', 'admin@nexusnode.io',
-          '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
-          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          email = EXCLUDED.email,
-          role = 'admin',
-          status = 'active',
-          updated_at = CURRENT_TIMESTAMP;
-      `, [rootAdminHash]);
-      counts.users++;
-
-      // 1b. Canonical Test Admin (usr_test_admin)
-      await client.query(`
-        INSERT INTO users (
-          id, name, email, password_hash, role, company_name, status,
-          phone, whatsapp_number, telegram_chat_id, notification_email,
-          notification_preferences, created_at, updated_at
-        ) VALUES (
-          'usr_test_admin', 'Kanonik Test Yöneticisi', 'test@nexusnodeiot.com.tr', $1, 'admin', 'Test Laboratuvarı', 'active',
-          '+905550000000', '+905550000000', '987654321', 'test@nexusnodeiot.com.tr',
-          '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
-          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          email = 'test@nexusnodeiot.com.tr',
-          password_hash = $1,
-          role = 'admin',
-          status = 'active',
-          updated_at = CURRENT_TIMESTAMP;
-      `, [testAdminHash]);
-      counts.users++;
-
-      // 2. CANONICAL TEST DEVICE (dev_test_01)
+      // 1. CANONICAL TEST DEVICE (dev_test_01)
       const testApiKey = 'dev_key_test_0000000000000000';
       const testApiKeyHash = crypto.createHash('sha256').update(testApiKey).digest('hex');
       const supportedOutputs = [
@@ -123,7 +80,7 @@ export class InitialDataSeeder {
           capabilities, supported_commands, expected_interval_seconds, heartbeat_timeout_seconds,
           last_seen, created_at
         ) VALUES (
-          'dev_test_01', 'usr_test_admin', 'usr_test_admin', 'usr_test_admin',
+          'dev_test_01', 'system', 'system', NULL,
           'Kanonik Saha Test Cihazı (ESP32)', 'sensor', 'production_sensor',
           $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100', '192.168.1.100',
           'ESP32-WROOM-32D', 'v1.0.0', 300, 'AES-256-GCM',
@@ -151,35 +108,26 @@ export class InitialDataSeeder {
       ]);
       counts.devices++;
 
-      // 3. DASHBOARD LAYOUTS (dashboard_layouts)
-      // Seed rich 10-widget dashboard layouts for both root admin and canonical test admin
+      // 2. DASHBOARD LAYOUTS (dashboard_layouts)
+      // Seed default 10-widget dashboard layout for the system (user_id = NULL)
       const widgetsJson = JSON.stringify(defaultWidgets);
 
       await client.query(`
         INSERT INTO dashboard_layouts (id, user_id, title, widgets_json, updated_at)
-        VALUES ('dash_usr_admin', 'usr_admin', 'Merkez Yönetim Ana Dashboard', $1::jsonb, CURRENT_TIMESTAMP)
+        VALUES ('dash_default', NULL, 'Varsayılan Sistem Paneli', $1::jsonb, CURRENT_TIMESTAMP)
         ON CONFLICT (id) DO UPDATE SET
           widgets_json = EXCLUDED.widgets_json,
           updated_at = CURRENT_TIMESTAMP;
       `, [widgetsJson]);
       counts.dashboards++;
 
-      await client.query(`
-        INSERT INTO dashboard_layouts (id, user_id, title, widgets_json, updated_at)
-        VALUES ('dash_usr_test_admin', 'usr_test_admin', 'Kanonik Test Dashboard', $1::jsonb, CURRENT_TIMESTAMP)
-        ON CONFLICT (id) DO UPDATE SET
-          widgets_json = EXCLUDED.widgets_json,
-          updated_at = CURRENT_TIMESTAMP;
-      `, [widgetsJson]);
-      counts.dashboards++;
-
-      // 4. THRESHOLD RULES (threshold_rules)
+      // 3. THRESHOLD RULES (threshold_rules)
       const defaultRules = [
         {
           id: 'rule_temp_warn',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: null,
+          tenantId: 'system',
+          userName: 'Sistem',
           deviceId: 'all',
           metricKey: 'temperature',
           operator: '>',
@@ -190,9 +138,9 @@ export class InitialDataSeeder {
         },
         {
           id: 'rule_temp_crit',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: null,
+          tenantId: 'system',
+          userName: 'Sistem',
           deviceId: 'all',
           metricKey: 'temperature',
           operator: '>',
@@ -203,9 +151,9 @@ export class InitialDataSeeder {
         },
         {
           id: 'rule_cpu_high',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: null,
+          tenantId: 'system',
+          userName: 'Sistem',
           deviceId: 'all',
           metricKey: 'cpu',
           operator: '>',
@@ -216,9 +164,9 @@ export class InitialDataSeeder {
         },
         {
           id: 'rule_power_high',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: null,
+          tenantId: 'system',
+          userName: 'Sistem',
           deviceId: 'all',
           metricKey: 'power',
           operator: '>',
@@ -301,7 +249,7 @@ export class InitialDataSeeder {
             id, tenant_id, customer_id, user_id, device_id, device_name,
             metric, metric_value, unit, status_level, source, environment, created_at
           ) VALUES (
-            $1, 'usr_test_admin', 'usr_test_admin', 'usr_test_admin', 'dev_test_01', 'Kanonik Saha Test Cihazı (ESP32)',
+            $1, 'system', 'system', NULL, 'dev_test_01', 'Kanonik Saha Test Cihazı (ESP32)',
             $2, $3, $4, 'normal', 'physical', 'production', $5::timestamptz
           )
           ON CONFLICT (id, created_at) DO NOTHING;
@@ -313,24 +261,24 @@ export class InitialDataSeeder {
       const defaultNotifications = [
         {
           id: 'notif_sys_init',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
+          userId: null,
+          tenantId: 'system',
           title: 'NexusNode IoT Platformu Başarıyla Kuruldu',
           message: 'PostgreSQL ve TimescaleDB veritabanı yolları, şemalar ve başlangıç tabloları ilk kurulumda başarıyla yazıldı.',
           severity: 'info',
         },
         {
           id: 'notif_test_dev',
-          userId: 'usr_test_admin',
-          tenantId: 'usr_test_admin',
+          userId: null,
+          tenantId: 'system',
           title: 'Kanonik Saha Test Cihazı Devrede',
           message: 'ESP32 Kanonik Test Cihazı (dev_test_01) canlı telemetri akışına ve röle kontrolüne hazır vaziyette sisteme tanımlandı.',
           severity: 'info',
         },
         {
           id: 'notif_schema_audit',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
+          userId: null,
+          tenantId: 'system',
           title: 'Sıfır Veri Kaybı ve Şema Doğrulaması Aktif',
           message: 'TimescaleDB Hypertables, sürekli agregasyon görünümleri ve RLS politikaları başarıyla denetlendi.',
           severity: 'info',
@@ -353,9 +301,9 @@ export class InitialDataSeeder {
       const auditEntries = [
         {
           id: 'log_init_db',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: 'system',
+          tenantId: 'system',
+          userName: 'Sistem',
           action: 'DATABASE_PATHS_INITIALIZED',
           details: {
             version: APP_VERSION,
@@ -365,9 +313,9 @@ export class InitialDataSeeder {
         },
         {
           id: 'log_sys_ready',
-          userId: 'usr_admin',
-          tenantId: 'usr_admin',
-          userName: 'Sistem Yöneticisi',
+          userId: 'system',
+          tenantId: 'system',
+          userName: 'Sistem',
           action: 'SYSTEM_BOOT_COMPLETED',
           details: {
             engine: 'NexusNode IoT Enterprise Engine',
@@ -456,26 +404,9 @@ export class InitialDataSeeder {
       const { db } = await import('../db.js');
       if (!db.data) return;
 
-      // Users
+      // Note: No hardcoded users or passwords seeded into memory here.
       if (!db.data.users) db.data.users = [];
       if (!db.data.passwords) db.data.passwords = {};
-
-      const existingTestAdmin = db.data.users.find(u => u.id === 'usr_test_admin');
-      if (!existingTestAdmin) {
-        db.data.users.push({
-          id: 'usr_test_admin',
-          name: 'Kanonik Test Yöneticisi',
-          email: 'test@nexusnodeiot.com.tr',
-          phone: '+905550000000',
-          notificationEmail: 'test@nexusnodeiot.com.tr',
-          whatsappNumber: '+905550000000',
-          role: 'admin',
-          companyName: 'Test Laboratuvarı',
-          notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-          created_at: new Date().toISOString(),
-        });
-        db.data.passwords['usr_test_admin'] = hashPassword('test1234');
-      }
 
       // Devices
       if (!db.data.devices) db.data.devices = [];
@@ -483,7 +414,7 @@ export class InitialDataSeeder {
       if (!existingTestDevice) {
         db.data.devices.push({
           id: 'dev_test_01',
-          tenantId: 'usr_test_admin',
+          tenantId: 'system',
           name: 'Kanonik Saha Test Cihazı (ESP32)',
           type: 'sensor',
           apiKey: testApiKey,
@@ -501,11 +432,11 @@ export class InitialDataSeeder {
 
       // Dashboards
       if (!db.data.dashboards) db.data.dashboards = [];
-      if (!db.data.dashboards.some(d => d.id === 'dash_usr_test_admin')) {
+      if (!db.data.dashboards.some(d => d.id === 'dash_default')) {
         db.data.dashboards.push({
-          id: 'dash_usr_test_admin',
-          tenantId: 'usr_test_admin',
-          title: 'Kanonik Test Dashboard',
+          id: 'dash_default',
+          tenantId: 'system',
+          title: 'Varsayılan Sistem Paneli',
           widgets: [...defaultWidgets],
           updatedAt: new Date().toISOString(),
         });

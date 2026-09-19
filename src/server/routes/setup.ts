@@ -3,6 +3,7 @@ import { setupService, type DatabaseConfigPayload } from '../services/setup.serv
 import { setSessionCookie } from './auth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { requireSetupAuth, isRequestSetupAuthenticated, extractSetupToken } from '../middleware/setupAuth.js';
 
 export const setupRouter = Router();
 
@@ -16,7 +17,8 @@ function getClientIp(req: Request): string {
  */
 setupRouter.get('/status', async (req: Request, res: Response) => {
   try {
-    const status = await setupService.getStatus();
+    const isAuth = isRequestSetupAuthenticated(req);
+    const status = await setupService.getStatus(isAuth);
     return res.json({
       success: true,
       ...status,
@@ -31,11 +33,69 @@ setupRouter.get('/status', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/setup/verify-token
+ * Validates the Setup Security Token and sets setup session cookie.
+ */
+setupRouter.post('/verify-token', (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`setup_token_verify:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      code: 'RATE_LIMIT_EXCEEDED',
+      error: 'Çok fazla doğrulama denemesi. Lütfen biraz bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  if (setupService.isSetupCompleted()) {
+    return res.status(403).json({
+      success: false,
+      code: 'SETUP_LOCKED',
+      message: 'NexusNode IoT kurulumu zaten tamamlanmış ve kilitlenmiştir.',
+    });
+  }
+
+  const token = req.body?.token || extractSetupToken(req);
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({
+      success: false,
+      code: 'TOKEN_REQUIRED',
+      message: 'Lütfen kurulum güvenlik anahtarını (Setup Token) giriniz.',
+    });
+  }
+
+  const isValid = setupService.validateSetupToken(token);
+  if (!isValid) {
+    systemLogger.warn('security', `Başarısız kurulum güvenlik anahtarı denemesi (IP: ${clientIp})`);
+    return res.status(401).json({
+      success: false,
+      code: 'INVALID_SETUP_TOKEN',
+      message: 'Geçersiz kurulum güvenlik anahtarı. Lütfen sunucu konsolu veya data/.setup_token dosyasındaki anahtarı kontrol ediniz.',
+    });
+  }
+
+  // Set secure setup session cookie for subsequent browser wizard calls
+  res.cookie('nexus_setup_session', token.trim(), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 2 * 60 * 60 * 1000, // 2 hours
+  });
+
+  return res.json({
+    success: true,
+    authenticated: true,
+    message: 'Kurulum güvenlik anahtarı başarıyla doğrulandı.',
+  });
+});
+
+/**
  * POST /api/setup/test-database
  * Tests real PostgreSQL connection with specified credentials.
- * Zero password leaking.
+ * Zero password leaking. Requires Setup Authentication.
  */
-setupRouter.post('/test-database', async (req: Request, res: Response) => {
+setupRouter.post('/test-database', requireSetupAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup_test:${clientIp}`, 20);
   if (!rateLimit.allowed) {
@@ -70,7 +130,7 @@ setupRouter.post('/test-database', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({
       success: false,
-      message: 'Veritabanı bağlantı testi sırasında beklenmeyen bir hata oluştu.',
+      message: err?.message || 'Veritabanı bağlantı testi sırasında beklenmeyen bir hata oluştu.',
     });
   }
 });
@@ -78,8 +138,9 @@ setupRouter.post('/test-database', async (req: Request, res: Response) => {
 /**
  * POST /api/setup/quick-init-docker
  * 1-Click automated Docker TimescaleDB setup (test, config, schema, migrations)
+ * Requires Setup Authentication.
  */
-setupRouter.post('/quick-init-docker', async (req: Request, res: Response) => {
+setupRouter.post('/quick-init-docker', requireSetupAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup_quick:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -105,8 +166,9 @@ setupRouter.post('/quick-init-docker', async (req: Request, res: Response) => {
 /**
  * POST /api/setup/configure-database
  * Saves valid database credentials to secure runtime secret storage and restarts pool.
+ * Requires Setup Authentication.
  */
-setupRouter.post('/configure-database', async (req: Request, res: Response) => {
+setupRouter.post('/configure-database', requireSetupAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup_cfg:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -151,8 +213,9 @@ setupRouter.post('/configure-database', async (req: Request, res: Response) => {
 /**
  * POST /api/setup/initialize
  * Runs TimescaleDB check, migrations, and canonical schema verification with ZERO DATA LOSS.
+ * Requires Setup Authentication.
  */
-setupRouter.post('/initialize', async (req: Request, res: Response) => {
+setupRouter.post('/initialize', requireSetupAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup_init:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -179,8 +242,9 @@ setupRouter.post('/initialize', async (req: Request, res: Response) => {
 /**
  * POST /api/setup/create-admin
  * Creates the primary administrator, hashes password, and finalizes setup mode.
+ * Requires Setup Authentication.
  */
-setupRouter.post('/create-admin', async (req: Request, res: Response) => {
+setupRouter.post('/create-admin', requireSetupAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup_admin:${clientIp}`, 10);
   if (!rateLimit.allowed) {

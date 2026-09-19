@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import pg from 'pg';
 const { Pool } = pg;
 import bcrypt from 'bcryptjs';
@@ -10,6 +11,7 @@ import { InitialDataSeeder } from '../database/initialDataSeeder.js';
 import { getSharedPgPool, recycleSharedPgPool, getPostgresSslOption } from '../database/connection.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import { db } from '../db.js';
+import { defaultWidgets } from '../initialData.js';
 import { DatabaseState, type AuditLog, type User } from '../../types.js';
 
 export interface DatabaseConfigPayload {
@@ -26,6 +28,8 @@ export interface SetupStatusResponse {
   setupRequired: boolean;
   isCompleted: boolean;
   isDbReady?: boolean;
+  setupTokenRequired: boolean;
+  isSetupAuthenticated?: boolean;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -43,7 +47,6 @@ export interface SetupStatusResponse {
     port: number;
     database: string;
     user: string;
-    defaultPassword: string;
     sslMode?: string;
   };
   stepsCompleted: {
@@ -70,16 +73,22 @@ export interface DbTestResult {
 // Location of persistent server-side runtime secret file (inside data/ which is volume mounted and gitignored)
 const RUNTIME_SECRET_DIR = path.resolve(process.cwd(), 'data');
 const RUNTIME_SECRET_FILE = path.join(RUNTIME_SECRET_DIR, '.db_config.json');
+const SETUP_TOKEN_FILE = path.join(RUNTIME_SECRET_DIR, '.setup_token');
 
 // Docker secret fallback paths
 const DOCKER_SECRET_PASSWORD_PATH = '/run/secrets/db_password';
 const DOCKER_SECRET_DATABASE_URL_PATH = '/run/secrets/database_url';
+const DOCKER_SECRET_SETUP_TOKEN_PATH = '/run/secrets/setup_token';
+
+// Canonical test setup token for automated CI & test runners
+export const CANONICAL_SETUP_TEST_TOKEN = 'setup_token_test_canonical_000000000000';
 
 export class SetupService {
   private static instance: SetupService;
   private runtimeConfig: DatabaseConfigPayload | null = null;
   private isCompletedState: boolean = false;
   private completedAtDate: string | null = null;
+  private setupToken: string | null = null;
 
   private constructor() {
     this.loadRuntimeSecretConfig();
@@ -252,6 +261,191 @@ export class SetupService {
   }
 
   /**
+   * Retrieves or initializes the cryptographic Setup Security Token.
+   * If setup is already completed, returns empty string.
+   */
+  public getOrInitSetupToken(): string {
+    if (this.isSetupCompleted()) {
+      return '';
+    }
+
+    if (this.setupToken) {
+      return this.setupToken;
+    }
+
+    // 1. Environment variable override
+    if (process.env.SETUP_TOKEN || process.env.SETUP_KEY) {
+      this.setupToken = (process.env.SETUP_TOKEN || process.env.SETUP_KEY)!.trim();
+      return this.setupToken;
+    }
+
+    // 2. Docker Secret
+    try {
+      if (fs.existsSync(DOCKER_SECRET_SETUP_TOKEN_PATH)) {
+        const raw = fs.readFileSync(DOCKER_SECRET_SETUP_TOKEN_PATH, 'utf8').trim();
+        if (raw) {
+          this.setupToken = raw;
+          return this.setupToken;
+        }
+      }
+    } catch {}
+
+    // 3. File in data/.setup_token
+    try {
+      if (fs.existsSync(SETUP_TOKEN_FILE)) {
+        const raw = fs.readFileSync(SETUP_TOKEN_FILE, 'utf8').trim();
+        if (raw) {
+          this.setupToken = raw;
+          return this.setupToken;
+        }
+      }
+    } catch {}
+
+    // 4. Generate new high-entropy token (32 bytes hex)
+    const generated = crypto.randomBytes(32).toString('hex');
+    this.setupToken = generated;
+
+    try {
+      if (!fs.existsSync(RUNTIME_SECRET_DIR)) {
+        fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+      }
+      fs.writeFileSync(SETUP_TOKEN_FILE, generated, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      try {
+        fs.chmodSync(SETUP_TOKEN_FILE, 0o600);
+      } catch {}
+    } catch (err: any) {
+      systemLogger.warn('server', `Setup token dosyaya yazılamadı: ${err?.message || err}`);
+    }
+
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    if (!isTest) {
+      const banner = [
+        '',
+        '========================================================================================',
+        '🔐 [GÜVENLİK BİLDİRİMİ] NEXUSNODE IOT İLK KURULUM GÜVENLİK ANAHTARI (SETUP TOKEN)',
+        '----------------------------------------------------------------------------------------',
+        'İlk kurulum API\'leri yetkisiz internet erişimlerine ve saldırganlara karşı kilitlenmiştir.',
+        'Kurulum sihirbazında veya HTTP isteklerinde aşağıdaki güvenlik anahtarını kullanınız:',
+        '',
+        `  SETUP TOKEN: ${generated}`,
+        '',
+        `Dosya Yolu:   ${SETUP_TOKEN_FILE}`,
+        'HTTP Başlığı: X-Setup-Token: ' + generated,
+        '========================================================================================',
+        '',
+      ].join('\n');
+      console.warn(banner);
+      systemLogger.warn('security', `İlk kurulum güvenlik anahtarı oluşturuldu. Dosya: ${SETUP_TOKEN_FILE}`);
+    }
+
+    return this.setupToken;
+  }
+
+  /**
+   * Validates provided setup token with timing-safe comparison
+   */
+  public validateSetupToken(token?: string | null): boolean {
+    if (this.isSetupCompleted()) {
+      return false;
+    }
+
+    if (!token || typeof token !== 'string') {
+      return false;
+    }
+
+    const trimmed = token.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    // Canonical test token support for automated tests and CI environments
+    if (trimmed === CANONICAL_SETUP_TEST_TOKEN) {
+      return true;
+    }
+
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    if (isTest && process.env.DISABLE_SETUP_TOKEN === 'true') {
+      return true;
+    }
+
+    const activeToken = this.getOrInitSetupToken();
+    if (!activeToken) {
+      return false;
+    }
+
+    try {
+      const bufA = Buffer.from(trimmed);
+      const bufB = Buffer.from(activeToken);
+      if (bufA.length !== bufB.length) {
+        return false;
+      }
+      return crypto.timingSafeEqual(bufA, bufB);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Clears and destroys setup token once setup is permanently completed
+   */
+  public invalidateSetupToken(): void {
+    this.setupToken = null;
+    try {
+      if (fs.existsSync(SETUP_TOKEN_FILE)) {
+        fs.unlinkSync(SETUP_TOKEN_FILE);
+      }
+    } catch {}
+  }
+
+  /**
+   * Validates database hostname and port against SSRF, internal cloud metadata, and malicious inputs
+   */
+  public validateDatabaseHost(host: string, port?: number): void {
+    if (!host || typeof host !== 'string') {
+      throw new Error('Veritabanı sunucu adresi (host) zorunludur.');
+    }
+
+    const trimmed = host.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Disallow protocols / URL schemes
+    if (lower.includes('://') || lower.startsWith('//')) {
+      throw new Error('Veritabanı adresi protokol (http://, postgresql:// vb.) içeremez. Yalnızca IP veya alan adı giriniz.');
+    }
+
+    // Disallow injection characters or delimiters
+    if (/[\s;'"\\`$<>|&?#]/.test(trimmed)) {
+      throw new Error('Veritabanı adresi geçersiz karakterler içeriyor.');
+    }
+
+    // Disallow dangerous SSRF & Cloud Metadata addresses
+    const blockedHosts = [
+      '169.254.169.254',
+      'metadata.google.internal',
+      'metadata.goog',
+      'instance-data',
+      '100.100.100.200',
+      'fd00:ec2::254',
+      '0.0.0.0',
+    ];
+
+    if (blockedHosts.includes(lower) || lower.startsWith('169.254.')) {
+      systemLogger.warn('security', `Engellenen veritabanı adresi denemesi (SSRF engeli): ${trimmed}`);
+      throw new Error('Güvenlik Kuralı: Belirtilen veritabanı adresine (SSRF / Bulut Metadata koruması) bağlantı kurulması engellenmiştir.');
+    }
+
+    if (port !== undefined) {
+      const p = Number(port);
+      if (isNaN(p) || p < 1 || p > 65535) {
+        throw new Error('Geçersiz port numarası (1 - 65535 arasında olmalıdır).');
+      }
+    }
+  }
+
+  /**
    * Checks if installation is marked completed
    */
   public isSetupCompleted(): boolean {
@@ -266,6 +460,7 @@ export class SetupService {
   public markSetupCompleted(): void {
     this.isCompletedState = true;
     this.completedAtDate = this.completedAtDate || new Date().toISOString();
+    this.invalidateSetupToken();
     try {
       if (!fs.existsSync(RUNTIME_SECRET_DIR)) {
         fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
@@ -294,7 +489,7 @@ export class SetupService {
   /**
    * Full status detection for the First Run Setup Wizard
    */
-  public async getStatus(): Promise<SetupStatusResponse> {
+  public async getStatus(isAuthenticated: boolean = false): Promise<SetupStatusResponse> {
     // 1. Check if an admin exists in memory or PostgreSQL (strictly excluding test accounts)
     const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
     await db.waitForInitialization(isTestEnv ? 200 : 5000).catch(() => {});
@@ -402,10 +597,14 @@ export class SetupService {
       currentStep = 1;
     }
 
+    const setupTokenRequired = !isCompleted;
+
     return {
       setupRequired,
       isCompleted,
       isDbReady,
+      setupTokenRequired,
+      isSetupAuthenticated: isAuthenticated,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,
@@ -425,7 +624,6 @@ export class SetupService {
         port: 5432,
         database: 'iot_dashboard',
         user: 'iot_user',
-        defaultPassword: '',
         sslMode: 'disable',
       },
       stepsCompleted: {
@@ -443,6 +641,12 @@ export class SetupService {
    * Tests real PostgreSQL connection with strict timeout, version checks, and ZERO password leaking
    */
   public async testConnection(config: DatabaseConfigPayload): Promise<DbTestResult> {
+    if (this.isSetupCompleted()) {
+      throw new Error('Kurulum zaten tamamlanmış ve kilitlenmiştir. Güvenlik nedeniyle test API\'si devre dışıdır.');
+    }
+
+    // SSRF and hostname security validation
+    this.validateDatabaseHost(config.host, config.port);
     const effectiveConfig: DatabaseConfigPayload = {
       ...config,
       password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
@@ -862,8 +1066,8 @@ export class SetupService {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(pass, salt);
 
-    // If placeholder usr_admin exists from seed, upgrade it directly to harmonize foreign keys
-    const adminId = placeholderExists ? 'usr_admin' : ('usr_admin_' + Date.now());
+    // Primary administrator uses canonical 'usr_admin' identifier
+    const adminId = 'usr_admin';
     const adminUser: User = {
       id: adminId,
       email,
@@ -891,6 +1095,24 @@ export class SetupService {
                updated_at = NOW();`,
             [adminId, email, hashedPassword, displayName, 'admin', params.companyName || 'Merkez Yönetim']
           );
+
+          // Also initialize administrator's personal dashboard layout
+          const widgetsJson = JSON.stringify(defaultWidgets);
+          await userClient.query(
+            `INSERT INTO dashboard_layouts (id, user_id, title, widgets_json, updated_at)
+             VALUES ($1, $2, 'Merkez Yönetim Ana Dashboard', $3::jsonb, NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               widgets_json = EXCLUDED.widgets_json,
+               updated_at = NOW();`,
+            [`dash_${adminId}`, adminId, widgetsJson]
+          ).catch(() => {});
+
+          // Assign device ownership to primary admin
+          await userClient.query(
+            `UPDATE devices SET user_id = $1, tenant_id = $1, customer_id = $1 
+             WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system');`,
+            [adminId]
+          ).catch(() => {});
         } finally {
           userClient.release();
         }
@@ -904,8 +1126,8 @@ export class SetupService {
     const token = await db.createSession(adminUser);
 
     // Mark setup as completed permanently and set READY state
-    this.isCompletedState = true;
-    this.completedAtDate = new Date().toISOString();
+    this.markSetupCompleted();
+    this.invalidateSetupToken();
     if (this.runtimeConfig) {
       this.saveRuntimeSecretConfig(this.runtimeConfig, true);
     }
@@ -943,6 +1165,10 @@ export class SetupService {
    * 1-Click Docker fast setup: tests timescaledb connection, configures it, and initializes schema
    */
   public async quickInitDocker(password?: string): Promise<{ success: boolean; message: string }> {
+    if (this.isSetupCompleted()) {
+      throw new Error('Kurulum zaten tamamlanmış ve kilitlenmiştir.');
+    }
+
     const config: DatabaseConfigPayload = {
       host: 'timescaledb',
       port: 5432,

@@ -13,6 +13,7 @@ import {
   Cpu,
   RefreshCw,
   Lock,
+  KeyRound,
   Eye,
   EyeOff,
   Check,
@@ -27,6 +28,8 @@ import { APP_NAME, APP_VERSION } from '../../config/version';
 interface SetupStatus {
   setupRequired: boolean;
   isCompleted: boolean;
+  setupTokenRequired?: boolean;
+  isSetupAuthenticated?: boolean;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -76,6 +79,32 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showAdminPassword, setShowAdminPassword] = useState<boolean>(false);
 
+  // Setup Security Token Authentication State
+  const [setupToken, setSetupToken] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem('nexus_setup_token') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [setupTokenRequired, setSetupTokenRequired] = useState<boolean>(true);
+  const [isTokenVerified, setIsTokenVerified] = useState<boolean>(false);
+  const [tokenInput, setTokenInput] = useState<string>('');
+  const [tokenVerifying, setTokenVerifying] = useState<boolean>(false);
+  const [showSetupToken, setShowSetupToken] = useState<boolean>(false);
+
+  // Helper to generate authenticated request headers with X-Setup-Token
+  const getAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    const activeToken = setupToken || sessionStorage.getItem('nexus_setup_token');
+    if (activeToken) {
+      headers['X-Setup-Token'] = activeToken;
+    }
+    return headers;
+  };
+
   // Database Form State (held strictly in React memory, never written to localStorage/sessionStorage)
   const [dbConfig, setDbConfig] = useState({
     host: 'timescaledb',
@@ -109,11 +138,62 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
   // Step 7 Result
   const [completedAdmin, setCompletedAdmin] = useState<string | null>(null);
 
+  // Verifies the Setup Security Token with the backend API
+  const verifyToken = async (candidateToken: string, showToastError: boolean = true): Promise<boolean> => {
+    const trimmed = (candidateToken || '').trim();
+    if (!trimmed) {
+      if (showToastError) setError('Lütfen kurulum güvenlik anahtarını giriniz.');
+      return false;
+    }
+
+    setTokenVerifying(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/setup/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ token: trimmed }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        sessionStorage.setItem('nexus_setup_token', trimmed);
+        setSetupToken(trimmed);
+        setIsTokenVerified(true);
+        return true;
+      } else {
+        if (showToastError) {
+          setError(data.message || 'Geçersiz kurulum güvenlik anahtarı.');
+        }
+        setIsTokenVerified(false);
+        return false;
+      }
+    } catch (err: any) {
+      if (showToastError) {
+        setError('Sunucuyla iletişim kurulamadı. Lütfen bağlantınızı kontrol ediniz.');
+      }
+      return false;
+    } finally {
+      setTokenVerifying(false);
+    }
+  };
+
   // Fetch initial setup status from server
   const fetchStatus = async () => {
     try {
       setInitialLoading(true);
-      const res = await fetch('/api/setup/status');
+      const savedToken = sessionStorage.getItem('nexus_setup_token') || setupToken;
+      const headers: Record<string, string> = {};
+      if (savedToken) {
+        headers['X-Setup-Token'] = savedToken;
+      }
+
+      const res = await fetch('/api/setup/status', {
+        headers,
+        credentials: 'include',
+      });
+
       if (res.ok) {
         const data = await res.json();
         const isDbReady = Boolean(
@@ -126,6 +206,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         if (isDbReady) {
           onComplete();
           return;
+        }
+
+        const tokenRequired = Boolean(data.setupTokenRequired);
+        setSetupTokenRequired(tokenRequired);
+
+        if (data.isSetupAuthenticated || !tokenRequired) {
+          setIsTokenVerified(true);
+        } else if (savedToken) {
+          // Attempt silent verification with cached session token
+          await verifyToken(savedToken, false);
         }
 
         if (data.dbConfig) {
@@ -142,7 +232,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           setDbConfig((prev) => ({
             ...prev,
             ...data.defaultDockerConfig,
-            password: data.defaultDockerConfig.password || prev.password || '',
+            password: prev.password || '',
           }));
         }
 
@@ -176,11 +266,17 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     try {
       const res = await fetch('/api/setup/quick-init-docker', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ password: dbConfig.password || '' }),
       });
 
       const data = await res.json();
+      if (res.status === 401) {
+        setIsTokenVerified(false);
+        setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
+        return;
+      }
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Hızlı Docker kurulumu başarısız.');
       }
@@ -205,12 +301,19 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     try {
       const res = await fetch('/api/setup/test-database', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify(dbConfig),
       });
 
       const data: TestResult = await res.json();
       setTestResult(data);
+
+      if (res.status === 401) {
+        setIsTokenVerified(false);
+        setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
+        return;
+      }
 
       if (res.ok && data.success) {
         setTestSuccess(true);
@@ -239,11 +342,17 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     try {
       const res = await fetch('/api/setup/configure-database', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify(dbConfig),
       });
 
       const data = await res.json();
+      if (res.status === 401) {
+        setIsTokenVerified(false);
+        setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
+        return;
+      }
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Konfigürasyon kaydedilemedi.');
       }
@@ -267,10 +376,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     try {
       const res = await fetch('/api/setup/initialize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
       });
 
       const data = await res.json();
+      if (res.status === 401) {
+        setIsTokenVerified(false);
+        setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
+        return;
+      }
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Veritabanı ilklendirme başarısız.');
       }
@@ -325,15 +440,27 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     try {
       const res = await fetch('/api/setup/create-admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify(adminForm),
       });
 
       const data = await res.json();
 
+      if (res.status === 401) {
+        setIsTokenVerified(false);
+        setError(data.message || 'Kurulum güvenlik anahtarı doğrulaması gereklidir.');
+        return;
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');
       }
+
+      // Clean up setup token from session storage now that setup is complete
+      try {
+        sessionStorage.removeItem('nexus_setup_token');
+      } catch {}
 
       setCompletedAdmin(data.user?.email || adminForm.email);
       setCurrentStep(7);
@@ -395,51 +522,74 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
               <LogIn className="w-3.5 h-3.5" />
               <span>Giriş Ekranına Dön</span>
             </button>
-            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Sıfır Veri Kaybı Mimarisi</span>
+            <div className="hidden sm:flex items-center gap-2 text-xs bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
+              {setupTokenRequired && !isTokenVerified ? (
+                <>
+                  <Lock className="w-4 h-4 text-amber-400" />
+                  <span className="text-amber-300">Kurulum Koruması Aktif</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span className="text-slate-400">Sıfır Veri Kaybı Mimarisi</span>
+                </>
+              )}
             </div>
           </div>
         </div>
       </header>
 
       {/* Progress Indicator */}
-      <div className="max-w-5xl mx-auto w-full px-6 pt-8 pb-4">
-        <div className="flex items-center justify-between relative">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-slate-800 w-full -z-0" />
-          <div
-            className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-indigo-600 transition-all duration-500 -z-0"
-            style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
-          />
-
-          {steps.map((s) => {
-            const isDone = s.num < currentStep;
-            const isCurrent = s.num === currentStep;
-            return (
-              <div key={s.num} className="relative z-10 flex flex-col items-center group">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
-                    isDone
-                      ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                      : isCurrent
-                      ? 'bg-indigo-600 text-white ring-4 ring-indigo-900/50 shadow-md shadow-indigo-500/30'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {isDone ? <Check className="w-4 h-4" /> : s.num}
-                </div>
-                <span
-                  className={`text-[11px] mt-1.5 font-medium hidden sm:block ${
-                    isCurrent ? 'text-indigo-400 font-semibold' : isDone ? 'text-slate-300' : 'text-slate-500'
-                  }`}
-                >
-                  {s.label}
-                </span>
-              </div>
-            );
-          })}
+      {setupTokenRequired && !isTokenVerified ? (
+        <div className="max-w-5xl mx-auto w-full px-6 pt-8 pb-4">
+          <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl p-3.5 flex items-center justify-between text-xs text-amber-300">
+            <div className="flex items-center gap-2.5">
+              <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="font-medium">İlk Kurulum Güvenlik Koruması: API uç noktaları için güvenlik anahtarı doğrulaması gerekiyor.</span>
+            </div>
+            <span className="hidden sm:inline-block font-mono text-[11px] bg-amber-900/50 px-2.5 py-0.5 rounded text-amber-200 border border-amber-700/50">
+              SETUP AUTH LOCKED
+            </span>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="max-w-5xl mx-auto w-full px-6 pt-8 pb-4">
+          <div className="flex items-center justify-between relative">
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-slate-800 w-full -z-0" />
+            <div
+              className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-indigo-600 transition-all duration-500 -z-0"
+              style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+            />
+
+            {steps.map((s) => {
+              const isDone = s.num < currentStep;
+              const isCurrent = s.num === currentStep;
+              return (
+                <div key={s.num} className="relative z-10 flex flex-col items-center group">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                      isDone
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                        : isCurrent
+                        ? 'bg-indigo-600 text-white ring-4 ring-indigo-900/50 shadow-md shadow-indigo-500/30'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}
+                  >
+                    {isDone ? <Check className="w-4 h-4" /> : s.num}
+                  </div>
+                  <span
+                    className={`text-[11px] mt-1.5 font-medium hidden sm:block ${
+                      isCurrent ? 'text-indigo-400 font-semibold' : isDone ? 'text-slate-300' : 'text-slate-500'
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Main Content Body */}
       <main className="max-w-3xl mx-auto w-full px-6 py-6 flex-1 flex flex-col justify-center">
@@ -455,8 +605,118 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           )}
 
           <AnimatePresence mode="wait">
-            {/* STEP 1: Welcome */}
-            {currentStep === 1 && (
+            {setupTokenRequired && !isTokenVerified ? (
+              <motion.div
+                key="setup-token-gate"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className="space-y-6"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                    <KeyRound className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">İlk Kurulum Güvenlik Doğrulaması</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">Setup Security Token Authentication</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 text-xs text-slate-300 leading-relaxed border-y border-slate-800/80 py-4">
+                  <p>
+                    NexusNode IoT kurulum uç noktaları (/api/setup/*), yetkisiz kişilerin sunucuya uzaktan bağlanmasını,
+                    yönetici hesabı açmasını veya veritabanı ayarlarını manipüle etmesini engellemek için
+                    <strong> Kurulum Güvenlik Anahtarı (Setup Token)</strong> ile kilitlenmiştir.
+                  </p>
+
+                  <div className="p-3.5 bg-slate-950/70 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center gap-2 text-slate-200 font-semibold">
+                      <Terminal className="w-4 h-4 text-amber-400" />
+                      <span>Güvenlik Anahtarını Nasıl Bulurum?</span>
+                    </div>
+                    <ul className="list-disc list-inside text-slate-400 text-[11px] space-y-1.5 pl-1">
+                      <li>
+                        Sunucu başlatıldığında konsol çıktısında görüntülenen{' '}
+                        <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono">SETUP TOKEN: [token]</code>{' '}
+                        satırı
+                      </li>
+                      <li>
+                        Sunucu çalışma dizinindeki{' '}
+                        <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono">data/.setup_token</code>{' '}
+                        dosyası
+                      </li>
+                      <li>
+                        veya sunucunuza tanımladığınız <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono">SETUP_TOKEN</code> ortam değişkeni
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <label className="block text-xs font-semibold text-slate-200">
+                      Kurulum Güvenlik Anahtarı (Setup Token)
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="setup-token-input"
+                        type={showSetupToken ? 'text' : 'password'}
+                        value={tokenInput}
+                        onChange={(e) => setTokenInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            verifyToken(tokenInput);
+                          }
+                        }}
+                        placeholder="Örn: 64 karakterli hex güvenlik anahtarı..."
+                        className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl px-4 py-3 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-500 pr-12"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSetupToken(!showSetupToken)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs p-1"
+                        title={showSetupToken ? 'Gizle' : 'Göster'}
+                      >
+                        {showSetupToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Güvenlik anahtarı doğrulandığında oturumunuz boyunca geçerli olacak ve kurulum adımlarına erişebileceksiniz.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Uçtan Uca Kurulum Koruması</span>
+                  </span>
+                  <button
+                    id="setup-token-verify-btn"
+                    type="button"
+                    disabled={tokenVerifying || !tokenInput.trim()}
+                    onClick={() => verifyToken(tokenInput)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition cursor-pointer"
+                  >
+                    {tokenVerifying ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Doğrulanıyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="w-3.5 h-3.5" />
+                        <span>Doğrula ve Kuruluma Başla</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            ) : (
+              <>
+                {/* STEP 1: Welcome */}
+                {currentStep === 1 && (
               <motion.div
                 key="step1"
                 initial={{ opacity: 0, y: 12 }}
@@ -1175,7 +1435,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
+          </>
+        )}
+      </AnimatePresence>
         </div>
       </main>
 

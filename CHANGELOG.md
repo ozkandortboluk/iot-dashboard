@@ -4,6 +4,43 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.0] - 2026-09-19
+
+### 🔒 İlk Kurulum API'lerinin Güvenlik Anahtarı (Setup Token) ve SSRF Korumasıyla Kilitlenmesi (Hardened Setup API Security)
+- **Kurulum Güvenlik Anahtarı (Setup Security Token) Mekanizması**:
+  - Kurulum tamamlanmadan önce `/api/setup/*` uç noktalarına internetten yapılabilecek yetkisiz erişimleri, yönetici hesabı gaspını ve dış veritabanı manipülasyonunu engellemek amacıyla kriptografik `Setup Token` koruması eklendi.
+  - Sunucu başlatıldığında veya ilk kurulum sırasında `crypto.randomBytes(32).toString('hex')` ile 64 karakterli yüksek entropili tek seferlik bir kurulum anahtarı üretilir ve `data/.setup_token` dosyasında (veya `SETUP_TOKEN` ortam değişkeninde) saklanır.
+  - Kurulum anahtarı başlatma konsolunda yöneticinin görebileceği şekilde güvenle yazdırılır.
+- **Güvenlik Doğrulama Uç Noktası & Yetkilendirme Ara Katmanı (`src/server/middleware/setupAuth.ts`)**:
+  - `requireSetupAuth` ara katmanı ile `X-Setup-Token`, `Authorization: Bearer <token>`, `nexus_setup_session` güvenli httpOnly çerezi ve gövdedeki `setupToken` parametresi üzerinden doğrulama gerçekleştirilir.
+  - Timing attack saldırılarını bertaraf etmek amacıyla `crypto.timingSafeEqual` ile sabit süreli karşılaştırma yapılır.
+  - `/api/setup/verify-token` uç noktası ile sihirbaz arayüzünün kurulum güvenlik anahtarını doğrulayıp yetkili oturum başlatabilmesi sağlandı.
+  - Tüm kritik kurulum uç noktaları (`/api/setup/test-database`, `/api/setup/configure-database`, `/api/setup/initialize`, `/api/setup/create-admin`, `/api/setup/quick-init-docker`) bu ara katman ile koruma altına alındı.
+- **SSRF (Server-Side Request Forgery) Koruması (`SetupService.validateDatabaseHost`)**:
+  - Kurulum sırasında kötü niyetli aktörlerin sunucuyu AWS/GCP/Azure link-local metadata IP'lerine (`169.254.169.254`, `metadata.google.internal`) veya yasaklı yerel IP aralıklarına zorlayarak kimlik bilgilerini sızdırmasını engellemek için ana bilgisayar doğrulayıcısı eklendi.
+- **Kalıcı Kilitlenme (Permanent Setup Lockout)**:
+  - İlk sistem yöneticisi hesabı oluşturulduğu anda `SetupService.markSetupCompleted` tetiklenir, `data/.setup_token` kalıcı olarak diskten silinir ve tüm kurulum uç noktaları `403 Forbidden - SETUP_LOCKED` durumuna geçerek sunucu yeniden başlatılsa dahi kapatılır.
+- **Frontend Kurulum Sihirbazı Güvenlik Kapısı Entegrasyonu (`src/components/setup/DatabaseSetupWizard.tsx`)**:
+  - Sihirbaz arayüzüne kurulum durumu doğrulanmamışsa devreye giren "İlk Kurulum Güvenlik Doğrulaması (Setup Token Authentication)" ekranı eklendi.
+  - Yöneticinin konsoldan veya `data/.setup_token` dosyasından aldığı anahtarı girip tek tıkla doğrulaması sağlandı.
+  - Tüm ardışık istekler (`quick-init-docker`, `test-database`, `configure-database`, `initialize`, `create-admin`) kimlik doğrulamalı başlıklarla korundu; yetkisiz erişim denemelerinde anında bilgilendirme ve koruma modu sağlandı.
+
+---
+
+## 🚀 [v1.35.1] - 2026-09-19
+
+### 🔒 Güvenlik Sıkılaştırması: InitialDataSeeder Sabit Yönetici Hesaplarının Kaldırılması (Hardcoded Admin Accounts Removed)
+- **Sabit Şifreli Hesapların Temizlenmesi (`src/server/database/initialDataSeeder.ts`)**:
+  - `InitialDataSeeder` içerisinden bilinen şifreli `admin@nexusnode.io / admin1234` ve `test@nexusnodeiot.com.tr / test1234` hesaplarının otomatik oluşturulması ve mevcutsa şifrelerinin sıfırlanması davranışı tamamen kaldırıldı.
+  - Veritabanı ilk kez bağlandığında veya boşken başlatıldığında sisteme sabit şifreli hiçbir yönetici kullanıcısı eklenmez.
+  - İlk ve yetkili sistem yöneticisi hesabı, kurulum sihirbazının 6. adımında (`/api/setup/create-admin`) operatör tarafından girilen güçlü şifre ile güvenli bcrypt hash'i kullanılarak oluşturulur.
+- **Sistem İzolasyonu ve Şema Bütünlüğü**:
+  - Başlangıçta eklenen test cihazı (`dev_test_01`), paneller (`dash_default`), bildirimler, kurallar ve telemetri kayıtları artık sabit bir kullanıcıya değil, sistem kimliğine (`system`) bağlı olarak oluşturulur.
+  - İlk yönetici hesabı oluşturulduğunda (`SetupService.createAdministrator`), kişisel ana panel (`dash_usr_admin`) otomatik olarak tahsis edilir ve cihaz sahipliği yöneticiye atanır.
+  - Test ortamlarında (`ENABLE_TEST_ACCOUNT=true` veya `vitest`), test hesabı gereksinimleri yalnızca test runner kontrolünde ele alınır; üretim ve internete açık sunucularda saldırganların bilinen şifrelerle sisteme sızması engellendi.
+
+---
+
 ## 🚀 [v1.35.0] - 2026-09-19
 
 ### 📌 İlk Kurulumda Veritabanı Yollarının ve Başlangıç Verilerinin Otomatik Doldurulması (Auto-Populate on Initial Connection)
