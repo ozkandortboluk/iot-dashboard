@@ -259,4 +259,21 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     expect(status.setupRequired).toBe(true);
     expect(setupService.isSetupCompleted()).toBe(false);
   });
+
+  it('12. should allow reset and resume in requireSetupAuth when setup is in progress', async () => {
+    const { requireSetupAuth } = await import('../server/middleware/setupAuth.js');
+    (setupService as any).isCompletedState = false;
+
+    let nextCalled = false;
+    const req: any = { path: '/reset', headers: {}, cookies: {} };
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+    const next = () => { nextCalled = true; };
+
+    requireSetupAuth(req, res, next);
+    expect(nextCalled).toBe(true);
+    expect(res.status).not.toHaveBeenCalled();
+  });
 });

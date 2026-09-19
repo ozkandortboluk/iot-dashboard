@@ -262,10 +262,10 @@ export class SetupService {
 
   /**
    * Retrieves or initializes the cryptographic Setup Security Token.
-   * If setup is already completed, returns empty string.
+   * If setup is already completed and force is false, returns empty string.
    */
-  public getOrInitSetupToken(): string {
-    if (this.isSetupCompleted()) {
+  public getOrInitSetupToken(force: boolean = false): string {
+    if (this.isSetupCompleted() && !force) {
       return '';
     }
 
@@ -371,7 +371,7 @@ export class SetupService {
       return true;
     }
 
-    const activeToken = this.getOrInitSetupToken();
+    const activeToken = this.getOrInitSetupToken(allowIfCompleted);
     if (!activeToken) {
       return false;
     }
@@ -503,6 +503,10 @@ export class SetupService {
       } catch (err: any) {
         systemLogger.warn('database', `Runtime config dosyası silinemedi: ${err?.message || err}`);
       }
+      recycleSharedPgPool().catch(() => {});
+      try {
+        db.postgresRepo?.setPool(null as any);
+      } catch {}
     } else if (this.runtimeConfig) {
       // Re-save config with isCompleted: false
       this.saveRuntimeSecretConfig(this.runtimeConfig, false);
@@ -510,7 +514,7 @@ export class SetupService {
 
     // Invalidate existing token and generate fresh setup token
     this.invalidateSetupToken();
-    const newToken = this.getOrInitSetupToken();
+    const newToken = this.getOrInitSetupToken(true);
 
     systemLogger.info('security', `Kurulum durumu operatör tarafından sıfırlandı (preserveConfig: ${preserveConfig}).`);
 

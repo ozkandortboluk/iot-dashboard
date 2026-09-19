@@ -62,7 +62,7 @@ export function isRequestSetupAuthenticated(req: Request): boolean {
  *    If invalid or missing, returns HTTP 401 Unauthorized with code 'SETUP_TOKEN_REQUIRED'.
  */
 export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
-  const isResetOrResume = req.path === '/reset' || req.path === '/resume';
+  const isResetOrResume = req.path === '/reset' || req.path === '/resume' || req.originalUrl?.endsWith('/reset') || req.originalUrl?.endsWith('/resume');
 
   // 1. Check permanent setup lockout (allowed for reset/resume with valid token)
   if (setupService.isSetupCompleted() && !isResetOrResume) {
@@ -72,6 +72,12 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
       error: 'Kurulum kilitlendi.',
       message: 'NexusNode IoT kurulumu zaten tamamlanmış ve kilitlenmiştir. Güvenlik nedeniyle kurulum uç noktaları erişime kapatılmıştır.',
     });
+    return;
+  }
+
+  // If this is a reset or resume operation and setup is in progress (not completed), allow directly
+  if (isResetOrResume && !setupService.isSetupCompleted()) {
+    next();
     return;
   }
 

@@ -187,7 +187,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
   };
 
   // Fetch initial setup status from server
-  const fetchStatus = async () => {
+  const fetchStatus = async (manualStep?: number) => {
     try {
       setInitialLoading(true);
       const savedToken = sessionStorage.getItem('nexus_setup_token') || setupToken;
@@ -225,7 +225,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           await verifyToken(savedToken, false);
         }
 
-        if (data.dbConfig) {
+        if (data.dbConfig && manualStep === undefined) {
           setDbConfig((prev) => ({
             ...prev,
             host: data.dbConfig.host || prev.host,
@@ -235,7 +235,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
             sslMode: data.dbConfig.sslMode || prev.sslMode,
             password: prev.password || '',
           }));
-        } else if (data.defaultDockerConfig) {
+        } else if (data.defaultDockerConfig && !data.dbConfig && manualStep === undefined) {
           setDbConfig((prev) => ({
             ...prev,
             ...data.defaultDockerConfig,
@@ -243,7 +243,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           }));
         }
 
-        if (data.isDbConnected && data.stepsCompleted?.schemaVerified && !data.hasAdmin) {
+        if (manualStep !== undefined) {
+          setCurrentStep(manualStep);
+        } else if (data.isDbConnected && data.stepsCompleted?.schemaVerified && !data.hasAdmin) {
           setCurrentStep(6);
         } else if (data.isDbConnected && !data.stepsCompleted?.migrations) {
           setCurrentStep(4);
@@ -291,8 +293,28 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       setTestResult(null);
       setInitComplete(false);
       setInitLogs([]);
-      await fetchStatus();
-      setCurrentStep(data.currentStep || 1);
+
+      if (!preserveConfig) {
+        setDbConfig({
+          host: 'timescaledb',
+          port: 5432,
+          database: 'iot_dashboard',
+          user: 'iot_user',
+          password: '',
+          sslMode: 'disable',
+        });
+        setAdminForm({
+          name: 'Sistem Yöneticisi',
+          email: '',
+          password: '',
+          passwordConfirm: '',
+          companyName: 'Merkez Yönetim',
+        });
+      }
+
+      const nextStep = preserveConfig ? 2 : 1;
+      await fetchStatus(nextStep);
+      setCurrentStep(nextStep);
     } catch (err: any) {
       setError(err?.message || 'Kurulum sıfırlanırken bir hata oluştu.');
     } finally {
@@ -319,7 +341,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         sessionStorage.setItem('nexus_setup_token', data.setupToken);
         setIsTokenVerified(true);
       }
-      await fetchStatus();
+      const resumeStep = data.currentStep || 1;
+      await fetchStatus(resumeStep);
+      setCurrentStep(resumeStep);
     } catch (err: any) {
       setError(err?.message || 'Kurulum kurtarılırken hata oluştu.');
     } finally {

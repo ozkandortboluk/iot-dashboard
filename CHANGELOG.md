@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.5] - 2026-09-19
+
+### 🔧 Kurulum Sıfırlama & Kurtarma Mekanizması Düzeltmesi (Setup Reset & Recovery Fix)
+- **Kurulum Sıfırlama / Reset İzin & Token Kilidi Düzeltildi**:
+  - `requireSetupAuth` middleware'i, kurulum tamamlanmamışken veya devam ederken gelen `/api/setup/reset` ve `/api/setup/resume` isteklerini yetkilendirme kilidine takılmadan doğrudan işleme alacak şekilde güncellendi.
+  - `setupService.validateSetupToken` ve `getOrInitSetupToken`, sıfırlama işlemlerinde token oluşturma/doğrulama kilitlenmelerini engelleyecek şekilde `force` desteğiyle güçlendirildi.
+- **Derin Bağlantı Havuzu & Durum Temizliği (`setupService.resetSetup`)**:
+  - `preserveConfig: false` ile sıfırlama yapıldığında, PostgreSQL bağlantı havuzu (`recycleSharedPgPool`) tamamen sonlandırılır ve `db.postgresRepo` bağlantısı düşürülür.
+  - Çalışma zamanı gizli dosyası (`.db_config.json`) ve mevcut kurulum anahtarı imha edilerek taze bir kurulum oturumu başlatılır.
+- **Arayüz (Frontend) Sihirbaz Durum Senkronizasyonu (`DatabaseSetupWizard.tsx`)**:
+  - `fetchStatus` metoduna opsiyonel `manualStep` parametresi eklendi. Sıfırlama sonrası veritabanı havuzunun eski durumu nedeniyle sihirbazın otomatik olarak sonraki adımlara atlaması engellendi.
+  - Sıfırlama işleminde form alanları ve doğrulama durumları sıfırlandı; `preserveConfig: false` seçildiğinde Step 1'e, `preserveConfig: true` seçildiğinde Step 2'ye temiz geçiş sağlandı.
+- **Birim Test Kapsamı**:
+  - `src/tests/database_setup_wizard.test.ts` içerisine `requireSetupAuth` reset/resume izin testi eklendi.
+  - Sürüm `1.36.5` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.4] - 2026-09-19
 
 ### 🛡️ Kurulum Kilidi & Otomatik İyileştirme / Kurtarma Mekanizması (Setup Lock, Resume & Reset Recovery)
