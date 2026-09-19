@@ -4,6 +4,27 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.18.0] - 2026-09-19
+
+### 📌 Yerel Veritabanının Tamamen Kaldırılması, Saf PostgreSQL Geçişi & Zorunlu Kurulum Sihirbazı
+- **Yerel JSON Veritabanının Tamamen Devre Dışı Bırakılması**:
+  - `src/server/db.ts` içerisindeki `getActiveEngine()` ve `setActiveEngine()` metodları güncellenerek yerel veritabanı kullanım seçeneği kaldırıldı; sistem tamamen PostgreSQL (ve TimescaleDB) motorunu tek ve zorunlu veri kaynağı olarak belirledi.
+  - `/api/database/config` uç noktası ve veritabanı ayar ekranları yalnızca PostgreSQL / TimescaleDB motorlarını kabul edecek şekilde kısıtlandı.
+- **Sıfırdan Açılış & Zorunlu Admin / PostgreSQL Kurulum Akışı (`SystemSetupWizard.tsx`)**:
+  - Sistemde süper yönetici (admin) hesabı yoksa veya PostgreSQL veritabanı henüz bağlanmamışsa tüm site erişimi (`DashboardContent` ve paneller) katı bir şekilde kilitlenir.
+  - **Adım 1 - Yönetici Oluşturma**: Sistemde admin yoksa ilk olarak süper yönetici hesabı oluşturma ekranı açılır.
+  - **Adım 2 - PostgreSQL Yapılandırma**: Admin hesabı oluşturulduğu anda sistem otomatik olarak PostgreSQL bağlantı bilgileri ve şema kurulum ekranına yönlendirir.
+  - **Sistem Kilit Mekanizması**: Bu iki adım başarıyla tamamlanmadan, bağlantı testi geçmeden ve IoT tabloları migrate edilmeden ana platform kesinlikle açılmaz.
+- **Yeni Backend Uç Noktaları**:
+  - `GET /api/auth/setup-status`: Sistemde admin varlığını, PostgreSQL bağlantı durumunu ve kurulumun tamamlanıp tamamlanmadığını (`isComplete`) döndürür.
+  - `POST /api/auth/test-database`: Canlı PostgreSQL bağlantısını test eder, sunucu sürümü ve gecikme süresini (ms) raporlar.
+  - `POST /api/auth/setup-database`: PostgreSQL bağlantı dizesini kaydeder, SQL migration şemasını icra eder, aktif motoru PostgreSQL'e çevirir ve audit logu oluşturur.
+- **Help & Knowledge Center ve Tip Güncellemeleri**:
+  - `HelpView.tsx` içerisine yeni PostgreSQL Setup & Status API uç noktaları için çalışan curl ve API kod örnekleri eklendi.
+  - `SystemSetupStatus` tipi `src/types.ts` dosyasına eklendi, `AuthContext` kurulum durumunu ve DB yapılandırma metodunu yönetecek şekilde güncellendi.
+
+---
+
 ## 🚀 [v1.17.19] - 2026-09-16
 
 ### 📌 Cihaz Eşleştirme Token Çözümleme & Donanım Anahtarı Üretimi İyileştirmesi

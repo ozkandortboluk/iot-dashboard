@@ -1940,6 +1940,64 @@ Response:
 `,
     },
     {
+      id: 'code_postgresql_setup_api',
+      title: 'PostgreSQL İlk Kurulum & Şema Doğrulama API (Setup Wizard API)',
+      category: 'curl',
+      categoryLabel: 'PostgreSQL Kurulum API',
+      badge: 'Zorunlu PostgreSQL Motoru',
+      description: 'Yerel veritabanı tamamen devre dışı bırakılmıştır. Sistemin ilk açılışında admin oluşturma, PostgreSQL bağlantı testi ve şema migration uç noktaları.',
+      tags: ['postgresql', 'setup', 'onboarding', 'database', 'migration', 'test-database', 'setup-database'],
+      endpoint: 'GET /api/auth/setup-status & POST /api/auth/test-database & POST /api/auth/setup-database',
+      code: `# =========================================================================
+# NEXUSNODE IoT - POSTGRESQL KURULUM VE BAĞLANTI API UÇ NOKTALARI
+# =========================================================================
+
+# 1. Sistem Kurulum & PostgreSQL Bağlantı Durumu Sorgulama:
+curl -X GET "${originUrl}/api/auth/setup-status" \\
+  -H "Accept: application/json"
+
+# Yanıt (Kurulum Gerekiyorsa):
+# {
+#   "needSetup": true,
+#   "needAdminSetup": true,
+#   "needDatabaseConfig": true,
+#   "hasAdmin": false,
+#   "isPostgresConnected": false,
+#   "isComplete": false
+# }
+
+# 2. PostgreSQL Bağlantısını Test Etme:
+curl -X POST "${originUrl}/api/auth/test-database" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "postgresUrl": "postgresql://postgres:password@localhost:5432/nexusnode_iot?sslmode=disable"
+  }'
+
+# Yanıt (Test Başarılı):
+# {
+#   "success": true,
+#   "message": "PostgreSQL sunucusu ile başarılı bağlantı sağlandı.",
+#   "version": "PostgreSQL 16.2",
+#   "latencyMs": 8
+# }
+
+# 3. PostgreSQL Veritabanını Bağlama & IoT Şemalarını Kurma:
+curl -X POST "${originUrl}/api/auth/setup-database" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \\
+  -d '{
+    "postgresUrl": "postgresql://postgres:password@localhost:5432/nexusnode_iot?sslmode=disable"
+  }'
+
+# Yanıt (Şema Migration & Sistem Açılışı):
+# {
+#   "success": true,
+#   "message": "PostgreSQL veritabanı başarıyla yapılandırıldı ve tüm IoT tabloları oluşturuldu.",
+#   "tablesCreated": ["users", "devices", "telemetry_readings", "dashboard_layouts", "notifications", "threshold_rules", "audit_logs"]
+# }
+`,
+    },
+    {
       id: 'code_nodejs_javascript_client',
       title: 'Node.js / JavaScript - Axios & Fetch İstemcisi',
       category: 'nodejs',

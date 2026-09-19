@@ -17,6 +17,7 @@ import { DatabaseDataView } from './components/DatabaseDataView';
 import { NetworkDiscoveryView } from './components/NetworkDiscoveryView';
 import { AddWidgetModal } from './components/AddWidgetModal';
 import { LoginView } from './components/LoginView';
+import { SystemSetupWizard } from './components/SystemSetupWizard';
 import { HelpView } from './components/HelpView';
 import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
@@ -291,13 +292,52 @@ function DashboardContent() {
   );
 }
 
+function RootContent() {
+  const { user, setupStatus, isCheckingSetup, refreshSetupStatus } = useAuth();
+
+  // Show a clean minimal loader while discovering system setup status on cold start
+  if (isCheckingSetup) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 space-y-4">
+        <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+        <p className="text-xs font-semibold tracking-wider uppercase text-slate-400">
+          Sistem Durumu Kontrol Ediliyor...
+        </p>
+      </div>
+    );
+  }
+
+  // Strict User Constraint: If no admin exists or PostgreSQL is not configured/connected,
+  // the user MUST NOT access the site. The SystemSetupWizard takes over!
+  if (setupStatus && !setupStatus.isComplete) {
+    return (
+      <SystemSetupWizard
+        setupStatus={setupStatus}
+        onComplete={async () => {
+          await refreshSetupStatus();
+        }}
+      />
+    );
+  }
+
+  // If setup is complete but no active user session, show login
+  if (!user) {
+    return <LoginView />;
+  }
+
+  // Once authenticated and system is fully verified, render full dashboard
+  return (
+    <RealtimeProvider>
+      <DashboardContent />
+    </RealtimeProvider>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RealtimeProvider>
-          <DashboardContent />
-        </RealtimeProvider>
+        <RootContent />
       </AuthProvider>
     </ThemeProvider>
   );

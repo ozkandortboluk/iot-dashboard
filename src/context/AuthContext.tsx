@@ -1,13 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { User } from '../types';
+import type { User, SystemSetupStatus } from '../types';
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  setupStatus: SystemSetupStatus | null;
+  isCheckingSetup: boolean;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string, role?: User['role']) => Promise<void>;
-  setup: (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean) => Promise<void>;
+  setup: (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean, postgresUrl?: string) => Promise<any>;
   checkSetupStatus: () => Promise<boolean>;
+  refreshSetupStatus: () => Promise<SystemSetupStatus | null>;
+  setupDatabase: (postgresUrl: string) => Promise<{ success: boolean; message: string; tablesCreated?: string[] }>;
   updateUser: (updatedUser: User) => void;
   refreshUser: () => Promise<User | null>;
   logout: () => void;
@@ -19,6 +23,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser] = useState<any>(null);
+  const [setupStatus, setSetupStatus] = useState<SystemSetupStatus | null>(null);
+  const [isCheckingSetup, setIsCheckingSetup] = useState<boolean>(true);
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('dashboard_user');
     if (saved) {
@@ -39,6 +45,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [isLoading, setIsLoading] = useState(false);
+
+  const refreshSetupStatus = async (): Promise<SystemSetupStatus | null> => {
+    try {
+      const res = await fetch('/api/auth/setup-status');
+      if (res.ok) {
+        const data: SystemSetupStatus = await res.json();
+        setSetupStatus(data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('[AuthContext] setup-status check failed:', err);
+    } finally {
+      setIsCheckingSetup(false);
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    refreshSetupStatus();
+  }, []);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('dashboard_token');
@@ -125,14 +151,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const setup = async (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean) => {
+  const setup = async (
+    name: string,
+    email: string,
+    pass: string,
+    companyName: string,
+    seedDemoData: boolean,
+    postgresUrl?: string
+  ) => {
     setIsLoading(true);
     try {
       const res = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ name, email, password: pass, companyName, seedDemoData }),
+        body: JSON.stringify({ name, email, password: pass, companyName, seedDemoData, postgresUrl }),
       });
 
       const contentType = res.headers.get('content-type');
@@ -151,6 +184,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setUser(userData);
       setToken(data.token);
+
+      // Refresh setup status
+      await refreshSetupStatus();
+      return data;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const setupDatabase = async (postgresUrl: string): Promise<{ success: boolean; message: string; tablesCreated?: string[] }> => {
+    setIsLoading(true);
+    try {
+      const savedToken = token || localStorage.getItem('dashboard_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (savedToken) {
+        headers['Authorization'] = `Bearer ${savedToken}`;
+      }
+
+      const res = await fetch('/api/auth/setup-database', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ postgresUrl }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'PostgreSQL yapılandırma işlemi başarısız oldu.');
+      }
+
+      await refreshSetupStatus();
+      return data;
     } finally {
       setIsLoading(false);
     }
@@ -160,6 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await fetch('/api/auth/setup-status');
       const data = await res.json();
+      setSetupStatus(data);
       return !!data.needSetup;
     } catch {
       return false;
@@ -236,10 +304,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         token,
+        setupStatus,
+        isCheckingSetup,
         login,
         register,
         setup,
         checkSetupStatus,
+        refreshSetupStatus,
+        setupDatabase,
         updateUser,
         refreshUser,
         logout,

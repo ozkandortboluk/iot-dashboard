@@ -399,7 +399,7 @@ export const DatabaseDataView: React.FC = () => {
       if (resEngine.ok) {
         const engData = await resEngine.json();
         setEngineConfig(engData);
-        setPendingEngine(engData.activeEngine || 'local');
+        setPendingEngine(engData.activeEngine || 'postgres');
       }
       if (resGuide.ok) {
         const guideData = await resGuide.json();
@@ -819,7 +819,7 @@ export const DatabaseDataView: React.FC = () => {
   const storageLimitMB = 1024;
   const storagePct = Math.min(100, Math.round((storageUsedMB / (storageLimitMB || 1)) * 100));
 
-  const currentEngine = engineConfig?.activeEngine || 'local';
+  const currentEngine = engineConfig?.activeEngine || 'postgres';
 
   return (
     <div className="space-y-6 pb-12">

@@ -1075,6 +1075,18 @@ export interface ServerStats {
 
 export type DatabaseEngineType = 'postgres' | 'timescaledb' | 'local';
 
+export interface SystemSetupStatus {
+  needSetup: boolean;
+  needAdminSetup: boolean;
+  needDatabaseConfig: boolean;
+  hasAdmin: boolean;
+  isPostgresConnected: boolean;
+  hasPostgresUrl: boolean;
+  isComplete: boolean;
+  inProgress?: boolean;
+  postgresConfig?: DatabaseEngineConfig | null;
+}
+
 export interface DatabaseEngineConfig {
   activeEngine: DatabaseEngineType;
   postgresUrl?: string;

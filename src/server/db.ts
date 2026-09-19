@@ -2238,39 +2238,32 @@ class LocalDatabase {
 
   // Database Engine & PostgreSQL / TimescaleDB Management Methods
   public getActiveEngine(): DatabaseEngineType {
-    if (process.env.NODE_ENV === 'production') {
-      return 'postgres';
+    if (this.data?.databaseSettings?.activeEngine === 'timescaledb' || process.env.DB_ENGINE === 'timescaledb') {
+      return 'timescaledb';
     }
-    if (this.data?.databaseSettings?.activeEngine) {
-      return this.data.databaseSettings.activeEngine;
-    }
-    const envEngine = process.env.DB_ENGINE as DatabaseEngineType;
-    if (envEngine === 'postgres' || envEngine === 'timescaledb' || envEngine === 'local' || envEngine === 'firestore-hybrid') {
-      return envEngine;
-    }
-    return 'postgres'; // Default to PostgreSQL as primary database
+    // PostgreSQL is the sole authoritative database engine for the system
+    return 'postgres';
   }
 
   public setActiveEngine(engine: DatabaseEngineType, postgresUrl?: string): void {
+    const targetEngine: DatabaseEngineType = engine === 'timescaledb' ? 'timescaledb' : 'postgres';
     if (!this.data.databaseSettings) {
       this.data.databaseSettings = {
-        activeEngine: engine,
+        activeEngine: targetEngine,
       };
     }
-    this.data.databaseSettings.activeEngine = engine;
+    this.data.databaseSettings.activeEngine = targetEngine;
     if (postgresUrl !== undefined && !postgresUrl.includes('••••••••')) {
       this.data.databaseSettings.postgresUrl = postgresUrl.trim();
     }
-    process.env.DB_ENGINE = engine;
+    process.env.DB_ENGINE = targetEngine;
     this.saveData(this.data);
 
-    if (engine === 'postgres' || engine === 'timescaledb') {
-      if (this.pgPool) {
-        try { this.pgPool.end().catch(() => {}); } catch {}
-        this.pgPool = null;
-      }
-      this.initPostgresRepository().catch(() => {});
+    if (this.pgPool) {
+      try { this.pgPool.end().catch(() => {}); } catch {}
+      this.pgPool = null;
     }
+    this.initPostgresRepository().catch(() => {});
   }
 
   public resolveUnmaskedPostgresUrl(customUrl?: string): string {

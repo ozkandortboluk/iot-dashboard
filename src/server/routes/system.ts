@@ -259,13 +259,8 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
 
 databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   const { engine, postgresUrl } = req.body;
-  if (!engine || !['postgres', 'timescaledb', 'local'].includes(engine)) {
-    return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi.' });
-  }
-
-  // P0.12 Enforce production database policy
-  if (process.env.NODE_ENV === 'production' && engine === 'local') {
-    return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
+  if (!engine || !['postgres', 'timescaledb'].includes(engine)) {
+    return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi. Yerel veritabanı kullanımı tamamen devre dışı bırakılmıştır; yalnızca PostgreSQL ve TimescaleDB desteklenmektedir.' });
   }
 
   db.setActiveEngine(engine, postgresUrl);

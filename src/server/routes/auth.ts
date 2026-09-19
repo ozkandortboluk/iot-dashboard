@@ -63,7 +63,26 @@ router.get('/setup-status', async (req, res) => {
     }
   }
 
-  res.json({ needSetup: !hasAdmin, inProgress: isSetupInProgress });
+  // 3. PostgreSQL status check
+  const isPostgresConnected = Boolean(db.postgresRepo.isReady());
+  const postgresUrl = db.getPostgresUrl()?.trim() || '';
+  const hasPostgresUrl = Boolean(postgresUrl);
+
+  const needAdminSetup = !hasAdmin;
+  const needDatabaseConfig = !isPostgresConnected;
+  const isComplete = hasAdmin && isPostgresConnected;
+
+  res.json({
+    needSetup: !isComplete,
+    needAdminSetup,
+    needDatabaseConfig,
+    hasAdmin,
+    isPostgresConnected,
+    hasPostgresUrl,
+    isComplete,
+    inProgress: isSetupInProgress,
+    postgresConfig: hasPostgresUrl ? db.getPostgresConfig() : null,
+  });
 });
 
 router.post('/setup', async (req, res) => {
@@ -128,16 +147,129 @@ router.post('/setup', async (req, res) => {
     // Set HttpOnly, Secure cookie
     setSessionCookie(res, token);
 
+    let dbSetupResult = null;
+    if (req.body?.postgresUrl) {
+      try {
+        const pUrl = String(req.body.postgresUrl).trim();
+        const testRes = await db.testPostgresConnection(pUrl);
+        if (testRes.success) {
+          const migRes = await db.executePostgresMigration(pUrl);
+          db.setActiveEngine('postgres', pUrl);
+          dbSetupResult = { test: testRes, migration: migRes };
+        }
+      } catch (dbErr) {
+        console.warn('[Setup DB Attachment Warning]:', dbErr);
+      }
+    }
+
     res.json({
       user: adminUser,
       token,
       message: 'Kurulum başarıyla tamamlandı ve güvenli oturum açıldı.',
+      needDatabaseConfig: !db.postgresRepo.isReady(),
+      dbSetupResult,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kurulum sırasında bir hata oluştu.';
     res.status(400).json({ error: msg });
   } finally {
     isSetupInProgress = false;
+  }
+});
+
+// Test PostgreSQL Connection (Public during setup, or authenticated)
+router.post('/test-database', async (req, res) => {
+  await db.waitForInitialization();
+  const { postgresUrl } = req.body;
+  if (!postgresUrl || typeof postgresUrl !== 'string') {
+    return res.status(400).json({ success: false, message: 'Geçerli bir PostgreSQL bağlantı adresi (URL) girilmelidir.' });
+  }
+
+  try {
+    const result = await db.testPostgresConnection(postgresUrl.trim());
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      message: `Bağlantı testi başarısız: ${err?.message || 'Sunucuya ulaşılamadı'}`,
+    });
+  }
+});
+
+// Setup PostgreSQL Database & Run Migrations (Completes Phase 2 of Onboarding)
+router.post('/setup-database', async (req, res) => {
+  await db.waitForInitialization();
+
+  // Authentication check: Must have an admin session or setup token
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.session_token;
+  let authorizedAdmin = null;
+
+  if (token) {
+    const verified = db.verifySession(token);
+    if (verified?.user && verified.user.role === 'admin') {
+      authorizedAdmin = verified.user;
+    }
+  }
+
+  const users = db.getUsers();
+  const hasAdmin = users.some((u) => u.role === 'admin' && (u as any).status !== 'deleted');
+
+  // If system has an admin, caller must be authenticated as admin
+  if (hasAdmin && !authorizedAdmin) {
+    return res.status(401).json({
+      error: 'Veritabanı yapılandırmasını tamamlamak için yönetici oturumu açmanız gerekmektedir.',
+      requireAdminLogin: true,
+    });
+  }
+
+  const { postgresUrl } = req.body;
+  if (!postgresUrl || typeof postgresUrl !== 'string') {
+    return res.status(400).json({ error: 'PostgreSQL bağlantı adresi (URL) gereklidir.' });
+  }
+
+  try {
+    // 1. Test connection first
+    const testResult = await db.testPostgresConnection(postgresUrl.trim());
+    if (!testResult.success) {
+      return res.status(400).json({
+        error: `PostgreSQL bağlantısı kurulamadı: ${testResult.message}`,
+        details: testResult,
+      });
+    }
+
+    // 2. Execute migration to create all required IoT schema tables
+    const migrationResult = await db.executePostgresMigration(postgresUrl.trim());
+    if (!migrationResult.success) {
+      return res.status(400).json({
+        error: `Veritabanı tabloları oluşturulurken hata oluştu: ${migrationResult.message}`,
+        details: migrationResult,
+      });
+    }
+
+    // 3. Set active engine to postgres and persist
+    db.setActiveEngine('postgres', postgresUrl.trim());
+
+    // 4. Record audit log
+    if (authorizedAdmin) {
+      db.addAuditLog(
+        authorizedAdmin.id,
+        authorizedAdmin.name,
+        'PostgreSQL veritabanı ilk kurulum sihirbazı ile başarıyla bağlandı ve IoT şeması oluşturuldu.',
+        'high'
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'PostgreSQL veritabanı başarıyla yapılandırıldı ve tüm IoT tabloları oluşturuldu.',
+      tablesCreated: migrationResult.tablesCreated,
+      version: testResult.version,
+      latencyMs: testResult.latencyMs,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      error: `PostgreSQL yapılandırma hatası: ${err?.message || 'Beklenmeyen bir hata oluştu.'}`,
+    });
   }
 });
 
