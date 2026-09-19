@@ -4,6 +4,25 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.35.0] - 2026-09-19
+
+### 📌 İlk Kurulumda Veritabanı Yollarının ve Başlangıç Verilerinin Otomatik Doldurulması (Auto-Populate on Initial Connection)
+- **InitialDataSeeder Modülü (`src/server/database/initialDataSeeder.ts`)**:
+  - İlk kurulum ekranında boş bir veritabanına bağlanıldığında veya veritabanı ilklendirmesi çalıştırıldığında sistemin tüm yollarını ve tablolarını otomatik dolduran özel mimari eklendi.
+  - **Kanonik Kullanıcılar**: Root Sistem Yöneticisi (`usr_admin`) ve Kanonik Test Yöneticisi (`usr_test_admin` - `test@nexusnodeiot.com.tr` / `test1234`).
+  - **Kanonik Test Cihazı**: ESP32 Kanonik Saha Test Cihazı (`dev_test_01` - `dev_key_test_0000000000000000`), aktif röle ve PWM pinleri ile donatılmış vaziyette sisteme kaydedildi.
+  - **Hazır Dashboard Panelleri**: 10 adet zengin endüstriyel widget içeren başlangıç panelleri doğrudan `dashboard_layouts` tablosuna yazıldı.
+  - **Eşik Kuralları (Threshold Rules)**: Sıcaklık uyarı ve kritik seviyeleri, CPU aşırı yükü ve güç tüketimi limitleri `threshold_rules` tablosuna kaydedildi.
+  - **24 Saatlik Canlı Telemetri Geçmişi**: Grafikler, TimescaleDB continuous aggregate görünümleri ve analiz ekranlarının anında veri sunabilmesi için 48 adet zaman serisi telemetri noktası `telemetry_readings` tablosuna yazıldı.
+  - **Sistem Bildirimleri, Olayları ve Komutları**: `notifications`, `audit_logs`, `system_events` ve `device_commands` başlangıç kayıtları dolduruldu.
+  - **In-Memory Senkronizasyonu**: `LocalDatabase` nesnesi veritabanı kayıtlarıyla anında senkronize edildi.
+- **SetupService & PostgreSQL Entegrasyonu**:
+  - `SetupService.configureDatabase` ve `SetupService.initializeDatabase` adımlarında ilk bağlantı anında otomatik şema denetimi ve seeder tetiklendi.
+  - `PostgresRepository.ensureTelemetrySchema` boş veritabanı tespit ettiğinde otomatik olarak tüm yolları ve başlangıç verilerini dolduracak şekilde güncellendi.
+  - Kurulum sihirbazı adımlarına `Database paths & default data seeded` aşaması eklendi.
+
+---
+
 ## 🚀 [v1.34.2] - 2026-09-18
 
 ### 📌 Fast Access, Test Account Autofill & Seamless Gatekeeper Flow

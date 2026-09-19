@@ -5,6 +5,7 @@ import { recordDatabaseHealingEvent } from '../services/databaseAutoHealer.servi
 import { getSharedPgPoolStats } from './connection.js';
 import { runAllMigrations, getMigrationStatus, getLatestMigrationRunStatus } from './migrations/migrationRunner.js';
 import { SchemaAuditor, type SchemaAuditReport, type SchemaHealingResult } from './schemaAuditor.js';
+import { InitialDataSeeder } from './initialDataSeeder.js';
 import type {
   User,
   Device,
@@ -528,61 +529,12 @@ export class PostgresRepository {
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
         if (totalUsers === 0) {
-          // Only seed initial root admin on a brand new, completely empty database
-          await client.query(`
-            INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-            VALUES (
-              'usr_admin', 
-              'Sistem Yöneticisi', 
-              'admin@nexusnode.io', 
-              '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K', 
-              'admin', 
-              'Merkez Yönetim', 
-              'active', 
-              CURRENT_TIMESTAMP
-            )
-            ON CONFLICT (id) DO NOTHING;
-          `).catch(() => {});
-        }
-
-        // 7. Seed Canonical Test Admin & Device ONLY in test environment or if explicitly requested
-        // Never resurrect in production if the user deliberately removed it!
-        const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-        if (isTestEnv) {
-          await client.query(`
-            INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-            VALUES (
-              'usr_test_admin',
-              'Test Kullanıcısı',
-              'test@nexusnodeiot.com.tr',
-              '$2b$10$l6m4lLoiQaRgmgd1SlQy8.ofgjjxdXfTkaNKVoJayHYX1G6BSSPne',
-              'admin',
-              'Test Laboratuvarı',
-              'active',
-              CURRENT_TIMESTAMP
-            )
-            ON CONFLICT (id) DO NOTHING;
-          `).catch(() => {});
-
-          await client.query(`
-            INSERT INTO devices (id, name, type, device_type, api_key, status, location, ip, ip_address, is_simulated, tenant_id, user_id, created_at)
-            VALUES (
-              'dev_test_01',
-              'Test Simülasyon Cihazı',
-              'sensor',
-              'sensor',
-              'dev_key_test_0000000000000000',
-              'online',
-              'Sanal Test Odası',
-              '192.168.1.100',
-              '192.168.1.100',
-              true,
-              'usr_test_admin',
-              'usr_test_admin',
-              CURRENT_TIMESTAMP
-            )
-            ON CONFLICT (id) DO NOTHING;
-          `).catch(() => {});
+          // Brand new empty database connected - immediately populate all canonical paths, tables, and seed data
+          try {
+            await InitialDataSeeder.populateInitialDatabase(this.pool);
+          } catch (seedErr: any) {
+            console.error('[PostgreSQL ensureTelemetrySchema] InitialDataSeeder notice:', seedErr?.message || seedErr);
+          }
         }
 
         const contractValid = await this.verifySchemaContract(client);

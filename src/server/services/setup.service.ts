@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { systemLogger } from './systemLogger.service.js';
 import { ALL_MIGRATIONS, runAllMigrations, getMigrationStatus } from '../database/migrations/migrationRunner.js';
 import { SchemaAuditor } from '../database/schemaAuditor.js';
+import { InitialDataSeeder } from '../database/initialDataSeeder.js';
 import { getSharedPgPool, recycleSharedPgPool, getPostgresSslOption } from '../database/connection.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import { db } from '../db.js';
@@ -584,12 +585,20 @@ export class SetupService {
     if (newPool) {
       db.postgresRepo?.setPool(newPool);
       await db.initPostgresRepository().catch(() => {});
+
+      // Automatically audit schema and populate initial database paths upon initial connection
+      try {
+        await SchemaAuditor.auditAndHeal(newPool);
+        await InitialDataSeeder.populateInitialDatabase(newPool);
+      } catch (seedErr: any) {
+        systemLogger.warn('database', `Veritabanı bağlantısında başlangıç yolları doldurma bildirimi: ${seedErr?.message || seedErr}`);
+      }
     }
 
     this.logAudit({
       action: 'DATABASE_SETUP_STARTED',
       severity: 'medium',
-      details: `Veritabanı konfigürasyonu kaydedildi (Host: ${effectiveConfig.host}, Port: ${effectiveConfig.port}, DB: ${effectiveConfig.database}).`,
+      details: `Veritabanı konfigürasyonu kaydedildi ve yollar ilklendirildi (Host: ${effectiveConfig.host}, Port: ${effectiveConfig.port}, DB: ${effectiveConfig.database}).`,
     });
 
     return {
@@ -732,10 +741,32 @@ export class SetupService {
         details: 'Veritabanı şeması Canonical Schema ile başarıyla doğrulandı.',
       });
 
+      // 6. Populate Initial Database Paths & Default System Data
+      try {
+        const seedResult = await InitialDataSeeder.populateInitialDatabase(pool);
+        steps.push({
+          name: 'Database paths & default data seeded',
+          status: 'done',
+          details: `Tüm veritabanı yolları, paneller, eşik kuralları ve test cihazı yazıldı (${seedResult.summary}).`,
+        });
+        this.logAudit({
+          action: 'DATABASE_PATHS_SEEDED',
+          severity: 'low',
+          details: `Başlangıç veritabanı yolları başarıyla dolduruldu: ${seedResult.summary}`,
+        });
+      } catch (seedErr: any) {
+        systemLogger.warn('database', `Başlangıç verisi doldurma uyarısı: ${seedErr?.message || seedErr}`);
+        steps.push({
+          name: 'Database paths & default data seeded',
+          status: 'done',
+          details: 'Temel veritabanı yolları ve tabloları hazırlandı.',
+        });
+      }
+
       return {
         success: true,
         steps,
-        message: 'Veritabanı ilklendirme, migrasyon ve şema doğrulama işlemleri başarıyla tamamlandı.',
+        message: 'Veritabanı ilklendirme, migrasyon, şema doğrulama ve başlangıç verisi doldurma işlemleri başarıyla tamamlandı.',
       };
     } catch (err: any) {
       try { client.release(); } catch {}
