@@ -23,19 +23,6 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Canonical Root System Administrator (usr_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, created_at)
-VALUES (
-    'usr_admin',
-    'Sistem Yöneticisi',
-    'admin@nexusnode.io',
-    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-    'admin',
-    'Merkez Yönetim',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
@@ -331,8 +318,3 @@ CREATE TABLE IF NOT EXISTS dispatch_logs (
     error_details TEXT,
     sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-
--- Seed Default Admin User
-INSERT INTO users (id, name, email, password_hash, role, company_name) 
-VALUES ('usr_admin', 'Özkan Dörtbölük', 'admin@dashboard.io', '$2b$10$wE99o9oZ3GvBkWxVpW4eOuL83D/80R57K1hG2vJp0VpM0m/9cR.sK', 'admin', 'Merkez Yönetim')
-ON CONFLICT (email) DO NOTHING;

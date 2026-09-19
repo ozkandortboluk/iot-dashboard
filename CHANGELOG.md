@@ -4,6 +4,39 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.2] - 2026-09-19
+
+### 🐛 Düzeltme: @nexusnodeiot.com.tr Alan Adlı Gerçek Yöneticilerin Tanınması (Real Admin Domain Fix)
+- **Aşırı Geniş Alan Adı Filtresinin Kaldırılması**:
+  - `src/server/services/setup.service.ts`, `src/server/database/postgres.ts` ve `src/server/db.ts` içerisindeki yönetici kontrol sorgularında bulunan `AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'` koşulu kaldırıldı.
+  - `isRealAdminUser` fonksiyonunda `email.endsWith('@nexusnodeiot.com.tr')` kontrolü düzeltildi; yalnızca kanonik test hesabı `test@nexusnodeiot.com.tr` ve `test_` önekli hesaplar test hesabı olarak ayrıştırıldı.
+  - Böylelikle `admin@nexusnodeiot.com.tr`, `ozkan@nexusnodeiot.com.tr` veya şirket alan adına sahip herhangi bir gerçek yönetici hesabı oluşturulduğunda sistem bu hesabı eksiksiz ve kalıcı bir yönetici olarak tanır; kurulum ekranının döngüye girmesi veya "kurulum gerekli" durumunda takılması önlendi.
+- **Kapsamlı Test Doğrulaması**:
+  - `src/tests/database_setup_wizard.test.ts` içerisindeki `isRealAdminUser` testlerine `@nexusnodeiot.com.tr` alan adlı gerçek yönetici hesaplarının tanındığını doğrulayan kontrol senaryoları eklendi.
+  - Sürüm numaraları senkronize edildi (`1.36.2`).
+
+---
+
+## 🚀 [v1.36.1] - 2026-09-19
+
+### 🔒 Güvenlik & İlklendirme Mimarisi: Erken Seed ve Sabit Şifreli Yönetici Oluşturulmasının Engellenmesi
+- **Erken Seed ve Şema Denetiminin `configureDatabase` Aşamasından Kaldırılması (`src/server/services/setup.service.ts`)**:
+  - Veritabanı bağlantı parametreleri kaydedilir kaydedilmez (`/api/setup/configure-database`) otomatik olarak çalışan `SchemaAuditor.auditAndHeal()` ve `InitialDataSeeder.populateInitialDatabase()` çağrıları tamamen kaldırıldı.
+  - Bu adım yalnızca bağlantı havuzunu güvenle oluşturur ve yapılandırmayı saklar; şema yaratma ve veri doldurma işlemleri sırasını bekler.
+- **İlklendirme ve Veri Doldurma Döngüsünün Gerçek Yöneticiye Ertelenmesi**:
+  - Şema yapısı ve migrasyonlar Adım 5'te (`initializeDatabase`) doğrulanır; ancak kullanıcı veya varsayılan donanım kayıtlarının doldurulması Adım 6'ya (`createAdmin`) ertelendi.
+  - Operatör kendi gerçek yönetici hesabını oluşturup şifresini belirledikten hemen sonra `InitialDataSeeder` çalıştırılır ve oluşturulan tüm sistem donanımları (`dev_test_01`) ile paneller doğrudan bu yeni gerçek yöneticiye bağlanır.
+- **Kanonik Şema DDL ve Migrasyonlardaki Sabit Yönetici Eklemelerinin Temizlenmesi**:
+  - `src/server/database/canonicalSchema.ts` içerisindeki `generateTableCanonicalDDL('users')` ve `generateCanonicalSchemaDDL()` fonksiyonlarından sabit şifreli `admin@nexusnode.io` (`admin1234`) hesabı kaldırıldı. Kanonik test kullanıcısı (`usr_test_admin`) yalnızca test çalışma ortamlarında (`NODE_ENV === 'test' || VITEST`) şartlı olarak üretilecek şekilde sınırlandırıldı.
+  - `src/server/database/migrations/004_multitenant_columns.ts` içerisindeki gereksiz ve güvensiz `INSERT INTO users ('usr_admin'...)` bloğu temizlendi.
+  - `src/db/timescaledb.sql` içerisindeki eski `usr_admin` eklemeleri kaldırıldı.
+  - `src/server/database/postgres.ts` `ensureTelemetrySchema` döngüsünde boş veritabanlarında (`totalUsers === 0`) otomatik seed tetiklenmesi yalnızca test ortamlarıyla sınırlandırıldı; üretim kurulumunda kurulum sihirbazının yönetici oluşturma akışına bırakıldı.
+- **Kapsamlı Test Koruması**:
+  - `src/tests/database_setup_wizard.test.ts` içerisine üretim modunda kanonik DDL'de hiçbir sabit yönetici kaydı veya şifresi üretilmediğini ve `isRealAdminUser` metodunun test/yer tutucu hesapları dışladığını doğrulayan birim testleri eklendi.
+  - Tüm sürüm dosyaları (`package.json`, `package-lock.json`, `src/config/version.ts`) senkronize edildi.
+
+---
+
 ## 🚀 [v1.36.0] - 2026-09-19
 
 ### 🔒 İlk Kurulum API'lerinin Güvenlik Anahtarı (Setup Token) ve SSRF Korumasıyla Kilitlenmesi (Hardened Setup API Security)

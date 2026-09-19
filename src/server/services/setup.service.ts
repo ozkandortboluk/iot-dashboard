@@ -525,7 +525,6 @@ export class SetupService {
               AND LOWER(email) != 'test@nexusnodeiot.com.tr'
               AND id NOT LIKE 'usr_test_%'
               AND id NOT LIKE 'test_%'
-              AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
               AND LOWER(email) NOT LIKE 'test_%'
             LIMIT 1;
           `).catch(() => ({ rows: [] }));
@@ -789,20 +788,12 @@ export class SetupService {
     if (newPool) {
       db.postgresRepo?.setPool(newPool);
       await db.initPostgresRepository().catch(() => {});
-
-      // Automatically audit schema and populate initial database paths upon initial connection
-      try {
-        await SchemaAuditor.auditAndHeal(newPool);
-        await InitialDataSeeder.populateInitialDatabase(newPool);
-      } catch (seedErr: any) {
-        systemLogger.warn('database', `Veritabanı bağlantısında başlangıç yolları doldurma bildirimi: ${seedErr?.message || seedErr}`);
-      }
     }
 
     this.logAudit({
       action: 'DATABASE_SETUP_STARTED',
       severity: 'medium',
-      details: `Veritabanı konfigürasyonu kaydedildi ve yollar ilklendirildi (Host: ${effectiveConfig.host}, Port: ${effectiveConfig.port}, DB: ${effectiveConfig.database}).`,
+      details: `Veritabanı konfigürasyonu kaydedildi (Host: ${effectiveConfig.host}, Port: ${effectiveConfig.port}, DB: ${effectiveConfig.database}).`,
     });
 
     return {
@@ -945,32 +936,17 @@ export class SetupService {
         details: 'Veritabanı şeması Canonical Schema ile başarıyla doğrulandı.',
       });
 
-      // 6. Populate Initial Database Paths & Default System Data
-      try {
-        const seedResult = await InitialDataSeeder.populateInitialDatabase(pool);
-        steps.push({
-          name: 'Database paths & default data seeded',
-          status: 'done',
-          details: `Tüm veritabanı yolları, paneller, eşik kuralları ve test cihazı yazıldı (${seedResult.summary}).`,
-        });
-        this.logAudit({
-          action: 'DATABASE_PATHS_SEEDED',
-          severity: 'low',
-          details: `Başlangıç veritabanı yolları başarıyla dolduruldu: ${seedResult.summary}`,
-        });
-      } catch (seedErr: any) {
-        systemLogger.warn('database', `Başlangıç verisi doldurma uyarısı: ${seedErr?.message || seedErr}`);
-        steps.push({
-          name: 'Database paths & default data seeded',
-          status: 'done',
-          details: 'Temel veritabanı yolları ve tabloları hazırlandı.',
-        });
-      }
+      // 6. Schema and tables verified ready for administrator creation
+      steps.push({
+        name: 'Database structure & schema verified',
+        status: 'done',
+        details: 'Tüm tablolar, indeksler ve migrasyonlar hazırlandı. İlk yönetici hesabı oluşturulmayı bekliyor.',
+      });
 
       return {
         success: true,
         steps,
-        message: 'Veritabanı ilklendirme, migrasyon, şema doğrulama ve başlangıç verisi doldurma işlemleri başarıyla tamamlandı.',
+        message: 'Veritabanı ilklendirme, migrasyon ve şema doğrulama işlemleri başarıyla tamamlandı. Yönetici hesabı oluşturulabilir.',
       };
     } catch (err: any) {
       try { client.release(); } catch {}
@@ -1037,7 +1013,6 @@ export class SetupService {
           AND LOWER(email) != 'test@nexusnodeiot.com.tr'
           AND id NOT LIKE 'usr_test_%'
           AND id NOT LIKE 'test_%'
-          AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
           AND LOWER(email) NOT LIKE 'test_%'
         LIMIT 1;
       `).catch(() => ({ rows: [] }));
@@ -1096,6 +1071,13 @@ export class SetupService {
             [adminId, email, hashedPassword, displayName, 'admin', params.companyName || 'Merkez Yönetim']
           );
 
+          // Populate initial database paths and canonical test device now that real admin exists
+          try {
+            await InitialDataSeeder.populateInitialDatabase(pool);
+          } catch (seedErr: any) {
+            systemLogger.warn('database', `Veritabanı başlangıç yolları doldurma bildirimi: ${seedErr?.message || seedErr}`);
+          }
+
           // Also initialize administrator's personal dashboard layout
           const widgetsJson = JSON.stringify(defaultWidgets);
           await userClient.query(
@@ -1110,7 +1092,7 @@ export class SetupService {
           // Assign device ownership to primary admin
           await userClient.query(
             `UPDATE devices SET user_id = $1, tenant_id = $1, customer_id = $1 
-             WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system');`,
+             WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system' OR user_id = 'usr_admin');`,
             [adminId]
           ).catch(() => {});
         } finally {

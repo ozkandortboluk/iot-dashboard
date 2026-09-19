@@ -106,7 +106,7 @@ export function isRealAdminUser(u?: {
   if (id.startsWith('usr_test_') || id.startsWith('test_')) {
     return false;
   }
-  if (email.endsWith('@nexusnodeiot.com.tr') || email.startsWith('test_') || email.includes('test_')) {
+  if (email.startsWith('test_') || email.startsWith('test.') || email.startsWith('test+')) {
     return false;
   }
   if (name.startsWith('test ') || name.includes('test user') || name === 'test kullanıcısı') {
@@ -321,7 +321,6 @@ export class PostgresRepository {
              AND LOWER(email) != 'test@nexusnodeiot.com.tr'
              AND id NOT LIKE 'usr_test_%'
              AND id NOT LIKE 'test_%'
-             AND LOWER(email) NOT LIKE '%@nexusnodeiot.com.tr'
              AND LOWER(email) NOT LIKE 'test_%'
            LIMIT 1;`;
       const res = await this.pool.query(sql);
@@ -528,8 +527,9 @@ export class PostgresRepository {
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
-        if (totalUsers === 0) {
-          // Brand new empty database connected - immediately populate all canonical paths, tables, and seed data
+        const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+        if (totalUsers === 0 && isTestEnv) {
+          // Strictly in test environments, populate initial database test paths
           try {
             await InitialDataSeeder.populateInitialDatabase(this.pool);
           } catch (seedErr: any) {

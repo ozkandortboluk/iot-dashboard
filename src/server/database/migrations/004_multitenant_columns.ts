@@ -6,23 +6,7 @@ export const migration004: Migration = {
   name: 'multitenant_columns_and_integrity',
   disableTransaction: true,
   up: async (client: pg.PoolClient) => {
-    // 1. Ensure root admin user exists (do this first for FK integrity)
-    await client.query(`
-      INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-      VALUES (
-        'usr_admin',
-        'Sistem Yöneticisi',
-        'admin@nexusnode.io',
-        '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-        'admin',
-        'Merkez Yönetim',
-        'active',
-        CURRENT_TIMESTAMP
-      )
-      ON CONFLICT (id) DO NOTHING;
-    `);
-
-    // 2. Ensure tenant_id column exists on all relevant tables and backfill
+    // 1. Ensure tenant_id column exists on all relevant tables and backfill
     const tenantColumns = [
       { table: 'devices', column: 'tenant_id' },
       { table: 'telemetry_readings', column: 'tenant_id' },

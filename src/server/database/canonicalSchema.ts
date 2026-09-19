@@ -1214,22 +1214,11 @@ EXCEPTION
 END $$;\n`;
   }
 
-  // Seed Canonical Root & Test Accounts if users table was created
+  // Seed Canonical Test Account strictly in test environments if users table was created
   if (tableName === 'users') {
-    ddl += `
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_admin',
-    'Sistem Yöneticisi',
-    'admin@nexusnode.io',
-    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-    'admin',
-    'Merkez Yönetim',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
+    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+    if (isTestEnv) {
+      ddl += `
 INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
 VALUES (
     'usr_test_admin',
@@ -1242,6 +1231,7 @@ VALUES (
     CURRENT_TIMESTAMP
 )
 ON CONFLICT (id) DO NOTHING;\n`;
+    }
   }
 
   // Seed Canonical Test Device if devices table was created
@@ -1279,6 +1269,23 @@ ON CONFLICT (id) DO NOTHING;\n`;
  * Generates the complete, idempotent, self-healing DDL SQL string for the entire Canonical Schema.
  */
 export function generateCanonicalSchemaDDL(): string {
+  const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+  const testUserDdl = isTestEnv ? `
+-- Canonical Permanent Test Administrator (usr_test_admin)
+INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
+VALUES (
+    'usr_test_admin',
+    'Kanonik Test Yöneticisi',
+    'test@nexusnodeiot.com.tr',
+    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+    'admin',
+    'NexusNode Test Laboratuvarı',
+    'active',
+    CURRENT_TIMESTAMP
+)
+ON CONFLICT (id) DO NOTHING;
+` : '';
+
   return `
 -- ============================================================================
 -- NexusNode IoT - Complete Canonical Database Schema (PostgreSQL + TimescaleDB)
@@ -1362,33 +1369,7 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- Canonical Root Administrator (usr_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_admin',
-    'Sistem Yöneticisi',
-    'admin@nexusnode.io',
-    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-    'admin',
-    'Merkez Yönetim',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
--- Canonical Permanent Test Administrator (usr_test_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_test_admin',
-    'Kanonik Test Yöneticisi',
-    'test@nexusnodeiot.com.tr',
-    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
-    'admin',
-    'NexusNode Test Laboratuvarı',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
+${testUserDdl}
 
 -- 2.2 DEVICES
 CREATE TABLE IF NOT EXISTS devices (

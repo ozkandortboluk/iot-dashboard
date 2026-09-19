@@ -148,4 +148,49 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     // Reset state
     (setupService as any).isCompletedState = false;
   });
+
+  it('7. should guarantee no hardcoded admin credentials (admin@nexusnode.io) exist in Canonical Schema DDL', async () => {
+    const { generateCanonicalSchemaDDL, generateSingleTableDDL } = await import('../server/database/canonicalSchema.js');
+    
+    // Save original env
+    const origEnv = process.env.NODE_ENV;
+    const origVitest = process.env.VITEST;
+    const origEnable = process.env.ENABLE_TEST_ACCOUNT;
+    
+    try {
+      // Simulate production runtime
+      process.env.NODE_ENV = 'production';
+      delete (process.env as any).VITEST;
+      delete (process.env as any).ENABLE_TEST_ACCOUNT;
+
+      const ddl = generateCanonicalSchemaDDL();
+      expect(ddl).not.toContain('admin@nexusnode.io');
+      expect(ddl).not.toContain('$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K');
+      expect(ddl).not.toContain("VALUES ('usr_admin'");
+
+      const usersTableDdl = generateSingleTableDDL('users');
+      expect(usersTableDdl).not.toContain('admin@nexusnode.io');
+      expect(usersTableDdl).not.toContain("VALUES (\n    'usr_admin'");
+    } finally {
+      process.env.NODE_ENV = origEnv;
+      if (origVitest) process.env.VITEST = origVitest;
+      if (origEnable) process.env.ENABLE_TEST_ACCOUNT = origEnable;
+    }
+  });
+
+  it('8. should verify isRealAdminUser strictly distinguishes genuine human admins from test or placeholder accounts', async () => {
+    const { isRealAdminUser } = await import('../server/database/postgres.js');
+
+    // Canonical test accounts must NOT count as real production admins
+    expect(isRealAdminUser({ id: 'usr_test_admin', email: 'test@nexusnodeiot.com.tr', role: 'admin' })).toBe(false);
+    expect(isRealAdminUser({ id: 'test_user_01', email: 'test_123@nexusnodeiot.com.tr', role: 'admin' })).toBe(false);
+    expect(isRealAdminUser(null)).toBe(false);
+    expect(isRealAdminUser({ id: 'usr_op', email: 'op@company.com', role: 'operator' })).toBe(false);
+
+    // True operator admin accounts - including company domain @nexusnodeiot.com.tr
+    expect(isRealAdminUser({ id: 'usr_admin', email: 'realadmin@mycompany.com', role: 'admin' })).toBe(true);
+    expect(isRealAdminUser({ id: 'usr_admin', email: 'admin@nexusnodeiot.com.tr', role: 'admin' })).toBe(true);
+    expect(isRealAdminUser({ id: 'usr_ozkan', email: 'ozkan@nexusnodeiot.com.tr', role: 'admin' })).toBe(true);
+    expect(isRealAdminUser({ id: 'usr_director', email: 'director@nexusnodeiot.com.tr', role: 'admin' })).toBe(true);
+  });
 });
