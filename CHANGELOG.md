@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.3] - 2026-09-19
+
+### 🔒 Güvenlik & Hata Yönetimi: Yönetici Veritabanı Yazımının Kesin Doğrulanması ve Hata Durumunda Kurulumun İptali (Atomic Admin Persistence)
+- **Hata Yutmanın Kaldırılması ve Hızlı Başarısızlık (Fail-Fast Policy)**:
+  - `src/server/services/setup.service.ts` içerisindeki `createAdministrator` metodunda yönetici kullanıcısı ekleme hatalarının `.catch(() => {})` ile yutulup kurulumun sanki başarılıymış gibi tamamlanması ve sahte oturum açılması açığı kapatıldı.
+- **Atomik Veritabanı İşlemi (Transaction) ve Doğrulama Sorgusu**:
+  - Yönetici hesabı oluşturma süreci `BEGIN` ... `COMMIT` / `ROLLBACK` işlem bloğuna alındı.
+  - Yönetici tablosuna yazma (`INSERT ... RETURNING`) yapıldıktan sonra kaydın aktif ve doğru rolde olduğu seçme sorgusuyla (`SELECT id, email, role, status FROM users WHERE id = $1 AND role = 'admin' AND status = 'active'`) doğrulanır.
+  - Veritabanına yazma veya doğrulama aşamasında herhangi bir hata meydana gelirse işlem geri alınır (`ROLLBACK`), `markSetupCompleted()` çağrılmaz, `SETUP_TOKEN` silinmez ve istemciye açık bir hata fırlatılarak kurulumun yarım veya geçersiz durumda kilitlenmesi engellenir.
+- **Birim Test Koruması**:
+  - `src/tests/database_setup_wizard.test.ts` içerisine veritabanı yazma başarısızlığında kurulumun tamamlanmadığını ve hata fırlatıldığını teyit eden birim testi eklendi.
+  - Sürüm numaraları senkronize edildi (`1.36.3`).
+
+---
+
 ## 🚀 [v1.36.2] - 2026-09-19
 
 ### 🐛 Düzeltme: @nexusnodeiot.com.tr Alan Adlı Gerçek Yöneticilerin Tanınması (Real Admin Domain Fix)

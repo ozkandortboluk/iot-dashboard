@@ -193,4 +193,22 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     expect(isRealAdminUser({ id: 'usr_ozkan', email: 'ozkan@nexusnodeiot.com.tr', role: 'admin' })).toBe(true);
     expect(isRealAdminUser({ id: 'usr_director', email: 'director@nexusnodeiot.com.tr', role: 'admin' })).toBe(true);
   });
+
+  it('9. should abort setup and throw error if admin database write fails, preventing false setup completion', async () => {
+    // Attempting to create admin without database connection should fail fast
+    (setupService as any).isCompletedState = false;
+    (setupService as any).runtimeConfig = null;
+
+    await expect(
+      setupService.createAdministrator({
+        name: 'Failure Test Admin',
+        email: 'admin@nexusnodeiot.com.tr',
+        password: 'validPassword123!',
+        passwordConfirm: 'validPassword123!',
+      })
+    ).rejects.toThrow();
+
+    // Setup must NOT be marked as completed
+    expect(setupService.isSetupCompleted()).toBe(false);
+  });
 });

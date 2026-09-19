@@ -1055,53 +1055,80 @@ export class SetupService {
 
     // Save user to PostgreSQL repository if pool is available
     if (pool) {
+      const userClient = await pool.connect();
       try {
-        const userClient = await pool.connect();
-        try {
-          await userClient.query(
-            `INSERT INTO users (id, email, password_hash, name, role, company_name, status, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW(), NOW())
-             ON CONFLICT (id) DO UPDATE SET
-               email = EXCLUDED.email,
-               password_hash = EXCLUDED.password_hash,
-               name = EXCLUDED.name,
-               company_name = EXCLUDED.company_name,
-               status = 'active',
-               updated_at = NOW();`,
-            [adminId, email, hashedPassword, displayName, 'admin', params.companyName || 'Merkez Yönetim']
-          );
+        await userClient.query('BEGIN');
 
-          // Populate initial database paths and canonical test device now that real admin exists
-          try {
-            await InitialDataSeeder.populateInitialDatabase(pool);
-          } catch (seedErr: any) {
-            systemLogger.warn('database', `Veritabanı başlangıç yolları doldurma bildirimi: ${seedErr?.message || seedErr}`);
-          }
+        const insertRes = await userClient.query(
+          `INSERT INTO users (id, email, password_hash, name, role, company_name, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW(), NOW())
+           ON CONFLICT (id) DO UPDATE SET
+             email = EXCLUDED.email,
+             password_hash = EXCLUDED.password_hash,
+             name = EXCLUDED.name,
+             company_name = EXCLUDED.company_name,
+             status = 'active',
+             updated_at = NOW()
+           RETURNING id, email, role, status;`,
+          [adminId, email, hashedPassword, displayName, 'admin', params.companyName || 'Merkez Yönetim']
+        );
 
-          // Also initialize administrator's personal dashboard layout
-          const widgetsJson = JSON.stringify(defaultWidgets);
-          await userClient.query(
-            `INSERT INTO dashboard_layouts (id, user_id, title, widgets_json, updated_at)
-             VALUES ($1, $2, 'Merkez Yönetim Ana Dashboard', $3::jsonb, NOW())
-             ON CONFLICT (id) DO UPDATE SET
-               widgets_json = EXCLUDED.widgets_json,
-               updated_at = NOW();`,
-            [`dash_${adminId}`, adminId, widgetsJson]
-          ).catch(() => {});
-
-          // Assign device ownership to primary admin
-          await userClient.query(
-            `UPDATE devices SET user_id = $1, tenant_id = $1, customer_id = $1 
-             WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system' OR user_id = 'usr_admin');`,
-            [adminId]
-          ).catch(() => {});
-        } finally {
-          userClient.release();
+        if (!insertRes.rows || insertRes.rows.length === 0) {
+          throw new Error('Yönetici hesabı veritabanı tablosuna yazılamadı.');
         }
-      } catch (pgInsertErr) {
-        systemLogger.warn('database', `Could not directly insert admin to postgres table: ${pgInsertErr}`);
+
+        // Authoritative verification that admin was committed and is active
+        const verifyCheck = await userClient.query(
+          `SELECT id, email, role, status FROM users WHERE id = $1 AND role = 'admin' AND status = 'active' LIMIT 1;`,
+          [adminId]
+        );
+        if (!verifyCheck.rows || verifyCheck.rows.length === 0) {
+          throw new Error('Yönetici hesabı veritabanında doğrulanamadı.');
+        }
+
+        // Populate initial database paths and canonical test device now that real admin exists
+        try {
+          await InitialDataSeeder.populateInitialDatabase(pool);
+        } catch (seedErr: any) {
+          systemLogger.warn('database', `Veritabanı başlangıç yolları doldurma bildirimi: ${seedErr?.message || seedErr}`);
+        }
+
+        // Also initialize administrator's personal dashboard layout
+        const widgetsJson = JSON.stringify(defaultWidgets);
+        await userClient.query(
+          `INSERT INTO dashboard_layouts (id, user_id, title, widgets_json, updated_at)
+           VALUES ($1, $2, 'Merkez Yönetim Ana Dashboard', $3::jsonb, NOW())
+           ON CONFLICT (id) DO UPDATE SET
+             widgets_json = EXCLUDED.widgets_json,
+             updated_at = NOW();`,
+          [`dash_${adminId}`, adminId, widgetsJson]
+        ).catch((layoutErr) => {
+          systemLogger.warn('database', `Dashboard layout initialization warning: ${layoutErr?.message || layoutErr}`);
+        });
+
+        // Assign device ownership to primary admin
+        await userClient.query(
+          `UPDATE devices SET user_id = $1, tenant_id = $1, customer_id = $1 
+           WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system' OR user_id = 'usr_admin');`,
+          [adminId]
+        ).catch(() => {});
+
+        await userClient.query('COMMIT');
+      } catch (pgInsertErr: any) {
+        await userClient.query('ROLLBACK').catch(() => {});
+        systemLogger.error('database', `Yönetici veritabanına kaydedilirken kritik hata: ${pgInsertErr?.message || pgInsertErr}`);
+        throw new Error(`Yönetici hesabı veritabanına kaydedilemedi: ${pgInsertErr?.message || pgInsertErr}`, { cause: pgInsertErr });
+      } finally {
+        userClient.release();
       }
-      await db.postgresRepo?.saveUser(adminUser, hashedPassword).catch(() => {});
+
+      if (db.postgresRepo) {
+        try {
+          await db.postgresRepo.saveUser(adminUser, hashedPassword);
+        } catch (repoErr: any) {
+          systemLogger.warn('database', `PostgresRepo in-memory sync notice: ${repoErr?.message || repoErr}`);
+        }
+      }
     }
 
     // Generate session token via unified database service (persisted to PostgreSQL user_sessions)
