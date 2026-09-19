@@ -9,7 +9,7 @@ data/
 db.json
 uploads/keys/
 uploads/firmware/
+docker/nginx/adminer.htpasswd
 # Backups
 backups/
 *.bak
-
