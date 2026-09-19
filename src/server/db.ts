@@ -506,9 +506,6 @@ class LocalDatabase {
           AND (deleted_at IS NULL)
           AND id != 'usr_test_admin'
           AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-          AND id NOT LIKE 'usr_test_%'
-          AND id NOT LIKE 'test_%'
-          AND LOWER(email) NOT LIKE 'test_%'
         LIMIT 1;
       `).catch(() => ({ rows: [] }));
 

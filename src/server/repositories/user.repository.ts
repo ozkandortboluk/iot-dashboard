@@ -34,11 +34,7 @@ export class UserRepository {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
-    if (this.isPgReady()) {
-      await this.db.postgresRepo.saveSession(session).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return token;
-    }
-
+    // Always maintain in-memory sessions cache for resilient fallback
     if (!this.db.data.sessions) {
       this.db.data.sessions = [];
     }
@@ -46,7 +42,13 @@ export class UserRepository {
       (s: any) => new Date(s.expiresAt).getTime() > Date.now()
     );
     this.db.data.sessions.push(session);
-    this.db.saveData(this.db.data, true);
+    try {
+      this.db.saveData(this.db.data, true);
+    } catch {}
+
+    if (this.isPgReady()) {
+      await this.db.postgresRepo.saveSession(session).catch((e: any) => console.warn('[PG Error saveSession]', e?.message || e));
+    }
     return token;
   }
 
@@ -56,14 +58,15 @@ export class UserRepository {
 
     if (this.isPgReady()) {
       await this.db.postgresRepo.deleteSession(cleanToken).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      return true;
     }
 
     const initialLength = (this.db.data.sessions || []).length;
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.token !== cleanToken);
     const removed = (this.db.data.sessions || []).length < initialLength;
     if (removed) {
-      this.db.saveData(this.db.data, true);
+      try {
+        this.db.saveData(this.db.data, true);
+      } catch {}
     }
     return removed;
   }
@@ -98,7 +101,10 @@ export class UserRepository {
     const cleanToken = token.trim();
 
     if (this.isPgReady()) {
-      return await this.db.postgresRepo.verifySession(cleanToken);
+      const pgResult = await this.db.postgresRepo.verifySession(cleanToken).catch(() => null);
+      if (pgResult) {
+        return pgResult;
+      }
     }
 
     return this.verifySession(cleanToken);
@@ -107,32 +113,43 @@ export class UserRepository {
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> {
     const cleanEmail = email.trim().toLowerCase();
 
-    // 1. PostgreSQL Production Mode: PostgreSQL is the SOLE source of truth
+    // 1. PostgreSQL Production Mode: PostgreSQL is the primary source of truth
     if (this.isPgReady()) {
       const record = await this.db.postgresRepo.getUserWithPassword(cleanEmail);
-      if (!record) {
-        this.addAuditLog('unknown', email, 'Hatalı Giriş Denemesi (Kullanıcı Bulunamadı)', 'high');
+      if (record) {
+        const { user, passwordHash: storedHash } = record;
+        if (storedHash && verifyPassword(pass, storedHash)) {
+          if (!storedHash.startsWith('$2')) {
+            const newHashed = hashPassword(pass);
+            await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch((e: any) =>
+              console.warn('[PG Error]', e?.message || e)
+            );
+          }
+          // Sync with in-memory store
+          if (this.db.data.users) {
+            const idx = this.db.data.users.findIndex((u: any) => u.id === user.id || u.email.toLowerCase() === cleanEmail);
+            if (idx >= 0) this.db.data.users[idx] = user;
+            else this.db.data.users.push(user);
+          }
+          if (this.db.data.passwords) {
+            this.db.data.passwords[user.id] = storedHash;
+          }
+
+          const token = await this.createSession(user);
+          this.addAuditLog(user.id, user.name, 'Giriş Başarılı (PostgreSQL Bcrypt Verified)', 'low');
+          return { user, token };
+        }
+        this.addAuditLog(user.id, email, 'Hatalı Giriş Denemesi (Şifre Hatalı)', 'high');
         return null;
       }
-      const { user, passwordHash: storedHash } = record;
-      if (storedHash && verifyPassword(pass, storedHash)) {
-        if (!storedHash.startsWith('$2')) {
-          const newHashed = hashPassword(pass);
-          await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch((e: any) =>
-            console.warn('[PG Error]', e?.message || e)
-          );
-        }
-        const token = await this.createSession(user);
-        this.addAuditLog(user.id, user.name, 'Giriş Başarılı (PostgreSQL Bcrypt Verified)', 'low');
-        return { user, token };
-      }
-      this.addAuditLog(user.id, email, 'Hatalı Giriş Denemesi (Şifre Hatalı)', 'high');
-      return null;
     }
 
-    // Fallback for non-postgres local/test mode
+    // Fallback for non-postgres local/test mode or in-memory sync
     const user = (this.db.data.users || []).find((u: any) => u.email.toLowerCase() === cleanEmail);
-    if (!user) return null;
+    if (!user) {
+      this.addAuditLog('unknown', email, 'Hatalı Giriş Denemesi (Kullanıcı Bulunamadı)', 'high');
+      return null;
+    }
     const storedHash = (this.db.data.passwords || {})[user.id];
     if (storedHash && verifyPassword(pass, storedHash)) {
       if (!storedHash.startsWith('$2')) {
@@ -208,6 +225,20 @@ export class UserRepository {
 
       await this.db.postgresRepo.saveDashboard(dashboard).catch((e: any) => console.warn('[PG Error]', e?.message || e));
       await this.db.postgresRepo.saveAuditLog(auditLog).catch((e: any) => console.warn('[PG Error]', e?.message || e));
+
+      // Also sync to in-memory store for instant cache retrieval
+      if (!this.db.data.users) this.db.data.users = [];
+      if (!this.db.data.passwords) this.db.data.passwords = {};
+      const existingIdx = this.db.data.users.findIndex((u: any) => u.id === newUser.id || u.email.toLowerCase() === cleanEmail);
+      if (existingIdx >= 0) {
+        this.db.data.users[existingIdx] = newUser;
+      } else {
+        this.db.data.users.push(newUser);
+      }
+      this.db.data.passwords[newUser.id] = hashedPassword;
+      try {
+        this.db.saveData(this.db.data, true);
+      } catch {}
 
       return newUser;
     }

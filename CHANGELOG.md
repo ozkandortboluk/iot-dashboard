@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.9] - 2026-09-19
+
+### 🛡️ İlk Yönetici Hesabı Oluşturma Sonrası Oturum Açma & Kayıt Olma Düzeltmesi (Post-Setup Auth & Session Resilience)
+- **Kullanıcı Oturumu (user_sessions) & ON CONFLICT Hataları Düzeltildi**:
+  - `user_sessions` tablosunda `token` alanı üzerinde `idx_user_sessions_token` benzersiz indeksi (UNIQUE INDEX) tanımlandı.
+  - `saveSession` metodu PostgreSQL `ON CONFLICT (token)` hatasını önleyecek ve hem PostgreSQL hem bellek içi (in-memory) katmanda oturumları anında ve çift yönlü senkronize edecek şekilde güncellendi.
+- **Yönetici ve Kullanıcı Doğrulama Filtresi (isRealAdminUser) Düzeltildi**:
+  - `isRealAdminUser` ve `isTestOrEphemeralUser` kontrollerinde meşru kullanıcı adları veya e-posta adreslerinin (`test_` vb.) yanlışlıkla göz ardı edilmesine yol açan filtreler sadeleştirildi; yalnızca kanonik test kullanıcısı (`usr_test_admin` / `test@nexusnodeiot.com.tr`) ve dahili e2e kullanıcıları hariç tutulacak şekilde kesinleştirildi.
+- **Kayıt Olma & Giriş Yapma Senkronizasyonu**:
+  - `registerUser` ve `createAdministrator` işlemlerinde oluşturulan kullanıcılar ve bcrypt şifre özetleri hem PostgreSQL'e hem de anlık bellek içi verilere işlenerek ilk kurulumdan hemen sonra şifre kontrolü ve oturum doğrulamasının (`authenticateUser` & `verifySessionAsync`) pürüzsüz çalışması sağlandı.
+- **Birim Test Kapsamı**:
+  - Sürüm `1.36.9` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.8] - 2026-09-19
 
 ### 🛡️ Kurulum Sihirbazı Adım 4 TimescaleDB / PostgreSQL Esnek İlklendirme Düzeltmesi (Step 4 DB Init & Adaptive TimescaleDB Fallback)

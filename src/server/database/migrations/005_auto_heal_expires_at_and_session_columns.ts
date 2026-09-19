@@ -31,6 +31,7 @@ export const migration005: Migration = {
 
       CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
       CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);
     `);
 
     // 2. device_ws_messages_dedup table column resilience

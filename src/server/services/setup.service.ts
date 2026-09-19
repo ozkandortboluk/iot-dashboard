@@ -582,7 +582,7 @@ export class SetupService {
           isDbConnected = true;
 
           // Admin check in PostgreSQL:
-          // Strictly query for REAL production administrator, excluding test accounts (usr_test_admin)
+          // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
           const adminCheck = await client.query(`
             SELECT id, email, name FROM users 
             WHERE role = 'admin' 
@@ -590,9 +590,6 @@ export class SetupService {
               AND (deleted_at IS NULL)
               AND id != 'usr_test_admin'
               AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-              AND id NOT LIKE 'usr_test_%'
-              AND id NOT LIKE 'test_%'
-              AND LOWER(email) NOT LIKE 'test_%'
             LIMIT 1;
           `).catch(() => ({ rows: [] }));
 
@@ -1096,9 +1093,6 @@ export class SetupService {
           AND (deleted_at IS NULL)
           AND id != 'usr_test_admin'
           AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-          AND id NOT LIKE 'usr_test_%'
-          AND id NOT LIKE 'test_%'
-          AND LOWER(email) NOT LIKE 'test_%'
         LIMIT 1;
       `).catch(() => ({ rows: [] }));
 
@@ -1215,6 +1209,20 @@ export class SetupService {
         }
       }
     }
+
+    // Sync into db.data for cache consistency across in-memory layers
+    if (!db.data.users) db.data.users = [];
+    if (!db.data.passwords) db.data.passwords = {};
+    const adminIdx = db.data.users.findIndex((u: any) => u.id === adminId || u.email?.toLowerCase() === email.toLowerCase());
+    if (adminIdx >= 0) {
+      db.data.users[adminIdx] = adminUser;
+    } else {
+      db.data.users.push(adminUser);
+    }
+    db.data.passwords[adminId] = hashedPassword;
+    try {
+      db.saveData(db.data, true);
+    } catch {}
 
     // Generate session token via unified database service (persisted to PostgreSQL user_sessions)
     const token = await db.createSession(adminUser);

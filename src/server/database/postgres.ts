@@ -58,30 +58,25 @@ export function isTestOrEphemeralArtifact(id?: string): boolean {
 
 export function isTestOrEphemeralUser(id?: string, email?: string, name?: string): boolean {
   if (!id) return false;
+  // usr_admin, usr_test_admin, or standard customer accounts are NOT ephemeral
   if (id === 'usr_admin' || id === 'usr_test_admin') return false;
-  if (id.startsWith('usr_customer_') || id.startsWith('usr_cust_') || id.startsWith('usr_tmp_') || id.startsWith('usr_ephemeral_')) {
+  // Strictly filter only synthetic automated e2e test artifacts
+  if (id.startsWith('usr_e2e_') || id.startsWith('usr_ephemeral_')) {
     return true;
   }
-  if (name === 'E2E User' || name === 'Integration Test User') {
+  if (name === '__EPHEMERAL_TEST_USER__') {
     return true;
   }
-  if (email && (
-    email.startsWith('test_') ||
-    email.startsWith('integration_') ||
-    email.includes('@example.com') ||
-    email.includes('@test.com') ||
-    email.includes('customer_')
-  )) {
+  if (email && email.endsWith('.e2e.internal')) {
     return true;
   }
   return false;
 }
 
 /**
- * Distinguishes true, production human administrators from test users,
- * ephemeral test artifacts, and default static schema seed placeholders.
- * Ensures the First Run Setup Wizard is NOT erroneously skipped when only
- * canonical test accounts (e.g. usr_test_admin) exist in the system.
+ * Distinguishes true, production human administrators from the canonical test admin (usr_test_admin)
+ * and ephemeral test artifacts. Ensures the First Run Setup Wizard is NOT erroneously skipped when only
+ * canonical test accounts exist, while properly recognizing any legitimate administrator created in setup.
  */
 export function isRealAdminUser(u?: {
   id?: string;
@@ -97,7 +92,6 @@ export function isRealAdminUser(u?: {
 
   const id = (u.id || '').trim().toLowerCase();
   const email = (u.email || '').trim().toLowerCase();
-  const name = (u.name || '').trim().toLowerCase();
 
   // 1. Strictly exclude Canonical Test Admin (Mandatory Rule 3) and test accounts
   if (id === 'usr_test_admin' || email === 'test@nexusnodeiot.com.tr') {
@@ -109,11 +103,8 @@ export function isRealAdminUser(u?: {
   if (email.startsWith('test_') || email.startsWith('test.') || email.startsWith('test+')) {
     return false;
   }
-  if (name.startsWith('test ') || name.includes('test user') || name === 'test kullanıcısı') {
-    return false;
-  }
 
-  // 2. Ephemeral / integration test users
+  // 2. Ephemeral internal test users
   if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
     return false;
   }
@@ -2771,25 +2762,58 @@ export class PostgresRepository {
   public async saveSession(session: UserSession): Promise<void> {
     if (!this.pool) return;
     const sessionId = (session as any).id || `sess_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
-    const sql = `
-      INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (token) DO UPDATE SET 
-        expires_at = EXCLUDED.expires_at,
-        user_role = EXCLUDED.user_role,
-        user_email = EXCLUDED.user_email,
-        user_name = EXCLUDED.user_name;
-    `;
-    await this.query(sql, [
-      sessionId,
-      session.token,
-      session.userId,
-      session.userRole,
-      session.userEmail,
-      session.userName,
-      session.createdAt || new Date().toISOString(),
-      session.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    ]);
+    const expiresAt = session.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const createdAt = session.createdAt || new Date().toISOString();
+
+    try {
+      const sql = `
+        INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (token) DO UPDATE SET 
+          expires_at = EXCLUDED.expires_at,
+          user_role = EXCLUDED.user_role,
+          user_email = EXCLUDED.user_email,
+          user_name = EXCLUDED.user_name;
+      `;
+      await this.query(sql, [
+        sessionId,
+        session.token,
+        session.userId,
+        session.userRole || 'customer',
+        session.userEmail || '',
+        session.userName || '',
+        createdAt,
+        expiresAt,
+      ]);
+    } catch (insertErr: any) {
+      // Resilient fallback: ensure unique index and update or insert
+      try {
+        await this.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);`);
+        const updateRes = await this.query(
+          `UPDATE user_sessions SET expires_at = $1, user_role = $2, user_email = $3, user_name = $4 WHERE token = $5 RETURNING id;`,
+          [expiresAt, session.userRole || 'customer', session.userEmail || '', session.userName || '', session.token]
+        );
+        if (!updateRes.rows || updateRes.rows.length === 0) {
+          await this.query(
+            `INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT DO NOTHING;`,
+            [
+              sessionId,
+              session.token,
+              session.userId,
+              session.userRole || 'customer',
+              session.userEmail || '',
+              session.userName || '',
+              createdAt,
+              expiresAt,
+            ]
+          );
+        }
+      } catch (fallbackErr: any) {
+        console.warn('[PostgreSQL saveSession fallback warning]:', fallbackErr?.message || fallbackErr);
+      }
+    }
   }
 
   public async deleteSession(token: string): Promise<void> {
