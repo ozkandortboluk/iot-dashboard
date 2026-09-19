@@ -4,6 +4,20 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.7] - 2026-09-19
+
+### 🛡️ Kesin Yönetici Varlığı & İlk Kurulum Ekranı Yönlendirmesi (Strict Admin Requirement & Auto Setup Route)
+- **Veritabanında Yönetici Yoksa Sistemin Kurulmamış Sayılması**:
+  - `setupService.getStatus()` ve `isSetupCompleted()` fonksiyonlarında, PostgreSQL veritabanında gerçek bir `admin` kullanıcısı (`isRealAdminUser`) yoksa sistemin kesinlikle **kurulmamış** (`hasAdmin: false`, `isCompleted: false`, `setupRequired: true`, `isDbReady: false`) sayılması kuralı katılaştırıldı.
+  - PostgreSQL bağlıyken in-memory sahte admin kalıntıları bypass edilerek PostgreSQL tablosu tek yetkili (authoritative) hale getirildi.
+- **Arayüz ve Giriş Ekranı Yönlendirmeleri**:
+  - `LoginView.tsx` içerisine başlangıç durum kontrolü eklendi; sistemde yönetici hesabı bulunmadığında kullanıcı giriş formu yerine doğrudan **İlk Kurulum Sihirbazı'na (`DatabaseSetupWizard`)** yönlendirilir.
+  - `App.tsx` ve `auth.ts` (`/api/auth/setup-status`) rotaları yönetici hesabı olmayan sistemlerde ilk kurulum adımlarını otomatik olarak devreye sokar.
+- **Birim Test Kapsamı**:
+  - Sürüm `1.36.7` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.6] - 2026-09-19
 
 ### 🛡️ Kurulum Kilidi & Sıfırlama Kesin Kurtarma İyileştirmesi (Permanent Setup Lock Removal & Immediate Reset)

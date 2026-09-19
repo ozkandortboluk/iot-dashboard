@@ -18,6 +18,24 @@ export const LoginView: React.FC = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Check if system has a real administrator or requires first-run setup
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        const res = await fetch('/api/setup/status', {
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.hasAdmin || data.setupRequired || !data.isDbReady) {
+            setAuthMode('setup');
+          }
+        }
+      } catch {}
+    };
+    checkAdminStatus();
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

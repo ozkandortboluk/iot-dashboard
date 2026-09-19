@@ -51,30 +51,19 @@ router.get('/setup-status', async (req, res) => {
 
   const wizardStatus = await setupService.getStatus().catch(() => null);
 
-  const users = await db.getUsersAsync();
-  let hasAdmin = users.some(isRealAdminUser);
+  let hasAdmin = false;
+  let isDbReady = false;
+  let needSetup = true;
 
-  // 2. Direct PostgreSQL fallback: If in-memory cache hasn't loaded admin yet, query PostgreSQL directly
-  if (db.postgresRepo?.getPool() || db.getPostgresUrl()) {
-    try {
-      const pgAdminExists = await db.postgresRepo.checkIfAdminExists(false);
-      if (pgAdminExists) {
-        hasAdmin = true;
-        // Trigger background hydration to sync in-memory data
-        db.initPostgresRepository().catch(() => {});
-      }
-    } catch (pgErr) {
-      console.warn('[Setup-Status PG Check Warning]:', pgErr);
-    }
+  if (wizardStatus) {
+    hasAdmin = Boolean(wizardStatus.hasAdmin);
+    isDbReady = Boolean(wizardStatus.isDbReady);
+    needSetup = Boolean(wizardStatus.setupRequired || !wizardStatus.hasAdmin || !wizardStatus.isDbReady);
+  } else {
+    const users = await db.getUsersAsync();
+    hasAdmin = users.some(isRealAdminUser);
+    needSetup = !hasAdmin;
   }
-
-  // If setupService detected an administrator, also respect it
-  if (wizardStatus?.hasAdmin && wizardStatus?.isDbConnected) {
-    hasAdmin = true;
-  }
-
-  const isDbReady = Boolean(wizardStatus?.isDbReady || (hasAdmin && wizardStatus?.isDbConnected));
-  const needSetup = !isDbReady || Boolean(wizardStatus?.setupRequired);
 
   res.json({
     needSetup,

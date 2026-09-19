@@ -598,9 +598,9 @@ export class SetupService {
 
           if (adminCheck.rows.length > 0) {
             hasAdmin = true;
-          } else if (users.some(isRealAdminUser)) {
-            hasAdmin = true;
           } else {
+            // When PostgreSQL is connected, the PostgreSQL database is authoritative.
+            // If PostgreSQL has no admin user, hasAdmin is strictly FALSE.
             hasAdmin = false;
           }
 
@@ -636,11 +636,11 @@ export class SetupService {
       }
     }
 
-    // If an administrator exists and DB is connected and migrations are verified, mark setup completed permanently
+    // If an administrator exists, DB is connected, and migrations/schema are verified, mark setup completed
     if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
       this.markSetupCompleted();
-    } else if ((!hasAdmin || !isDbConnected) && process.env.SETUP_COMPLETED !== 'true') {
-      // Auto-heal: If database is disconnected or no real admin exists, setup CANNOT be locked.
+    } else {
+      // Auto-heal: If database is disconnected or no real admin exists, setup CANNOT be completed/locked.
       if (this.isCompletedState) {
         this.isCompletedState = false;
       }
@@ -648,11 +648,11 @@ export class SetupService {
       this.getOrInitSetupToken();
     }
 
-    const isDbReady = Boolean(isDbConnected && migrationsComplete && hasAdmin);
-    const isCompleted = Boolean(isDbReady && (this.isCompletedState || hasAdmin));
+    const isDbReady = Boolean(isDbConnected && migrationsComplete && schemaVerified && hasAdmin);
+    const isCompleted = Boolean(isDbReady && hasAdmin && this.isCompletedState);
 
     // Setup is strictly required if PostgreSQL is not connected, migrations not applied, or admin not created
-    const setupRequired = !isDbReady || process.env.SETUP_REQUIRED === 'true';
+    const setupRequired = !isDbReady || !hasAdmin || process.env.SETUP_REQUIRED === 'true';
 
     // Calculate current step (1 to 7)
     let currentStep = 1;
