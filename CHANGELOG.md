@@ -4,6 +4,19 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.37.0] - 2026-09-19
+
+### 🛡️ Giriş ve Kimlik Doğrulama Rotaları İçin API Veritabanı Koruması Düzeltmesi (Auth Route Guard Fix & Login Flow Recovery)
+- **`/api/auth` Rotalarının 503 Engelinden Muaf Tutulması**:
+  - `server.ts` içerisindeki `/api` PostgreSQL kullanılabilirlik koruma middleware'inde, yalnızca `/auth/setup-status` yerine tüm `/auth` uç noktalarının (`/api/auth/login`, `/api/auth/register`, `/api/auth/me`, `/api/auth/logout`, `/api/auth/setup`) `authRouter`'a iletilmesi sağlandı.
+  - Böylece kurulum tamamlandıktan sonra veya giriş yaparken sunucunun `503 - Veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı` hatası fırlatarak giriş ekranını kilitlemesi ve sayfayı tekrar kurulum moduna düşürmesi sorunu tamamen çözüldü.
+- **Yönetici İlklendirme Sırasında PostgreSQL Havuzunun Hazır Duruma Alınması**:
+  - `createAdministrator` fonksiyonunda oluşturulan yönetici hesabı ile birlikte `db.postgresRepo` havuzunun (`setPool`, `setConnected`) doğrudan `READY` durumuna geçirilmesi güvence altına alındı.
+- **Birim Test Kapsamı**:
+  - Sürüm `1.37.0` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.36.9] - 2026-09-19
 
 ### 🛡️ İlk Yönetici Hesabı Oluşturma Sonrası Oturum Açma & Kayıt Olma Düzeltmesi (Post-Setup Auth & Session Resilience)

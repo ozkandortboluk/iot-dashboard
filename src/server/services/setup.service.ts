@@ -1203,6 +1203,8 @@ export class SetupService {
 
       if (db.postgresRepo) {
         try {
+          db.postgresRepo.setPool(pool);
+          db.postgresRepo.setConnected(true, true);
           await db.postgresRepo.saveUser(adminUser, hashedPassword);
         } catch (repoErr: any) {
           systemLogger.warn('database', `PostgresRepo in-memory sync notice: ${repoErr?.message || repoErr}`);

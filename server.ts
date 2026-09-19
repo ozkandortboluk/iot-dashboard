@@ -153,7 +153,7 @@ app.use('/api', (req, res, next) => {
   // Allowed endpoints even when DB is not ready
   if (
     req.path.startsWith('/setup') ||
-    req.path.startsWith('/auth/setup-status') ||
+    req.path.startsWith('/auth') ||
     req.path === '/system/status' ||
     req.path.startsWith('/health')
   ) {
