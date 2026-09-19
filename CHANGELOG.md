@@ -4,6 +4,18 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.34.3] - 2026-09-19
+
+### 📌 Secure VPS, Domain, Adminer & PostgreSQL Deployment
+- **Production Domains & TLS**: Added dedicated HTTPS virtual hosts for `www.nexusnodeiot.com.tr` and `db.nexusnodeiot.com.tr`, HTTP-to-HTTPS redirects, hardened TLS headers, and WebSocket proxying.
+- **Protected Adminer Access**: Routed Adminer through the private Docker network and required a VPS-managed HTTP Basic Auth file before the public database subdomain can start.
+- **Private Service Bindings**: Bound application, Adminer, and PostgreSQL host ports to loopback by default while documenting SSH-tunneled and temporary IP-restricted PostgreSQL access.
+- **Fail-Fast Secrets & Health Checks**: Made `POSTGRES_PASSWORD` mandatory, corrected the proxy healthcheck, and kept real credentials outside Git.
+- **Reproducible Runtime Image**: Switched Docker dependency installation to `npm ci` and included the OpenAPI document in the production image.
+- **VPS Runbook**: Added certificate provisioning, first-run migrations, firewall rules, Adminer setup, external database access, and password-rotation instructions.
+
+---
+
 ## 🚀 [v1.34.2] - 2026-09-18
 
 ### 📌 Fast Access, Test Account Autofill & Seamless Gatekeeper Flow
