@@ -283,3 +283,69 @@ setupRouter.post('/create-admin', requireSetupAuth, async (req: Request, res: Re
     });
   }
 });
+
+/**
+ * POST /api/setup/reset
+ * Resets setup lock and state, generates a fresh setup token.
+ * Optionally preserves configured DB credentials if preserveConfig is true.
+ * Requires Setup Authentication or valid setup token.
+ */
+setupRouter.post('/reset', requireSetupAuth, (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const preserveConfig = req.body?.preserveConfig === true || req.body?.preserveConfig === 'true';
+
+  try {
+    const result = setupService.resetSetup(preserveConfig);
+
+    // Update setup session cookie with new token
+    if (result.setupToken) {
+      res.cookie('nexus_setup_session', result.setupToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 2 * 60 * 60 * 1000,
+      });
+    }
+
+    systemLogger.info('security', `Kurulum sıfırlandı (IP: ${clientIp}, preserveConfig: ${preserveConfig})`);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: 'Kurulum sıfırlanamadı.',
+      message: err?.message || err,
+    });
+  }
+});
+
+/**
+ * POST /api/setup/resume
+ * Recovers an interrupted setup wizard session and ensures locks are cleared if admin is missing.
+ * Requires Setup Authentication or valid setup token.
+ */
+setupRouter.post('/resume', requireSetupAuth, (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+
+  try {
+    const result = setupService.resumeSetup();
+
+    // Update setup session cookie
+    if (result.setupToken) {
+      res.cookie('nexus_setup_session', result.setupToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 2 * 60 * 60 * 1000,
+      });
+    }
+
+    systemLogger.info('security', `Kurulum devam ettirildi (IP: ${clientIp})`);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: 'Kurulum devam ettirilemedi.',
+      message: err?.message || err,
+    });
+  }
+});

@@ -2126,7 +2126,7 @@ curl -X POST "${originUrl}/api/timescale/policies" \\
       badge: 'First Run Setup API',
       description: 'Yeni bir VPS veya Home Server kurulumunda veritabanı bağlantısı testi, konfigürasyon kaydetme, TimescaleDB ve migrasyon ilklendirme ile ilk yönetici hesabı oluşturma uç noktaları.',
       tags: ['setup', 'wizard', 'database', 'timescaledb', 'first run', 'migrations', 'admin', 'headless'],
-      endpoint: 'GET /api/setup/status, POST /api/setup/test-database, POST /api/setup/initialize, POST /api/setup/create-admin',
+      endpoint: 'GET /api/setup/status, POST /api/setup/test-database, POST /api/setup/initialize, POST /api/setup/create-admin, POST /api/setup/reset, POST /api/setup/resume',
       code: `#!/bin/bash
 # =========================================================================
 # NEXUSNODE IoT - FIRST RUN DATABASE SETUP WIZARD & HEADLESS KURULUM API
@@ -2135,6 +2135,7 @@ curl -X POST "${originUrl}/api/timescale/policies" \\
 #  - Kurulum tamamlandıktan sonra setup uç noktaları kalıcı olarak kilitlenir (HTTP 403).
 #  - Veritabanı şifresi hiçbir API yanıtında veya loglarda saklanmaz.
 #  - Veriler (telemetri ve cihazlar) sıfır veri kaybı garantisiyle korunur.
+#  - Setup Token: X-Setup-Token başlığı ile gönderilmelidir.
 #
 # 1. KURULUM DURUMUNU SORGULAMA
 # Uç Nokta: GET /api/setup/status
@@ -2145,6 +2146,7 @@ curl -s -X GET "\${originUrl}/api/setup/status"
 # PostgreSQL soketini doğrular ve TimescaleDB varlığını kontrol eder.
 curl -s -X POST "\${originUrl}/api/setup/test-database" \\
   -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN" \\
   -d '{
     "host": "timescaledb",
     "port": 5432,
@@ -2159,6 +2161,7 @@ curl -s -X POST "\${originUrl}/api/setup/test-database" \\
 # Sunucu 0600 izinli protected secret dosyasında saklar ve bağlantı havuzunu başlatır.
 curl -s -X POST "\${originUrl}/api/setup/configure-database" \\
   -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN" \\
   -d '{
     "host": "timescaledb",
     "port": 5432,
@@ -2172,13 +2175,15 @@ curl -s -X POST "\${originUrl}/api/setup/configure-database" \\
 # Uç Nokta: POST /api/setup/initialize
 # TimescaleDB eklentisini açar, migrasyonları uygular ve Canonical Schema'yı doğrular.
 curl -s -X POST "\${originUrl}/api/setup/initialize" \\
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN"
 
 # 5. İLK SİSTEM YÖNETİCİSİNİ OLUŞTURMA VE KURULUMU KİLİTLEME
 # Uç Nokta: POST /api/setup/create-admin
 # İlk yöneticiyi oluşturur, şifreyi bcrypt ile hashler ve setup mode'u kalıcı kilitler.
 curl -s -X POST "\${originUrl}/api/setup/create-admin" \\
   -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN" \\
   -d '{
     "name": "Sistem Yöneticisi",
     "email": "test@nexusnodeiot.com.tr",
@@ -2186,6 +2191,23 @@ curl -s -X POST "\${originUrl}/api/setup/create-admin" \\
     "passwordConfirm": "YOUR_STRONG_ADMIN_PASSWORD",
     "companyName": "Merkez Yönetim"
   }'
+
+# 6. KURULUMU SIFIRLAMA / YENİDEN BAŞLATMA (RECOVERY)
+# Uç Nokta: POST /api/setup/reset
+# Kurulum yarım kaldığında veya kilitlendiğinde güvenle sıfırlar.
+# preserveConfig: true -> Veritabanı bağlantı ayarlarını korur, adımları baştan başlatır.
+# preserveConfig: false -> Tüm kayıtlı veritabanı ayarlarını ve anahtarları siler.
+curl -s -X POST "\${originUrl}/api/setup/reset" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN" \\
+  -d '{"preserveConfig": true}'
+
+# 7. KURULUMU DEVAM ETTİRME / KURTARMA (RESUME)
+# Uç Nokta: POST /api/setup/resume
+# Yarım kalmış kurulumu kurtarır ve kilidi kaldırarak adımları senkronize eder.
+curl -s -X POST "\${originUrl}/api/setup/resume" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Setup-Token: YOUR_SETUP_TOKEN"
 `,
     },
     {

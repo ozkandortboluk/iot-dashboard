@@ -212,8 +212,8 @@ export class SetupService {
         password: config.password || '',
         sslMode: config.sslMode || 'disable',
         rejectUnauthorized: config.rejectUnauthorized ?? false,
-        isCompleted: isCompleted || this.isCompletedState,
-        completedAt: this.completedAtDate || (isCompleted ? new Date().toISOString() : undefined),
+        isCompleted: Boolean(isCompleted),
+        completedAt: isCompleted ? (this.completedAtDate || new Date().toISOString()) : undefined,
         updatedAt: new Date().toISOString(),
       };
 
@@ -347,8 +347,8 @@ export class SetupService {
   /**
    * Validates provided setup token with timing-safe comparison
    */
-  public validateSetupToken(token?: string | null): boolean {
-    if (this.isSetupCompleted()) {
+  public validateSetupToken(token?: string | null, allowIfCompleted: boolean = false): boolean {
+    if (this.isSetupCompleted() && !allowIfCompleted) {
       return false;
     }
 
@@ -446,12 +446,12 @@ export class SetupService {
   }
 
   /**
-   * Checks if installation is marked completed
+   * Checks if installation is marked completed.
+   * Returns false if database is not connected or real administrator is missing.
    */
   public isSetupCompleted(): boolean {
-    if (this.isCompletedState) return true;
     if (process.env.SETUP_COMPLETED === 'true') return true;
-    return false;
+    return Boolean(this.isCompletedState);
   }
 
   /**
@@ -484,6 +484,68 @@ export class SetupService {
     } catch (e) {
       console.warn('[SetupService] Could not persist completed flag:', e);
     }
+  }
+
+  /**
+   * Safely resets the setup wizard state and generates a fresh setup token.
+   * If preserveConfig is true, keeps the saved database connection host/port/db/user.
+   */
+  public resetSetup(preserveConfig: boolean = false): { success: boolean; message: string; setupToken: string; currentStep: number } {
+    this.isCompletedState = false;
+    this.completedAtDate = null;
+
+    if (!preserveConfig) {
+      this.runtimeConfig = null;
+      try {
+        if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+          fs.unlinkSync(RUNTIME_SECRET_FILE);
+        }
+      } catch (err: any) {
+        systemLogger.warn('database', `Runtime config dosyası silinemedi: ${err?.message || err}`);
+      }
+    } else if (this.runtimeConfig) {
+      // Re-save config with isCompleted: false
+      this.saveRuntimeSecretConfig(this.runtimeConfig, false);
+    }
+
+    // Invalidate existing token and generate fresh setup token
+    this.invalidateSetupToken();
+    const newToken = this.getOrInitSetupToken();
+
+    systemLogger.info('security', `Kurulum durumu operatör tarafından sıfırlandı (preserveConfig: ${preserveConfig}).`);
+
+    return {
+      success: true,
+      message: preserveConfig
+        ? 'Kurulum adımları sıfırlandı, veritabanı bağlantı parametreleri korundu.'
+        : 'Kurulum ve veritabanı bağlantı parametreleri tamamen sıfırlandı.',
+      setupToken: newToken,
+      currentStep: preserveConfig && this.runtimeConfig ? 2 : 1,
+    };
+  }
+
+  /**
+   * Resumes an interrupted setup process, restoring runtime config and unblocking setup locks if admin is missing.
+   */
+  public resumeSetup(): { success: boolean; message: string; setupToken: string; currentStep: number; hasSavedConfig: boolean } {
+    this.isCompletedState = false;
+    this.loadRuntimeSecretConfig();
+    const token = this.getOrInitSetupToken();
+
+    let step = 1;
+    if (this.runtimeConfig?.host) {
+      step = 2;
+    }
+
+    systemLogger.info('security', 'Kurulum kurtarma ve devam ettirme süreci başlatıldı (resumeSetup).');
+
+    return {
+      success: true,
+      message: 'Kurulum devam ettirilmeye hazır.',
+      setupToken: token,
+      currentStep: step,
+      hasSavedConfig: Boolean(this.runtimeConfig),
+    };
   }
 
   /**
@@ -569,13 +631,20 @@ export class SetupService {
       }
     }
 
-    // If an administrator exists and DB is connected, mark setup completed permanently
-    if (hasAdmin && isDbConnected) {
+    // If an administrator exists and DB is connected and migrations are verified, mark setup completed permanently
+    if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
       this.markSetupCompleted();
+    } else if ((!hasAdmin || !isDbConnected) && process.env.SETUP_COMPLETED !== 'true') {
+      // Auto-heal: If database is disconnected or no real admin exists, setup CANNOT be locked.
+      if (this.isCompletedState) {
+        this.isCompletedState = false;
+      }
+      // Ensure a valid setup token is available for the wizard
+      this.getOrInitSetupToken();
     }
 
     const isDbReady = Boolean(isDbConnected && migrationsComplete && hasAdmin);
-    const isCompleted = this.isCompletedState || isDbReady;
+    const isCompleted = Boolean(isDbReady && (this.isCompletedState || hasAdmin));
 
     // Setup is strictly required if PostgreSQL is not connected, migrations not applied, or admin not created
     const setupRequired = !isDbReady || process.env.SETUP_REQUIRED === 'true';

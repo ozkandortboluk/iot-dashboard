@@ -211,4 +211,52 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     // Setup must NOT be marked as completed
     expect(setupService.isSetupCompleted()).toBe(false);
   });
+
+  it('10. should safely reset and resume setup session without unintended lockout', async () => {
+    // 1. Configure initial DB
+    const config: DatabaseConfigPayload = {
+      host: 'localhost',
+      port: 5432,
+      database: 'iot_db_test',
+      user: 'iot_user',
+      password: 'testPassword123!',
+      sslMode: 'disable',
+    };
+    setupService.saveRuntimeSecretConfig(config, false);
+
+    // 2. Simulate partial state or lock
+    (setupService as any).isCompletedState = true;
+    expect(setupService.isSetupCompleted()).toBe(true);
+
+    // 3. Reset setup preserving DB config
+    const resetResult = await setupService.resetSetup(true);
+    expect(resetResult.success).toBe(true);
+    expect(resetResult.setupToken).toBeDefined();
+    expect(setupService.isSetupCompleted()).toBe(false);
+
+    // 4. Test resumeSetup
+    (setupService as any).isCompletedState = true;
+    const resumeResult = await setupService.resumeSetup();
+    expect(resumeResult.success).toBe(true);
+    expect(resumeResult.hasSavedConfig).toBe(true);
+    expect(setupService.isSetupCompleted()).toBe(false);
+
+    // 5. Reset without preserving config
+    const fullResetResult = await setupService.resetSetup(false);
+    expect(fullResetResult.success).toBe(true);
+    expect(fullResetResult.currentStep).toBe(1);
+    expect(setupService.isSetupCompleted()).toBe(false);
+  });
+
+  it('11. should auto-heal and unlock setup status if system lacks admin or DB connection', async () => {
+    // Force corrupted completed state in memory
+    (setupService as any).isCompletedState = true;
+    (setupService as any).runtimeConfig = null;
+
+    // getStatus should detect that DB/admin is missing and auto-heal isCompletedState to false
+    const status = await setupService.getStatus();
+    expect(status.isCompleted).toBe(false);
+    expect(status.setupRequired).toBe(true);
+    expect(setupService.isSetupCompleted()).toBe(false);
+  });
 });

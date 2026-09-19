@@ -4,6 +4,26 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.36.4] - 2026-09-19
+
+### 🛡️ Kurulum Kilidi & Otomatik İyileştirme / Kurtarma Mekanizması (Setup Lock, Resume & Reset Recovery)
+- **Yarım Kalan Kurulum Kilitlerinin Önlenmesi & Otomatik İyileştirme (Auto-Healing)**:
+  - `src/server/services/setup.service.ts` içerisindeki `getStatus` metoduna otomatik doğrulama eklendi. Sistemde `isCompleted = true` bayrağı bulunsa bile, eğer veritabanı bağlı değilse veya gerçek bir yönetici hesabı mevcut değilse `isCompletedState` otomatik olarak `false`'a çekilir (auto-healing). Böylelikle yarım kalmış işlemlerin sistemi kilitli durumda bırakması önlenir.
+- **Güvenli Kurulum Sıfırlama ve Devam Ettirme API Uç Noktaları**:
+  - `POST /api/setup/reset`: Kurulum adımlarını ve kilit durumunu sıfırlar; `preserveConfig: true` ile mevcut veritabanı ayarlarını koruyarak adımları baştan başlatabilir veya `preserveConfig: false` ile tamamen temiz bir kurulum başlatır.
+  - `POST /api/setup/resume`: Yarım kalmış kurulum oturumunu kurtarır ve güncel adımı hesaplayarak istemciye aktarır.
+  - `src/server/middleware/setupAuth.ts` middleware'i, geçerli bir kurulum anahtarı veya oturumu sunulduğunda `/reset` ve `/resume` uç noktalarına kilitliyken dahi güvenle erişilmesine olanak tanır.
+- **Arayüz (Frontend) Sihirbaz Entegrasyonu (`DatabaseSetupWizard.tsx`)**:
+  - Başlık alanına "Kurulumu Sıfırla" butonu ve detaylı onay/seçim modalı eklendi.
+  - Hata bildirim alanına "Kaldığı Yerden Devam Et / Kurtar" ve "Sıfırla" aksiyon butonları entegre edildi.
+- **Yardım ve Bilgi Merkezi Güncellemesi (`HelpView.tsx`)**:
+  - Headless ve cURL örneklerine `/api/setup/reset` ve `/api/setup/resume` uç noktaları eklendi.
+- **Birim Test Kapsamı**:
+  - `src/tests/database_setup_wizard.test.ts` içerisine `resetSetup`, `resumeSetup` ve otomatik durum iyileştirme testleri eklendi.
+  - Sürüm numaraları senkronize edildi (`1.36.4`).
+
+---
+
 ## 🚀 [v1.36.3] - 2026-09-19
 
 ### 🔒 Güvenlik & Hata Yönetimi: Yönetici Veritabanı Yazımının Kesin Doğrulanması ve Hata Durumunda Kurulumun İptali (Atomic Admin Persistence)

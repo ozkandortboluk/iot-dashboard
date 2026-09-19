@@ -62,8 +62,10 @@ export function isRequestSetupAuthenticated(req: Request): boolean {
  *    If invalid or missing, returns HTTP 401 Unauthorized with code 'SETUP_TOKEN_REQUIRED'.
  */
 export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
-  // 1. Check permanent setup lockout
-  if (setupService.isSetupCompleted()) {
+  const isResetOrResume = req.path === '/reset' || req.path === '/resume';
+
+  // 1. Check permanent setup lockout (allowed for reset/resume with valid token)
+  if (setupService.isSetupCompleted() && !isResetOrResume) {
     res.status(403).json({
       success: false,
       code: 'SETUP_LOCKED',
@@ -75,7 +77,7 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
 
   // 2. Verify setup token
   const token = extractSetupToken(req);
-  if (!token || !setupService.validateSetupToken(token)) {
+  if (!token || !setupService.validateSetupToken(token, isResetOrResume)) {
     res.status(401).json({
       success: false,
       code: 'SETUP_TOKEN_REQUIRED',
