@@ -278,16 +278,16 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   }
 });
 
-// Initialize WebSocket, OTA Worker & Background Simulation Engines ONLY after PostgreSQL is ready
+// Initialize WebSocket, OTA Worker & Background Simulation Engines when Database is READY (PostgreSQL or Local WAL)
 let backgroundWorkersStarted = false;
 export function startBackgroundWorkers() {
   if (backgroundWorkersStarted) return;
-  if (!db.postgresRepo?.isReady() || db.getDatabaseState() !== DatabaseState.READY) {
-    console.log('[Workers] PostgreSQL ve şema tam olarak hazır (READY) olmadığı için arka plan servisleri başlatılmadı.');
+  if (db.getDatabaseState() !== DatabaseState.READY) {
+    console.log('[Workers] Veritabanı hazır (READY) olmadığı için arka plan servisleri bekletiliyor.');
     return;
   }
   backgroundWorkersStarted = true;
-  console.log('[Workers] PostgreSQL veritabanı READY durumunda. Veritabanına bağlı arka plan servisleri başlatılıyor (Simulator, OTA, NoData, CommandExpiry)...');
+  console.log('[Workers] Veritabanı READY durumunda. Arka plan servisleri başlatılıyor (Simulator, OTA, NoData, CommandExpiry)...');
   initSimulator();
   startOtaWorker();
   startNoDataWorker();
@@ -301,10 +301,15 @@ initWebSocketServer(server);
 
 // Automatically start background workers whenever the DB state transitions to READY
 db.onStateChange((newState) => {
-  if (newState === DatabaseState.READY && db.postgresRepo?.isReady()) {
+  if (newState === DatabaseState.READY) {
     startBackgroundWorkers();
   }
 });
+
+// If already ready, start background workers immediately
+if (db.getDatabaseState() === DatabaseState.READY) {
+  startBackgroundWorkers();
+}
 
 
 // Serve Vite in dev mode or static bundled files in production

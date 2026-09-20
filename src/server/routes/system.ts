@@ -118,12 +118,15 @@ systemRouter.get('/health', (req, res) => {
 systemRouter.get(['/system/status', '/system-status'], (req, res) => {
   const dbState = db.getDatabaseState();
   const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
+  const isLocalReady = dbState === DatabaseState.READY;
+  const isReady = isPostgresReady || isLocalReady;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   res.json({
-    status: isPostgresReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
+    status: isReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
     databaseState: dbState,
-    isReady: isPostgresReady,
+    isReady: isReady,
+    activeEngine: isPostgresReady ? 'postgres' : 'local',
     pool: poolStats,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),

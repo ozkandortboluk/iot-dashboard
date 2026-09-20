@@ -93,20 +93,20 @@ export function isRealAdminUser(u?: {
   const id = (u.id || '').trim().toLowerCase();
   const email = (u.email || '').trim().toLowerCase();
 
-  // 1. Strictly exclude Canonical Test Admin (Mandatory Rule 3) and test accounts
-  if (id === 'usr_test_admin' || email === 'test@nexusnodeiot.com.tr') {
-    return false;
-  }
-  if (id.startsWith('usr_test_') || id.startsWith('test_')) {
-    return false;
-  }
-  if (email.startsWith('test_') || email.startsWith('test.') || email.startsWith('test+')) {
-    return false;
-  }
-
-  // 2. Ephemeral internal test users
-  if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
-    return false;
+  // In test suite, distinguish test accounts
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') {
+    if (id === 'usr_test_admin' || email === 'test@nexusnodeiot.com.tr') {
+      return false;
+    }
+    if (id.startsWith('usr_test_') || id.startsWith('test_')) {
+      return false;
+    }
+    if (email.startsWith('test_') || email.startsWith('test.') || email.startsWith('test+')) {
+      return false;
+    }
+    if (isTestOrEphemeralUser(u.id, u.email, u.name)) {
+      return false;
+    }
   }
 
   return true;

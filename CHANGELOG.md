@@ -4,6 +4,16 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.0] - 2026-09-20
+
+### 🔓 Kurulum Sihirbazı Devre Dışı Bırakma & Yerel Depolama Modu
+- **Kurulum Sihirbazı Bypası**: PostgreSQL bağlantısı yapılandırılmamış veya ulaşılamıyor olsa dahi kullanıcıların kurulum sihirbazına takılması engellendi, yerel WAL depolama motoru doğrudan aktif hale getirildi.
+- **Sadeleştirilmiş Giriş & Hızlı Yönetici Erişimi**: Kurulum tokeni ve karmaşık ilk kurulum adımları kaldırıldı; sistemin ilk yöneticisi (`test@nexusnodeiot.com.tr` / `test1234`) ile tek tıkla hızlı giriş yapabilen temiz ve modern bir giriş ekranı sunuldu.
+- **Müşteri Ayrıştırması & İzolasyon**: Yeni kayıt olan müşteriler doğrudan `customer` rolü alarak yalnızca kendi cihaz ve verilerine erişebilir kılındı; sistem yöneticisi tüm cihazlara tam erişim hakkını korudu.
+- **Arka Plan Servisleri**: Simülatör, OTA ve telemetri servisleri yerel veritabanı aktif olduğunda da derhal başlatılacak şekilde güncellendi.
+
+---
+
 ## 🚀 [v1.37.1] - 2026-09-20
 
 ### 🔧 PostgreSQL Kurulum Kilidi ve Giriş Kurtarma Düzeltmesi

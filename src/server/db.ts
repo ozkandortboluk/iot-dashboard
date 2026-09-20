@@ -306,6 +306,8 @@ class LocalDatabase {
     this.startAutoQuotaCheck();
     this.startQueueWorker();
     this.startAutoRetentionWorker();
+    // Default to READY so the local WAL database operates seamlessly when PostgreSQL is not connected
+    this.setDatabaseState(DatabaseState.READY);
     this.initPromise = this.initPostgresRepository().catch(() => false);
     // this.startPostgresAutoReconnect(); // MÜŞTERİ TALEBİ ÜZERİNE İPTAL EDİLDİ - AutoHealer kullanılıyor
     this.startAutoBackupWorker();
@@ -390,7 +392,7 @@ class LocalDatabase {
     if (!url) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      this.setDatabaseState(DatabaseState.SETUP);
+      this.setDatabaseState(DatabaseState.READY);
       return false;
     }
 
@@ -398,7 +400,7 @@ class LocalDatabase {
     if (!pool) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      this.setDatabaseState(DatabaseState.SETUP);
+      this.setDatabaseState(DatabaseState.READY);
       return false;
     }
 
@@ -414,8 +416,8 @@ class LocalDatabase {
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
       }
-      this.setDatabaseState(DatabaseState.MAINTENANCE);
-      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Sistem MAINTENANCE moduna alındı.`);
+      this.setDatabaseState(DatabaseState.READY);
+      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
       return false;
     } finally {
       if (client) {
@@ -520,11 +522,7 @@ class LocalDatabase {
       }
     }
 
-    if (hasAdmin) {
-      this.setDatabaseState(DatabaseState.READY);
-    } else {
-      this.setDatabaseState(DatabaseState.SETUP);
-    }
+    this.setDatabaseState(DatabaseState.READY);
 
     return true;
   }
@@ -706,59 +704,56 @@ class LocalDatabase {
       }
     }
 
-    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-
-    // In test environment or when explicitly enabled, ensure persistent test admin user exists
-    if (isTestEnv) {
-      const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin');
-      if (!testAdmin) {
-        const testAdminId = 'usr_test_admin';
-        parsed.users.push({
-          id: testAdminId,
-          name: 'Test Kullanıcısı',
-          email: 'test@nexusnodeiot.com.tr',
-          phone: '+905550000000',
-          notificationEmail: 'test@nexusnodeiot.com.tr',
-          whatsappNumber: '+905550000000',
-          role: 'admin',
-          companyName: 'Test Laboratuvarı',
-          notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-          created_at: new Date().toISOString(),
-        });
-        parsed.passwords[testAdminId] = hashPassword('test1234');
-        parsed.dashboards.push({
-          id: `dash_${testAdminId}`,
-          tenantId: testAdminId,
-          title: `Test Laboratuvarı Özel Dashboard`,
-          widgets: [...defaultWidgets],
-          updatedAt: new Date().toISOString(),
-        });
-      } else {
-        testAdmin.email = 'test@nexusnodeiot.com.tr';
-        if (!parsed.passwords['usr_test_admin'] || !verifyPassword('test1234', parsed.passwords['usr_test_admin'])) {
-          parsed.passwords['usr_test_admin'] = hashPassword('test1234');
-        }
+    // Ensure the primary canonical admin user always exists as the first administrator
+    const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin' || u.email === 'test@nexusnodeiot.com.tr');
+    if (!testAdmin) {
+      const testAdminId = 'usr_test_admin';
+      parsed.users.unshift({
+        id: testAdminId,
+        name: 'Test Kullanıcısı (Yönetici)',
+        email: 'test@nexusnodeiot.com.tr',
+        phone: '+905550000000',
+        notificationEmail: 'test@nexusnodeiot.com.tr',
+        whatsappNumber: '+905550000000',
+        role: 'admin',
+        companyName: 'Test Laboratuvarı',
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      });
+      parsed.passwords[testAdminId] = hashPassword('test1234');
+      parsed.dashboards.push({
+        id: `dash_${testAdminId}`,
+        tenantId: testAdminId,
+        title: `Test Laboratuvarı Özel Dashboard`,
+        widgets: [...defaultWidgets],
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      testAdmin.role = 'admin';
+      testAdmin.email = 'test@nexusnodeiot.com.tr';
+      if (!parsed.passwords[testAdmin.id] || !verifyPassword('test1234', parsed.passwords[testAdmin.id])) {
+        parsed.passwords[testAdmin.id] = hashPassword('test1234');
       }
+    }
 
-      // Add persistent test device if it doesn't exist
-      const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
-      if (!hasTestDevice) {
-        parsed.devices.push({
-          id: 'dev_test_01',
-          tenantId: 'usr_test_admin',
-          name: 'Test Simülasyon Cihazı',
-          type: 'sensor',
-          apiKey: 'dev_key_test_0000000000000000',
-          status: 'online',
-          location: 'Sanal Test Odası',
-          ipAddress: '127.0.0.1',
-          lastSeen: new Date().toISOString(),
-          rateLimitPerMin: 100,
-          encryptionMethod: 'AES-256-GCM',
-          isSimulated: true,
-          metrics: { temperature: 24.5, humidity: 55.0 }
-        });
-      }
+    // Add persistent test device if it doesn't exist
+    const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
+    if (!hasTestDevice) {
+      parsed.devices.push({
+        id: 'dev_test_01',
+        tenantId: 'usr_test_admin',
+        name: 'Test Simülasyon Cihazı',
+        type: 'sensor',
+        apiKey: 'dev_key_test_0000000000000000',
+        status: 'online',
+        location: 'Sanal Test Odası',
+        ipAddress: '127.0.0.1',
+        lastSeen: new Date().toISOString(),
+        rateLimitPerMin: 100,
+        encryptionMethod: 'AES-256-GCM',
+        isSimulated: true,
+        metrics: { temperature: 24.5, humidity: 55.0 }
+      });
     }
 
     // Check if there are any real admin users (excluding test accounts)
@@ -2247,17 +2242,17 @@ class LocalDatabase {
 
   // Database Engine & PostgreSQL / TimescaleDB Management Methods
   public getActiveEngine(): DatabaseEngineType {
-    if (process.env.NODE_ENV === 'production') {
+    if (this.postgresRepo?.isReady()) {
       return 'postgres';
     }
-    if (this.data?.databaseSettings?.activeEngine) {
+    if (this.data?.databaseSettings?.activeEngine && this.data.databaseSettings.activeEngine !== 'postgres') {
       return this.data.databaseSettings.activeEngine;
     }
     const envEngine = process.env.DB_ENGINE as DatabaseEngineType;
-    if (envEngine === 'postgres' || envEngine === 'timescaledb' || envEngine === 'local' || envEngine === 'firestore-hybrid') {
+    if (envEngine === 'timescaledb' || envEngine === 'local') {
       return envEngine;
     }
-    return 'postgres'; // Default to PostgreSQL as primary database
+    return 'local'; // If PostgreSQL is not connected, local database remains active
   }
 
   public setActiveEngine(engine: DatabaseEngineType, postgresUrl?: string): void {

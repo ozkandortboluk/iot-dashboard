@@ -297,110 +297,14 @@ function DashboardContent() {
   );
 }
 
-/**
- * Startup Gatekeeper: Enforces strict PostgreSQL initialization before displaying Login or Dashboard
- * Flow:
- * 1. Site loads
- * 2. Check: Is PostgreSQL configured, connected, TimescaleDB checked, migrations complete, and admin exists?
- * 3. If NO -> Directly render DatabaseSetupWizard (Host / Port / DB / User / Password -> Test -> PostgreSQL ✓ -> TimescaleDB ✓ -> Migration -> Admin -> READY -> Login)
- * 4. If YES -> Directly render LoginView / Dashboard
- */
-function AppStartupGatekeeper() {
-  const [bypassToLogin, setBypassToLogin] = useState(false);
-  const [dbStatusState, setDbStatusState] = useState<{
-    isLoading: boolean;
-    setupRequired: boolean;
-    isDbReady: boolean;
-    errorMessage?: string;
-  }>({
-    isLoading: true,
-    setupRequired: false,
-    isDbReady: false,
-  });
-
-  const checkDatabaseReadiness = useCallback(async () => {
-    setDbStatusState((prev) => ({ ...prev, isLoading: true, errorMessage: undefined }));
-    try {
-      const res = await fetch('/api/setup/status', {
-        headers: { 'Cache-Control': 'no-cache' },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const isReady = Boolean(
-          data.isDbConnected &&
-          data.stepsCompleted?.migrations &&
-          data.hasAdmin &&
-          !data.setupRequired
-        );
-
-        setDbStatusState({
-          isLoading: false,
-          setupRequired: !isReady,
-          isDbReady: isReady,
-        });
-        return;
-      } else {
-        // Non-200 response (e.g. 503 database not ready)
-        setDbStatusState({
-          isLoading: false,
-          setupRequired: true,
-          isDbReady: false,
-        });
-      }
-    } catch (err: unknown) {
-      setDbStatusState({
-        isLoading: false,
-        setupRequired: true,
-        isDbReady: false,
-        errorMessage: err instanceof Error ? err.message : 'Veritabanı kontrol hatası',
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    checkDatabaseReadiness();
-  }, [checkDatabaseReadiness]);
-
-  // Loading state during initial startup check
-  if (dbStatusState.isLoading) {
-    return (
-      <div className="min-h-screen bg-[#020617] text-white flex flex-col items-center justify-center p-6 space-y-6">
-        <NexusNodeLogo variant="stacked" size="lg" showDomain={true} animated={true} />
-        
-        <div className="flex items-center gap-3 px-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono shadow-xl">
-          <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
-          <span>PostgreSQL & TimescaleDB durumu kontrol ediliyor...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Database is NOT configured or NOT ready -> Render Database Setup Wizard directly (unless user intentionally bypassed to Login)
-  if (!bypassToLogin && (dbStatusState.setupRequired || !dbStatusState.isDbReady)) {
-    return (
-      <DatabaseSetupWizard
-        onComplete={() => {
-          setBypassToLogin(true);
-        }}
-      />
-    );
-  }
-
-  // Database is configured and ready (or bypassed to login) -> Render regular Auth & Dashboard flow
-  return (
-    <AuthProvider>
-      <RealtimeProvider>
-        <DashboardContent />
-      </RealtimeProvider>
-    </AuthProvider>
-  );
-}
-
 export default function App() {
   return (
     <ThemeProvider>
-      <AppStartupGatekeeper />
+      <AuthProvider>
+        <RealtimeProvider>
+          <DashboardContent />
+        </RealtimeProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

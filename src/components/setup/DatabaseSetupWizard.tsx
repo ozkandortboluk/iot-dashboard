@@ -1260,13 +1260,34 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                               🐳 Host Olarak 'timescaledb' Dene
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={onComplete}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-medium cursor-pointer transition flex items-center gap-1.5"
+                          >
+                            <LogIn className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>⚡ Doğrudan Giriş Yap (Test Hesabı)</span>
+                          </button>
                         </div>
 
-                        <ul className="list-disc pl-4 space-y-1 text-[11px] text-slate-400">
-                          <li>Host adresi olarak Docker ortamındaysanız <code className="text-indigo-400">timescaledb</code> veya yerelde <code className="text-indigo-400">localhost</code> kullanın.</li>
-                          <li>Kullanıcı adı (<code className="text-indigo-400">iot_user</code>) ve veritabanı şifrenizin doğru girildiğinden emin olun.</li>
-                          <li>Docker TimescaleDB konteynerinin çalıştığını kontrol edin: <code className="text-slate-300 font-mono">docker compose ps</code></li>
-                        </ul>
+                        <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800 space-y-2 text-[11px] text-slate-300 font-sans">
+                          <p className="font-semibold text-amber-300">📌 Bağlantı Reddedildi (ECONNREFUSED) veya Zaman Aşımı Nedenleri:</p>
+                          <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                            <li>
+                              <strong>Docker / VPS Servisi:</strong> Sunucunuzda TimescaleDB/PostgreSQL konteynerinin çalıştığından emin olun (<code className="text-slate-300 font-mono">docker compose ps</code>).
+                            </li>
+                            <li>
+                              <strong>Güvenlik Duvarı & Port:</strong> VPS üzerinde 5432 portunun dışarıya açık olduğunu doğrulayın (<code className="text-slate-300 font-mono">sudo ufw allow 5432/tcp</code>).
+                            </li>
+                            <li>
+                              <strong>Docker Port Yönlendirme:</strong> Konteynerinizin <code className="text-slate-300 font-mono">-p 5432:5432</code> parametresiyle ana sunucu portuna bağlı olduğundan emin olun.
+                            </li>
+                            <li>
+                              <strong>Bulut Veritabanı:</strong> Supabase, Neon, AWS RDS veya Cloud SQL kullanıyorsanız, SSL modunu <code className="text-indigo-400 font-mono">require</code> olarak seçin.
+                            </li>
+                          </ul>
+                        </div>
                       </div>
                     )}
                   </div>

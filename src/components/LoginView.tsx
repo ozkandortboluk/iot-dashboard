@@ -1,15 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { ShieldCheck, Building2, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, Database, LogIn, UserPlus } from 'lucide-react';
+import { ShieldCheck, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, LogIn, UserPlus, Zap } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
-import { DatabaseSetupWizard } from './setup/DatabaseSetupWizard';
 
 export const LoginView: React.FC = () => {
   const { login, register, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'setup'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -18,23 +17,19 @@ export const LoginView: React.FC = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Check if system has a real administrator or requires first-run setup
-  useEffect(() => {
-    const checkAdminStatus = async () => {
-      try {
-        const res = await fetch('/api/setup/status', {
-          headers: { 'Cache-Control': 'no-cache' },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!data.hasAdmin || data.setupRequired || !data.isDbReady) {
-            setAuthMode('setup');
-          }
-        }
-      } catch {}
-    };
-    checkAdminStatus();
-  }, []);
+  // 1-Click Quick Admin Login
+  const handleQuickAdminLogin = async () => {
+    setError('');
+    setSuccessMsg('');
+    setEmail('test@nexusnodeiot.com.tr');
+    setPassword('test1234');
+    try {
+      await login('test@nexusnodeiot.com.tr', 'test1234');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Yönetici girişi başarısız oldu.';
+      setError(msg);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,13 +52,10 @@ export const LoginView: React.FC = () => {
 
       try {
         await register(name, email, password, role);
-        setSuccessMsg('Kayıt başarılı! Hesabınız oluşturuldu ve giriş yapıldı.');
+        setSuccessMsg('Kayıt başarılı! Hesabınız oluşturuldu ve oturum açıldı.');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
         setError(msg);
-        if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
-          setAuthMode('setup');
-        }
       }
     } else {
       // Normal login
@@ -74,31 +66,18 @@ export const LoginView: React.FC = () => {
       try {
         await login(email, password);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol ediniz.';
+        const msg = err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen e-posta ve şifrenizi kontrol ediniz.';
         setError(msg);
-        if (msg.includes('veritabanı bağlantısı') || msg.includes('kurulum tamamlanmadı')) {
-          setAuthMode('setup');
-        }
       }
     }
   };
-
-  if (authMode === 'setup') {
-    return (
-      <DatabaseSetupWizard
-        onComplete={() => {
-          setAuthMode('login');
-          setSuccessMsg('Veritabanı kurulumu başarıyla tamamlandı. Lütfen giriş yapınız.');
-        }}
-      />
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#020617] text-slate-800 dark:text-slate-100 flex items-center justify-center p-4 relative overflow-hidden transition-colors duration-200">
       {/* Top right theme toggle */}
       <div className="absolute top-4 right-4 z-20">
         <button
+          type="button"
           onClick={toggleTheme}
           className="p-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-all flex items-center gap-2 text-xs font-semibold cursor-pointer"
           title={theme === 'dark' ? 'Açık Moda Geç' : 'Karanlık Moda Geç'}
@@ -108,7 +87,7 @@ export const LoginView: React.FC = () => {
         </button>
       </div>
 
-      {/* Background glow effects */}
+      {/* Background ambient lighting */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-indigo-500/10 dark:bg-indigo-600/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-[400px] h-[300px] bg-emerald-500/10 dark:bg-emerald-600/10 blur-[100px] rounded-full pointer-events-none" />
 
@@ -120,26 +99,16 @@ export const LoginView: React.FC = () => {
           <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full mt-1">
             <Sparkles className="w-3.5 h-3.5" />
             <span>
-              {authMode === 'setup'
-                ? 'İlk Sistem Kurulum Sihirbazı'
-                : authMode === 'register'
-                ? 'Müşteri & Operatör Kayıt'
-                : 'Müşteri & IoT Cihaz Portalı'}
+              {authMode === 'register' ? 'Müşteri Kayıt Portalı' : 'Müşteri & IoT Cihaz Girişi'}
             </span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            {authMode === 'setup'
-              ? 'Yönetici Hesabı Oluşturun' 
-              : authMode === 'register' 
-              ? 'Yeni Hesap Oluştur' 
-              : 'Giriş Yapın'}
+            {authMode === 'register' ? 'Yeni Hesap Oluştur' : 'Giriş Yapın'}
           </h1>
           <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto">
-            {authMode === 'setup'
-              ? 'Sistemi güvenli üretim modunda ayağa kaldırmak için ilk yönetici hesabını oluşturun.'
-              : authMode === 'register'
-              ? 'Müşteri veya operatör hesabı açarak cihazlarınızı uzaktan yönetin.'
-              : 'Lütfen kullanıcı adınız (e-posta) ve şifreniz ile oturum açın.'}
+            {authMode === 'register'
+              ? 'Müşteri hesabı açarak cihazlarınızı güvenle izleyin ve yönetin.'
+              : 'E-posta adresiniz ve şifrenizle IoT platformuna hemen erişin.'}
           </p>
         </div>
 
@@ -183,24 +152,27 @@ export const LoginView: React.FC = () => {
 
           {/* Quick Demo Test Account Helper Banner */}
           {authMode === 'login' && (
-            <div className="p-3 bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl flex items-center justify-between gap-2">
-              <div className="text-[11px] leading-tight text-indigo-950 dark:text-indigo-200">
-                <span className="font-bold flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
-                  <KeyRound className="w-3 h-3" /> Hazır Test Hesabı:
-                </span>
-                <span className="font-mono text-[10px] text-slate-600 dark:text-slate-300">test@nexusnodeiot.com.tr / test1234</span>
+            <div className="p-3.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/40 dark:to-blue-950/30 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <span>Sistem Yöneticisi Hesabı:</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleQuickAdminLogin}
+                  disabled={isLoading}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Tek Tıkla Yönetici Girişi</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('test@nexusnodeiot.com.tr');
-                  setPassword('test1234');
-                  setError('');
-                }}
-                className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-[11px] rounded-lg shadow-sm transition cursor-pointer shrink-0"
-              >
-                Doldur
-              </button>
+              <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 font-mono bg-white/70 dark:bg-slate-900/60 px-2.5 py-1.5 rounded-lg border border-slate-200/60 dark:border-slate-800/60">
+                <span>test@nexusnodeiot.com.tr</span>
+                <span className="text-slate-400 dark:text-slate-500">|</span>
+                <span>test1234</span>
+              </div>
             </div>
           )}
 
@@ -340,19 +312,6 @@ export const LoginView: React.FC = () => {
                 Zaten bir hesabınız var mı? Giriş Yapın
               </button>
             )}
-
-            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('setup');
-                }}
-                className="text-[11px] text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>Veritabanı Yapılandırma & Kurulum Sihirbazı</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>
