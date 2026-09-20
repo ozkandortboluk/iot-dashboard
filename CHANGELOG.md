@@ -4,6 +4,15 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.3] - 2026-09-20
+
+### 🎯 Veritabanı Bağlantı Durumu & Arayüz Tutarlılık İyileştirmesi
+- **Çelişkili Durum Göstergesi Düzeltildi**: `DatabaseDataView` bileşeninde "Aktif Motor" ile "Bağlantı Durumu" arasındaki çelişki giderildi. Bağlantı adresi girilmiş ancak sunucuya henüz erişilememişken eskiden gösterilen `Yapılandırılmadı` ibaresi yerine `Tanımlı (Bağlantı Bekleniyor)` etiketi getirildi.
+- **Gerçek Zamanlı Aktif Depolama Ayrımı**: Canlı TimescaleDB bağlantısı sağlanana kadar aktif motor alanı açık ve net bir şekilde `Yerel WAL Depolama (DB Bekleniyor)` olarak gösterilerek sistemin verileri yerel WAL tamponunda güvenle tuttuğu belirtildi.
+- **Docker Compose Dahili Ağ Rehberliği**: `timescaledb` ana makine adının Docker Compose ağı içerisinde çalıştığı ve canlı sunucu ortamında konteynerler arası otomatik bağlanacağı arayüz bilgi kutusunda açıklandı.
+
+---
+
 ## 🚀 [v1.38.2] - 2026-09-20
 
 ### 🗄️ TimescaleDB / PostgreSQL Bağlantı Adresi Yapılandırması
