@@ -704,6 +704,17 @@ class LocalDatabase {
       }
     }
 
+    // Ensure default databaseSettings with user-defined TimescaleDB URL
+    if (!parsed.databaseSettings) {
+      parsed.databaseSettings = {
+        activeEngine: 'timescaledb',
+        postgresUrl: 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable',
+        isPostgresConnected: false,
+      };
+    } else if (!parsed.databaseSettings.postgresUrl) {
+      parsed.databaseSettings.postgresUrl = 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+    }
+
     // Ensure the primary canonical admin user always exists as the first administrator
     const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin' || u.email === 'test@nexusnodeiot.com.tr');
     if (!testAdmin) {
@@ -2461,6 +2472,15 @@ class LocalDatabase {
     version?: string;
     latencyMs?: number;
     tablesStatus?: Record<string, boolean>;
+    diagnostic?: {
+      code: string;
+      host?: string;
+      port?: number;
+      database?: string;
+      user?: string;
+      suggestionTitle: string;
+      suggestionSteps: string[];
+    };
   }> {
     const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
@@ -2545,9 +2565,116 @@ class LocalDatabase {
         this.data.databaseSettings.lastTestedAt = new Date().toISOString();
         this.saveData(this.data);
       }
+
+      let parsedHost = '';
+      let parsedPort = 5432;
+      let parsedDb = '';
+      let parsedUser = '';
+      try {
+        const u = new URL(connStr);
+        parsedHost = u.hostname;
+        parsedPort = parseInt(u.port, 10) || 5432;
+        parsedDb = u.pathname?.replace(/^\//, '') || '';
+        parsedUser = u.username || '';
+      } catch {}
+
+      let diagnostic: {
+        code: string;
+        host?: string;
+        port?: number;
+        database?: string;
+        user?: string;
+        suggestionTitle: string;
+        suggestionSteps: string[];
+      } | undefined = undefined;
+
+      const errMsg = err.message || '';
+      const errCode = err.code || '';
+
+      if (errCode === 'ECONNREFUSED' || errMsg.includes('ECONNREFUSED')) {
+        diagnostic = {
+          code: 'ECONNREFUSED',
+          host: parsedHost,
+          port: parsedPort,
+          database: parsedDb,
+          user: parsedUser,
+          suggestionTitle: `Sunucu Bağlantıyı Reddetti (${parsedHost}:${parsedPort})`,
+          suggestionSteps: [
+            "postgresql.conf: 'listen_addresses = \\'*\\'' olarak ayarlayın (varsayılan 'localhost' dış bağlantıları reddeder).",
+            "pg_hba.conf: 'host all all 0.0.0.0/0 scram-sha-256' satırını ekleyerek dış erişime izin verin.",
+            'Servisi yeniden başlatın: sudo systemctl restart postgresql (veya Docker konteynerini yeniden başlatın).',
+            'Port ve Firewall: Sunucuda 5432 portunu açın (sudo ufw allow 5432/tcp) veya Docker -p 5432:5432 port yönlendirmesini kontrol edin.',
+          ],
+        };
+      } else if (errCode === 'ETIMEDOUT' || errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
+        diagnostic = {
+          code: 'ETIMEDOUT',
+          host: parsedHost,
+          port: parsedPort,
+          database: parsedDb,
+          user: parsedUser,
+          suggestionTitle: `Zaman Aşımı / Sunucuya Ulaşılamadı (${parsedHost}:${parsedPort})`,
+          suggestionSteps: [
+            'Sunucu IP adresi ve portun (5432) doğruluğunu kontrol edin.',
+            'Bulut sağlayıcınızın (Hetzner, AWS Security Group, DigitalOcean, vb.) Inbound Firewall kurallarında 5432 TCP portunun açık olduğunu doğrulayın.',
+            'Sunucu üzerinde UFW veya iptables güvenlik duvarını kontrol edin (sudo ufw status).',
+          ],
+        };
+      } else if (errCode === '28P01' || errMsg.includes('password authentication failed')) {
+        diagnostic = {
+          code: 'AUTH_FAILED',
+          host: parsedHost,
+          port: parsedPort,
+          database: parsedDb,
+          user: parsedUser,
+          suggestionTitle: `Şifre / Kullanıcı Doğrulama Hatası (Kullanıcı: ${parsedUser})`,
+          suggestionSteps: [
+            'DATABASE_URL içindeki kullanıcı adı ve şifrenin doğruluğunu kontrol edin.',
+            "PostgreSQL'de kullanıcı şifresini yenileyin: ALTER USER " + (parsedUser || 'iot_user') + " WITH PASSWORD 'sifreniz';",
+            'pg_hba.conf dosyasındaki kimlik doğrulama yöntemini (md5 veya scram-sha-256) kontrol edin.',
+          ],
+        };
+      } else if (errCode === '3D000' || errMsg.includes('does not exist')) {
+        diagnostic = {
+          code: 'DATABASE_NOT_FOUND',
+          host: parsedHost,
+          port: parsedPort,
+          database: parsedDb,
+          user: parsedUser,
+          suggestionTitle: `Veritabanı Bulunamadı ("${parsedDb}")`,
+          suggestionSteps: [
+            'PostgreSQL konsolunda veritabanını oluşturun: CREATE DATABASE ' + (parsedDb || 'iot_dashboard') + ';',
+            'Kullanıcıya tam yetki verin: GRANT ALL PRIVILEGES ON DATABASE ' + (parsedDb || 'iot_dashboard') + ' TO ' + (parsedUser || 'iot_user') + ';',
+          ],
+        };
+      } else if (errCode === 'ENOTFOUND' || errCode === 'EAI_AGAIN' || errMsg.includes('getaddrinfo') || errMsg.includes('ENOTFOUND')) {
+        const isInternalDockerHost = parsedHost === 'timescaledb' || parsedHost === 'postgres' || parsedHost === 'db';
+        diagnostic = {
+          code: 'HOST_NOT_RESOLVED',
+          host: parsedHost,
+          port: parsedPort,
+          database: parsedDb,
+          user: parsedUser,
+          suggestionTitle: isInternalDockerHost
+            ? `Docker Konteyner Adı Algılandı ("${parsedHost}")`
+            : `Alan Adı / IP Çözümlenemedi ("${parsedHost}")`,
+          suggestionSteps: isInternalDockerHost
+            ? [
+                `"${parsedHost}" adresi Docker Compose ağı içerisindeki dahili konteyner servis adıdır. Uygulama sunucunuzda Docker Compose ("docker compose up") ile çalıştığında TimescaleDB konteynerine bu isimle otomatik olarak bağlanır.`,
+                `Eğer bu bulut önizleme ortamından (Cloud Run / AI Studio) canlı test ediyorsanız; "timescaledb" yerine sunucunuzun dış statik IP adresini veya alan adını (örn: 91.151.95.66 veya db.nexusnodeiot.com.tr) girmeniz gerekir.`,
+                `Sunucunuzda docker-compose.yml dosyasında POSTGRES_PASSWORD=kastamonuaraccalalibeyli.37 olarak tanımlandığından emin olun.`,
+              ]
+            : [
+                `Sunucu alan adı veya IP adresinin (${parsedHost}) doğru yazıldığından emin olun.`,
+                `DNS ayarlarınızı veya sunucu /etc/hosts yapılandırmasını kontrol edin.`,
+              ],
+        };
+      }
+
       return {
         success: false,
-        message: `Bağlantı hatası: ${err.message || 'Sunucuya erişilemedi'}`,
+        message: `Bağlantı hatası: ${errMsg || 'Sunucuya erişilemedi'}`,
+        diagnostic,
       };
     }
   }

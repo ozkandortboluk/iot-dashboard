@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.2] - 2026-09-20
+
+### 🗄️ TimescaleDB / PostgreSQL Bağlantı Adresi Yapılandırması
+- **Kalıcı Bağlantı Dizesi Tanımlandı**: Kullanıcının belirlediği `postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable` adresi veritabanı ayarlarına, `.env.example` ve sistem runtime yapılandırmasına kaydedildi.
+- **Arayüz & Form Ön Değeri**: `DatabaseDataView` bileşeninde `inputPostgresUrl` ve form yer tutucusu kullanıcının TimescaleDB bağlantı adresiyle önceden doldurulacak şekilde güncellendi.
+- **Docker Konteyner Adı Teşhisi (HOST_NOT_RESOLVED)**: `timescaledb` servis adı test edildiğinde, Docker Compose dahili ağı ile dış IP/alan adı ayrımı hakkında rehberlik sağlayan akıllı teşhis eklendi.
+
+---
+
+## 🚀 [v1.38.1] - 2026-09-20
+
+### 🔧 PostgreSQL Bağlantı Testi & Uzak Sunucu Teşhis Güçlendirmesi
+- **PostgreSQL Test Uç Noktası Erişimi**: Veritabanı yönetim ve test uç noktalarının (`/api/database/*`) veritabanı kapalı veya henüz bağlanmamışken 503 engeline takılması giderildi; yöneticinin uzaktaki sunucuyu arayüzden test edebilmesi sağlandı.
+- **Frontend Yetkilendirme Başlıkları**: `DatabaseDataView` bileşeninde `handleTestPostgres`, `handleMigratePostgres`, `handleSyncAllPostgres` ve motor değiştirme isteklerine yönetici oturum başlıkları eklendi.
+- **Akıllı Hata Teşhisi & Yönlendirme**: `ECONNREFUSED` (Port 5432 bağlantı reddi), `ETIMEDOUT`, kimlik doğrulama hataları ve eksik veritabanı durumları için sunucuda yapılması gereken düzeltme adımları (`postgresql.conf`, `pg_hba.conf`, `ufw`, Docker port yönlendirmesi) test sonucunda detaylı olarak gösterildi.
+
+---
+
 ## 🚀 [v1.38.0] - 2026-09-20
 
 ### 🔓 Kurulum Sihirbazı Devre Dışı Bırakma & Yerel Depolama Modu

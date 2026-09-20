@@ -345,7 +345,7 @@ export const DatabaseDataView: React.FC = () => {
   // PostgreSQL Configuration & Setup State
   const [engineConfig, setEngineConfig] = useState<DatabaseEngineConfig | null>(null);
   const [setupGuide, setSetupGuide] = useState<PostgresSetupGuide | null>(null);
-  const [inputPostgresUrl, setInputPostgresUrl] = useState('');
+  const [inputPostgresUrl, setInputPostgresUrl] = useState('postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable');
   const [testingPostgres, setTestingPostgres] = useState(false);
   const [migratingPostgres, setMigratingPostgres] = useState(false);
   const [postgresTestResult, setPostgresTestResult] = useState<{
@@ -354,6 +354,15 @@ export const DatabaseDataView: React.FC = () => {
     version?: string;
     latencyMs?: number;
     tablesStatus?: Record<string, boolean>;
+    diagnostic?: {
+      code: string;
+      host?: string;
+      port?: number;
+      database?: string;
+      user?: string;
+      suggestionTitle: string;
+      suggestionSteps: string[];
+    };
   } | null>(null);
   const [postgresMigrateResult, setPostgresMigrateResult] = useState<{
     success: boolean;
@@ -541,14 +550,14 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/postgres/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ postgresUrl: inputPostgresUrl || undefined }),
       });
       const data = await res.json();
       setPostgresTestResult(data);
       if (data.success) {
         // Refresh engine config and database stats immediately
-        const resEng = await fetch('/api/database/config');
+        const resEng = await fetch('/api/database/config', { headers: getAuthHeaders() });
         if (resEng.ok) {
           const eng = await resEng.json();
           setEngineConfig(eng);
@@ -574,7 +583,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/postgres/migrate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ postgresUrl: inputPostgresUrl || undefined }),
       });
       const data = await res.json();
@@ -602,7 +611,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/postgres/sync-all', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       });
       const data = await res.json();
       setSyncAllResult(data);
@@ -625,7 +634,7 @@ export const DatabaseDataView: React.FC = () => {
     try {
       const res = await fetch('/api/database/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           engine: pendingEngine,
           postgresUrl: inputPostgresUrl || undefined,
@@ -1392,7 +1401,7 @@ export const DatabaseDataView: React.FC = () => {
                     type="text"
                     value={inputPostgresUrl}
                     onChange={(e) => setInputPostgresUrl(e.target.value)}
-                    placeholder={engineConfig?.postgresUrl || 'postgresql://iot_admin:GizliSifreniz123!@192.168.1.50:5432/iot_dashboard_db?sslmode=disable'}
+                    placeholder={engineConfig?.postgresUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable'}
                     className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500"
                   />
                   <div className="flex items-center gap-2">
@@ -1424,7 +1433,7 @@ export const DatabaseDataView: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  İpucu: Docker / VPS sunucunuz için örnek: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:sifreniz@db.nexusnodeiot.com.tr:5432/iot_dashboard?sslmode=disable</code>
+                  İpucu: Docker / VPS sunucunuz için yapılandırılmış adres: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable</code>
                 </p>
                 <div className="mt-2 p-2.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/30 rounded-lg text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
                   <Info className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
@@ -1462,6 +1471,23 @@ export const DatabaseDataView: React.FC = () => {
                             <span className={`w-2 h-2 rounded-full ${exists ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                             <span className="font-mono">{tbl}</span>
                             <span className="opacity-70">({exists ? 'Mevcut' : 'Eksik'})</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {postgresTestResult.diagnostic && (
+                    <div className="mt-2 pt-2.5 border-t border-rose-200 dark:border-rose-900/40 text-xs space-y-2">
+                      <div className="flex items-center gap-1.5 font-bold text-rose-800 dark:text-rose-300">
+                        <Info className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                        <span>Teşhis & Çözüm: {postgresTestResult.diagnostic.suggestionTitle}</span>
+                      </div>
+                      <div className="space-y-1.5 pl-2">
+                        {postgresTestResult.diagnostic.suggestionSteps.map((step, idx) => (
+                          <div key={idx} className="text-slate-700 dark:text-slate-300 flex items-start gap-1.5">
+                            <span className="font-semibold text-rose-600 dark:text-rose-400 shrink-0">{idx + 1}.</span>
+                            <span className="font-mono text-[11px] leading-relaxed">{step}</span>
                           </div>
                         ))}
                       </div>

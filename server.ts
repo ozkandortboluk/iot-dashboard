@@ -150,20 +150,23 @@ app.use('/api', (req, res, next) => {
     return next();
   }
 
-  // Allowed endpoints even when DB is not ready
+  // Allowed endpoints even when DB is not ready or during configuration
   if (
     req.path.startsWith('/setup') ||
     req.path.startsWith('/auth') ||
     req.path === '/system/status' ||
-    req.path.startsWith('/health')
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/database') ||
+    req.path.startsWith('/system-logs')
   ) {
     return next();
   }
 
   const dbState = db.getDatabaseState();
   const isPgReady = db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
+  const isSystemReady = isPgReady || dbState === DatabaseState.READY;
 
-  if (!isPgReady) {
+  if (!isSystemReady) {
     const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
     return res.status(503).json({
       success: false,
