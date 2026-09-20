@@ -287,13 +287,17 @@ export function startBackgroundWorkers() {
     return;
   }
   backgroundWorkersStarted = true;
-  console.log('[Workers] PostgreSQL veritabanı READY durumunda. Arka plan servisleri başlatılıyor (WebSocket, Simulator, OTA, NoData, CommandExpiry)...');
-  initWebSocketServer(server);
+  console.log('[Workers] PostgreSQL veritabanı READY durumunda. Veritabanına bağlı arka plan servisleri başlatılıyor (Simulator, OTA, NoData, CommandExpiry)...');
   initSimulator();
   startOtaWorker();
   startNoDataWorker();
   startCommandExpiryWorker();
 }
+
+// Start the authenticated WebSocket upgrade/security layer with the HTTP server.
+// Database-dependent workers remain gated by READY, but /ws must always reject
+// unauthenticated or untrusted-origin upgrades instead of falling through to SPA HTTP 200.
+initWebSocketServer(server);
 
 // Automatically start background workers whenever the DB state transitions to READY
 db.onStateChange((newState) => {
