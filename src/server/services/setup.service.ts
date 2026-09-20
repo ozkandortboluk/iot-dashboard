@@ -451,7 +451,9 @@ export class SetupService {
    * Returns false if database is not connected or real administrator is missing.
    */
   public isSetupCompleted(): boolean {
-    if (process.env.SETUP_COMPLETED === 'true') return true;
+    // The persisted runtime state is authoritative. SETUP_COMPLETED is intentionally
+    // not treated as an unconditional lock because a stale environment value can
+    // otherwise make a fresh/restored database impossible to initialize.
     return Boolean(this.isCompletedState);
   }
 
@@ -640,8 +642,13 @@ export class SetupService {
       // Auto-heal: If database is disconnected or no real admin exists, setup CANNOT be completed/locked.
       if (this.isCompletedState) {
         this.isCompletedState = false;
+        this.completedAtDate = null;
+        // Persist the repaired state so a container restart cannot restore a stale lock.
+        if (this.runtimeConfig) {
+          this.saveRuntimeSecretConfig(this.runtimeConfig, false);
+        }
       }
-      // Ensure a valid setup token is available for the wizard
+      // Ensure a valid setup token is available for the operator.
       this.getOrInitSetupToken();
     }
 
@@ -668,6 +675,8 @@ export class SetupService {
     }
 
     const setupTokenRequired = !isCompleted;
+    // Never disclose the setup token through a public status response. The operator
+    // retrieves it from the server console, Docker secret, or data/.setup_token.
     const activeSetupToken = !isCompleted ? this.getOrInitSetupToken(true) : undefined;
 
     return {
@@ -675,8 +684,8 @@ export class SetupService {
       isCompleted,
       isDbReady,
       setupTokenRequired,
-      isSetupAuthenticated: isAuthenticated || Boolean(activeSetupToken),
-      setupToken: activeSetupToken,
+      isSetupAuthenticated: isAuthenticated,
+      setupToken: isAuthenticated ? activeSetupToken : undefined,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,
