@@ -13,6 +13,7 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 - `/api/setup/reset` ve `/api/setup/resume` kurtarma işlemleri geçerli sunucu Setup Token ile korumaya alındı.
 - Docker PostgreSQL örnek bağlantı adı `iot_dashboard` ile eşitlendi ve kurtarma güvenlik testleri genişletildi.
 - Sunucunun `PORT` ortam değişkenini yok sayması düzeltildi; production smoke testi boş veritabanında güvenli `SETUP` modunu doğrulayacak hale getirildi.
+- WebSocket güvenlik katmanı PostgreSQL `READY` durumundan ayrıldı; `/ws` istekleri kurulum modunda da gerçek 401/403 kontrollerinden geçiyor ve artık SPA tarafından yanlışlıkla HTTP 200 ile karşılanmıyor.
 
 ---
 
