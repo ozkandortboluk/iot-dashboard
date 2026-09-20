@@ -89,6 +89,19 @@ async function runSmokeTest() {
       throw new Error(`Live endpoint failed: status ${live.statusCode}, data: ${JSON.stringify(live.data)}`);
     }
     console.log('   ✅ Live OK (Status: alive, Uptime: ' + live.data.uptimeSeconds + 's)');
+
+    // A production bundle with an empty database must remain live in setup mode.
+    // Readiness is expected only after migrations and a real administrator exist.
+    const initialReady = await checkEndpoint('http://127.0.0.1:3001/api/health/ready');
+    if (initialReady.statusCode === 503 && initialReady.data?.state === 'SETUP') {
+      console.log('   ✅ Setup mode detected correctly for an uninitialized database.');
+      const setupStatus = await checkEndpoint('http://127.0.0.1:3001/api/setup/status');
+      if (setupStatus.statusCode !== 200 || setupStatus.data?.setupRequired !== true) {
+        throw new Error(`Setup status failed: status ${setupStatus.statusCode}, data: ${JSON.stringify(setupStatus.data)}`);
+      }
+      console.log('   ✅ Setup status endpoint is reachable and requires initialization.');
+      return;
+    }
     
     // 2. Readiness check (Database status & engine verification)
     console.log('➡️ Testing /api/health/ready (Readiness & DB)...');
