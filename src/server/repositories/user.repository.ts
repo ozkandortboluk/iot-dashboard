@@ -364,13 +364,10 @@ export class UserRepository {
     // 1. CİHAZ SAHİPLİĞİNİ KORUMA & KANONİK AKTARIM:
     const now = new Date().toISOString();
     const ownedDevices = (this.db.data.devices || []).filter(
-      (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
+      (d: any) => d.tenantId === userId || d.userId === userId
     );
 
     for (const dev of ownedDevices) {
-      dev.previousTenantId = userId;
-      dev.previousTenantName = removed.name;
-      dev.ownershipTransferredAt = now;
       dev.tenantId = 'usr_admin';
       dev.userId = 'usr_admin';
       if (!dev.location || dev.location === 'Varsayılan') {
@@ -434,9 +431,6 @@ export class UserRepository {
     } else {
       const now = new Date().toISOString();
       for (const dev of ownedDevices) {
-        dev.previousTenantId = userId;
-        dev.previousTenantName = removed.name;
-        dev.ownershipTransferredAt = now;
         dev.tenantId = 'usr_admin';
         dev.userId = 'usr_admin';
         if (!dev.location || dev.location === 'Varsayılan') {

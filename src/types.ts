@@ -156,9 +156,6 @@ export interface Device {
   id: string;
   tenantId: string; // Canonical Tenant (Customer/Company) ID
   userId?: string; // Backwards compatibility alias for tenantId
-  previousTenantId?: string; // Prior owner tenant ID before deletion or reassignment
-  previousTenantName?: string; // Prior owner name before deletion
-  ownershipTransferredAt?: string; // Timestamp of ownership reassignment
   siteId?: string; // Facility/Location ID
   zoneId?: string; // Facility Zone/Area ID
   groupId?: string; // Logical Device Group ID
@@ -182,7 +179,6 @@ export interface Device {
   apiKeyLastUsedAt?: string;
   apiKeyScopes?: string[];
   apiKeyRotatedAt?: string;
-  previousApiKeyHash?: string;
   status: DeviceStatus;
   location: string;
   ipAddress: string;
@@ -208,8 +204,6 @@ export interface Device {
   batteryLevel?: number;
   saveSimulatedDataToDb?: boolean;
   simulatedMetrics?: string[];
-  supportedOutputs?: string[];
-  supportedCommands?: string[];
   outputDefinitions?: DeviceOutputDefinition[];
   capabilities?: DeviceCapabilities;
   metrics: {
@@ -358,8 +352,6 @@ export interface TelemetryReading {
   id: string;
   packetId?: string;
   tenantId?: string;
-  customerId?: string;
-  userId?: string;
   deviceId: string;
   deviceName: string;
   timestamp: string;
@@ -372,7 +364,6 @@ export interface TelemetryReading {
   bootId?: string;
   idempotencyKey?: string;
   source: TelemetrySource;
-  environment: 'production' | 'sandbox';
   simulationRunId?: string;
 }
 

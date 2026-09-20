@@ -40,7 +40,12 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
     rateLimitPerMin: 600,
     encryptionMethod: 'none',
     lastSeen: new Date().toISOString(),
-    supportedOutputs: ['RELAY_1', 'RELAY_2', 'VALVE_1', 'HEATER_1'],
+    outputDefinitions: [
+      { id: 'RELAY_1', name: 'Röle 1', pin: 2, type: 'relay' },
+      { id: 'RELAY_2', name: 'Röle 2', pin: 4, type: 'relay' },
+      { id: 'VALVE_1', name: 'Vana 1', pin: 5, type: 'relay' },
+      { id: 'HEATER_1', name: 'Isıtıcı 1', pin: 12, type: 'relay' }
+    ],
     metrics: {
       temperature: 19.5,
       humidity: 62.0,

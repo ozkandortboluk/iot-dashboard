@@ -382,20 +382,13 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       columns: [
         { name: 'id', type: 'VARCHAR(64)', nullable: false, primaryKey: true },
         { name: 'tenant_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
-        { name: 'customer_id', type: 'VARCHAR(64)', nullable: true, defaultValue: "'usr_admin'" },
         { name: 'user_id', type: 'VARCHAR(64)', nullable: true, defaultValue: "'usr_admin'" },
-        { name: 'assigned_user_id', type: 'VARCHAR(64)', nullable: true },
-        { name: 'created_by_user_id', type: 'VARCHAR(64)', nullable: true },
-        { name: 'previous_tenant_id', type: 'VARCHAR(64)', nullable: true },
-        { name: 'previous_tenant_name', type: 'VARCHAR(128)', nullable: true },
-        { name: 'ownership_transferred_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'name', type: 'VARCHAR(128)', nullable: false },
         { name: 'device_type', type: 'VARCHAR(64)', nullable: false, defaultValue: "'custom'" },
         { name: 'role_key', type: 'VARCHAR(64)', nullable: true, defaultValue: "'device'" },
         { name: 'api_key', type: 'VARCHAR(256)', nullable: true },
         { name: 'api_key_prefix', type: 'VARCHAR(32)', nullable: true },
         { name: 'api_key_hash', type: 'VARCHAR(128)', nullable: true },
-        { name: 'previous_api_key_hash', type: 'VARCHAR(128)', nullable: true },
         { name: 'api_key_expires_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'api_key_revoked', type: 'BOOLEAN', nullable: false, defaultValue: 'FALSE' },
         { name: 'api_key_last_used_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
@@ -432,8 +425,6 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'last_message_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'output_definitions', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'capabilities', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
-        { name: 'supported_outputs', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
-        { name: 'supported_commands', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
       indexes: [
@@ -518,8 +509,6 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'id', type: 'VARCHAR(128)', nullable: false },
         { name: 'packet_id', type: 'VARCHAR(128)', nullable: true },
         { name: 'tenant_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
-        { name: 'customer_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
-        { name: 'user_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
         { name: 'device_id', type: 'VARCHAR(64)', nullable: true },
         { name: 'device_name', type: 'VARCHAR(128)', nullable: false },
         { name: 'metric', type: 'VARCHAR(64)', nullable: false },
@@ -528,20 +517,16 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'status_level', type: 'VARCHAR(32)', nullable: false, defaultValue: "'normal'" },
         { name: 'sequence', type: 'BIGINT', nullable: true },
         { name: 'source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'physical'" },
-        { name: 'environment', type: 'VARCHAR(32)', nullable: false, defaultValue: "'production'" },
-        { name: 'simulation_run_id', type: 'VARCHAR(128)', nullable: true },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
       indexes: [
         { name: 'idx_telemetry_tenant_device_time', columns: ['tenant_id', 'device_id', 'created_at DESC'] },
-        { name: 'idx_telemetry_customer_device_time', columns: ['customer_id', 'device_id', 'created_at DESC'] },
         { name: 'idx_telemetry_tenant_time', columns: ['tenant_id', 'created_at DESC'] },
-        { name: 'idx_telemetry_customer_time', columns: ['customer_id', 'created_at DESC'] },
         { name: 'idx_telemetry_device_time', columns: ['device_id', 'created_at DESC'] },
         { name: 'idx_telemetry_metric_time', columns: ['metric', 'created_at DESC'] },
         { name: 'idx_telemetry_time', columns: ['created_at DESC'] },
         { name: 'idx_telemetry_packet', columns: ['packet_id'] },
-        { name: 'idx_telemetry_source_env', columns: ['source', 'environment'] }
+        { name: 'idx_telemetry_source', columns: ['source'] }
       ],
       timescaleHypertable: {
         timeColumn: 'created_at',
@@ -580,8 +565,6 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'id', type: 'VARCHAR(128)', nullable: false },
         { name: 'packet_id', type: 'VARCHAR(128)', nullable: true },
         { name: 'tenant_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
-        { name: 'customer_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
-        { name: 'user_id', type: 'VARCHAR(64)', nullable: false, defaultValue: "'usr_admin'" },
         { name: 'device_id', type: 'VARCHAR(64)', nullable: true },
         { name: 'device_name', type: 'VARCHAR(128)', nullable: false },
         { name: 'metric', type: 'VARCHAR(64)', nullable: false },
@@ -590,15 +573,12 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'status_level', type: 'VARCHAR(32)', nullable: false, defaultValue: "'normal'" },
         { name: 'sequence', type: 'BIGINT', nullable: true },
         { name: 'source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'simulator'" },
-        { name: 'environment', type: 'VARCHAR(32)', nullable: false, defaultValue: "'sandbox'" },
         { name: 'simulation_run_id', type: 'VARCHAR(128)', nullable: true },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
       indexes: [
         { name: 'idx_sim_telemetry_tenant_device_time', columns: ['tenant_id', 'device_id', 'created_at DESC'] },
-        { name: 'idx_sim_telemetry_customer_device_time', columns: ['customer_id', 'device_id', 'created_at DESC'] },
         { name: 'idx_sim_telemetry_tenant_time', columns: ['tenant_id', 'created_at DESC'] },
-        { name: 'idx_sim_telemetry_customer_time', columns: ['customer_id', 'created_at DESC'] },
         { name: 'idx_sim_telemetry_device_time', columns: ['device_id', 'created_at DESC'] },
         { name: 'idx_sim_telemetry_metric_time', columns: ['metric', 'created_at DESC'] },
         { name: 'idx_sim_telemetry_time', columns: ['created_at DESC'] },
@@ -1238,13 +1218,12 @@ ON CONFLICT (id) DO NOTHING;\n`;
   if (tableName === 'devices') {
     ddl += `
 INSERT INTO devices (
-    id, tenant_id, customer_id, user_id, name, device_type, role_key,
+    id, tenant_id, user_id, name, device_type, role_key,
     api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
     heartbeat_timeout_seconds, expected_interval_seconds, created_at
 )
 VALUES (
     'dev_test_01',
-    'usr_test_admin',
     'usr_test_admin',
     'usr_test_admin',
     'Kanonik Saha Test Cihazı (ESP32)',
@@ -1375,20 +1354,13 @@ ${testUserDdl}
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) DEFAULT 'usr_admin',
     user_id VARCHAR(64) DEFAULT 'usr_admin',
-    assigned_user_id VARCHAR(64),
-    created_by_user_id VARCHAR(64),
-    previous_tenant_id VARCHAR(64),
-    previous_tenant_name VARCHAR(128),
-    ownership_transferred_at TIMESTAMP WITH TIME ZONE,
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(64) NOT NULL DEFAULT 'custom',
     role_key VARCHAR(64) DEFAULT 'device',
     api_key VARCHAR(256),
     api_key_prefix VARCHAR(32),
     api_key_hash VARCHAR(128),
-    previous_api_key_hash VARCHAR(128),
     api_key_expires_at TIMESTAMP WITH TIME ZONE,
     api_key_revoked BOOLEAN DEFAULT FALSE,
     api_key_last_used_at TIMESTAMP WITH TIME ZONE,
@@ -1423,8 +1395,6 @@ CREATE TABLE IF NOT EXISTS devices (
     last_message_at TIMESTAMP WITH TIME ZONE,
     output_definitions JSONB DEFAULT '[]'::jsonb,
     capabilities JSONB DEFAULT '[]'::jsonb,
-    supported_outputs JSONB DEFAULT '[]'::jsonb,
-    supported_commands JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1438,13 +1408,12 @@ CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC);
 
 -- Canonical Permanent Test Device (dev_test_01)
 INSERT INTO devices (
-    id, tenant_id, customer_id, user_id, name, device_type, role_key,
+    id, tenant_id, user_id, name, device_type, role_key,
     api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
     heartbeat_timeout_seconds, expected_interval_seconds, created_at
 )
 VALUES (
     'dev_test_01',
-    'usr_test_admin',
     'usr_test_admin',
     'usr_test_admin',
     'Kanonik Saha Test Cihazı (ESP32)',
@@ -1499,8 +1468,6 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    user_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -1509,21 +1476,17 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
     source VARCHAR(32) DEFAULT 'physical',
-    environment VARCHAR(32) DEFAULT 'production',
-    simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_time ON telemetry_readings(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_time ON telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_packet ON telemetry_readings(packet_id);
-CREATE INDEX IF NOT EXISTS idx_telemetry_source_env ON telemetry_readings(source, environment);
+CREATE INDEX IF NOT EXISTS idx_telemetry_source ON telemetry_readings(source);
 
 -- TimescaleDB Hypertable Setup & Columnar Compression for telemetry_readings
 DO $$
@@ -1550,8 +1513,6 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    user_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -1560,16 +1521,13 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
     source VARCHAR(32) DEFAULT 'simulator',
-    environment VARCHAR(32) DEFAULT 'sandbox',
     simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_time ON simulation_telemetry_readings(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_time ON simulation_telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_device_time ON simulation_telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_metric_time ON simulation_telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_time ON simulation_telemetry_readings(created_at DESC);

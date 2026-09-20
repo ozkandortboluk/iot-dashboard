@@ -4,6 +4,34 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.40.0] - 2026-09-20
+
+### ⚡ Telemetry Readings Tablosu Sadeleştirme & Performans Optimizasyonu (Migration 017)
+- **Gereksiz & Mükerrer Kolonların Temizlenmesi**: `telemetry_readings` ve `simulation_telemetry_readings` tablolarındaki gereksiz kolonlar (`customer_id`, `user_id`, `environment`, `simulation_run_id`) kaldırıldı. `tenant_id` kanonik veri sahipliği alanı olarak korundu.
+- **Performans & İndeks Optimizasyonu**: Mükerrer `idx_telemetry_customer_device_time` ve `idx_telemetry_customer_time` indeksleri silinerek yazma performansında ivme sağlandı ve disk depolama maliyeti düşürüldü.
+- **Şema, ORM & Repozitör Senkronizasyonu**: Drizzle ORM şeması (`schema.ts`), TimescaleDB SQL DDL (`timescaledb.sql`), kanonik şema metadata'sı (`canonicalSchema.ts`), PostgreSQL toplu ekleme motoru (`postgres.ts`) ve `telemetry.repository.ts` katmanları sadeleştirilmiş şemaya göre güncellendi.
+- **Tip Güvenliği**: TypeScript `TelemetryReading` arayüzü gereksiz alanlardan arındırıldı.
+
+---
+
+## 🚀 [v1.39.0] - 2026-09-20
+
+### ⚡ Devices Tablosu Mimarisi Sadeleştirme & Temizlik (Migration 016)
+- **Gereksiz Kolonların Temizlenmesi**: `devices` tablosundaki 15 adet gereksiz, atıl veya mükerrer kolon (`customer_id`, `assigned_user_id`, `created_by_user_id`, `previous_tenant_id`, `previous_tenant_name`, `ownership_transferred_at`, `type`, `ip`, `previous_api_key_hash`, `ota_target_version`, `ota_job_id`, `supported_outputs`, `supported_commands`, `error_message`, `ota_error_message`) kaldırıldı.
+- **Şema & ORM Uyumluluğu**: Drizzle ORM şeması (`schema.ts`), PostgreSQL reposu (`postgres.ts`), DDL metadata tanımları (`canonicalSchema.ts`) ve seeder yapıları (`initialDataSeeder.ts`) yalınlaştırılmış şema yapısıyla tam uyumlu hale getirildi.
+- **Tip & Test Senkronizasyonu**: TypeScript `Device` arayüzü, komut doğrulayıcıları ve test suitleri (`command_lifecycle`, `esp_hardware_e2e`, `automation_and_field_ops`, `network_reconnect_soak`) sadeleştirilmiş model doğrultusunda güncellendi.
+
+---
+
+## 🚀 [v1.38.13] - 2026-09-20
+
+### 🧹 Veritabanı Şema Temizliği & Veri Konsolidasyonu (Migration 015)
+- **Veri Konsolidasyonu**: `devices` tablosunda ve ilişkili yapılarda yer alan mükerrer/eski kiracı ve kullanıcı referansları (`tenant_id`, `user_id`, `customer_id`) otomatik olarak konsolide edildi ve eksik alanlar güvenli varsayılanlarla dolduruldu.
+- **API Anahtarı & Oturum Temizliği**: Cihaz API anahtarlarının SHA-256 hash senkronizasyonu sağlandı. Süresi dolmuş oturumlar ve geçici mükerrer mesaj kayıtları temizlendi.
+- **Kanonik Test Varlıkları Senkronizasyonu**: Kanonik test kullanıcısı (`usr_test_admin`) ve test cihazı (`dev_test_01`) şema temizliği sonrası aktif statü ve geçerli API anahtarı hash'i ile güncellendi.
+
+---
+
 ## 🚀 [v1.38.12] - 2026-09-20
 
 ### 🛡️ PostgreSQL Bağlantı Havuzu & Kaynak Yönetimi Optimizasyonu (Connection Leak Prevention)

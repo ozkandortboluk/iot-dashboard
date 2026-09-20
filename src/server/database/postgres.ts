@@ -1149,9 +1149,6 @@ export class PostgresRepository {
       await client.query(`
         UPDATE devices
         SET 
-          previous_tenant_id = $1,
-          previous_tenant_name = COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), 'Eski Müşteri'),
-          ownership_transferred_at = NOW(),
           tenant_id = 'usr_admin',
           user_id = 'usr_admin',
           location = CASE 
@@ -1197,8 +1194,8 @@ export class PostgresRepository {
           await client.query(`DELETE FROM simulation_telemetry_readings WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
           await client.query(`DELETE FROM telemetry_packets WHERE device_id = ANY($1::text[])`, [deviceIds]).catch(() => {});
         }
-        await client.query(`DELETE FROM telemetry_readings WHERE tenant_id = $1 OR user_id = $1 OR customer_id = $1`, [userId]).catch(() => {});
-        await client.query(`DELETE FROM simulation_telemetry_readings WHERE tenant_id = $1 OR user_id = $1 OR customer_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM telemetry_readings WHERE tenant_id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM simulation_telemetry_readings WHERE tenant_id = $1`, [userId]).catch(() => {});
       }
 
       if (options.deleteDashboards) {
@@ -1230,9 +1227,6 @@ export class PostgresRepository {
         await client.query(`
           UPDATE devices
           SET 
-            previous_tenant_id = $1,
-            previous_tenant_name = COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), 'Eski Müşteri'),
-            ownership_transferred_at = NOW(),
             tenant_id = 'usr_admin',
             user_id = 'usr_admin',
             location = CASE 
@@ -1318,36 +1312,30 @@ export class PostgresRepository {
 
     const sql = `
       INSERT INTO devices (
-        id, tenant_id, user_id, previous_tenant_id, previous_tenant_name, ownership_transferred_at,
-        name, type, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
-        ip, ip_address, mac_address, last_seen, rate_limit_per_min, 
+        id, tenant_id, user_id, name, device_type, api_key, api_key_prefix, api_key_hash, status, location, 
+        ip_address, mac_address, last_seen, rate_limit_per_min, 
         encryption_method, metrics, data_flow_active, is_simulated, 
         save_simulated_data_to_db, simulated_metrics, role_key, hardware_model, firmware_version,
         ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at,
         expected_interval_seconds, auto_detected_interval_seconds, heartbeat_timeout_seconds,
         interval_mode, custom_interval_seconds, recent_intervals,
-        websocket_connected, last_message_at, output_definitions, capabilities, supported_outputs, supported_commands,
+        websocket_connected, last_message_at, output_definitions, capabilities,
         created_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
         $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, 
-        $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
+        $33, $34, $35, $36, $37, $38, $39
       )
       ON CONFLICT (id) DO UPDATE SET
         tenant_id = EXCLUDED.tenant_id,
         user_id = EXCLUDED.user_id,
-        previous_tenant_id = COALESCE(EXCLUDED.previous_tenant_id, devices.previous_tenant_id),
-        previous_tenant_name = COALESCE(EXCLUDED.previous_tenant_name, devices.previous_tenant_name),
-        ownership_transferred_at = COALESCE(EXCLUDED.ownership_transferred_at, devices.ownership_transferred_at),
         name = EXCLUDED.name,
-        type = EXCLUDED.type,
         device_type = EXCLUDED.device_type,
         api_key = EXCLUDED.api_key,
         api_key_prefix = EXCLUDED.api_key_prefix,
         api_key_hash = EXCLUDED.api_key_hash,
         status = EXCLUDED.status,
         location = EXCLUDED.location,
-        ip = EXCLUDED.ip,
         ip_address = EXCLUDED.ip_address,
         mac_address = EXCLUDED.mac_address,
         last_seen = EXCLUDED.last_seen,
@@ -1375,26 +1363,19 @@ export class PostgresRepository {
         websocket_connected = EXCLUDED.websocket_connected,
         last_message_at = COALESCE(EXCLUDED.last_message_at, devices.last_message_at),
         output_definitions = EXCLUDED.output_definitions,
-        capabilities = EXCLUDED.capabilities,
-        supported_outputs = EXCLUDED.supported_outputs,
-        supported_commands = EXCLUDED.supported_commands;
+        capabilities = EXCLUDED.capabilities;
     `;
     const params = [
       dev.id,
       canonicalTenantId,
       canonicalTenantId,
-      dev.previousTenantId || null,
-      dev.previousTenantName || null,
-      dev.ownershipTransferredAt || null,
       dev.name,
-      effectiveType,
       effectiveType,
       dev.apiKey || null,
       dev.apiKeyPrefix || null,
       dev.apiKeyHash || null,
       dev.status || 'online',
       dev.location || null,
-      effectiveIp,
       effectiveIp,
       dev.macAddress || null,
       dev.lastSeen || new Date().toISOString(),
@@ -1423,8 +1404,6 @@ export class PostgresRepository {
       dev.lastMessageAt || null,
       JSON.stringify(dev.outputDefinitions || []),
       JSON.stringify(dev.capabilities || []),
-      JSON.stringify(dev.supportedOutputs || []),
-      JSON.stringify(dev.supportedCommands || []),
       (dev as any).createdAt || new Date().toISOString(),
     ];
 
@@ -1508,9 +1487,6 @@ export class PostgresRepository {
       id: r.id,
       tenantId: r.tenant_id || r.user_id || 'usr_admin',
       userId: r.tenant_id || r.user_id || 'usr_admin',
-      previousTenantId: r.previous_tenant_id || undefined,
-      previousTenantName: r.previous_tenant_name || undefined,
-      ownershipTransferredAt: r.ownership_transferred_at ? new Date(r.ownership_transferred_at).toISOString() : undefined,
       name: r.name,
       type: r.device_type || r.type || 'sensor',
       deviceType: r.device_type || r.type || 'sensor',
@@ -1547,8 +1523,6 @@ export class PostgresRepository {
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : undefined,
       outputDefinitions: Array.isArray(r.output_definitions) ? r.output_definitions : (typeof r.output_definitions === 'string' ? JSON.parse(r.output_definitions) : undefined),
       capabilities: Array.isArray(r.capabilities) ? r.capabilities : (typeof r.capabilities === 'string' ? JSON.parse(r.capabilities) : undefined),
-      supportedOutputs: Array.isArray(r.supported_outputs) ? r.supported_outputs : (typeof r.supported_outputs === 'string' ? JSON.parse(r.supported_outputs) : undefined),
-      supportedCommands: Array.isArray(r.supported_commands) ? r.supported_commands : (typeof r.supported_commands === 'string' ? JSON.parse(r.supported_commands) : undefined),
     };
   }
 
@@ -1864,9 +1838,7 @@ export class PostgresRepository {
             let paramIdx = 1;
 
             for (const r of chunk) {
-              const tenantId = r.tenantId || r.customerId || 'usr_admin';
-              const customerId = r.customerId || r.tenantId || 'usr_admin';
-              const userId = r.userId || customerId || tenantId || 'usr_admin';
+              const tenantId = r.tenantId || r.customerId || r.userId || 'usr_admin';
               const bootId = r.bootId || 'default';
               const rPacketId = r.packetId || (r.sequence !== undefined && r.sequence !== null ? `pkt_${r.deviceId}_boot_${bootId}_seq_${r.sequence}` : null);
               const rIdempotencyKey = r.idempotencyKey || (
@@ -1875,13 +1847,11 @@ export class PostgresRepository {
                   : null
               );
 
-              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
+              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13})`);
               params.push(
                 r.id,
                 rPacketId,
                 tenantId,
-                customerId,
-                userId,
                 r.deviceId,
                 r.deviceName || r.deviceId,
                 r.metric,
@@ -1892,16 +1862,14 @@ export class PostgresRepository {
                 bootId,
                 rIdempotencyKey,
                 r.source || 'physical',
-                r.environment || 'production',
-                r.simulationRunId || null,
                 r.timestamp || new Date().toISOString()
               );
-              paramIdx += 18;
+              paramIdx += 14;
             }
 
             const sql = `
               INSERT INTO telemetry_readings (
-                id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+                id, packet_id, tenant_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, created_at
               ) VALUES ${valueTuples.join(', ')}
               ON CONFLICT DO NOTHING;
             `;
@@ -1920,20 +1888,16 @@ export class PostgresRepository {
             let paramIdx = 1;
 
             for (const r of chunk) {
-              const tenantId = r.tenantId || r.customerId || 'usr_admin';
-              const customerId = r.customerId || r.tenantId || 'usr_admin';
-              const userId = r.userId || customerId || tenantId || 'usr_admin';
+              const tenantId = r.tenantId || r.customerId || r.userId || 'usr_admin';
               const bootId = r.bootId || 'default';
               const rPacketId = r.packetId || null;
               const rIdempotencyKey = r.idempotencyKey || null;
 
-              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14}, $${paramIdx + 15}, $${paramIdx + 16}, $${paramIdx + 17})`);
+              valueTuples.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9}, $${paramIdx + 10}, $${paramIdx + 11}, $${paramIdx + 12}, $${paramIdx + 13}, $${paramIdx + 14})`);
               params.push(
                 r.id,
                 rPacketId,
                 tenantId,
-                customerId,
-                userId,
                 r.deviceId,
                 r.deviceName || r.deviceId,
                 r.metric,
@@ -1944,16 +1908,15 @@ export class PostgresRepository {
                 bootId,
                 rIdempotencyKey,
                 'simulator',
-                'sandbox',
                 r.simulationRunId || null,
                 r.timestamp || new Date().toISOString()
               );
-              paramIdx += 18;
+              paramIdx += 15;
             }
 
             const sql = `
               INSERT INTO simulation_telemetry_readings (
-                id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, environment, simulation_run_id, created_at
+                id, packet_id, tenant_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, boot_id, idempotency_key, source, simulation_run_id, created_at
               ) VALUES ${valueTuples.join(', ')}
               ON CONFLICT DO NOTHING;
             `;
@@ -3186,13 +3149,13 @@ export class PostgresRepository {
       // Check and delete simulation records from telemetry_readings efficiently using indexes
       try {
         const hasSimSource = await this.query(
-          `SELECT 1 FROM telemetry_readings WHERE source = $1 OR environment = $2 LIMIT 1;`,
-          ['simulator', 'sandbox']
+          `SELECT 1 FROM telemetry_readings WHERE source = $1 LIMIT 1;`,
+          ['simulator']
         );
         if (hasSimSource?.rows?.length > 0) {
           const delRes = await this.query(
-            `DELETE FROM telemetry_readings WHERE source = $1 OR environment = $2;`,
-            ['simulator', 'sandbox']
+            `DELETE FROM telemetry_readings WHERE source = $1;`,
+            ['simulator']
           );
           counts.telemetry += delRes?.rowCount || 0;
         }

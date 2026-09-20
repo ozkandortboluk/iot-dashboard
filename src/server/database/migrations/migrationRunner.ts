@@ -14,6 +14,9 @@ import { migration011 } from './011_fix_threshold_rules_active_hours_json_syntax
 import { migration012 } from './012_canonical_schema_full_harmonization.js';
 import { migration013 } from './013_add_device_power_status.js';
 import { migration014 } from './014_widen_audit_logs_action_and_resilient_user_refs.js';
+import { migration015 } from './015_schema_cleanup_and_consolidation.js';
+import { migration016 } from './016_simplify_devices_table.js';
+import { migration017 } from './017_simplify_telemetry_readings_table.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -38,6 +41,9 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration012,
   migration013,
   migration014,
+  migration015,
+  migration016,
+  migration017,
 ];
 
 let lastMigrationStatus: {

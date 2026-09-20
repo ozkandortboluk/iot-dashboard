@@ -22,7 +22,11 @@ describe('Command Lifecycle & Idempotency Test Suite (Roadmap 3.3)', () => {
     rateLimitPerMin: 60,
     encryptionMethod: 'none',
     lastSeen: new Date().toISOString(),
-    supportedOutputs: ['RELAY_1', 'RELAY_2', 'PWM_1'],
+    outputDefinitions: [
+      { id: 'RELAY_1', name: 'Röle 1', pin: 2, type: 'relay' },
+      { id: 'RELAY_2', name: 'Röle 2', pin: 4, type: 'relay' },
+      { id: 'PWM_1', name: 'PWM 1', pin: 5, type: 'pwm' }
+    ],
     metrics: {
       temperature: 24,
       pressure: 1.2,

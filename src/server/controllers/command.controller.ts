@@ -79,18 +79,6 @@ export class CommandController {
       if (match) return { supported: true };
     }
 
-    // 2. Explicitly declared supported outputs on device
-    if (device.supportedOutputs && Array.isArray(device.supportedOutputs) && device.supportedOutputs.length > 0) {
-      const match = device.supportedOutputs.some((o) => o.trim().toUpperCase() === cleanOutput);
-      if (match) return { supported: true };
-    }
-
-    // 2. Explicitly declared supported commands on device
-    if (device.supportedCommands && Array.isArray(device.supportedCommands) && device.supportedCommands.length > 0) {
-      const match = device.supportedCommands.some((c) => c.trim().toUpperCase() === cleanOutput);
-      if (match) return { supported: true };
-    }
-
     // 3. Known metric pins on the device (e.g. device.metrics)
     if (device.metrics && Object.prototype.hasOwnProperty.call(device.metrics, outputId)) {
       return { supported: true };

@@ -225,9 +225,6 @@ export class DeviceRepository {
     const oldOwner = this.db.data.users?.find((u: any) => u.id === oldOwnerId);
     const newOwner = this.db.data.users?.find((u: any) => u.id === resolved.canonicalTenantId);
 
-    dev.previousTenantId = oldOwnerId;
-    dev.previousTenantName = oldOwner ? oldOwner.name : (oldOwnerId === 'usr_admin' ? 'Merkez Yönetim' : oldOwnerId);
-    dev.ownershipTransferredAt = new Date().toISOString();
     dev.tenantId = resolved.canonicalTenantId;
     dev.userId = resolved.canonicalTenantId;
 
@@ -235,7 +232,7 @@ export class DeviceRepository {
     this.db.addAuditLog(
       adminUserId,
       adminUserName,
-      `Cihaz Sahipliği Devredildi: "${dev.name}" -> ${newOwner ? newOwner.name : 'Sistem Yöneticisi'} (${resolved.canonicalTenantId}) [Önceki Sahip: ${dev.previousTenantName}]`,
+      `Cihaz Sahipliği Devredildi: "${dev.name}" -> ${newOwner ? newOwner.name : 'Sistem Yöneticisi'} (${resolved.canonicalTenantId}) [Önceki Sahip: ${oldOwner ? oldOwner.name : oldOwnerId}]`,
       'medium'
     );
     this.db.postgresRepo?.saveDevice(dev).catch((err: any) => {
@@ -579,8 +576,6 @@ export class DeviceRepository {
     if (updates.otaLastCheckAt !== undefined) dev.otaLastCheckAt = updates.otaLastCheckAt;
     if (updates.outputDefinitions !== undefined) dev.outputDefinitions = updates.outputDefinitions;
     if (updates.capabilities !== undefined) dev.capabilities = updates.capabilities;
-    if (updates.supportedOutputs !== undefined) dev.supportedOutputs = updates.supportedOutputs;
-    if (updates.supportedCommands !== undefined) dev.supportedCommands = updates.supportedCommands;
     if (updates.websocketConnected !== undefined) dev.websocketConnected = updates.websocketConnected;
     if (updates.lastMessageAt !== undefined) dev.lastMessageAt = updates.lastMessageAt;
     if (updates.location !== undefined) dev.location = updates.location;

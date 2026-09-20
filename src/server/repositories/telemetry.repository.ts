@@ -85,7 +85,6 @@ export class TelemetryRepository {
               const sanitizedReadings = parsed.readings.map((r: TelemetryReading) => ({
                 ...r,
                 source: 'physical' as const,
-                environment: 'production' as const,
               }));
               this.physicalRetryQueue.push({
                 ...parsed,
@@ -119,7 +118,6 @@ export class TelemetryRepository {
               const sanitizedReadings = parsed.readings.map((r: TelemetryReading) => ({
                 ...r,
                 source: 'simulator' as const,
-                environment: 'sandbox' as const,
               }));
               this.simulationRetryQueue.push({
                 ...parsed,
@@ -156,7 +154,7 @@ export class TelemetryRepository {
 
             if (readings.length > 0) {
               const first = readings[0];
-              const isSim = first.source === 'simulator' || first.environment === 'sandbox';
+              const isSim = first.source === 'simulator';
               const packet: TelemetryPacket = {
                 packetId: parsed.packetId || `pkt_migrated_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                 deviceId: first.deviceId,
@@ -297,7 +295,7 @@ export class TelemetryRepository {
 
     // Determine target queue based on source and device type
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === first.deviceId);
-    const isSimulated = dev?.isSimulated || first.source === 'simulator' || first.environment === 'sandbox';
+    const isSimulated = dev?.isSimulated || first.source === 'simulator';
     const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
     if (isSimulated) {
@@ -312,7 +310,6 @@ export class TelemetryRepository {
         bootId: r.bootId || bootId,
         idempotencyKey: r.idempotencyKey || idempotencyKey,
         source: 'simulator' as const,
-        environment: 'sandbox' as const,
       }));
 
       const packet: TelemetryPacket = {
@@ -345,13 +342,12 @@ export class TelemetryRepository {
         console.warn(`[Simulation Queue Append Error]: ${err?.message || err}`);
       }
     } else {
-      // Physical production pipeline: strictly enforce source='physical' and environment='production'
+      // Physical production pipeline: strictly enforce source='physical'
       const sanitizedReadings = readings.map((r) => ({
         ...r,
         bootId: r.bootId || bootId,
         idempotencyKey: r.idempotencyKey || idempotencyKey,
         source: 'physical' as const,
-        environment: 'production' as const,
       }));
 
       const packet: TelemetryPacket = {
@@ -989,9 +985,7 @@ export class TelemetryRepository {
 
     const fullReadings: TelemetryReading[] = readings.map((r, i) => {
       const dev = devLookup || (this.db.data.devices || []).find((d: Device) => d.id === r.deviceId);
-      const tenantId = r.tenantId || r.customerId || dev?.tenantId || '';
-      const customerId = r.customerId || r.tenantId || dev?.tenantId || '';
-      const userId = r.userId || r.tenantId || dev?.tenantId || '';
+      const tenantId = r.tenantId || dev?.tenantId || '';
       const bootId = r.bootId || 'default';
       const idempotencyKey = r.idempotencyKey || (
         r.deviceId && r.sequence !== undefined && r.sequence !== null
@@ -1008,13 +1002,10 @@ export class TelemetryRepository {
         ...r,
         id,
         tenantId,
-        customerId,
-        userId,
         bootId,
         idempotencyKey,
         timestamp,
         source: r.source || (isDevSim ? 'simulator' : 'physical'),
-        environment: r.environment || (isDevSim ? 'sandbox' : 'production'),
         simulationRunId: r.simulationRunId,
       };
     });
@@ -1134,19 +1125,14 @@ export class TelemetryRepository {
   public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<TelemetryReading> {
     const dev = (this.db.data.devices || []).find((d: Device) => d.id === reading.deviceId);
     const isDevSim = dev?.isSimulated || false;
-    const tenantId = reading.tenantId || reading.customerId || dev?.tenantId || '';
-    const customerId = reading.customerId || reading.tenantId || dev?.tenantId || '';
-    const userId = reading.userId || reading.tenantId || dev?.tenantId || '';
+    const tenantId = reading.tenantId || dev?.tenantId || '';
 
     const fullReading: TelemetryReading = {
       ...reading,
       id: `tel_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       tenantId,
-      customerId,
-      userId,
       timestamp: new Date().toISOString(),
       source: reading.source || (isDevSim ? 'simulator' : 'physical'),
-      environment: reading.environment || (isDevSim ? 'sandbox' : 'production'),
       simulationRunId: reading.simulationRunId,
     };
 
@@ -1442,7 +1428,7 @@ export class TelemetryRepository {
             const isSimulatedQuery = queryDevObj ? queryDevObj.isSimulated : false;
             const rawTable = queryDev
               ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
-              : `(SELECT id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, tenant_id, customer_id, user_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
+              : `(SELECT id, packet_id, tenant_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, tenant_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, created_at FROM simulation_telemetry_readings) AS combined_telemetry`;
 
             // Automated Resolution Selector:
             // Range <= 2 Hours -> Raw Telemetry
@@ -1529,7 +1515,7 @@ export class TelemetryRepository {
                   FROM ${rawTable}
                   WHERE (
                     device_id = ANY($1::text[]) 
-                    OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                    OR ($7::text IS NOT NULL AND tenant_id = $7)
                   )
                     AND ($2::text IS NULL OR device_id = $2)
                     AND ($3::text IS NULL OR metric = $3)
@@ -1549,8 +1535,6 @@ export class TelemetryRepository {
                     id,
                     packet_id AS "packetId",
                     tenant_id AS "tenantId",
-                    customer_id AS "customerId",
-                    user_id AS "userId",
                     device_id AS "deviceId",
                     device_name AS "deviceName",
                     metric,
@@ -1559,13 +1543,11 @@ export class TelemetryRepository {
                     status_level AS status,
                     sequence,
                     source,
-                    environment,
-                    simulation_run_id AS "simulationRunId",
                     created_at AS timestamp
                   FROM ${rawTable}
                   WHERE (
                     device_id = ANY($1::text[]) 
-                    OR ($7::text IS NOT NULL AND (tenant_id = $7 OR customer_id = $7 OR user_id = $7))
+                    OR ($7::text IS NOT NULL AND tenant_id = $7)
                   )
                     AND ($2::text IS NULL OR device_id = $2)
                     AND ($3::text IS NULL OR metric = $3)
@@ -1605,7 +1587,7 @@ export class TelemetryRepository {
               // Resilient fallback query
               const safeRawTable = queryDev
                 ? (isSimulatedQuery ? 'simulation_telemetry_readings' : 'telemetry_readings')
-                : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, environment, simulation_run_id, created_at FROM simulation_telemetry_readings) AS legacy_combined_telemetry`;
+                : `(SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, created_at FROM telemetry_readings UNION ALL SELECT id, packet_id, device_id, device_name, metric, metric_value, unit, status_level, sequence, source, created_at FROM simulation_telemetry_readings) AS legacy_combined_telemetry`;
 
               const fallbackSql = `
                 SELECT * FROM (
@@ -1620,8 +1602,6 @@ export class TelemetryRepository {
                     status_level AS status,
                     sequence,
                     source,
-                    environment,
-                    simulation_run_id AS "simulationRunId",
                     created_at AS timestamp
                   FROM ${safeRawTable}
                   WHERE device_id = ANY($1::text[])
@@ -1666,8 +1646,6 @@ export class TelemetryRepository {
                 status: r.status || 'normal',
                 sequence: r.sequence !== null && r.sequence !== undefined ? Number(r.sequence) : undefined,
                 source: (r.source as any) || 'physical',
-                environment: (r.environment as any) || 'production',
-                simulationRunId: r.simulationRunId || undefined,
                 timestamp: new Date(r.timestamp).toISOString(),
               }));
 

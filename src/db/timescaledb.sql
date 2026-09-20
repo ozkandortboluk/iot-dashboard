@@ -50,8 +50,6 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
     tenant_id VARCHAR(64) NOT NULL,
-    customer_id VARCHAR(64) NOT NULL,
-    user_id VARCHAR(64) NOT NULL,
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -60,18 +58,14 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
     source VARCHAR(32) DEFAULT 'physical',
-    environment VARCHAR(32) DEFAULT 'production',
-    simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
--- Ensure tenant_id, customer_id, user_id exist on telemetry_readings
+-- Ensure tenant_id exists on telemetry_readings
 DO $$
 BEGIN
     ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) NOT NULL;
-    ALTER TABLE telemetry_readings ADD COLUMN IF NOT EXISTS user_id VARCHAR(64) NOT NULL;
 EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'telemetry_readings tenant columns setup notice: %', SQLERRM;
@@ -94,9 +88,7 @@ END $$;
 
 -- Primary composite indexes for multi-tenant and time-series range lookups
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_time ON telemetry_readings(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_time ON telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);

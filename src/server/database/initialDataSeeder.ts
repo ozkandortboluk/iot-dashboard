@@ -73,19 +73,19 @@ export class InitialDataSeeder {
 
       await client.query(`
         INSERT INTO devices (
-          id, tenant_id, customer_id, user_id, name, device_type, role_key,
-          api_key, api_key_hash, status, location, ip, ip_address,
+          id, tenant_id, user_id, name, device_type, role_key,
+          api_key, api_key_hash, status, location, ip_address,
           hardware_model, firmware_version, rate_limit_per_min, encryption_method,
-          is_simulated, data_flow_active, metrics, supported_outputs, output_definitions,
-          capabilities, supported_commands, expected_interval_seconds, heartbeat_timeout_seconds,
+          is_simulated, data_flow_active, metrics, output_definitions,
+          capabilities, expected_interval_seconds, heartbeat_timeout_seconds,
           last_seen, created_at
         ) VALUES (
-          'dev_test_01', 'system', 'system', NULL,
+          'dev_test_01', 'system', NULL,
           'Kanonik Saha Test Cihazı (ESP32)', 'sensor', 'production_sensor',
-          $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100', '192.168.1.100',
+          $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100',
           'ESP32-WROOM-32D', 'v1.0.0', 300, 'AES-256-GCM',
-          true, true, $3::jsonb, $4::jsonb, $4::jsonb,
-          $5::jsonb, $6::jsonb, 10, 60,
+          true, true, $3::jsonb, $4::jsonb,
+          $5::jsonb, 10, 60,
           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         ON CONFLICT (id) DO UPDATE SET
@@ -95,7 +95,6 @@ export class InitialDataSeeder {
           status = 'online',
           ip_address = EXCLUDED.ip_address,
           metrics = EXCLUDED.metrics,
-          supported_outputs = EXCLUDED.supported_outputs,
           output_definitions = EXCLUDED.output_definitions,
           last_seen = CURRENT_TIMESTAMP;
       `, [
@@ -104,7 +103,6 @@ export class InitialDataSeeder {
         JSON.stringify(initialMetrics),
         JSON.stringify(supportedOutputs),
         JSON.stringify(['telemetry', 'relays', 'pwm', 'ota', 'heartbeat']),
-        JSON.stringify(['SET_OUTPUT', 'REBOOT', 'PING', 'OTA_UPDATE']),
       ]);
       counts.devices++;
 

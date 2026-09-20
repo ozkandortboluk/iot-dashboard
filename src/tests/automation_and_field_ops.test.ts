@@ -34,7 +34,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
     encryptionMethod: 'none',
     lastSeen: new Date().toISOString(),
     type: 'sensor',
-    supportedOutputs: ['RELAY_1'],
+    outputDefinitions: [{ id: 'RELAY_1', name: 'Röle 1', pin: 2, type: 'relay' }],
     metrics: {
       temperature: 24,
       pressure: 1.5,
@@ -54,7 +54,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
     encryptionMethod: 'none',
     lastSeen: new Date().toISOString(),
     type: 'valve',
-    supportedOutputs: ['VALVE_1'],
+    outputDefinitions: [{ id: 'VALVE_1', name: 'Vana 1', pin: 4, type: 'relay' }],
     metrics: {},
   };
 
