@@ -129,10 +129,6 @@ router.post('/setup', async (req, res) => {
 
     const adminUser = await db.registerUser(name, email, password, 'admin', companyName);
 
-    if (seedDemoData) {
-      db.seedDemoDataForUser(adminUser.id, name, companyName, email);
-    }
-
     const token = await db.createSession(adminUser);
 
     // Mark setup as permanently completed and transition DB state to READY

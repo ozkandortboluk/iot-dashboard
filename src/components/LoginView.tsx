@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { ShieldCheck, Lock, UserCheck, ArrowRight, Sparkles, KeyRound, Sun, Moon, LogIn, UserPlus, Zap } from 'lucide-react';
+import { Lock, UserCheck, ArrowRight, Sparkles, Sun, Moon, LogIn, UserPlus } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
 
 export const LoginView: React.FC = () => {
@@ -16,20 +16,6 @@ export const LoginView: React.FC = () => {
   const [role, setRole] = useState<'customer' | 'operator'>('customer');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
-  // 1-Click Quick Admin Login
-  const handleQuickAdminLogin = async () => {
-    setError('');
-    setSuccessMsg('');
-    setEmail('test@nexusnodeiot.com.tr');
-    setPassword('test1234');
-    try {
-      await login('test@nexusnodeiot.com.tr', 'test1234');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Yönetici girişi başarısız oldu.';
-      setError(msg);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,32 +135,6 @@ export const LoginView: React.FC = () => {
               <span>Yeni Kayıt</span>
             </button>
           </div>
-
-          {/* Quick Demo Test Account Helper Banner */}
-          {authMode === 'login' && (
-            <div className="p-3.5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/40 dark:to-blue-950/30 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl flex flex-col gap-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                  <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <span>Sistem Yöneticisi Hesabı:</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleQuickAdminLogin}
-                  disabled={isLoading}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Tek Tıkla Yönetici Girişi</span>
-                </button>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 font-mono bg-white/70 dark:bg-slate-900/60 px-2.5 py-1.5 rounded-lg border border-slate-200/60 dark:border-slate-800/60">
-                <span>test@nexusnodeiot.com.tr</span>
-                <span className="text-slate-400 dark:text-slate-500">|</span>
-                <span>test1234</span>
-              </div>
-            </div>
-          )}
 
           {error && (
             <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs rounded-xl flex items-center gap-2 font-medium">

@@ -4,6 +4,56 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.12] - 2026-09-20
+
+### 🛡️ PostgreSQL Bağlantı Havuzu & Kaynak Yönetimi Optimizasyonu (Connection Leak Prevention)
+- **Bağlantı Havuzu Sızıntı Koruması**: `setup.service.ts` ve `db.ts` içerisindeki tekil bağlantı testi ve migrasyon işlemleri `try ... finally` bloklarıyla sarmalanarak olası hata veya zaman aşımı durumlarında istemcilerin (`client.release()`) ve geçici havuzların (`pool.end()`) eksiksiz serbest bırakılması sağlandı.
+- **Konteyner Havuz Limitleri ve Boşta Kalma Süresi Ayarı**: Bulut ve mikroservis konteyner ortamları için `getPostgresPoolLimits()` maksimum bağlantı havuzu tavanı optimize edildi (`max: 10`, `idleTimeout: 10s`), PostgreSQL `sorry, too many clients already` hatasının önüne geçildi.
+
+---
+
+## 🚀 [v1.38.11] - 2026-09-20
+
+### 🛡️ Canlı Veritabanı Şema Sağlığı & Yabancı Anahtar Onarımı
+- **Otomatik Şema İyileştirme (%100 Sağlık Skoru)**: `devices` tablosundaki yabancı anahtar (`fk_devices_user_id`) eksikliği ve yetim kayıt kalıntısı tamamen giderildi.
+- **Auto-Healer Servisi Doğrulaması**: `DatabaseAutoHealer` ve `SchemaAuditor` ile tüm kısıtlar, indeksler, kolonlar ve veri modelleri taranarak canlı veritabanı sağlık skoru %100 (PASS) olarak teyit edildi.
+
+---
+
+## 🚀 [v1.38.10] - 2026-09-20
+
+### 👤 Geliştirme Aşaması Yönetici Kimlik Bilgileri Yapılandırması
+- **Yönetici Hesabı E-posta & Şifre Güncellemesi**: Geliştirme ve yönetim kolaylığı için ana sistem yöneticisi e-posta adresi `admin@dashboard.io` ve şifresi `admin1234` olarak yapılandırıldı.
+- **PostgreSQL ve Bellek İçi Veritabanı Senkronizasyonu**: `usr_admin` kaydı hem PostgreSQL `users` tablosunda hem de yerel JSON veri deposunda bcrypt (`admin1234`) hash ile güncellendi ve `/api/auth/login` uç noktası üzerinden doğrulandı.
+
+---
+
+## 🚀 [v1.38.9] - 2026-09-20
+
+### 🔐 Giriş Ekranı Güvenlik ve Arayüz Sadeleştirmesi
+- **Tek Tıkla Yönetici Girişinin Kaldırılması (`LoginView.tsx`)**: Giriş portalında yer alan otomatik tek tıkla yönetici giriş butonu ve demo kimlik bilgisi bannerı arayüzden tamamen kaldırıldı.
+- **Standart Güvenli Kimlik Doğrulama**: Kullanıcılar artık yalnızca kendi e-posta ve şifrelerini form üzerinden manuel girerek güvenli şekilde oturum açmaktadır.
+
+---
+
+## 🚀 [v1.38.8] - 2026-09-20
+
+### 🛠️ Geliştirme Sunucusu Başlatma & Veritabanı Şema Doğrulama İyileştirmesi
+- **Yetim Cihaz Referansının Çözülmesi**: `devices` tablosunda ve yerel veritabanında (`data/db.json`) bulunan eski kullanıcı kimliği referansı yönetici hesabına (`usr_admin`) bağlanarak yabancı anahtar (`fk_devices_user_id`) kısıtı onarıldı.
+- **Canlı Şema Sağlığının %100 Seviyesine Ulaştırılması**: `SchemaAuditor.autoHeal` çalıştırılarak eksik foreign key kısıtları uygulandı ve şema sağlık skoru %100 (TAM UYUMLU) olarak doğrulandı.
+- **Geliştirme Sunucusu ve Sağlık Uç Noktalarının Doğrulanması**: Sunucu `/api/health/live` (Liveness) ve `/api/health/ready` (Readiness) kontrolleri, WebSocket iki yönlü bağlantısı ve telemetri heartbeat API uç noktaları başarıyla doğrulandı.
+
+---
+
+## 🚀 [v1.38.7] - 2026-09-20
+
+### 🧹 Otomatik Cihaz, Kullanıcı ve Alarm Kuralı Oluşturan Yapıların Temizlenmesi
+- **Otomatik Demo Verisi Oluşturucularının Kaldırılması (`demoData.ts` & `auth.ts`)**: Sistem ilk kurulumunda veya kullanıcı kaydında otomatik olarak üretilen sanal cihazlar (`dev_01_istanbul`, `dev_02_frankfurt`, `dev_03_bursa`), sahte alarm kuralları (`rule_cpu_high_...`, `rule_temp_high_...`), sentetik telemetri ve bildirim üreten seeder fonksiyonları tamamen devreden çıkarıldı.
+- **Kanonik Başlangıç Verisi Temizliği (`initialDataSeeder.ts`)**: İlk veritabanı yolları oluşturulurken otomatik olarak eklenen varsayılan alarm kuralları (`rule_temp_warn`, `rule_temp_crit`, `rule_cpu_high`, `rule_power_high`), sahte telemetri paketleri ve test bildirimleri kaldırıldı; sadece sistemin çalışması için zorunlu olan kanonik test aygıtı (`dev_test_01`) ve temel sistem paneli korundu.
+- **Veritabanı Kayıtlarının ve Yabancı Anahtarlarının Normalize Edilmesi**: PostgreSQL veritabanındaki yetim veya uyumsuz tenant referansları temizlendi ve mevcut cihazların kullanıcı ilişkileri eksiksiz şekilde doğrulandı.
+
+---
+
 ## 🚀 [v1.38.6] - 2026-09-20
 
 ### 🛡️ PostgreSQL Otomatik Şema Onarımı (Auto-Heal) & Kısıt/Karakter Genişliği Hata Çözümü

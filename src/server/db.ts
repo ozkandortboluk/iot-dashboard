@@ -704,15 +704,18 @@ class LocalDatabase {
       }
     }
 
-    // Ensure default databaseSettings with user-defined TimescaleDB URL
+    // Ensure default databaseSettings with user-defined TimescaleDB URL or environment DATABASE_URL
+    const defaultEnvDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
+    const fallbackDbUrl = defaultEnvDbUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+
     if (!parsed.databaseSettings) {
       parsed.databaseSettings = {
-        activeEngine: 'timescaledb',
-        postgresUrl: 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable',
+        activeEngine: defaultEnvDbUrl ? 'postgres' : 'timescaledb',
+        postgresUrl: fallbackDbUrl,
         isPostgresConnected: false,
       };
-    } else if (!parsed.databaseSettings.postgresUrl) {
-      parsed.databaseSettings.postgresUrl = 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+    } else if (!parsed.databaseSettings.postgresUrl || (parsed.databaseSettings.postgresUrl.includes('@timescaledb:5432') && defaultEnvDbUrl)) {
+      parsed.databaseSettings.postgresUrl = fallbackDbUrl;
     }
 
     // Ensure the primary canonical admin user always exists as the first administrator
@@ -767,63 +770,59 @@ class LocalDatabase {
       });
     }
 
-    // Check if there are any real admin users (excluding test accounts)
-    const hasAdmin = parsed.users.some(isRealAdminUser);
+    // Check if admin user exists (usr_admin or admin@dashboard.io)
+    const adminId = 'usr_admin';
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@dashboard.io';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
+    const adminName = process.env.ADMIN_NAME || 'Sistem Yöneticisi';
+    const adminCompany = process.env.ADMIN_COMPANY || 'Merkez Yönetim';
 
-    if (!hasAdmin) {
-      // Try to seed from Environment Variables
-      const envAdminEmail = process.env.ADMIN_EMAIL;
-      const envAdminPassword = process.env.ADMIN_PASSWORD;
+    const existingAdminIndex = parsed.users.findIndex((u: any) => u.id === adminId || u.email.toLowerCase() === adminEmail.toLowerCase());
 
-      if (envAdminEmail && envAdminPassword) {
-        const adminId = 'usr_admin';
-        const adminName = process.env.ADMIN_NAME || 'Sistem Yöneticisi';
-        const adminCompany = process.env.ADMIN_COMPANY || 'Merkez Yönetim';
+    if (existingAdminIndex >= 0) {
+      parsed.users[existingAdminIndex].id = adminId;
+      parsed.users[existingAdminIndex].email = adminEmail;
+      parsed.users[existingAdminIndex].role = 'admin';
+      parsed.users[existingAdminIndex].name = adminName;
+      parsed.users[existingAdminIndex].companyName = adminCompany;
+      parsed.passwords[adminId] = hashPassword(adminPassword);
+    } else {
+      const adminUser: User = {
+        id: adminId,
+        name: adminName,
+        email: adminEmail,
+        phone: '+905551234567',
+        notificationEmail: adminEmail,
+        whatsappNumber: '+905551234567',
+        telegramChatId: '129837465',
+        role: 'admin',
+        companyName: adminCompany,
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      };
 
-        const adminUser: User = {
-          id: adminId,
-          name: adminName,
-          email: envAdminEmail,
-          phone: '+905551234567',
-          notificationEmail: envAdminEmail,
-          whatsappNumber: '+905551234567',
-          telegramChatId: '129837465',
-          role: 'admin',
-          companyName: adminCompany,
-          notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-          created_at: new Date().toISOString(),
-        };
-
-        parsed.users.push(adminUser);
-        parsed.passwords[adminId] = hashPassword(envAdminPassword);
-        parsed.dashboards.push({
-          id: `dash_${adminId}`,
-          tenantId: adminId,
-          title: `${adminCompany} Özel Dashboard`,
-          widgets: [...defaultWidgets],
-          updatedAt: new Date().toISOString(),
-        });
-        parsed.auditLogs.push({
-          id: 'log_env_init',
-          timestamp: new Date().toISOString(),
-          tenantId: adminId,
-          userName: adminName,
-          action: 'İlk Yönetici Hesabı Ortam Değişkenleri ile Başarıyla Kuruldu (Güvenli Üretim Modu)',
-          ip: '127.0.0.1',
-          severity: 'low',
-        });
-
-        console.log(`[BOOTSTRAP] Administrator account dynamically seeded from environment: ${envAdminEmail}`);
-        this.data = parsed;
-        this.saveData(parsed);
-      } else {
-        // Leave the database clean and empty. The frontend will trigger the Setup onboarding screen.
-        if (!fileExists) {
-          this.data = parsed;
-          this.saveData(parsed);
-        }
-      }
+      parsed.users.push(adminUser);
+      parsed.passwords[adminId] = hashPassword(adminPassword);
+      parsed.dashboards.push({
+        id: `dash_${adminId}`,
+        tenantId: adminId,
+        title: `${adminCompany} Özel Dashboard`,
+        widgets: [...defaultWidgets],
+        updatedAt: new Date().toISOString(),
+      });
+      parsed.auditLogs.push({
+        id: 'log_admin_init',
+        timestamp: new Date().toISOString(),
+        tenantId: adminId,
+        userName: adminName,
+        action: 'Yönetici Hesabı (admin@dashboard.io) Başarıyla Yapılandırıldı',
+        ip: '127.0.0.1',
+        severity: 'low',
+      });
     }
+
+    this.data = parsed;
+    this.saveData(parsed);
 
     return parsed;
   }
@@ -2506,17 +2505,20 @@ class LocalDatabase {
 
     const startTime = Date.now();
     let pool: any = null;
+    let client: any = null;
     try {
       pool = new Pool({
         connectionString: connStr,
+        max: 2,
         connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 2000,
         ssl: this.getPgSslOption(connStr),
       });
       pool.on('error', (err: any) => {
         console.warn('[PostgreSQL Test Pool Error]:', err?.message);
       });
 
-      const client = await pool.connect();
+      client = await pool.connect();
       const latencyMs = Date.now() - startTime;
 
       // Check PostgreSQL Version
@@ -2568,9 +2570,6 @@ class LocalDatabase {
         tablesStatus,
       };
     } catch (err: any) {
-      if (pool) {
-        try { await pool.end(); } catch {}
-      }
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
         this.data.databaseSettings.lastTestedAt = new Date().toISOString();
@@ -2690,6 +2689,13 @@ class LocalDatabase {
         message: `Bağlantı hatası: ${errMsg || 'Sunucuya erişilemedi'}`,
         diagnostic,
       };
+    } finally {
+      if (client && typeof client.release === 'function') {
+        try { client.release(); } catch {}
+      }
+      if (pool) {
+        try { await pool.end(); } catch {}
+      }
     }
   }
 
@@ -2707,17 +2713,20 @@ class LocalDatabase {
     }
 
     let pool: any = null;
+    let client: any = null;
     try {
       pool = new Pool({
         connectionString: connStr,
+        max: 2,
         connectionTimeoutMillis: 8000,
+        idleTimeoutMillis: 2000,
         ssl: this.getPgSslOption(connStr),
       });
       pool.on('error', (err: any) => {
         console.warn('[PostgreSQL Migration Pool Error]:', err?.message);
       });
 
-      const client = await pool.connect();
+      client = await pool.connect();
       const sql = this.getPostgresSchemaSQL();
 
       await client.query(sql);
@@ -2731,8 +2740,8 @@ class LocalDatabase {
       `);
       const tablesCreated = tablesRes.rows.map((r: any) => r.table_name);
 
-      client.release();
-      await pool.end();
+      try { client.release(); client = null; } catch {}
+      try { await pool.end(); pool = null; } catch {}
 
       if (!this.data.databaseSettings) {
         this.data.databaseSettings = { activeEngine: 'postgres' };
@@ -2758,13 +2767,17 @@ class LocalDatabase {
         tablesCreated,
       };
     } catch (err: any) {
-      if (pool) {
-        try { await pool.end(); } catch {}
-      }
       return {
         success: false,
         message: `Şema kurulum hatası: ${err.message || 'SQL sorgusu çalıştırılamadı.'}`,
       };
+    } finally {
+      if (client && typeof client.release === 'function') {
+        try { client.release(); } catch {}
+      }
+      if (pool) {
+        try { await pool.end(); } catch {}
+      }
     }
   }
 

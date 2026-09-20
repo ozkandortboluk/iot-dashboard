@@ -1311,21 +1311,32 @@ export class SchemaAuditor {
           const refTable = fkDef.referencedTable;
           const refCol = fkDef.referencedColumns[0];
           try {
-            // Heal reference if missing user is the canonical permanent test admin
+            // Heal reference if missing user is the canonical permanent test admin or root admin
             if (refTable === 'users') {
               try {
                 await poolOrClient.query(`
                   INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-                  VALUES (
-                    'usr_test_admin',
-                    'Kanonik Test Yöneticisi',
-                    'test@nexusnodeiot.com.tr',
-                    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
-                    'admin',
-                    'NexusNode Test Laboratuvarı',
-                    'active',
-                    CURRENT_TIMESTAMP
-                  )
+                  VALUES 
+                    (
+                      'usr_test_admin',
+                      'Kanonik Test Yöneticisi',
+                      'test@nexusnodeiot.com.tr',
+                      '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+                      'admin',
+                      'NexusNode Test Laboratuvarı',
+                      'active',
+                      CURRENT_TIMESTAMP
+                    ),
+                    (
+                      'usr_admin',
+                      'Sistem Yöneticisi (Merkez Yönetim)',
+                      'admin@nexusnodeiot.com.tr',
+                      '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+                      'admin',
+                      'NexusNode Merkez Yönetim',
+                      'active',
+                      CURRENT_TIMESTAMP
+                    )
                   ON CONFLICT (id) DO NOTHING;
                 `);
               } catch {}
@@ -1339,61 +1350,86 @@ export class SchemaAuditor {
             `);
             const orphanCount = parseInt(countRes.rows[0]?.cnt || '0', 10);
             if (orphanCount > 0) {
-              blockedConstraintNames.add(missingConstraint.constraintName);
+              const colDef = tableDef?.columns?.find(c => c.name === localCol);
+              const isNullable = colDef ? colDef.nullable : true;
+              const isSetNullOnDelete = fkDef.onDelete === 'SET NULL';
 
-              // Collect sample orphan identifiers
-              let sampleIds: string[] = [];
-              try {
-                const sampleRes = await poolOrClient.query(`
-                  SELECT "${localCol}"::text AS orphan_val 
-                  FROM "${missingConstraint.table}" 
-                  WHERE "${localCol}" IS NOT NULL 
-                    AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}")
-                  LIMIT 5;
-                `);
-                sampleIds = sampleRes.rows.map((r: any) => String(r.orphan_val));
-              } catch {
-                // Non-blocking
-              }
+              if (isNullable || isSetNullOnDelete) {
+                // Zero Data Loss Referential Healing:
+                // If a referenced parent was deleted or missing and the FK column is nullable or ON DELETE SET NULL,
+                // reconcile the dangling reference without deleting any child record (e.g. devices/telemetry).
+                // Reassign to 'usr_admin' if the column default targets 'usr_admin', else SET NULL.
+                const fallbackVal = (colDef?.defaultValue && colDef.defaultValue.includes('usr_admin')) 
+                  ? 'usr_admin' 
+                  : null;
 
-              const orphanItem: OrphanViolationInfo = {
-                table: missingConstraint.table,
-                column: localCol,
-                referencedTable: refTable,
-                referencedColumn: refCol,
-                constraintName: missingConstraint.constraintName,
-                violationType: 'FOREIGN_KEY_ORPHAN',
-                violationCount: orphanCount,
-                sampleIds,
-                detectedAt: new Date().toISOString(),
-                message: `"${missingConstraint.table}" tablosunda "${refTable}" tablosunda karşılığı bulunmayan ${orphanCount} adet yetim (orphan) kayıt mevcut.`,
-              };
-              orphanReports.push(orphanItem);
-
-              // 1. Trigger ADMIN ALERT (Critical Log)
-              const alertMsg = `[SIFIR VERİ KAYBI / REPAIR FAIL] "${missingConstraint.table}" tablosunda "${missingConstraint.constraintName}" kısıtı eklenemedi: ${orphanCount} adet yetim (orphan) kayıt mevcut. Auto-Heal veri güvenliği prensibi gereği asla veri silmez! Ayrı Bakım İşi (Separate Maintenance Job) gereklidir.`;
-              console.error(`[SchemaAutoHealer - DATA INTEGRITY ALERT] ${alertMsg}`);
-
-              systemLogger.critical('database', alertMsg, {
-                table: missingConstraint.table,
-                constraintName: missingConstraint.constraintName,
-                orphanCount,
-                sampleIds,
-                action: 'PRESERVE_DATA_FAIL_REPAIR',
-              }, 'schema_auditor');
-
-              errors.push(`Kısıt onarılamadı (Sıfır Veri Kaybı Koruması): "${missingConstraint.table}" üzerinde ${orphanCount} adet yetim (orphan) kayıt var. Auto-Heal veri silmez.`);
-
-              // 2. Insert admin notification
-              try {
-                const notifId = `notif_orphan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
                 await poolOrClient.query(`
-                  INSERT INTO notifications (id, user_id, title, message, type, severity, is_read, created_at)
-                  VALUES ($1, 'usr_admin', 'Veri Bütünlüğü Uyarısı (Yetim Kayıt)', $2, 'security', 'error', FALSE, CURRENT_TIMESTAMP)
-                  ON CONFLICT (id) DO NOTHING;
-                `, [notifId, alertMsg.substring(0, 450)]);
-              } catch {
-                // Non-blocking
+                  UPDATE "${missingConstraint.table}"
+                  SET "${localCol}" = $1
+                  WHERE "${localCol}" IS NOT NULL 
+                    AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}");
+                `, [fallbackVal]);
+
+                actionsTaken.push(
+                  `Yetim FK referansı güvenle onarıldı (Sıfır Veri Kaybı): "${missingConstraint.table}.${localCol}" -> ${fallbackVal ? `'${fallbackVal}'` : 'NULL'} (${orphanCount} adet kayıt korundu).`
+                );
+              } else {
+                blockedConstraintNames.add(missingConstraint.constraintName);
+
+                // Collect sample orphan identifiers
+                let sampleIds: string[] = [];
+                try {
+                  const sampleRes = await poolOrClient.query(`
+                    SELECT "${localCol}"::text AS orphan_val 
+                    FROM "${missingConstraint.table}" 
+                    WHERE "${localCol}" IS NOT NULL 
+                      AND "${localCol}" NOT IN (SELECT "${refCol}" FROM "${refTable}")
+                    LIMIT 5;
+                  `);
+                  sampleIds = sampleRes.rows.map((r: any) => String(r.orphan_val));
+                } catch {
+                  // Non-blocking
+                }
+
+                const orphanItem: OrphanViolationInfo = {
+                  table: missingConstraint.table,
+                  column: localCol,
+                  referencedTable: refTable,
+                  referencedColumn: refCol,
+                  constraintName: missingConstraint.constraintName,
+                  violationType: 'FOREIGN_KEY_ORPHAN',
+                  violationCount: orphanCount,
+                  sampleIds,
+                  detectedAt: new Date().toISOString(),
+                  message: `"${missingConstraint.table}" tablosunda "${refTable}" tablosunda karşılığı bulunmayan ${orphanCount} adet yetim (orphan) kayıt mevcut.`,
+                };
+                orphanReports.push(orphanItem);
+
+                // 1. Trigger ADMIN ALERT (Critical Log)
+                const alertMsg = `[SIFIR VERİ KAYBI / REPAIR FAIL] "${missingConstraint.table}" tablosunda "${missingConstraint.constraintName}" kısıtı eklenemedi: ${orphanCount} adet yetim (orphan) kayıt mevcut. Auto-Heal veri güvenliği prensibi gereği asla veri silmez! Ayrı Bakım İşi (Separate Maintenance Job) gereklidir.`;
+                console.error(`[SchemaAutoHealer - DATA INTEGRITY ALERT] ${alertMsg}`);
+
+                systemLogger.critical('database', alertMsg, {
+                  table: missingConstraint.table,
+                  constraintName: missingConstraint.constraintName,
+                  orphanCount,
+                  sampleIds,
+                  action: 'PRESERVE_DATA_FAIL_REPAIR',
+                }, 'schema_auditor');
+
+                errors.push(`Kısıt onarılamadı (Sıfır Veri Kaybı Koruması): "${missingConstraint.table}" üzerinde ${orphanCount} adet yetim (orphan) kayıt var. Auto-Heal veri silmez.`);
+
+                // 2. Insert admin notification
+                try {
+                  const notifId = `notif_orphan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+                  await poolOrClient.query(`
+                    INSERT INTO notifications (id, user_id, title, message, type, severity, is_read, created_at)
+                    VALUES ($1, 'usr_admin', 'Veri Bütünlüğü Uyarısı (Yetim Kayıt)', $2, 'security', 'error', FALSE, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO NOTHING;
+                  `, [notifId, alertMsg.substring(0, 450)]);
+                } catch {
+                  // Non-blocking
+                }
               }
             }
           } catch (orphanErr) {

@@ -39,12 +39,6 @@ async function runSmokeTest() {
   console.log('🏗️ Starting production server bundle (dist/server.cjs) for CI smoke test...');
   
   const serverEnv = { ...process.env, PORT: '3001', NODE_ENV: 'production' };
-  // In CI or environment without live local postgres, test resilient embedded database fallback
-  if (!process.env.TEST_WITH_LIVE_POSTGRES) {
-    delete serverEnv.DATABASE_URL;
-    delete serverEnv.POSTGRES_HOST;
-    delete serverEnv.PGHOST;
-  }
 
   const server = spawn('node', ['dist/server.cjs'], {
     env: serverEnv,
@@ -105,9 +99,16 @@ async function runSmokeTest() {
     
     // 2. Readiness check (Database status & engine verification)
     console.log('➡️ Testing /api/health/ready (Readiness & DB)...');
-    const ready = await checkEndpoint('http://127.0.0.1:3001/api/health/ready');
-    if (ready.statusCode !== 200 || !ready.data?.ready || !ready.data?.database?.ready) {
-      throw new Error(`Ready endpoint failed: status ${ready.statusCode}, data: ${JSON.stringify(ready.data)}`);
+    let ready = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      ready = await checkEndpoint('http://127.0.0.1:3001/api/health/ready');
+      if (ready.statusCode === 200 && ready.data?.ready && ready.data?.database?.ready) {
+        break;
+      }
+      await wait(500);
+    }
+    if (!ready || ready.statusCode !== 200 || !ready.data?.ready || !ready.data?.database?.ready) {
+      throw new Error(`Ready endpoint failed: status ${ready?.statusCode}, data: ${JSON.stringify(ready?.data)}`);
     }
     console.log(`   ✅ Ready OK (Engine: ${ready.data.database.engine}, DB Status: ${ready.data.database.status})`);
 

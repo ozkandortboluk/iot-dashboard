@@ -572,66 +572,61 @@ export class SetupService {
     let schemaVerified = false;
 
     if (pool) {
+      let client: any = null;
       try {
-        const connectTimeout = isTestEnv ? 300 : 8000;
-        const client: any = await Promise.race([
-          pool.connect(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('DB_CONNECT_TIMEOUT')), connectTimeout)),
-        ]);
-        try {
-          // Connection test
-          await client.query('SELECT 1;');
-          isDbConnected = true;
+        client = await pool.connect();
+        // Connection test
+        await client.query('SELECT 1;');
+        isDbConnected = true;
 
-          // Admin check in PostgreSQL:
-          // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
-          const adminCheck = await client.query(`
-            SELECT id, email, name FROM users 
-            WHERE role = 'admin' 
-              AND status != 'deleted' 
-              AND (deleted_at IS NULL)
-              AND id != 'usr_test_admin'
-              AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-            LIMIT 1;
-          `).catch(() => ({ rows: [] }));
+        // Admin check in PostgreSQL:
+        // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
+        const adminCheck = await client.query(`
+          SELECT id, email, name FROM users 
+          WHERE role = 'admin' 
+            AND status != 'deleted' 
+            AND (deleted_at IS NULL)
+            AND id != 'usr_test_admin'
+            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+          LIMIT 1;
+        `).catch(() => ({ rows: [] }));
 
-          if (adminCheck.rows.length > 0) {
-            hasAdmin = true;
-          } else {
-            // When PostgreSQL is connected, the PostgreSQL database is authoritative.
-            // If PostgreSQL has no admin user, hasAdmin is strictly FALSE.
-            hasAdmin = false;
-          }
+        if (adminCheck.rows.length > 0) {
+          hasAdmin = true;
+        } else {
+          // When PostgreSQL is connected, the PostgreSQL database is authoritative.
+          // If PostgreSQL has no admin user, hasAdmin is strictly FALSE.
+          hasAdmin = false;
+        }
 
-          // TimescaleDB extension check
-          const tsRes = await client.query(`
-            SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
-          `).catch(() => ({ rows: [] }));
-          if (tsRes.rows.length > 0) {
-            isTimescaleAvailable = true;
-          }
+        // TimescaleDB extension check
+        const tsRes = await client.query(`
+          SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';
+        `).catch(() => ({ rows: [] }));
+        if (tsRes.rows.length > 0) {
+          isTimescaleAvailable = true;
+        }
 
-          // Migrations check
-          const migStatus = await getMigrationStatus(pool).catch(() => null);
-          if (migStatus && migStatus.pendingCount === 0 && migStatus.appliedCount > 0) {
-            migrationsComplete = true;
-          }
+        // Migrations check
+        const migStatus = await getMigrationStatus(pool).catch(() => null);
+        if (migStatus && migStatus.pendingCount === 0 && migStatus.appliedCount > 0) {
+          migrationsComplete = true;
+        }
 
-          // Tables presence check
-          const tblRes = await client.query(`
-            SELECT table_name FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name IN ('users', 'devices', 'telemetry_readings');
-          `).catch(() => ({ rows: [] }));
-          if (tblRes.rows.length >= 3) {
-            schemaVerified = true;
-          }
-        } finally {
-          if (client && typeof client.release === 'function') {
-            client.release();
-          }
+        // Tables presence check
+        const tblRes = await client.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name IN ('users', 'devices', 'telemetry_readings');
+        `).catch(() => ({ rows: [] }));
+        if (tblRes.rows.length >= 3) {
+          schemaVerified = true;
         }
       } catch {
         isDbConnected = false;
+      } finally {
+        if (client && typeof client.release === 'function') {
+          try { client.release(); } catch {}
+        }
       }
     }
 
@@ -771,15 +766,18 @@ export class SetupService {
     const connStr = this.buildConnectionString(effectiveConfig);
     const startTime = Date.now();
     let pool: pg.Pool | null = null;
+    let client: any = null;
 
     try {
       pool = new Pool({
         connectionString: connStr,
+        max: 2,
         connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 2000,
         ssl: config.sslMode === 'disable' ? undefined : (getPostgresSslOption(connStr) || { rejectUnauthorized: false }),
       });
 
-      const client = await pool.connect();
+      client = await pool.connect();
       const latencyMs = Date.now() - startTime;
 
       let pgVersion = 'PostgreSQL';
@@ -819,15 +817,6 @@ export class SetupService {
         audit_logs: existingTables.has('audit_logs'),
       };
 
-      client.release();
-      await pool.end();
-
-      this.logAudit({
-        action: 'DATABASE_CONNECTION_TESTED',
-        severity: 'low',
-        details: `Veritabanı bağlantı testi başarılı (Host: ${config.host}, Port: ${config.port}, DB: ${config.database}, Timescale: ${timescaleAvailable ? 'Var' : 'Yok'}).`,
-      });
-
       return {
         success: true,
         message: 'PostgreSQL bağlantısı başarılı.',
@@ -838,10 +827,6 @@ export class SetupService {
         tablesStatus,
       };
     } catch (err: any) {
-      if (pool) {
-        try { await pool.end(); } catch {}
-      }
-
       const rawMsg = err?.message || String(err);
       let sanitizedMessage = 'Veritabanı bağlantısı kurulamadı.';
       let errorCode = err?.code || 'UNKNOWN';
@@ -874,6 +859,13 @@ export class SetupService {
         timescaleAvailable: false,
         errorCode,
       };
+    } finally {
+      if (client && typeof client.release === 'function') {
+        try { client.release(); } catch {}
+      }
+      if (pool) {
+        try { await pool.end(); } catch {}
+      }
     }
   }
 
