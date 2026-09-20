@@ -11,7 +11,7 @@ services:
     # Security: In production, database is isolated inside nexus_net.
     # To expose port locally for external tools, set POSTGRES_PORT_BIND=127.0.0.1:5432:5432 in .env
     ports:
-      - "${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}"
+      - "5432:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
