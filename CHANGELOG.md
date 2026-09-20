@@ -12,6 +12,7 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 - Genel `/api/setup/status` yanıtından Setup Token sızıntısı ve örtük yetkilendirme kaldırıldı.
 - `/api/setup/reset` ve `/api/setup/resume` kurtarma işlemleri geçerli sunucu Setup Token ile korumaya alındı.
 - Docker PostgreSQL örnek bağlantı adı `iot_dashboard` ile eşitlendi ve kurtarma güvenlik testleri genişletildi.
+- Sunucunun `PORT` ortam değişkenini yok sayması düzeltildi; production smoke testi boş veritabanında güvenli `SETUP` modunu doğrulayacak hale getirildi.
 
 ---
 
