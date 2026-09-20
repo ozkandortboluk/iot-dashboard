@@ -41,7 +41,7 @@ export const migration001: Migration = {
         mac_address VARCHAR(32),
         hardware_model VARCHAR(64),
         firmware_version VARCHAR(32),
-        ota_status VARCHAR(32) DEFAULT 'idle',
+        ota_status VARCHAR(32) DEFAULT 'IDLE',
         ota_target_version VARCHAR(32),
         ota_progress INT DEFAULT 0,
         ota_job_id VARCHAR(64),

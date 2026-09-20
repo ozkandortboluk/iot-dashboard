@@ -2266,6 +2266,18 @@ class LocalDatabase {
     return 'local'; // If PostgreSQL is not connected, local database remains active
   }
 
+  public savePostgresUrl(url: string): void {
+    if (!this.data.databaseSettings) {
+      this.data.databaseSettings = {
+        activeEngine: this.getActiveEngine(),
+      };
+    }
+    if (url && !url.includes('••••••••')) {
+      this.data.databaseSettings.postgresUrl = url.trim();
+      this.saveData(this.data);
+    }
+  }
+
   public setActiveEngine(engine: DatabaseEngineType, postgresUrl?: string): void {
     if (!this.data.databaseSettings) {
       this.data.databaseSettings = {
@@ -2280,10 +2292,7 @@ class LocalDatabase {
     this.saveData(this.data);
 
     if (engine === 'postgres' || engine === 'timescaledb') {
-      if (this.pgPool) {
-        try { this.pgPool.end().catch(() => {}); } catch {}
-        this.pgPool = null;
-      }
+      this.recyclePgPool();
       this.initPostgresRepository().catch(() => {});
     }
   }
@@ -2457,6 +2466,7 @@ class LocalDatabase {
     return {
       activeEngine: this.getActiveEngine(),
       postgresUrl: maskedUrl,
+      rawPostgresUrl: rawUrl,
       isPostgresConnected: this.postgresRepo.isReady(),
       postgresVersion: this.data.databaseSettings?.postgresVersion || 'PostgreSQL 16 (TimescaleDB v2.14)',
       timescaleVersion: '2.14.2 (IoT Hypertable & Continuous Aggregates Active)',
@@ -2482,6 +2492,10 @@ class LocalDatabase {
       suggestionSteps: string[];
     };
   }> {
+    if (customUrl && !customUrl.includes('••••••••')) {
+      this.savePostgresUrl(customUrl.trim());
+    }
+
     const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
       return {
@@ -2543,10 +2557,7 @@ class LocalDatabase {
       this.saveData(this.data);
 
       // Re-initialize active Postgres repository and sync memory data
-      if (this.pgPool) {
-        try { await this.pgPool.end(); } catch {}
-        this.pgPool = null;
-      }
+      this.recyclePgPool();
       await this.initPostgresRepository().catch(() => {});
 
       return {
@@ -2563,6 +2574,9 @@ class LocalDatabase {
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
         this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+        if (customUrl && !customUrl.includes('••••••••')) {
+          this.data.databaseSettings.postgresUrl = customUrl.trim();
+        }
         this.saveData(this.data);
       }
 
@@ -2731,10 +2745,7 @@ class LocalDatabase {
       this.saveData(this.data);
 
       // Reset pool and push current data
-      if (this.pgPool) {
-        try { await this.pgPool.end(); } catch {}
-        this.pgPool = null;
-      }
+      this.recyclePgPool();
       const newPool = this.getPgPool();
       if (newPool) {
         this.postgresRepo.setPool(newPool);

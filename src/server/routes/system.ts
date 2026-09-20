@@ -308,19 +308,34 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
 
 databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   const { engine, postgresUrl } = req.body;
-  if (!engine || !['postgres', 'timescaledb', 'local'].includes(engine)) {
+  const targetEngine = engine || db.getActiveEngine() || 'timescaledb';
+  if (!targetEngine || !['postgres', 'timescaledb', 'local'].includes(targetEngine)) {
     return res.status(400).json({ error: 'Geçersiz veritabanı motoru seçimi.' });
   }
 
   // P0.12 Enforce production database policy
-  if (process.env.NODE_ENV === 'production' && engine === 'local') {
+  if (process.env.NODE_ENV === 'production' && targetEngine === 'local') {
     return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
   }
 
-  db.setActiveEngine(engine, postgresUrl);
+  db.setActiveEngine(targetEngine, postgresUrl);
   res.json({
     success: true,
-    message: `Aktif veritabanı motoru "${engine}" olarak güncellendi.`,
+    message: `Veritabanı yapılandırması güncellendi.`,
+    config: db.getPostgresConfig(),
+  });
+});
+
+databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, (req, res) => {
+  const { postgresUrl } = req.body;
+  if (!postgresUrl || typeof postgresUrl !== 'string' || !postgresUrl.trim()) {
+    return res.status(400).json({ error: 'Geçersiz veritabanı bağlantı adresi.' });
+  }
+  const trimmed = postgresUrl.trim();
+  db.savePostgresUrl(trimmed);
+  res.json({
+    success: true,
+    message: 'PostgreSQL bağlantı adresi başarıyla kaydedildi.',
     config: db.getPostgresConfig(),
   });
 });

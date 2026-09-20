@@ -1322,7 +1322,7 @@ export class PostgresRepository {
       dev.roleKey || null,
       dev.hardwareModel || null,
       dev.firmwareVersion || null,
-      dev.otaStatus || 'IDLE',
+      dev.otaStatus ? String(dev.otaStatus).toUpperCase() : 'IDLE',
       dev.otaTargetFirmwareId || null,
       dev.otaProgress || 0,
       dev.otaErrorMessage || null,

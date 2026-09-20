@@ -1090,6 +1090,7 @@ export type DatabaseEngineType = 'postgres' | 'timescaledb' | 'local';
 export interface DatabaseEngineConfig {
   activeEngine: DatabaseEngineType;
   postgresUrl?: string;
+  rawPostgresUrl?: string;
   isPostgresConnected: boolean;
   postgresVersion?: string;
   timescaleVersion?: string;

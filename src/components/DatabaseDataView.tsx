@@ -45,6 +45,8 @@ import {
   Bell,
   Send,
   Bot,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
@@ -345,7 +347,15 @@ export const DatabaseDataView: React.FC = () => {
   // PostgreSQL Configuration & Setup State
   const [engineConfig, setEngineConfig] = useState<DatabaseEngineConfig | null>(null);
   const [setupGuide, setSetupGuide] = useState<PostgresSetupGuide | null>(null);
-  const [inputPostgresUrl, setInputPostgresUrl] = useState('postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable');
+  const [inputPostgresUrl, setInputPostgresUrl] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('nexusnode_last_postgres_url');
+      if (saved && saved.trim()) return saved.trim();
+    } catch {}
+    return 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+  });
+  const [savingPostgresUrl, setSavingPostgresUrl] = useState(false);
+  const [saveUrlSuccess, setSaveUrlSuccess] = useState(false);
   const [testingPostgres, setTestingPostgres] = useState(false);
   const [migratingPostgres, setMigratingPostgres] = useState(false);
   const [postgresTestResult, setPostgresTestResult] = useState<{
@@ -409,6 +419,13 @@ export const DatabaseDataView: React.FC = () => {
         const engData = await resEngine.json();
         setEngineConfig(engData);
         setPendingEngine(engData.activeEngine || 'local');
+        try {
+          const savedLocal = localStorage.getItem('nexusnode_last_postgres_url');
+          if (!savedLocal && engData.rawPostgresUrl && !engData.rawPostgresUrl.includes('••••••••')) {
+            setInputPostgresUrl(engData.rawPostgresUrl);
+            localStorage.setItem('nexusnode_last_postgres_url', engData.rawPostgresUrl);
+          }
+        } catch {}
       }
       if (resGuide.ok) {
         const guideData = await resGuide.json();
@@ -543,7 +560,61 @@ export const DatabaseDataView: React.FC = () => {
     }
   };
 
+  const handleUrlChange = (val: string) => {
+    setInputPostgresUrl(val);
+    try {
+      if (val && !val.includes('••••••••')) {
+        localStorage.setItem('nexusnode_last_postgres_url', val);
+      }
+    } catch {}
+  };
+
+  const handleSavePostgresUrl = async () => {
+    if (!inputPostgresUrl || !inputPostgresUrl.trim()) return;
+    setSavingPostgresUrl(true);
+    setSaveUrlSuccess(false);
+    try {
+      const urlToSave = inputPostgresUrl.trim();
+      try {
+        localStorage.setItem('nexusnode_last_postgres_url', urlToSave);
+      } catch {}
+
+      const res = await fetch('/api/database/postgres/save-url', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ postgresUrl: urlToSave }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSaveUrlSuccess(true);
+        setTimeout(() => setSaveUrlSuccess(false), 3500);
+        if (data.config) {
+          setEngineConfig(data.config);
+        }
+      } else {
+        alert(data.error || 'Adres kaydedilemedi.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Adres kaydedilirken hata oluştu.');
+    } finally {
+      setSavingPostgresUrl(false);
+    }
+  };
+
+  const handleResetDefaultUrl = () => {
+    const defaultUrl = 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+    setInputPostgresUrl(defaultUrl);
+    try {
+      localStorage.setItem('nexusnode_last_postgres_url', defaultUrl);
+    } catch {}
+  };
+
   const handleTestPostgres = async () => {
+    try {
+      if (inputPostgresUrl && !inputPostgresUrl.includes('••••••••')) {
+        localStorage.setItem('nexusnode_last_postgres_url', inputPostgresUrl.trim());
+      }
+    } catch {}
     setTestingPostgres(true);
     setPostgresTestResult(null);
     setPostgresMigrateResult(null);
@@ -1433,40 +1504,74 @@ export const DatabaseDataView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   PostgreSQL Bağlantı Adresi (DATABASE_URL)
                 </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={inputPostgresUrl}
-                    onChange={(e) => setInputPostgresUrl(e.target.value)}
-                    placeholder={engineConfig?.postgresUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable'}
-                    className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500"
-                  />
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleTestPostgres}
-                      disabled={testingPostgres}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${testingPostgres ? 'animate-spin text-blue-500' : ''}`} />
-                      <span>Bağlantıyı Test Et</span>
-                    </button>
-                    <button
-                      onClick={handleMigratePostgres}
-                      disabled={migratingPostgres}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                      <span>{migratingPostgres ? 'Tablolar Kuruluyor...' : 'Otomatik Şema Kur (Migrate)'}</span>
-                    </button>
-                    <button
-                      onClick={handleSyncAllPostgres}
-                      disabled={syncingAllPostgres}
-                      title="Yerel bellekteki tüm kullanıcı, cihaz, kural ve dashboard verilerini doğrudan PostgreSQL tablolarına aktarır"
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
-                    >
-                      <Upload className={`w-3.5 h-3.5 ${syncingAllPostgres ? 'animate-bounce' : ''}`} />
-                      <span>{syncingAllPostgres ? 'Veriler Aktarılıyor...' : 'Tüm Verileri PostgreSQL\'e Aktar'}</span>
-                    </button>
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={inputPostgresUrl}
+                      onChange={(e) => handleUrlChange(e.target.value)}
+                      placeholder={engineConfig?.postgresUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable'}
+                      className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500"
+                    />
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={handleSavePostgresUrl}
+                        disabled={savingPostgresUrl}
+                        title="Girilen veritabanı adresini kalıcı olarak kaydeder"
+                        className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                          saveUrlSuccess
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        }`}
+                      >
+                        {saveUrlSuccess ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                        <span>{saveUrlSuccess ? 'Adres Kaydedildi!' : savingPostgresUrl ? 'Kaydediliyor...' : 'Adresi Kaydet'}</span>
+                      </button>
+                      <button
+                        onClick={handleResetDefaultUrl}
+                        title="Varsayılan TimescaleDB konteyner adresine sıfırla"
+                        className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs rounded-lg transition cursor-pointer flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Varsayılan</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handleTestPostgres}
+                        disabled={testingPostgres}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${testingPostgres ? 'animate-spin text-blue-500' : ''}`} />
+                        <span>Bağlantıyı Test Et</span>
+                      </button>
+                      <button
+                        onClick={handleMigratePostgres}
+                        disabled={migratingPostgres}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>{migratingPostgres ? 'Tablolar Kuruluyor...' : 'Otomatik Şema Kur (Migrate)'}</span>
+                      </button>
+                      <button
+                        onClick={handleSyncAllPostgres}
+                        disabled={syncingAllPostgres}
+                        title="Yerel bellekteki tüm kullanıcı, cihaz, kural ve dashboard verilerini doğrudan PostgreSQL tablolarına aktarır"
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
+                      >
+                        <Upload className={`w-3.5 h-3.5 ${syncingAllPostgres ? 'animate-bounce' : ''}`} />
+                        <span>{syncingAllPostgres ? 'Veriler Aktarılıyor...' : 'Tüm Verileri PostgreSQL\'e Aktar'}</span>
+                      </button>
+                    </div>
+                    {engineConfig?.postgresUrl && (
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                        Sunucuda Kayıtlı: <code className="font-mono text-slate-700 dark:text-slate-300">{engineConfig.postgresUrl}</code>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">

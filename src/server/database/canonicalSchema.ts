@@ -377,7 +377,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'chk_devices_status', condition: "status IN ('online', 'offline', 'warning', 'error')" },
         { name: 'chk_devices_power_source', condition: "power_source IN ('battery', 'mains', 'unknown')" },
         { name: 'chk_devices_rate_limit', condition: "rate_limit_per_min > 0" },
-        { name: 'chk_devices_ota_status', condition: "ota_status IN ('IDLE', 'PENDING', 'DOWNLOADING', 'FLASHING', 'SUCCESS', 'FAILED', 'CANCELLED')" }
+        { name: 'chk_devices_ota_status', condition: "ota_status IN ('IDLE', 'PENDING', 'DOWNLOADING', 'FLASHING', 'VERIFYING', 'REBOOTING', 'SUCCESS', 'FAILED', 'CANCELLED', 'EXPIRED', 'ROLLED_BACK', 'idle', 'pending', 'downloading', 'flashing', 'verifying', 'rebooting', 'success', 'failed', 'cancelled', 'expired', 'rolled_back')" }
       ],
       columns: [
         { name: 'id', type: 'VARCHAR(64)', nullable: false, primaryKey: true },
@@ -1032,7 +1032,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'fk_ota_jobs_device_id', columns: ['device_id'], referencedTable: 'devices', referencedColumns: ['id'], onDelete: 'SET NULL' }
       ],
       checkConstraints: [
-        { name: 'chk_ota_jobs_status', condition: "status IN ('PENDING', 'DOWNLOADING', 'FLASHING', 'CONFIRMING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT')" }
+        { name: 'chk_ota_jobs_status', condition: "status IN ('PENDING', 'DOWNLOADING', 'FLASHING', 'CONFIRMING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'pending', 'downloading', 'flashing', 'confirming', 'completed', 'failed', 'cancelled', 'timeout')" }
       ],
       columns: [
         { name: 'id', type: 'VARCHAR(64)', nullable: false, primaryKey: true },

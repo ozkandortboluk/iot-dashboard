@@ -572,7 +572,7 @@ export class DeviceRepository {
     if (updates.roleKey !== undefined) dev.roleKey = updates.roleKey;
     if (updates.hardwareModel !== undefined) dev.hardwareModel = updates.hardwareModel;
     if (updates.firmwareVersion !== undefined) dev.firmwareVersion = updates.firmwareVersion;
-    if (updates.otaStatus !== undefined) dev.otaStatus = updates.otaStatus;
+    if (updates.otaStatus !== undefined) dev.otaStatus = updates.otaStatus ? (String(updates.otaStatus).toUpperCase() as any) : 'IDLE';
     if (updates.otaTargetFirmwareId !== undefined) dev.otaTargetFirmwareId = updates.otaTargetFirmwareId;
     if (updates.otaProgress !== undefined) dev.otaProgress = updates.otaProgress;
     if (updates.otaErrorMessage !== undefined) dev.otaErrorMessage = updates.otaErrorMessage;

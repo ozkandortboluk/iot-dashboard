@@ -4,6 +4,26 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.5] - 2026-09-20
+
+### 💾 Veritabanı Bağlantı Adresi Kalıcılığı & Havuz (Pool) Yaşam Döngüsü İyileştirmesi
+- **Bağlantı Adresi Kalıcılığı (URL Persistence)**: Kullanıcının girdiği PostgreSQL / TimescaleDB bağlantı adresinin sayfa yenilemelerinde veya test başarısızlıklarında sıfırlanması engellendi. Hem tarayıcı yerel belleğinde (`localStorage`) hem de sunucu yapılandırmasında (`/api/database/postgres/save-url`) kalıcı olarak saklanması sağlandı.
+- **Doğrudan Kaydetme ve Geri Yükleme Kontrolleri**: Veritabanı ekranına doğrudan tek tıklamayla adresi kalıcı kılan **"Adresi Kaydet"** butonu (başarı rozeti ile) ve varsayılan TimescaleDB konteyner adresine dönmeyi sağlayan **"Varsayılan"** butonu eklendi.
+- **Bağlantı Havuzu Yaşam Döngüsü Hatası Giderildi**: `Cannot use a pool after calling end on the pool` hatası tamamen çözüldü; `getSharedPgPool` havuzun `ending`/`ended` durumlarını denetleyecek ve `recyclePgPool` ile kapanan havuzları güvenle yenileyecek şekilde yeniden tasarlandı.
+- **Şema Onarımı Yabancı Anahtar & Varsayılan Değer İyileştirmesi**: `schemaAuditor.ts` içerisinde kısıt onarımları sırasında eksik `users` referanslarında `usr_test_admin` kaydının otomatik sağlanması ve `NOT NULL` kolonlarda varsayılan değer doldurma mekanizması devreye alındı.
+
+---
+
+## 🚀 [v1.38.4] - 2026-09-20
+
+### 🔧 Veritabanı Şema Kısıtı & OTA Durum Onarım Hatası Düzeltildi (chk_devices_ota_status)
+- **Kapsamlı CHECK Kısıtı Genişletmesi**: `canonicalSchema.ts` içerisindeki `chk_devices_ota_status` kısıtına `VERIFYING`, `REBOOTING`, `EXPIRED`, `ROLLED_BACK` ve geriye dönük uyumluluk sağlayan küçük harf varyantları (`idle`, `pending`, `flashing` vb.) eklendi.
+- **Otomatik Veri Normalizasyonu & Ön Onarım (Auto-Healer)**: `schemaAuditor.ts` içerisinde CHECK kısıtları uygulanmadan önce cihazların `ota_status` değerlerini büyük harfe dönüştüren ve boş/geçersiz değerleri güvenli biçimde `IDLE` olarak normalize eden akıllı veri hazırlığı eklendi.
+- **Sıfır Hata Dayanıklılığı & Fallback Kurtarma**: Kısıt oluşturma esnasında eski veya uyumsuz satırlardan kaynaklı ihlaller (`violated by some row`) algılandığında sistemin çökmesini engelleyen ve satırları güvenle normalize edip kısıtı başarıyla oluşturan hata yakalama ve onarım mekanizması kuruldu.
+- **Cihaz Deposu & Senkronizasyon Koruması**: `device.repository.ts`, `postgres.ts` ve `data/db.json` dosyalarında cihaz kayıt ve güncelleme akışında `otaStatus` her zaman büyük harfe normalize edilecek şekilde sağlama alındı.
+
+---
+
 ## 🚀 [v1.38.3] - 2026-09-20
 
 ### 🎯 Veritabanı Bağlantı Durumu & Arayüz Tutarlılık İyileştirmesi

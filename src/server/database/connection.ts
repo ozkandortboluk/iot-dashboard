@@ -149,13 +149,17 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
     return null;
   }
 
-  if (!global._unifiedPostgresPool || global._unifiedPostgresPoolUrl !== url) {
-    if (global._unifiedPostgresPool) {
+  const currentPool = global._unifiedPostgresPool;
+  const isPoolTerminated = !currentPool || Boolean((currentPool as any).ending) || Boolean((currentPool as any).ended);
+
+  if (isPoolTerminated || global._unifiedPostgresPoolUrl !== url) {
+    if (currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
       try {
-        global._unifiedPostgresPool.end().catch(() => {});
+        currentPool.end().catch(() => {});
       } catch {}
     }
 
+    global._unifiedPostgresPool = undefined;
     global._unifiedPostgresPoolUrl = url;
     try {
       const limits = getPostgresPoolLimits();
