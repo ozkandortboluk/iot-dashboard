@@ -4,6 +4,17 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.37.1] - 2026-09-20
+
+### 🔧 PostgreSQL Kurulum Kilidi ve Giriş Kurtarma Düzeltmesi
+- Eski `SETUP_COMPLETED=true` ortam değerinin boş veya geri yüklenmiş PostgreSQL veritabanını kalıcı olarak kilitlemesi engellendi.
+- PostgreSQL bağlantısı, migrasyonlar veya gerçek yönetici hesabı eksikse hatalı tamamlanma durumu kalıcı çalışma zamanı ayarından da temizleniyor.
+- Genel `/api/setup/status` yanıtından Setup Token sızıntısı ve örtük yetkilendirme kaldırıldı.
+- `/api/setup/reset` ve `/api/setup/resume` kurtarma işlemleri geçerli sunucu Setup Token ile korumaya alındı.
+- Docker PostgreSQL örnek bağlantı adı `iot_dashboard` ile eşitlendi ve kurtarma güvenlik testleri genişletildi.
+
+---
+
 ## 🚀 [v1.37.0] - 2026-09-19
 
 ### 🛡️ Giriş ve Kimlik Doğrulama Rotaları İçin API Veritabanı Koruması Düzeltmesi (Auth Route Guard Fix & Login Flow Recovery)
