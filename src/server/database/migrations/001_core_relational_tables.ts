@@ -265,9 +265,9 @@ export const migration001: Migration = {
         id VARCHAR(64) PRIMARY KEY,
         user_id VARCHAR(64),
         tenant_id VARCHAR(64) DEFAULT 'usr_admin',
-        action VARCHAR(64) NOT NULL,
-        resource_type VARCHAR(64) DEFAULT 'system',
-        resource_id VARCHAR(64),
+        action VARCHAR(256) NOT NULL,
+        resource_type VARCHAR(128) DEFAULT 'system',
+        resource_id VARCHAR(128),
         details JSONB,
         ip_address VARCHAR(45),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

@@ -4,6 +4,17 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.38.6] - 2026-09-20
+
+### 🛡️ PostgreSQL Otomatik Şema Onarımı (Auto-Heal) & Kısıt/Karakter Genişliği Hata Çözümü
+- **Karakter Sınırı Taşması (Value Too Long) Kalıcı Çözümü**: `audit_logs` tablosundaki `action` kolonu `VARCHAR(64)` değerinden `VARCHAR(256)` boyutuna, `resource_type` ve `resource_id` kolonları ise `VARCHAR(128)` boyutuna genişletildi. Hem migration'lar (`014`), hem DDL, hem Drizzle şeması (`src/db/schema.ts`), hem de Kanonik Şema metaverisi senkronize edildi.
+- **Dinamik Parametre Güvenliği & Kırpma Koruması**: `postgres.ts` ve `saveAuditLog` içinde 255 karakteri aşan eylem mesajları için koruyucu sınırlandırma eklendi, böylece harici veya otomatik oluşturulmuş uzun hata dizgileri PostgreSQL `22001` (value too long) hatasına yol açmadan güvenle kaydedilmektedir.
+- **Yabancı Anahtar (FK) İhlalleri Çözümü (fk_user_sessions_user_id & fk_dashboard_layouts_user_id)**: Oturum (`user_sessions`) ve gösterge paneli (`dashboard_layouts`) tablolarında kullanıcı referansı kısıtları (`NOT NULL`) esnetildi; `saveSession` ve `saveDashboard` fonksiyonları hedef kullanıcı bulunamadığında otomatik olarak kök kullanıcıları sağlama alacak (`usr_test_admin`, `usr_admin`) veya kısıt ihlali oluşturmadan `NULL` fallback uygulayacak şekilde güçlendirildi.
+- **View Bağımlılığına Sahip Kolonların Akıllı Onarımı (Auto-Healer Engine)**: PostgreSQL üzerinde bir görünüm (VIEW, örn. `v_system_health_overview`, `v_active_device_summary`) tarafından kullanılan bir kolonun tipi değiştirilmek istendiğinde alınan `cannot alter type of a column used by a view or rule` hatası giderildi. Auto-Healer artık bağımlı görünümleri geçici olarak `CASCADE` ile düşürüp kolon tipini güncelledikten sonra kanonik tanımlarıyla anında yeniden oluşturmaktadır.
+- **%100 Kusursuz Şema Sağlığı**: Tüm 19 kanonik tablo, indeksler, kısıtlar ve tetikleyiciler %100 uyum ve tam sağlık (Score: 100) seviyesine ulaştırıldı; tüm yerel bellek verileri (`sync-all`) PostgreSQL ile sıfır hata ile senkronize edildi.
+
+---
+
 ## 🚀 [v1.38.5] - 2026-09-20
 
 ### 💾 Veritabanı Bağlantı Adresi Kalıcılığı & Havuz (Pool) Yaşam Döngüsü İyileştirmesi

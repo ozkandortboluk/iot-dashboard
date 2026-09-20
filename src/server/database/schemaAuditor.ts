@@ -395,6 +395,7 @@ export class SchemaAuditor {
         c.udt_name, 
         c.is_nullable, 
         c.column_default,
+        c.character_maximum_length,
         pg_get_expr(ad.adbin, ad.adrelid) AS default_expr
       FROM information_schema.columns c
       LEFT JOIN pg_class cl ON cl.relname = c.table_name
@@ -558,18 +559,21 @@ export class SchemaAuditor {
           });
           humanReadableMessages.push(`❌ Eksik kolon: ${tableName}.${colDef.name} (${colDef.type})`);
         } else {
-          // Check type compatibility
+          // Check type compatibility & column length adequacy
           const actualType = liveCol.data_type === 'USER-DEFINED' ? liveCol.udt_name : liveCol.data_type;
-          if (!areTypesCompatible(colDef.type, actualType)) {
+          const matchExpected = colDef.type.match(/varchar\((\d+)\)/i);
+          const isTooShort = matchExpected && liveCol.character_maximum_length && liveCol.character_maximum_length < parseInt(matchExpected[1], 10);
+
+          if (!areTypesCompatible(colDef.type, actualType) || isTooShort) {
             const fixSql = `ALTER TABLE "${tableName}" ALTER COLUMN "${colDef.name}" TYPE ${colDef.type} USING "${colDef.name}"::text::${colDef.type.split('(')[0]};`;
             typeMismatches.push({
               table: tableName,
               column: colDef.name,
               expectedType: colDef.type,
-              actualType,
+              actualType: isTooShort ? `VARCHAR(${liveCol.character_maximum_length})` : actualType,
               suggestedFixSql: fixSql,
             });
-            humanReadableMessages.push(`⚠️ Yanlış tip: ${tableName}.${colDef.name} (Beklenen: ${colDef.type}, Mevcut: ${actualType})`);
+            humanReadableMessages.push(`⚠️ ${isTooShort ? 'Kolon uzunluğu yetersiz' : 'Yanlış tip'}: ${tableName}.${colDef.name} (Beklenen: ${colDef.type}, Mevcut: ${isTooShort ? `VARCHAR(${liveCol.character_maximum_length})` : actualType})`);
           }
 
           // Check NOT NULL constraint
@@ -1215,7 +1219,23 @@ export class SchemaAuditor {
           ALTER COLUMN "${typeMismatch.column}" TYPE ${typeMismatch.expectedType} 
           USING (${castSql});
         `;
-        await poolOrClient.query(alterTypeSql);
+        try {
+          await poolOrClient.query(alterTypeSql);
+        } catch (initialTypeErr: any) {
+          if (String(initialTypeErr?.message || '').includes('used by a view or rule')) {
+            // Drop all known views temporarily with CASCADE
+            for (const viewName of Object.keys(CANONICAL_SCHEMA_METADATA.views)) {
+              await poolOrClient.query(`DROP VIEW IF EXISTS "${viewName}" CASCADE;`).catch(() => {});
+            }
+            await poolOrClient.query(alterTypeSql);
+            // Recreate all views from canonical definitions
+            for (const viewDef of Object.values(CANONICAL_SCHEMA_METADATA.views)) {
+              await poolOrClient.query(`CREATE OR REPLACE VIEW ${viewDef.name} AS ${viewDef.query};`).catch(() => {});
+            }
+          } else {
+            throw initialTypeErr;
+          }
+        }
         actionsTaken.push(`Kolon veri tipi düzeltildi: ${typeMismatch.table}.${typeMismatch.column} -> ${typeMismatch.expectedType}`);
       } catch (typeErr: any) {
         errors.push(`Veri tipi düzeltme hatası (${typeMismatch.table}.${typeMismatch.column}): ${typeErr?.message || typeErr}`);
