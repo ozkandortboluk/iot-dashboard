@@ -79,6 +79,9 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     if (status.dbConfig) {
       expect((status.dbConfig as any).password).toBeUndefined();
     }
+    // Public status must never disclose or implicitly authenticate the setup token.
+    expect(status.setupToken).toBeUndefined();
+    expect(status.isSetupAuthenticated).toBe(false);
   });
 
   it('4. should handle invalid database connection test gracefully without crashing', async () => {
@@ -260,20 +263,37 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     expect(setupService.isSetupCompleted()).toBe(false);
   });
 
-  it('12. should allow reset and resume in requireSetupAuth when setup is in progress', async () => {
+  it('12. should require a valid recovery token for reset and resume', async () => {
     const { requireSetupAuth } = await import('../server/middleware/setupAuth.js');
     (setupService as any).isCompletedState = false;
+    const recoveryToken = setupService.getOrInitSetupToken(true);
 
-    let nextCalled = false;
-    const req: any = { path: '/reset', headers: {}, cookies: {} };
-    const res: any = {
+    const deniedReq: any = { path: '/reset', originalUrl: '/api/setup/reset', headers: {}, cookies: {}, query: {} };
+    const deniedRes: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn().mockReturnThis(),
     };
-    const next = () => { nextCalled = true; };
+    const deniedNext = vi.fn();
 
-    requireSetupAuth(req, res, next);
-    expect(nextCalled).toBe(true);
-    expect(res.status).not.toHaveBeenCalled();
+    requireSetupAuth(deniedReq, deniedRes, deniedNext);
+    expect(deniedNext).not.toHaveBeenCalled();
+    expect(deniedRes.status).toHaveBeenCalledWith(401);
+
+    const allowedReq: any = {
+      path: '/resume',
+      originalUrl: '/api/setup/resume',
+      headers: { 'x-setup-token': recoveryToken },
+      cookies: {},
+      query: {},
+    };
+    const allowedRes: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+    const allowedNext = vi.fn();
+
+    requireSetupAuth(allowedReq, allowedRes, allowedNext);
+    expect(allowedNext).toHaveBeenCalledOnce();
+    expect(allowedRes.status).not.toHaveBeenCalled();
   });
 });
