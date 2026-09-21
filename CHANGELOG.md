@@ -4,6 +4,27 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.3] - 2026-09-21
+
+### 🔐 Güvenlik, Durum Denetimi ve Kurtarma Ekranı İyileştirmeleri (System Guard & Recovery Hardening)
+- **Kurtarma Ekranı Varsayılan E-posta Düzeltmesi (`RecoveryView.tsx`)**:
+  - Varsayılan e-posta alanındaki `test@nexusnodeiot.com.tr` kaldırıldı, boş alan ve `admin@domain.com` yer tutucusu getirildi. Bu sayede kurtarma sonrasında yönetici filtreleme döngüsüne girilmesi engellendi.
+  - VPS ve Docker ortamlarında kurtarma anahtarı üretme komutları ekran kılavuzuna eklendi (`docker compose exec app npm run generate-recovery-token`).
+- **`generate-recovery-token` NPM Script Eklemesi (`package.json`)**:
+  - `package.json` içerisine `"generate-recovery-token": "tsx scripts/generate-recovery-token.ts"` scripti tanımlandı.
+- **Güvenli Durum Koruması (Safe Fail-Closed SystemStateGuard)**:
+  - `/api/setup/status` uç noktası hata verdiğinde (HTTP hatası veya ağ kopukluğu) sistemin kontrolsüz şekilde `READY` moduna geçmesi engellendi, güvenli `MAINTENANCE` moduna geçiş sağlandı.
+  - Uygulama `READY` modundayken her 25 saniyede bir ve küresel ağ/bakım olaylarında (`nexus_system_maintenance`) veritabanı sağlık kontrolü yapılarak kesintilerde otomatik bakım ekranına geçilmesi sağlandı.
+- **Kalıcı ve Tek Kullanımlık Kurtarma Anahtarı Mantığı (`setup.service.ts`)**:
+  - Tüketilen kurtarma anahtarları SHA256 özeti ve metin olarak `data/.consumed_recovery_tokens.json` dosyasında saklanır. Ortam değişkeninden (`RECOVERY_TOKEN`) gelse dahi bir kez kullanıldıktan sonra tekrar kullanılamaz.
+- **Bakım Ekranı İstek Çakışması ve Katlanarak Bekleme (`MaintenanceView.tsx`)**:
+  - Aynı anda birden fazla arka plan durum sorgusunun çalışması engellendi (`isFetchingRef`).
+  - `setInterval` yerine, her sorgu tamamlandıktan sonra kademeli bekleme süresiyle (5s, 5s, 10s, 15s, 20s, 30s) arka plan kontrolleri yapılandırıldı. Manual buton tıklandığında süre sıfırlanıp anında sorgu atılır.
+- **RealtimeProvider Kapsam Daraltması (`App.tsx`)**:
+  - `RealtimeProvider` ve WebSocket bağlantıları `SETUP`, `MAINTENANCE` ve `RECOVERY` ekranlarında çalıştırılmayacak şekilde sadece `READY` durumu altına taşındı.
+
+---
+
 ## 🚀 [v1.41.2] - 2026-09-21
 
 ### 🐛 PostgreSQL Havuz Yaşam Döngüsü ve Cihaz Yabancı Anahtar İhlali Onarımı (Fix Pool Lifecycle & Device Foreign Key Violations)

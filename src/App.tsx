@@ -315,21 +315,63 @@ function SystemStateGuard() {
           setSystemMode('MAINTENANCE');
         } else if (!data.hasAdmin && data.isCompleted) {
           setSystemMode('RECOVERY');
-        } else {
+        } else if (data.isCompleted && data.isDbConnected && data.hasAdmin) {
           setSystemMode('READY');
+        } else {
+          setSystemMode('MAINTENANCE');
         }
       } else {
-        // Fallback to ready
-        setSystemMode('READY');
+        // HTTP / API error -> MAINTENANCE (Safe fail-closed behavior)
+        setSystemMode('MAINTENANCE');
       }
     } catch {
-      setSystemMode('READY');
+      // Network / connection error -> MAINTENANCE
+      setSystemMode('MAINTENANCE');
     }
   }, []);
 
   useEffect(() => {
     checkStatus();
+
+    // Global maintenance event listener (e.g. dispatched on 503 or DB connection drops)
+    const handleGlobalMaintenance = () => {
+      setSystemMode('MAINTENANCE');
+    };
+    window.addEventListener('nexus_system_maintenance', handleGlobalMaintenance);
+
+    return () => {
+      window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
+    };
   }, [checkStatus]);
+
+  // Periodic health monitor when system is READY
+  useEffect(() => {
+    if (systemMode !== 'READY') return;
+
+    const intervalId = setInterval(() => {
+      fetch('/api/setup/status', { credentials: 'include' })
+        .then((res) => {
+          if (!res.ok) {
+            setSystemMode('MAINTENANCE');
+            return null;
+          }
+          return res.json();
+        })
+        .then((data) => {
+          if (!data) return;
+          if (data.systemMode && data.systemMode !== 'READY') {
+            setSystemMode(data.systemMode);
+          } else if (data.isCompleted && !data.isDbConnected) {
+            setSystemMode('MAINTENANCE');
+          }
+        })
+        .catch(() => {
+          setSystemMode('MAINTENANCE');
+        });
+    }, 25000); // Check every 25s
+
+    return () => clearInterval(intervalId);
+  }, [systemMode]);
 
   if (systemMode === 'LOADING') {
     return (
@@ -354,16 +396,18 @@ function SystemStateGuard() {
     return <RecoveryView onRecovered={checkStatus} />;
   }
 
-  return <DashboardContent />;
+  return (
+    <RealtimeProvider>
+      <DashboardContent />
+    </RealtimeProvider>
+  );
 }
 
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <RealtimeProvider>
-          <SystemStateGuard />
-        </RealtimeProvider>
+        <SystemStateGuard />
       </AuthProvider>
     </ThemeProvider>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   Server,
@@ -24,35 +24,61 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
   const [lastCheckTime, setLastCheckTime] = useState<string>(new Date().toLocaleTimeString('tr-TR'));
   const [retryCount, setRetryCount] = useState<number>(0);
 
-  // Fetch status to load DB metadata and auto-check connection
-  const checkStatus = async () => {
+  const isFetchingRef = useRef(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const failureCountRef = useRef<number>(0);
+
+  const backoffDelays = [5000, 5000, 10000, 15000, 20000, 30000];
+
+  const scheduleNextCheck = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const delay = backoffDelays[Math.min(failureCountRef.current, backoffDelays.length - 1)];
+    timerRef.current = setTimeout(() => {
+      checkStatus();
+    }, delay);
+  }, []);
+
+  const checkStatus = useCallback(async (isManual: boolean = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setRetrying(true);
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
     try {
       const res = await fetch('/api/setup/status', { credentials: 'include' });
+      setLastCheckTime(new Date().toLocaleTimeString('tr-TR'));
+      setRetryCount((prev) => prev + 1);
+
       if (res.ok) {
         const data = await res.json();
-        setLastCheckTime(new Date().toLocaleTimeString('tr-TR'));
-        setRetryCount((prev) => prev + 1);
         if (data.dbConfig) {
           setDbConfig(data.dbConfig);
         }
         if (data.systemMode === 'READY' || data.isDbConnected) {
           onRetry();
+          return;
         }
       }
+      failureCountRef.current += 1;
     } catch {
-      // Offline
+      failureCountRef.current += 1;
     } finally {
+      isFetchingRef.current = false;
       setRetrying(false);
+      scheduleNextCheck();
     }
-  };
+  }, [onRetry, scheduleNextCheck]);
 
   useEffect(() => {
     checkStatus();
-    // Auto poll every 5 seconds while DB is down
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [checkStatus]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-amber-500/30">
@@ -143,7 +169,10 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
             <button
               id="maintenance-retry-btn"
               type="button"
-              onClick={checkStatus}
+              onClick={() => {
+                failureCountRef.current = 0;
+                checkStatus(true);
+              }}
               disabled={retrying}
               className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition cursor-pointer flex items-center justify-center gap-2"
             >

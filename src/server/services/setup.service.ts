@@ -1321,6 +1321,40 @@ export class SetupService {
     };
   }
 
+  private loadConsumedTokens(): Set<string> {
+    const consumedFile = path.join(process.cwd(), 'data', '.consumed_recovery_tokens.json');
+    try {
+      if (fs.existsSync(consumedFile)) {
+        const raw = fs.readFileSync(consumedFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(parsed);
+        }
+      }
+    } catch {}
+    return new Set();
+  }
+
+  private markRecoveryTokenConsumed(token: string): void {
+    if (!token) return;
+    const trimmed = token.trim();
+    const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
+    const consumedSet = this.loadConsumedTokens();
+    consumedSet.add(hash);
+    consumedSet.add(trimmed);
+
+    const consumedFile = path.join(process.cwd(), 'data', '.consumed_recovery_tokens.json');
+    try {
+      const dataDir = path.dirname(consumedFile);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      fs.writeFileSync(consumedFile, JSON.stringify(Array.from(consumedSet)), { encoding: 'utf8', mode: 0o600 });
+    } catch (err: any) {
+      systemLogger.error('security', `Tüketilen kurtarma anahtarı kaydedilemedi: ${err?.message || err}`);
+    }
+  }
+
   /**
    * Generates or retrieves single-use console recovery token for admin restoration
    */
@@ -1355,6 +1389,14 @@ export class SetupService {
   public validateRecoveryToken(token: string): boolean {
     if (!token || typeof token !== 'string') return false;
     const trimmed = token.trim();
+    const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
+
+    // Reject token if it has already been consumed
+    const consumedSet = this.loadConsumedTokens();
+    if (consumedSet.has(hash) || consumedSet.has(trimmed)) {
+      return false;
+    }
+
     if (process.env.RECOVERY_TOKEN && process.env.RECOVERY_TOKEN.trim() === trimmed) {
       return true;
     }
@@ -1395,6 +1437,9 @@ export class SetupService {
         companyName: 'Merkez Yönetim',
         ip: params.ip,
       });
+
+      // Mark token consumed permanently across ENV and file tokens
+      this.markRecoveryTokenConsumed(params.recoveryToken);
 
       // Clear recovery token file after single successful use
       const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');

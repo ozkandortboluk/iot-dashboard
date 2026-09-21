@@ -22,7 +22,7 @@ interface RecoveryViewProps {
 export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
   const [tokenInput, setTokenInput] = useState('');
   const [name, setName] = useState('Sistem Yöneticisi');
-  const [email, setEmail] = useState('test@nexusnodeiot.com.tr');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -135,15 +135,26 @@ export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
           <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-2">
             <div className="flex items-center gap-2 text-slate-300 font-semibold font-mono">
               <Terminal className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>VPS Konsol Komutu:</span>
+              <span>VPS / Docker Konsol Komutu:</span>
             </div>
             <p className="text-slate-400 text-[11px] leading-relaxed">
-              Kurtarma anahtarı üretmek için sunucu konsolunda aşağıdaki komutu çalıştırınız:
+              Kurtarma anahtarı üretmek için sunucu konsolunda aşağıdaki komutlardan uygun olanını çalıştırınız:
             </p>
-            <code className="block bg-slate-900 p-2 rounded text-emerald-400 font-mono text-[11px]">
-              npm run generate-recovery-token
-            </code>
-            <p className="text-[10px] text-slate-500">
+            <div className="space-y-1.5 font-mono text-[11px]">
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans block">Standart VPS Ortamı:</span>
+                <code className="block bg-slate-900 p-2 rounded text-emerald-400 overflow-x-auto">
+                  npm run generate-recovery-token
+                </code>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans block">Docker Ortamı:</span>
+                <code className="block bg-slate-900 p-2 rounded text-indigo-400 overflow-x-auto">
+                  docker compose exec app npm run generate-recovery-token
+                </code>
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-500 pt-1">
               Veya <code className="text-slate-400">data/.recovery_token</code> dosyasındaki anahtarı yapıştırınız.
             </p>
           </div>
@@ -195,6 +206,7 @@ export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@domain.com"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white font-mono focus:border-rose-500 focus:outline-hidden"
                 />
               </div>
