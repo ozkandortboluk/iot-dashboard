@@ -4,16 +4,6 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
-## 🚀 [v1.41.5] - 2026-09-21
-
-### 🐳 Production Dockerfile ve Inline Kurtarma Komutu İyileştirmesi (Docker Scripts Fix)
-- **Dockerfile Kopyalama Kuralı (`Dockerfile`)**:
-  - Çok aşamalı (multi-stage) Dockerfile `runner` aşamasına `COPY --from=builder /app/scripts ./scripts` satırı eklendi.
-  - Çalışmakta olan mevcut konteynerlerde yeniden derleme gerektirmeksizin anında çalışan `docker compose exec app node -e "..."` tek satırlık inline kurtarma komutu geliştirildi.
-  - Arayüzdeki yardım ekranı (`RecoveryView.tsx`) anında çalışan tek satırlık inline komutu içerecek şekilde güncellendi.
-
----
-
 ## 🚀 [v1.41.4] - 2026-09-21
 
 ### 🛠️ Üretim & Docker Uyumlu Bağımsız Kurtarma Anahtarı Betiği (Standalone Recovery Script)

@@ -33,7 +33,6 @@ RUN npm install --omit=dev --legacy-peer-deps
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/data ./data
-COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/metadata.json ./metadata.json
 
 # Ensure data directory exists for local fallback cache
