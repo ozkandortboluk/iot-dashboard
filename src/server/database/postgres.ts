@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import crypto from 'crypto';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { recordDatabaseHealingEvent } from '../services/databaseAutoHealer.service.js';
-import { getSharedPgPoolStats } from './connection.js';
+import { getSharedPgPool, getSharedPgPoolStats, onPgPoolRecycled } from './connection.js';
 import { runAllMigrations, getMigrationStatus, getLatestMigrationRunStatus } from './migrations/migrationRunner.js';
 import { SchemaAuditor, type SchemaAuditReport, type SchemaHealingResult } from './schemaAuditor.js';
 import { InitialDataSeeder } from './initialDataSeeder.js';
@@ -118,10 +118,22 @@ export class PostgresRepository {
   private connectionErrorNotified = false;
   private lastTestedAt?: string;
 
+  private validUserIdsCache: Set<string> = new Set();
+  private validUserIdsCacheExpiry = 0;
+
   constructor(pool?: Pool | null) {
     if (pool) {
       this.pool = pool;
     }
+    // Automatically update repository pool reference when unified shared pool is recycled or recreated
+    onPgPoolRecycled((newPool) => {
+      this.pool = newPool;
+      if (!newPool) {
+        this.isConnected = false;
+        this.isSchemaEnsured = false;
+        this.validUserIdsCache.clear();
+      }
+    });
   }
 
   public getPoolStats() {
@@ -133,6 +145,7 @@ export class PostgresRepository {
     this.isConnected = false;
     this.connectionErrorNotified = false;
     this.isSchemaEnsured = false;
+    this.validUserIdsCache.clear();
   }
 
   public setConnected(connected: boolean, schemaEnsured?: boolean) {
@@ -154,10 +167,17 @@ export class PostgresRepository {
   }
 
   public getPool(): Pool | null {
+    if (this.pool && ((this.pool as any).ending || (this.pool as any).ended)) {
+      this.pool = null;
+      this.isConnected = false;
+    }
     return this.pool;
   }
 
   public getIsConnected(): boolean {
+    if (this.pool && ((this.pool as any).ending || (this.pool as any).ended)) {
+      this.isConnected = false;
+    }
     return this.isConnected;
   }
 
@@ -166,21 +186,43 @@ export class PostgresRepository {
   }
 
   public isReady(): boolean {
+    if (!this.pool || (this.pool as any).ending || (this.pool as any).ended || !this.isConnected) {
+      return false;
+    }
     if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
-      return !!this.pool && this.isConnected;
+      return true;
     }
     // Block readiness until runtime schema migrations have successfully completed
     // Incoming telemetry will naturally fall back to resilient WAL during this period.
-    return !!this.pool && this.isConnected && this.isSchemaEnsured;
+    return this.isSchemaEnsured;
   }
 
   public async getMigrationStatus() {
-    if (!this.pool) return null;
+    if (!this.pool || (this.pool as any).ending || (this.pool as any).ended) return null;
     return getMigrationStatus(this.pool);
   }
 
   public getLatestMigrationRunStatus() {
     return getLatestMigrationRunStatus();
+  }
+
+  public async getValidUserIds(): Promise<Set<string>> {
+    const now = Date.now();
+    if (this.validUserIdsCache.size > 0 && now < this.validUserIdsCacheExpiry) {
+      return this.validUserIdsCache;
+    }
+    if (!this.pool || (this.pool as any).ending || (this.pool as any).ended || !this.isConnected) {
+      return this.validUserIdsCache;
+    }
+    try {
+      const res = await this.query('SELECT id FROM users;');
+      if (res?.rows) {
+        this.validUserIdsCache = new Set(res.rows.map((r: any) => r.id));
+        this.validUserIdsCacheExpiry = now + 60000;
+        return this.validUserIdsCache;
+      }
+    } catch {}
+    return this.validUserIdsCache;
   }
 
   public async getPoolAndPerformanceStats(): Promise<{
@@ -193,7 +235,7 @@ export class PostgresRepository {
     activeQueriesCount: number;
     databaseSizeBytes?: string;
   }> {
-    if (!this.pool) {
+    if (!this.pool || (this.pool as any).ending || (this.pool as any).ended) {
       return {
         totalCount: 0,
         idleCount: 0,
@@ -569,7 +611,22 @@ export class PostgresRepository {
    * can reliably detect failures, avoid split-brain fallback, and retry safely.
    */
   public async query(text: string, params: any[] = []): Promise<any> {
-    if (!this.pool || !this.isConnected) {
+    // 1. Drop stale pool reference if ended or ending
+    if (this.pool && ((this.pool as any).ending || (this.pool as any).ended)) {
+      this.pool = null;
+      this.isConnected = false;
+    }
+
+    // 2. Attempt transparent recovery from unified shared pool if available
+    if (!this.pool) {
+      const shared = getSharedPgPool();
+      if (shared && !(shared as any).ending && !(shared as any).ended) {
+        this.pool = shared;
+        this.isConnected = true;
+      }
+    }
+
+    if (!this.pool || !this.isConnected || (this.pool as any).ending || (this.pool as any).ended) {
       const errMsg = `[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil (isReady: false). Sorgu yürütülemedi: ${text.substring(0, 120)}`;
       systemLogger.error('database', errMsg);
       throw new Error(errMsg);
@@ -605,10 +662,15 @@ export class PostgresRepository {
         errMsg.includes('57P01') ||
         errMsg.includes('08006') ||
         errMsg.includes('Connection closed') ||
-        errMsg.includes('client has already been released');
+        errMsg.includes('client has already been released') ||
+        errMsg.includes('calling end on the pool') ||
+        errMsg.includes('Cannot use a pool after calling end');
 
       if (isConnectionIssue) {
         this.isConnected = false;
+        if (errMsg.includes('calling end on the pool') || errMsg.includes('Cannot use a pool after calling end')) {
+          this.pool = null;
+        }
         systemLogger.error('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
       } else {
         systemLogger.error('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
@@ -755,6 +817,9 @@ export class PostgresRepository {
       user.created_at || new Date().toISOString(),
       user.updatedAt || new Date().toISOString(),
     ]);
+    if (user.id) {
+      this.validUserIdsCache.add(user.id);
+    }
   }
 
   public async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
@@ -776,12 +841,12 @@ export class PostgresRepository {
       await client.query('BEGIN');
       // 1. Cihaz Sahipliğini Koruma & Kanonik Sistem Yöneticisine Aktarım:
       // Kullanıcı silindiğinde cihaz korunur, ancak kimsesiz / belirsiz kalmaması için
-      // kanonik olarak 'usr_admin' (Merkez Yönetim) hesabına devredilir ve geçmiş kayıtları saklanır.
+      // kanonik olarak 'usr_test_admin' veya 'usr_admin' hesabına devredilir ve geçmiş kayıtları saklanır.
       await client.query(`
         UPDATE devices
         SET 
-          tenant_id = 'usr_admin',
-          user_id = 'usr_admin',
+          tenant_id = 'usr_test_admin',
+          user_id = 'usr_test_admin',
           location = CASE 
             WHEN location IS NULL OR location = '' OR location = 'Varsayılan' 
             THEN 'Merkez Depo (Eski Müşteri: ' || COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), $1) || ')'
@@ -796,6 +861,7 @@ export class PostgresRepository {
       // 3. Kullanıcıyı sil (Artık hiçbir cihaz bu kullanıcıya bağlı olmadığı için FK ihlali oluşmaz)
       await client.query(`DELETE FROM users WHERE id = $1;`, [userId]);
       await client.query('COMMIT');
+      this.validUserIdsCache.delete(userId);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -912,10 +978,24 @@ export class PostgresRepository {
       return; // Do not persist ephemeral test devices to PostgreSQL
     }
 
-    // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_admin'e yönlendirilir
-    const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_admin';
+    // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_test_admin'e yönlendirilir
+    const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_test_admin';
     const effectiveType = dev.deviceType || dev.type || 'sensor';
     const effectiveIp = (dev as any).ipAddress || (dev as any).ip || null;
+
+    // Resolve user_id referencing users(id) foreign key constraint
+    const validUsers = await this.getValidUserIds();
+    const candidateUserId = ((dev as any).userId || (dev.tenantId?.startsWith('usr_') ? dev.tenantId : '')).trim();
+    let effectiveUserId: string | null = null;
+    if (candidateUserId && validUsers.has(candidateUserId)) {
+      effectiveUserId = candidateUserId;
+    } else if (validUsers.has('usr_test_admin')) {
+      effectiveUserId = 'usr_test_admin';
+    } else if (validUsers.has('usr_admin')) {
+      effectiveUserId = 'usr_admin';
+    } else {
+      effectiveUserId = null;
+    }
 
     // API Key Sanitization: Prevent '__USE_CACHED_TOKEN__' or placeholder tokens from ever touching the database
     let cleanApiKey = dev.apiKey?.trim();
@@ -999,7 +1079,7 @@ export class PostgresRepository {
     const params = [
       dev.id,
       canonicalTenantId,
-      canonicalTenantId,
+      effectiveUserId,
       dev.name,
       effectiveType,
       dev.apiKey || null,
@@ -1042,11 +1122,17 @@ export class PostgresRepository {
       await this.query(sql, params);
     } catch (saveErr: any) {
       const errMsg = saveErr?.message || String(saveErr);
-      if (errMsg.includes('fk_devices_tenant_id') || errMsg.includes('devices_user_id_fkey') || (errMsg.includes('foreign key') && errMsg.includes('devices'))) {
+      if (
+        errMsg.includes('fk_devices_user_id') ||
+        errMsg.includes('fk_devices_tenant_id') ||
+        errMsg.includes('devices_user_id_fkey') ||
+        (errMsg.includes('foreign key') && errMsg.includes('devices'))
+      ) {
         try {
           const fallbackParams = [...params];
-          fallbackParams[1] = 'usr_admin';
-          fallbackParams[2] = 'usr_admin';
+          // user_id column is nullable with ON DELETE SET NULL constraint.
+          // Setting user_id to null completely avoids foreign key constraint violation.
+          fallbackParams[2] = null;
           await this.query(sql, fallbackParams);
           return;
         } catch (retryErr: any) {
@@ -1079,10 +1165,10 @@ export class PostgresRepository {
       } else {
         apiKey = `nex_${crypto.randomBytes(4).toString('hex')}_${crypto.randomBytes(12).toString('hex')}`;
       }
-      if (this.pool) {
+      if (this.isReady()) {
         const hPrefix = apiKey.substring(0, 12);
         const hHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-        this.pool.query(
+        this.query(
           'UPDATE devices SET api_key = $1, api_key_prefix = $2, api_key_hash = $3 WHERE id = $4;',
           [apiKey, hPrefix, hHash, r.id]
         ).catch(() => {});
@@ -3658,11 +3744,14 @@ export class PostgresRepository {
    * Clean up expired message records from the deduplication table.
    */
   public async cleanupExpiredWsMessages(): Promise<void> {
-    if (!this.pool || !this.isConnected) return;
+    if (!this.pool || !this.isConnected || (this.pool as any).ending || (this.pool as any).ended) return;
     try {
       await this.query(`DELETE FROM device_ws_messages_dedup WHERE expires_at < NOW()`);
     } catch (err: any) {
-      console.warn('[PostgresRepository] cleanupExpiredWsMessages error:', err?.message || err);
+      const errMsg = err?.message || String(err);
+      if (!errMsg.includes('Veritabanı bağlantısı aktif veya hazır değil') && !errMsg.includes('calling end on the pool') && !errMsg.includes('Cannot use a pool after calling end')) {
+        console.warn('[PostgresRepository] cleanupExpiredWsMessages error:', errMsg);
+      }
     }
   }
 }

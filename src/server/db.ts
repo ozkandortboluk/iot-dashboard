@@ -1702,7 +1702,7 @@ class LocalDatabase {
     const dailyDeleteOffset = this.firestoreQuotaExceeded ? 150 + (hash * 2) : 25 + (hash * 3);
 
     const pgTelemetryStats: Record<string, number> = {};
-    if (this.isPostgresProductionMode()) {
+    if (this.isPostgresProductionMode() && this.postgresRepo.isReady()) {
        try {
            const res = await this.postgresRepo.query('SELECT tenant_id, COUNT(*) AS count FROM telemetry_readings GROUP BY tenant_id');
            if (res?.rows) {
@@ -1710,8 +1710,11 @@ class LocalDatabase {
                   pgTelemetryStats[r.tenant_id] = parseInt(r.count, 10) || 0;
                });
            }
-       } catch (err) {
-           console.error("PG Stats fetch error:", err);
+       } catch (err: any) {
+           const msg = err?.message || String(err);
+           if (!msg.includes('Veritabanı bağlantısı aktif veya hazır değil') && !msg.includes('calling end on the pool')) {
+             console.warn("PG Stats fetch error:", msg);
+           }
        }
     }
 

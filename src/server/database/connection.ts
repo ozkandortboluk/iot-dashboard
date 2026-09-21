@@ -14,6 +14,22 @@ declare global {
   var _unifiedPostgresPoolUrl: string | undefined;
 }
 
+export type PgPoolRecycleListener = (newPool: pg.Pool | null) => void;
+const poolRecycleListeners: Set<PgPoolRecycleListener> = new Set();
+
+export function onPgPoolRecycled(listener: PgPoolRecycleListener): () => void {
+  poolRecycleListeners.add(listener);
+  return () => poolRecycleListeners.delete(listener);
+}
+
+function notifyPoolRecycled(newPool: pg.Pool | null): void {
+  for (const listener of poolRecycleListeners) {
+    try {
+      listener(newPool);
+    } catch {}
+  }
+}
+
 /**
  * Resolves PostgreSQL connection URL from all possible environment variable conventions
  * and structured fallback configurations.
@@ -164,9 +180,11 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
 
     global._unifiedPostgresPool = undefined;
     global._unifiedPostgresPoolUrl = url;
+    notifyPoolRecycled(null);
+
     try {
       const limits = getPostgresPoolLimits();
-      global._unifiedPostgresPool = new Pool({
+      const newPool = new Pool({
         connectionString: url,
         connectionTimeoutMillis: limits.connectionTimeoutMillis,
         idleTimeoutMillis: limits.idleTimeoutMillis,
@@ -176,14 +194,17 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
         ssl: getPostgresSslOption(url),
       });
 
-      global._unifiedPostgresPool.on('error', (err: any) => {
+      newPool.on('error', (err: any) => {
         console.warn('[Unified PostgreSQL Pool Error]:', err?.message);
         systemLogger.warn('database', 'Birleşik PostgreSQL havuz hatası tespit edildi', err?.message);
       });
       console.log(`[Unified PostgreSQL Pool] Bağlantı havuzu başlatıldı (Max: ${limits.max}, ConnTimeout: ${limits.connectionTimeoutMillis}ms).`);
+      global._unifiedPostgresPool = newPool;
+      notifyPoolRecycled(newPool);
     } catch (err: any) {
       systemLogger.error('database', 'Birleşik PostgreSQL havuzu oluşturulamadı', err?.message);
       global._unifiedPostgresPool = undefined;
+      notifyPoolRecycled(null);
       return null;
     }
   }
@@ -220,12 +241,17 @@ export function getSharedPgPoolStats(): {
  * Safely recycles/terminates the shared pool (e.g. during disconnect or reconfiguration).
  */
 export async function recycleSharedPgPool(): Promise<void> {
-  if (global._unifiedPostgresPool) {
+  const poolToEnd = global._unifiedPostgresPool;
+  global._unifiedPostgresPool = undefined;
+  global._unifiedPostgresPoolUrl = undefined;
+  notifyPoolRecycled(null);
+
+  if (poolToEnd) {
     try {
-      await global._unifiedPostgresPool.end();
+      if (!(poolToEnd as any).ending && !(poolToEnd as any).ended) {
+        await poolToEnd.end();
+      }
     } catch {}
-    global._unifiedPostgresPool = undefined;
-    global._unifiedPostgresPoolUrl = undefined;
     systemLogger.info('database', 'Birleşik PostgreSQL bağlantı havuzu sıfırlandı.');
   }
 }

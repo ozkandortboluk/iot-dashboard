@@ -4,6 +4,46 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.2] - 2026-09-21
+
+### 🐛 PostgreSQL Havuz Yaşam Döngüsü ve Cihaz Yabancı Anahtar İhlali Onarımı (Fix Pool Lifecycle & Device Foreign Key Violations)
+- **Bağlantı Havuzu Geri Dönüşüm Senkronizasyonu (Pool Lifecycle & Reconnection Resiliency)**:
+  - `recycleSharedPgPool` havuz sonlandırıldığında veya yeni havuz oluşturulduğunda `onPgPoolRecycled` dinleyicileri tetiklenerek `PostgresRepository` referansı anında güncellenmektedir.
+  - Havuz `ending` veya `ended` durumundayken gelen arka plan sorguları (`cleanupExpiredWsMessages`, `getSystemStats`) korumaya alınarak `Cannot use a pool after calling end on the pool` istisnaları tamamen engellendi.
+  - `query()` fonksiyonunda sonlandırılmış havuz tespiti yapıldığında otomatik olarak taze paylaşılan havuza bağlanma yeteneği eklendi.
+- **Cihaz Yabancı Anahtar Koruması (Foreign Key Constraint Resiliency)**:
+  - `saveDevice` metodunda `user_id` kolonu için veritabanındaki geçerli kullanıcı kimlikleri önbellekten denetlenmektedir.
+  - Var olmayan bir kullanıcı kimliği verildiğinde veya ilk ekleme yabancı anahtar ihlali (`fk_devices_user_id`) ile karşılaştığında, yabancı anahtar kolonu güvenle `NULL` değerine çekilerek cihaz kaydının kesintisiz saklanması sağlanmaktadır.
+
+---
+
+## 🚀 [v1.41.1] - 2026-09-21
+
+### 🐛 Veritabanı Migrasyon 019 Onarımı (Fix Migration 019 Relation Devices Column Error)
+- **Hata Giderimi (Relational Schema Fix)**:
+  - `019_restore_canonical_test_entities.ts` içerisindeki `devices` tablosu çakışma güncellemesinde yer alan ve tabloda bulunmayan `deleted_at = NULL` ifadesi kaldırıldı, yerine geçerli `updated_at = CURRENT_TIMESTAMP` ataması getirildi.
+  - Bu sayede `[Migration Failed] Migration 019 (restore_canonical_test_entities) failed: column "deleted_at" of relation "devices" does not exist` hatası tamamen çözüldü ve PostgreSQL ilklendirmesi başarıyla tamamlandı.
+
+---
+
+## 🚀 [v1.41.0] - 2026-09-21
+
+### 🛡️ Durum Bazlı Kurulum, Bakım Modu ve Konsol Kurtarma Mimarisi (State-Based Routing & Maintenance Guard)
+- **Kalıcı Kurulum Kilidi Protekolü & Kesinti Koruması**:
+  - Kurulum tamamlandıktan (`setup_completed=true`) sonra PostgreSQL veritabanının geçici olarak kapanması veya erişilemez olması durumunda kurulum sihirbazının tekrar açılması güvenlik zafiyeti olarak engellendi.
+  - Veritabanı kesintilerinde `isCompleted` kilidi korunur; sistem otomatik olarak **Bakım Modu (Maintenance Mode)** ekranına geçer.
+- **Karar Tablosuna Uygun Durum Yönlendirme Mimari Yapısı (`systemMode`)**:
+  - `READY`: Kurulum tamamlanmış, veritabanı bağlı ve aktif yönetici mevcut -> Normal Çalışma / Giriş Ekranı.
+  - `MAINTENANCE`: Kurulum önceden tamamlanmış ancak veritabanı geçici olarak erişilemez -> Veritabanı Bakım Ekranı (`MaintenanceView`).
+  - `RECOVERY`: Kurulum önceden tamamlanmış, veritabanı aktif ancak yönetici hesabı bulunamıyor -> Güvenli Konsol Kurtarma Ekranı (`RecoveryView`).
+  - `SETUP`: İlk kurulum henüz tamamlanmamış -> Kurulum Sihirbazı (`DatabaseSetupWizard`).
+- **Bakım Modu Ekranı (`MaintenanceView.tsx`)**:
+  - Veritabanına ulaşılamadığında otomatik açılan, 5 saniyede bir bağlantıyı arka planda sorgulayan, hedef veritabanı sunucu bilgilerini gösteren ve bağlantı sağlandığında sistemi otomatik açan bakım arayüzü eklendi.
+- **Konsol Yönetici Kurtarma Sistemi (`RecoveryView.tsx` & `/api/setup/recover-admin`)**:
+  - Silinen/kaybolan yönetici hesaplarını kurtarmak için VPS konsolundan üretilen tek kullanımlık kurtarma anahtarı (`npm run generate-recovery-token`) ile çalışan güvenli kurtarma mekanizması eklendi.
+
+---
+
 ## 🚀 [v1.40.6] - 2026-09-21
 
 ### 🔑 PostgreSQL Giriş Doğrulama ve Kanonik Test Hesabı Onarımı (Authentication Hash & Seed Repair)

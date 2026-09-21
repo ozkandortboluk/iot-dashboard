@@ -103,7 +103,7 @@ export const migration019: Migration = {
         api_key_hash = $2,
         api_key_prefix = 'dev_key_test',
         status = 'online',
-        deleted_at = NULL;
+        updated_at = CURRENT_TIMESTAMP;
       `,
       [CANONICAL_API_KEY, CANONICAL_KEY_HASH]
     );

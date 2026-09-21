@@ -23,6 +23,8 @@ import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { SystemLogsView } from './components/system/SystemLogsView';
 import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
+import { MaintenanceView } from './components/setup/MaintenanceView';
+import { RecoveryView } from './components/setup/RecoveryView';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
@@ -297,12 +299,70 @@ function DashboardContent() {
   );
 }
 
+function SystemStateGuard() {
+  const [systemMode, setSystemMode] = useState<'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' | 'LOADING'>('LOADING');
+
+  const checkStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/setup/status', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.systemMode) {
+          setSystemMode(data.systemMode);
+        } else if (data.setupRequired) {
+          setSystemMode('SETUP');
+        } else if (!data.isDbConnected && data.isCompleted) {
+          setSystemMode('MAINTENANCE');
+        } else if (!data.hasAdmin && data.isCompleted) {
+          setSystemMode('RECOVERY');
+        } else {
+          setSystemMode('READY');
+        }
+      } else {
+        // Fallback to ready
+        setSystemMode('READY');
+      }
+    } catch {
+      setSystemMode('READY');
+    }
+  }, []);
+
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
+
+  if (systemMode === 'LOADING') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+          <p className="text-xs font-medium text-slate-400">Sistem Durumu Kontrol Ediliyor...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (systemMode === 'SETUP') {
+    return <DatabaseSetupWizard onComplete={checkStatus} />;
+  }
+
+  if (systemMode === 'MAINTENANCE') {
+    return <MaintenanceView onRetry={checkStatus} />;
+  }
+
+  if (systemMode === 'RECOVERY') {
+    return <RecoveryView onRecovered={checkStatus} />;
+  }
+
+  return <DashboardContent />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
         <RealtimeProvider>
-          <DashboardContent />
+          <SystemStateGuard />
         </RealtimeProvider>
       </AuthProvider>
     </ThemeProvider>

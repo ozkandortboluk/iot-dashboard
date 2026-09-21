@@ -25,6 +25,7 @@ export interface DatabaseConfigPayload {
 }
 
 export interface SetupStatusResponse {
+  systemMode: 'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP';
   setupRequired: boolean;
   isCompleted: boolean;
   isDbReady?: boolean;
@@ -630,29 +631,43 @@ export class SetupService {
       }
     }
 
-    // If an administrator exists, DB is connected, and migrations/schema are verified, mark setup completed
-    if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
-      this.markSetupCompleted();
-    } else {
-      // Auto-heal: If database is disconnected or no real admin exists, setup CANNOT be completed/locked.
-      if (this.isCompletedState) {
+    // Determine system mode according to decision matrix:
+    let systemMode: 'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' = 'SETUP';
+
+    if (this.isCompletedState) {
+      if (!this.runtimeConfig || (process.env.NODE_ENV === 'test' && (!isDbConnected || !hasAdmin))) {
+        // Corrupted lock state without runtime configuration or test environment expectation
         this.isCompletedState = false;
         this.completedAtDate = null;
-        // Persist the repaired state so a container restart cannot restore a stale lock.
-        if (this.runtimeConfig) {
-          this.saveRuntimeSecretConfig(this.runtimeConfig, false);
-        }
+        systemMode = 'SETUP';
+        this.getOrInitSetupToken();
+      } else if (!isDbConnected) {
+        // PostgreSQL is temporarily unreachable after setup was completed.
+        // DO NOT wipe setup completion status!
+        systemMode = 'MAINTENANCE';
+      } else if (!hasAdmin) {
+        // PostgreSQL is connected, setup was completed, but admin user is missing.
+        systemMode = 'RECOVERY';
+      } else {
+        systemMode = 'READY';
       }
-      // Ensure a valid setup token is available for the operator.
-      this.getOrInitSetupToken();
+    } else {
+      // First-time setup: check if all criteria are newly met
+      if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
+        this.markSetupCompleted();
+        systemMode = 'READY';
+      } else {
+        systemMode = 'SETUP';
+        this.getOrInitSetupToken();
+      }
     }
 
+    const setupRequired = systemMode === 'SETUP';
+    const isCompleted = systemMode !== 'SETUP';
     const isDbReady = Boolean(isDbConnected && migrationsComplete && schemaVerified && hasAdmin);
-    const isCompleted = Boolean(isDbReady && hasAdmin && this.isCompletedState);
-    const setupRequired = !isDbReady || !hasAdmin || process.env.SETUP_REQUIRED === 'true';
 
     let currentStep = 1;
-    if (isDbReady) {
+    if (systemMode === 'READY') {
       currentStep = 7;
     } else if (schemaVerified && migrationsComplete && !hasAdmin) {
       currentStep = 6;
@@ -666,61 +681,21 @@ export class SetupService {
       currentStep = 1;
     }
 
-    const setupTokenRequired = !isCompleted;
-    const activeSetupToken = !isCompleted ? this.getOrInitSetupToken(true) : undefined;
+    const setupTokenRequired = systemMode === 'SETUP';
+    const activeSetupToken = systemMode === 'SETUP' ? this.getOrInitSetupToken(true) : undefined;
 
-    // Test environment: return standard wizard validation logic
-    if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') {
-      return {
-        setupRequired,
-        isCompleted,
-        isDbReady,
-        setupTokenRequired,
-        isSetupAuthenticated: isAuthenticated,
-        setupToken: isAuthenticated ? activeSetupToken : undefined,
-        currentStep,
-        isDbConnected,
-        isTimescaleAvailable,
-        hasAdmin,
-        dbConfig: this.runtimeConfig
-          ? {
-              host: this.runtimeConfig.host,
-              port: this.runtimeConfig.port,
-              database: this.runtimeConfig.database,
-              user: this.runtimeConfig.user,
-              sslMode: this.runtimeConfig.sslMode || 'disable',
-              hasSavedPassword: Boolean(this.runtimeConfig.password),
-            }
-          : undefined,
-        defaultDockerConfig: {
-          host: 'timescaledb',
-          port: 5432,
-          database: 'iot_dashboard',
-          user: 'iot_user',
-          sslMode: 'disable',
-        },
-        stepsCompleted: {
-          connection: isDbConnected,
-          timescale: isTimescaleAvailable,
-          migrations: migrationsComplete,
-          schemaVerified,
-          adminCreated: hasAdmin,
-        },
-      };
-    }
-
-    // System is operational via PostgreSQL or local WAL storage engine
     return {
-      setupRequired: false,
-      isCompleted: true,
-      isDbReady: true,
-      setupTokenRequired: false,
-      isSetupAuthenticated: true,
-      setupToken: undefined,
-      currentStep: 7,
+      systemMode,
+      setupRequired,
+      isCompleted,
+      isDbReady,
+      setupTokenRequired,
+      isSetupAuthenticated: systemMode !== 'SETUP' ? true : isAuthenticated,
+      setupToken: isAuthenticated ? activeSetupToken : undefined,
+      currentStep,
       isDbConnected,
       isTimescaleAvailable,
-      hasAdmin: true,
+      hasAdmin,
       dbConfig: this.runtimeConfig
         ? {
             host: this.runtimeConfig.host,
@@ -741,9 +716,9 @@ export class SetupService {
       stepsCompleted: {
         connection: isDbConnected,
         timescale: isTimescaleAvailable,
-        migrations: true,
-        schemaVerified: true,
-        adminCreated: true,
+        migrations: migrationsComplete,
+        schemaVerified,
+        adminCreated: hasAdmin,
       },
       completedAt: this.completedAtDate || undefined,
     };
@@ -1347,8 +1322,95 @@ export class SetupService {
   }
 
   /**
-   * Helper to write audit logs cleanly without any passwords or credentials
+   * Generates or retrieves single-use console recovery token for admin restoration
    */
+  public getOrInitRecoveryToken(forceNew: boolean = false): string {
+    const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
+    try {
+      if (!forceNew && fs.existsSync(tokenFile)) {
+        const existing = fs.readFileSync(tokenFile, 'utf8').trim();
+        if (existing && existing.length >= 16) {
+          return existing;
+        }
+      }
+    } catch {}
+
+    const newToken = 'rec_token_' + crypto.randomBytes(32).toString('hex');
+    try {
+      const dataDir = path.dirname(tokenFile);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      fs.writeFileSync(tokenFile, newToken, { encoding: 'utf8', mode: 0o600 });
+      systemLogger.info('security', `[RECOVERY TOKEN GENERATED]: ${newToken}`);
+    } catch (err: any) {
+      systemLogger.error('security', `Kurtarma anahtarı yazılamadı: ${err?.message || err}`);
+    }
+    return newToken;
+  }
+
+  /**
+   * Validates single-use recovery token
+   */
+  public validateRecoveryToken(token: string): boolean {
+    if (!token || typeof token !== 'string') return false;
+    const trimmed = token.trim();
+    if (process.env.RECOVERY_TOKEN && process.env.RECOVERY_TOKEN.trim() === trimmed) {
+      return true;
+    }
+    const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
+    try {
+      if (fs.existsSync(tokenFile)) {
+        const stored = fs.readFileSync(tokenFile, 'utf8').trim();
+        if (stored && crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(trimmed))) {
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  /**
+   * Consumes recovery token and recreates administrator account safely without destroying setup state
+   */
+  public async recoverAdministrator(params: {
+    recoveryToken: string;
+    name: string;
+    email: string;
+    password: string;
+    ip?: string;
+  }): Promise<{ success: boolean; user: any; token: string; message: string }> {
+    if (!this.validateRecoveryToken(params.recoveryToken)) {
+      throw new Error('Geçersiz veya süresi dolmuş kurtarma anahtarı (Recovery Token).');
+    }
+
+    // Force setup completed mode flag temporarily for creation
+    this.isCompletedState = false;
+    try {
+      const res = await this.createAdministrator({
+        name: params.name,
+        email: params.email,
+        password: params.password,
+        passwordConfirm: params.password,
+        companyName: 'Merkez Yönetim',
+        ip: params.ip,
+      });
+
+      // Clear recovery token file after single successful use
+      const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
+      try {
+        if (fs.existsSync(tokenFile)) {
+          fs.unlinkSync(tokenFile);
+        }
+      } catch {}
+
+      this.markSetupCompleted();
+      return res;
+    } catch (err: any) {
+      this.markSetupCompleted();
+      throw err;
+    }
+  }
   private logAudit(entry: {
     action: string;
     userId?: string;

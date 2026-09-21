@@ -349,3 +349,49 @@ setupRouter.post('/resume', requireSetupAuth, (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * POST /api/setup/recover-admin
+ * Single-use console recovery token endpoint for recreating admin user safely
+ */
+setupRouter.post('/recover-admin', async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`recover_admin:${clientIp}`, 5);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: 'Çok fazla kurtarma isteği. Lütfen bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  const { recoveryToken, name, email, password } = req.body || {};
+  if (!recoveryToken || !name || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Kurtarma anahtarı, ad, e-posta ve şifre alanları zorunludur.',
+    });
+  }
+
+  try {
+    const result = await setupService.recoverAdministrator({
+      recoveryToken: String(recoveryToken).trim(),
+      name: String(name).trim(),
+      email: String(email).trim(),
+      password: String(password),
+      ip: clientIp,
+    });
+
+    if (result.token) {
+      setSessionCookie(res, result.token);
+    }
+
+    return res.json(result);
+  } catch (err: any) {
+    systemLogger.warn('security', `Başarısız yönetici kurtarma denemesi (IP: ${clientIp}): ${err?.message || err}`);
+    return res.status(400).json({
+      success: false,
+      message: err?.message || 'Yönetici hesabı kurtarılamadı.',
+    });
+  }
+});
