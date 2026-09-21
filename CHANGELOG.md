@@ -4,6 +4,18 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.4] - 2026-09-21
+
+### 🔐 Yönetici Kurtarma Ekranı Tek Tıkla Kopyalanabilir Komut Entegrasyonu (`RecoveryView.tsx`)
+- **Doğrudan Docker Node.js Komutu Eklendi**:
+  - `docker compose exec app node -e "const c=require('crypto'),f=require('fs');const t='rec_token_'+c.randomBytes(32).toString('hex');f.writeFileSync('/app/data/.recovery_token',t,{mode:0o600});console.log('\nYeni Kurtarma Anahtari:\n\n'+t+'\n');"` komutu yönetici kurtarma ekranına (`RecoveryView.tsx`) eklendi.
+- **Tek Tıkla Kopyalama Bileşeni (`CopyableCommand`)**:
+  - Kurtarma ekranındaki tüm konsol komutları (Docker Node One-Liner, Docker NPM Script ve VPS Native Script) tek tıkla panoya kopyalama butonu ile donatıldı.
+- **Yardım & Bilgi Merkezi Senkronizasyonu (`HelpView.tsx`)**:
+  - Kurtarma anahtarı üretme komutları Yardım & Bilgi Merkezi kod örnekleri bölümüne eklendi.
+
+---
+
 ## 🚀 [v1.41.3] - 2026-09-21
 
 ### 🔐 Güvenlik, Durum Denetimi ve Kurtarma Ekranı İyileştirmeleri (System Guard & Recovery Hardening)

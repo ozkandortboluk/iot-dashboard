@@ -2208,6 +2208,16 @@ curl -s -X POST "\${originUrl}/api/setup/reset" \\
 curl -s -X POST "\${originUrl}/api/setup/resume" \\
   -H "Content-Type: application/json" \\
   -H "X-Setup-Token: YOUR_SETUP_TOKEN"
+
+# 8. YÖNETİCİ KURTARMA ANAHTARI ÜRETME (DOCKER / VPS ONE-LINER)
+# Docker Ortamı (Node.js Doğrudan Komut):
+docker compose exec app node -e "const c=require('crypto'),f=require('fs');const t='rec_token_'+c.randomBytes(32).toString('hex');f.writeFileSync('/app/data/.recovery_token',t,{mode:0o600});console.log('\nYeni Kurtarma Anahtari:\n\n'+t+'\n');"
+
+# Docker Ortamı (NPM Script):
+docker compose exec app npm run generate-recovery-token
+
+# Standart VPS / Yerel Ortam:
+npm run generate-recovery-token
 `,
     },
     {

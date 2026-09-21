@@ -12,12 +12,78 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../../config/version';
 
 interface RecoveryViewProps {
   onRecovered: () => void;
 }
+
+interface CopyableCommandProps {
+  label: string;
+  command: string;
+  colorClass?: string;
+  badge?: string;
+}
+
+const CopyableCommand: React.FC<CopyableCommandProps> = ({
+  label,
+  command,
+  colorClass = 'text-indigo-400',
+  badge,
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    try {
+      navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="space-y-1 bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/80">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[11px] text-slate-300 font-sans font-medium truncate">{label}</span>
+          {badge && (
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800/60 font-mono shrink-0">
+              {badge}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="text-[10px] flex items-center gap-1 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-md border border-slate-700 transition cursor-pointer font-sans shrink-0 active:scale-95"
+          title="Komutu panoya kopyala"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3 text-emerald-400" />
+              <span className="text-emerald-400 font-semibold">Kopyalandı!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3 text-slate-400" />
+              <span>Kopyala</span>
+            </>
+          )}
+        </button>
+      </div>
+      <code className={`block bg-slate-950 p-2 rounded ${colorClass} overflow-x-auto break-all font-mono text-[11px] leading-relaxed select-all border border-slate-800/80`}>
+        {command}
+      </code>
+    </div>
+  );
+};
 
 export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
   const [tokenInput, setTokenInput] = useState('');
@@ -132,30 +198,45 @@ export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
           </div>
 
           {/* Terminal Hint */}
-          <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-2">
-            <div className="flex items-center gap-2 text-slate-300 font-semibold font-mono">
-              <Terminal className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>VPS / Docker Konsol Komutu:</span>
+          <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-200 font-semibold font-mono">
+                <Terminal className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>VPS / Docker Konsol Kurtarma Komutları:</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 font-medium">
+                Kopyalanabilir Komutlar
+              </span>
             </div>
             <p className="text-slate-400 text-[11px] leading-relaxed">
-              Kurtarma anahtarı üretmek için sunucu konsolunda aşağıdaki komutlardan uygun olanını çalıştırınız:
+              Kurtarma anahtarı (Recovery Token) üretip veritabanına işlemek için aşağıdaki komutlardan birini sunucu konsolunda çalıştırınız:
             </p>
-            <div className="space-y-1.5 font-mono text-[11px]">
-              <div>
-                <span className="text-[10px] text-slate-500 font-sans block">Standart VPS Ortamı:</span>
-                <code className="block bg-slate-900 p-2 rounded text-emerald-400 overflow-x-auto">
-                  npm run generate-recovery-token
-                </code>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 font-sans block">Docker Ortamı:</span>
-                <code className="block bg-slate-900 p-2 rounded text-indigo-400 overflow-x-auto">
-                  docker compose exec app npm run generate-recovery-token
-                </code>
-              </div>
+
+            <div className="space-y-2.5">
+              <CopyableCommand
+                label="Docker Node.js Doğrudan Komut (Tek Satır):"
+                badge="Docker One-Liner"
+                command={`docker compose exec app node -e "const c=require('crypto'),f=require('fs');const t='rec_token_'+c.randomBytes(32).toString('hex');f.writeFileSync('/app/data/.recovery_token',t,{mode:0o600});console.log('\\nYeni Kurtarma Anahtari:\\n\\n'+t+'\\n');"`}
+                colorClass="text-amber-300 font-semibold"
+              />
+
+              <CopyableCommand
+                label="Docker Compose NPM Script Komutu:"
+                badge="Docker Script"
+                command="docker compose exec app npm run generate-recovery-token"
+                colorClass="text-indigo-400"
+              />
+
+              <CopyableCommand
+                label="Standart VPS / Yerel Ortam Script Komutu:"
+                badge="VPS Native"
+                command="npm run generate-recovery-token"
+                colorClass="text-emerald-400"
+              />
             </div>
+
             <p className="text-[10px] text-slate-500 pt-1">
-              Veya <code className="text-slate-400">data/.recovery_token</code> dosyasındaki anahtarı yapıştırınız.
+              Üretilen anahtar konsola yazılacak ve <code className="text-slate-400">data/.recovery_token</code> dosyasına kaydedilecektir. Kopyaladığınız anahtarı aşağıdaki alana yapıştırınız.
             </p>
           </div>
 
