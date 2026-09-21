@@ -4,6 +4,16 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.4] - 2026-09-21
+
+### 🛠️ Üretim & Docker Uyumlu Bağımsız Kurtarma Anahtarı Betiği (Standalone Recovery Script)
+- **`scripts/generate-recovery-token.mjs` Saf Node.js Betiği**:
+  - `tsx` veya TypeScript derleyicisi gerektirmeden doğrudan standart `node` runtime'ı üzerinde çalışan sıfır bağımlılıklı saf ES modülü betik yazıldı.
+  - Production Docker konteynerlerinde `tsx` devDependency bulunmaması nedeniyle alınan çalıştırma hataları tamamen giderildi.
+  - `package.json` içerisindeki `"generate-recovery-token"` komutu `node scripts/generate-recovery-token.mjs` olarak güncellendi.
+
+---
+
 ## 🚀 [v1.41.3] - 2026-09-21
 
 ### 🔐 Güvenlik, Durum Denetimi ve Kurtarma Ekranı İyileştirmeleri (System Guard & Recovery Hardening)
