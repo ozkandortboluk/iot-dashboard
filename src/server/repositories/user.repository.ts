@@ -157,6 +157,9 @@ export class UserRepository {
         this.db.saveData(this.db.data, true);
       }
       const token = await this.createSession(user);
+      if (this.isPgReady()) {
+        await this.db.postgresRepo.saveUser(user, storedHash).catch(() => {});
+      }
       this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
       return { user, token };
     }

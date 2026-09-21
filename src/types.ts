@@ -352,6 +352,8 @@ export interface TelemetryReading {
   id: string;
   packetId?: string;
   tenantId?: string;
+  userId?: string; // Optional legacy compatibility alias for tenantId
+  customerId?: string; // Optional legacy compatibility alias for tenantId
   deviceId: string;
   deviceName: string;
   timestamp: string;
@@ -365,6 +367,7 @@ export interface TelemetryReading {
   idempotencyKey?: string;
   source: TelemetrySource;
   simulationRunId?: string;
+  environment?: string; // Optional legacy compatibility field
 }
 
 export type DeviceCommandStatus = 

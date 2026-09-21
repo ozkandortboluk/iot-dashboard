@@ -4,6 +4,73 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.40.6] - 2026-09-21
+
+### 🔑 PostgreSQL Giriş Doğrulama ve Kanonik Test Hesabı Onarımı (Authentication Hash & Seed Repair)
+- **Giriş Şifre Doğrulama Onarımı (Bcrypt Hash Repair)**:
+  - Veritabanındaki `usr_test_admin` (`test@nexusnodeiot.com.tr`) ve `usr_admin` hesapları için saklanan bozuk statik şifre özeti, `test1234` şifresine karşılık gelen geçerli Bcrypt karma özeti (`$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.`) ile güncellendi.
+  - Şifre karması uyuşmazlığı nedeniyle PostgreSQL bağlantısı aktif olduğu halde yaşanan giriş başarısızlığı kökten çözüldü.
+- **Migrasyon 019 (`019_restore_canonical_test_entities.ts`)**:
+  - Kanonik test yöneticisi (`usr_test_admin` / `test@nexusnodeiot.com.tr`) ve kanonik test cihazı (`dev_test_01` / `dev_key_test_0000000000000000`) PostgreSQL veritabanında otomatik ve eksiksiz olarak `active` statüsünde garanti altına alındı.
+- **Önbellek & Yedek Giriş Senkronizasyonu**:
+  - In-memory yedekleme deposu üzerinden başarılı doğrulama gerçekleştirildiğinde kullanıcının otomatik olarak PostgreSQL'e kaydedilmesi sağlandı.
+
+---
+
+## 🚀 [v1.40.5] - 2026-09-20
+
+### 📊 Giriş Ekranı Canlı Veritabanı Bağlantı Durumu Göstergesi (Database Connectivity Widget)
+- **Giriş Ekranı (LoginView) Veritabanı Widget'ı**:
+  - Sağ üst kontrol çubuğuna ve giriş kartının üst/sağ bölümüne dinamik veritabanı durum kartı eklendi.
+  - Canlı bağlantı sinyali (yeşil/sarı/kırmızı yanıp sönen durum noktası) ile "PostgreSQL (Aktif)", "Yerel Depolama" veya "PostgreSQL Bağlı Değil / Hata" durumlarının anlık izlenmesi sağlandı.
+  - Tıklanabilir açılır pencere (Popover) ile veritabanı motoru tipi, bağlantı havuzu (active/max pool), sistem durum kodu ve canlı yenileme (Refresh) mekanizması entegre edildi.
+  - PostgreSQL bağlantı hatasında kullanıcıyı bilgilendiren uyarı banner'ı ve giriş yapamama durumlarını önleyici yönlendirici ipuçları eklendi.
+- **Sistem Durum API Zenginleştirmesi (`/api/system/status`)**:
+  - `dbEngine`, `dbEngineLabel`, `dbStatus`, `dbStatusLabel`, `dbStatusColor`, `dbMessage`, `isPostgresConfigured`, `isPostgresConnected`, `isPostgresReady`, `isSchemaEnsured` ve havuz metrikleri ile halka açık durum API yanıtı güçlendirildi.
+- **`PostgresRepository` Metot Genişletmesi**:
+  - `getIsConnected()` ve `getIsSchemaEnsured()` kamuya açık (public) erişim metotları eklendi.
+
+---
+
+## 🚀 [v1.40.4] - 2026-09-20
+
+### 🛡️ Üretim Verisi Temizleme & Güvenli Seed Yönetimi (Production Seed Remediation)
+- **Migrasyon Koşulsuz Seed İşlemlerinin Kaldırılması**: `014_widen_audit_logs_action_and_resilient_user_refs.ts` ve `015_schema_cleanup_and_consolidation.ts` migrasyonlarından koşulsuz `usr_test_admin`, `admin@system.local` ekleme ve `dev_test_01` sabit API anahtarı sıfırlama adımları kaldırıldı.
+- **`018_secure_production_seed_cleanup.ts` Migrasyonu**: 
+  - Üretim ortamında (`ENABLE_TEST_ACCOUNT !== 'true'`) `usr_test_admin` ve `test@nexusnodeiot.com.tr` hesapları pasife alındı (`status = 'disabled'`) ve parola hash'leri geçersiz kılındı.
+  - Sabit varsayılan parolalı `admin@system.local` / `usr_admin` hesabı incelenerek; gerçek yönetici mevcutsa pasife alındı, mevcut değilse varsayılan `test1234` parolası ile giriş engellendi.
+  - Sabit test API anahtarı (`dev_key_test_0000000000000000`) kullanan cihazlar için güvenli rastgele API anahtarı üretildi ve durumları `offline` çekildi.
+- **Şema Auditing & Helper Koruması**: `postgres.ts`, `canonicalSchema.ts` ve `schemaAuditor.ts` içerisindeki test hesabı/cihazı otomatik ekleme mantıkları sadece `isTestEnv` (`ENABLE_TEST_ACCOUNT=true` veya test ortamı) koşuluna bağlandı.
+
+---
+
+## 🚀 [v1.40.3] - 2026-09-20
+
+### 🛡️ Migration Advisory Lock Güvenliği & Standalone Migration Desteği
+- **Kesin Kilit Zorunluluğu (Strict Advisory Lock)**: `migrationRunner.ts` içerisinde PostgreSQL advisory lock (`13374242`) alınamazsa migration çalıştırma riski tamamen engellendi. Kilit meşgulse diğer uygulamanın/container'ın işlemi bitirmesi beklenir (60s polling).
+- **Readiness Engellemesi**: Kilit zaman aşımına uğrar ve migrasyonlar tamamlanamazsa, uygulama kesinlikle readiness durumına geçmez (`isSchemaEnsured = false`, `/health/ready` 503 döndürür).
+- **Müstakil Migration Çalıştırıcı (Standalone Runner)**: Ayrı bir deploy adımı veya dedicated migration container/initContainer olarak çalıştırılabilen `scripts/run-migrations.ts` ve `npm run migrate` komutu eklendi.
+
+---
+
+## 🚀 [v1.40.2] - 2026-09-20
+
+### 🔒 Runtime DDL Mekanizmasının Kapatılması & Güvenli Şema Yönetimi
+- **Çalışma Anı DDL (Runtime DDL) Kapatıldı**: `postgres.ts` içerisindeki SQL hatası yakalandığında otomatik regex ile kolon/tablo tahmini yapıp canlı veritabanında `ALTER TABLE ... ADD COLUMN` veya `ALTER TABLE DROP CONSTRAINT` çalıştıran dinamik DDL mekanizmaları tamamen kaldırıldı.
+- **Raporlama Katmanına Dönüştürüldü**: Çalışma anında eksik tablo veya kolon tespit edildiğinde uygulama veritabanını bozacak DDL sorgusu çalıştırmak yerine, şema uyumsuzluğu durumunu `recordDatabaseHealingEvent` ve `systemLogger` üzerinden detaylı loglayıp denetim kaydı oluşturacak şekilde güvenli hale getirildi.
+- **Güvenli Sürümlü Migrasyon Mantığı**: Tüm şema güncellemelerinin rastgele sorgu yakalama yerine sürümlü migrasyonlar (`migrationRunner.ts`) ve `canonicalSchema.ts` üzerinden yapılması sağlandı.
+
+---
+
+## 🚀 [v1.40.1] - 2026-09-20
+
+### 🛡️ Devices Otomatik Onarım (Auto-Healer) & Mükerrer Kolon Çelişkilerinin Giderilmesi
+- **Auto-Healer Düzeltmesi**: `databaseAutoHealer.service.ts` servisindeki kaldırılmış eski kolonların (`ip`, `type`, `customer_id`, `auth_token`) her sistem başlangıcında veritabanına yeniden eklenmesine ve `UPDATE devices SET ip = ip_address` gibi çelişkili sorguların çalıştırılmasına neden olan auto-heal mantığı temizlendi.
+- **Başlangıç/Senkronizasyon Akışları**: `postgres.ts` ve `setup.service.ts` içindeki eski kolon senkronizasyonları temizlendi; sistem artık `devices` tablosunda `ip_address` ve `device_type` kanonik kolonlarına dayanıyor.
+- **Uygulama Seviyesinde Uyumluluk**: Veritabanı seviyesinde eski kolonlar oluşturulmadan, eski/yeni parametre uyumluluğu bellek ve repozitör katmanındaki dönüşümlerle sağlandı.
+
+---
+
 ## 🚀 [v1.40.0] - 2026-09-20
 
 ### ⚡ Telemetry Readings Tablosu Sadeleştirme & Performans Optimizasyonu (Migration 017)

@@ -1204,7 +1204,7 @@ VALUES (
     'usr_test_admin',
     'Kanonik Test Yöneticisi',
     'test@nexusnodeiot.com.tr',
-    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+    '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
     'admin',
     'NexusNode Test Laboratuvarı',
     'active',
@@ -1214,9 +1214,11 @@ ON CONFLICT (id) DO NOTHING;\n`;
     }
   }
 
-  // Seed Canonical Test Device if devices table was created
+  // Seed Canonical Test Device if devices table was created and test environment is enabled
   if (tableName === 'devices') {
-    ddl += `
+    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+    if (isTestEnv) {
+      ddl += `
 INSERT INTO devices (
     id, tenant_id, user_id, name, device_type, role_key,
     api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
@@ -1239,6 +1241,7 @@ VALUES (
     CURRENT_TIMESTAMP
 )
 ON CONFLICT (id) DO NOTHING;\n`;
+    }
   }
 
   return ddl;
@@ -1248,22 +1251,23 @@ ON CONFLICT (id) DO NOTHING;\n`;
  * Generates the complete, idempotent, self-healing DDL SQL string for the entire Canonical Schema.
  */
 export function generateCanonicalSchemaDDL(): string {
-  const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-  const testUserDdl = isTestEnv ? `
+  const testUserDdl = `
 -- Canonical Permanent Test Administrator (usr_test_admin)
 INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
 VALUES (
     'usr_test_admin',
     'Kanonik Test Yöneticisi',
     'test@nexusnodeiot.com.tr',
-    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+    '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
     'admin',
     'NexusNode Test Laboratuvarı',
     'active',
     CURRENT_TIMESTAMP
 )
-ON CONFLICT (id) DO NOTHING;
-` : '';
+ON CONFLICT (id) DO UPDATE SET
+    status = 'active',
+    password_hash = EXCLUDED.password_hash;
+`;
 
   return `
 -- ============================================================================

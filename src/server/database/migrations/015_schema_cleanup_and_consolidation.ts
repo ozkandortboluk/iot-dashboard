@@ -46,32 +46,7 @@ export const migration015: Migration = {
       }
     }
 
-    // 3. Ensure canonical test admin (usr_test_admin) and system admin exist with proper defaults
-    await client.query(`
-      INSERT INTO users (id, name, email, password_hash, role, company_name, status)
-      VALUES 
-        ('usr_test_admin', 'Kanonik Test Yöneticisi', 'test@nexusnodeiot.com.tr', '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m', 'admin', 'NexusNode Test Laboratuvarı', 'active'),
-        ('usr_admin', 'Sistem Yöneticisi', 'admin@system.local', '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m', 'admin', 'Merkez Sistem', 'active')
-      ON CONFLICT (id) DO UPDATE SET
-        status = 'active',
-        role = 'admin';
-    `).catch(() => {});
-
-    // 4. Ensure canonical test device (dev_test_01) is associated with usr_test_admin / usr_admin
-    const testApiKey = 'dev_key_test_0000000000000000';
-    const testApiKeyHash = crypto.createHash('sha256').update(testApiKey).digest('hex');
-    await client.query(`
-      UPDATE devices
-      SET 
-        tenant_id = 'usr_admin',
-        user_id = 'usr_test_admin',
-        api_key = $1,
-        api_key_hash = $2,
-        status = 'online'
-      WHERE id = 'dev_test_01';
-    `, [testApiKey, testApiKeyHash]).catch(() => {});
-
-    // 5. Clean up expired deduplication logs and expired user sessions
+    // 3. Clean up expired deduplication logs and expired user sessions
     await client.query(`
       DELETE FROM device_ws_messages_dedup WHERE expires_at < CURRENT_TIMESTAMP;
       DELETE FROM user_sessions WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP;

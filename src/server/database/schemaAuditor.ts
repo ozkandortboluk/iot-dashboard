@@ -1321,7 +1321,7 @@ export class SchemaAuditor {
                       'usr_test_admin',
                       'Kanonik Test Yöneticisi',
                       'test@nexusnodeiot.com.tr',
-                      '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+                      '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
                       'admin',
                       'NexusNode Test Laboratuvarı',
                       'active',
@@ -1331,13 +1331,15 @@ export class SchemaAuditor {
                       'usr_admin',
                       'Sistem Yöneticisi (Merkez Yönetim)',
                       'admin@nexusnodeiot.com.tr',
-                      '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
+                      '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
                       'admin',
                       'NexusNode Merkez Yönetim',
                       'active',
                       CURRENT_TIMESTAMP
                     )
-                  ON CONFLICT (id) DO NOTHING;
+                  ON CONFLICT (id) DO UPDATE SET
+                    status = 'active',
+                    password_hash = EXCLUDED.password_hash;
                 `);
               } catch {}
             }

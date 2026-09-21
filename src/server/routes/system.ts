@@ -117,16 +117,68 @@ systemRouter.get('/health', (req, res) => {
 // System Status Endpoint for Frontend / Diagnostics
 systemRouter.get(['/system/status', '/system-status'], (req, res) => {
   const dbState = db.getDatabaseState();
+  const isPgConfigured = !!process.env.DATABASE_URL;
   const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
+  const isPostgresConnected = !!db.postgresRepo?.getIsConnected();
+  const isSchemaEnsured = !!db.postgresRepo?.getIsSchemaEnsured();
   const isLocalReady = dbState === DatabaseState.READY;
   const isReady = isPostgresReady || isLocalReady;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
+
+  let dbEngine: 'postgres' | 'local' | 'disconnected' = 'local';
+  let dbEngineLabel = 'Yerel Depolama (In-Memory / WAL)';
+  let dbStatus: 'connected' | 'connecting' | 'disconnected' | 'error' | 'setup_required' = 'connected';
+  let dbStatusLabel = 'Yerel Mod Aktif';
+  let dbStatusColor: 'emerald' | 'amber' | 'rose' | 'slate' = 'amber';
+  let dbMessage = 'Yerel WAL bellek içi veritabanı aktif.';
+
+  if (isPgConfigured) {
+    if (isPostgresReady) {
+      dbEngine = 'postgres';
+      dbEngineLabel = 'PostgreSQL / TimescaleDB';
+      dbStatus = 'connected';
+      dbStatusLabel = 'PostgreSQL Bağlı & Aktif';
+      dbStatusColor = 'emerald';
+      dbMessage = 'PostgreSQL ana veritabanı aktif, şema doğrulanmış ve tüm sorgulara hazır.';
+    } else if (dbState === DatabaseState.DB_CONNECTING || dbState === DatabaseState.DB_INITIALIZING) {
+      dbEngine = 'postgres';
+      dbEngineLabel = 'PostgreSQL / TimescaleDB';
+      dbStatus = 'connecting';
+      dbStatusLabel = 'PostgreSQL Bağlanıyor...';
+      dbStatusColor = 'amber';
+      dbMessage = 'PostgreSQL sunucusuna bağlantı kuruluyor ve şema kontrolleri yapılıyor...';
+    } else if (dbState === DatabaseState.SETUP) {
+      dbEngine = 'postgres';
+      dbEngineLabel = 'PostgreSQL / TimescaleDB';
+      dbStatus = 'setup_required';
+      dbStatusLabel = 'İlk Kurulum Bekleniyor';
+      dbStatusColor = 'amber';
+      dbMessage = 'Sistem ilk kurulum sihirbazını bekliyor.';
+    } else {
+      dbEngine = 'disconnected';
+      dbEngineLabel = 'PostgreSQL (Bağlantı/Şema Hatası)';
+      dbStatus = 'error';
+      dbStatusLabel = 'PostgreSQL Bağlı Değil / Hata';
+      dbStatusColor = 'rose';
+      dbMessage = 'PostgreSQL sunucusuna erişilemiyor veya veritabanı hazır değil. Giriş işlemleri başarısız olabilir.';
+    }
+  }
 
   res.json({
     status: isReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
     databaseState: dbState,
     isReady: isReady,
     activeEngine: isPostgresReady ? 'postgres' : 'local',
+    dbEngine,
+    dbEngineLabel,
+    dbStatus,
+    dbStatusLabel,
+    dbStatusColor,
+    dbMessage,
+    isPostgresConfigured: isPgConfigured,
+    isPostgresConnected,
+    isPostgresReady,
+    isSchemaEnsured,
     pool: poolStats,
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),

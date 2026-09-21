@@ -17,6 +17,8 @@ import { migration014 } from './014_widen_audit_logs_action_and_resilient_user_r
 import { migration015 } from './015_schema_cleanup_and_consolidation.js';
 import { migration016 } from './016_simplify_devices_table.js';
 import { migration017 } from './017_simplify_telemetry_readings_table.js';
+import { migration018 } from './018_secure_production_seed_cleanup.js';
+import { migration019 } from './019_restore_canonical_test_entities.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -44,6 +46,8 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration015,
   migration016,
   migration017,
+  migration018,
+  migration019,
 ];
 
 let lastMigrationStatus: {
@@ -96,19 +100,70 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
     lockAcquired = lockRes.rows[0]?.locked === true;
 
     if (!lockAcquired) {
-      console.warn('[Migration Runner] Advisory lock could not be acquired immediately. Retrying for up to 3 seconds...');
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await new Promise((r) => setTimeout(r, 500));
+      console.log('[Migration Runner] Advisory lock is currently held by another instance/process. Waiting for completion...');
+      
+      const MAX_WAIT_MS = 60000; // Poll up to 60 seconds
+      const POLL_INTERVAL_MS = 1000;
+      let waitedMs = 0;
+      let externalFinished = false;
+
+      while (waitedMs < MAX_WAIT_MS) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        waitedMs += POLL_INTERVAL_MS;
+
+        // Try to acquire the advisory lock now
         const retryRes = await client.query('SELECT pg_try_advisory_lock($1) as locked;', [
           MIGRATION_ADVISORY_LOCK_ID,
         ]);
         if (retryRes.rows[0]?.locked === true) {
           lockAcquired = true;
+          console.log(`[Migration Runner] Advisory lock successfully acquired after ${waitedMs}ms.`);
           break;
         }
+
+        // Check if the other instance has finished applying all migrations
+        try {
+          await ensureMigrationsTable(client);
+          const appliedRes = await client.query('SELECT version FROM schema_migrations;');
+          const appliedVersions = new Set<string>(appliedRes.rows.map((r: any) => r.version));
+          const pendingCount = ALL_MIGRATIONS.filter((m) => !appliedVersions.has(m.version)).length;
+
+          if (pendingCount === 0) {
+            console.log('[Migration Runner] All pending migrations were applied by another instance.');
+            externalFinished = true;
+            break;
+          }
+        } catch (checkErr) {
+          // Ignore transient check errors while waiting
+        }
       }
+
+      if (!lockAcquired && externalFinished) {
+        lastMigrationStatus = {
+          success: true,
+          appliedCount: 0,
+          lastRunAt: new Date().toISOString(),
+        };
+        return {
+          success: true,
+          appliedCount: 0,
+        };
+      }
+
       if (!lockAcquired) {
-        console.warn('[Migration Runner] Advisory lock still busy or orphaned. Proceeding with migration execution under transaction isolation.');
+        const lockErr = `[Migration Runner Error] Could not acquire migration advisory lock within ${MAX_WAIT_MS}ms. Another process holds the lock and pending migrations remain unapplied. Aborting migration on this instance.`;
+        console.error(lockErr);
+        lastMigrationStatus = {
+          success: false,
+          error: lockErr,
+          appliedCount: 0,
+          lastRunAt: new Date().toISOString(),
+        };
+        return {
+          success: false,
+          appliedCount: 0,
+          error: lockErr,
+        };
       }
     }
 

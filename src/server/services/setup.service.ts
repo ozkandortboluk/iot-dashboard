@@ -1224,8 +1224,8 @@ export class SetupService {
 
         // Assign device ownership to primary admin
         await userClient.query(
-          `UPDATE devices SET user_id = $1, tenant_id = $1, customer_id = $1 
-           WHERE id = 'dev_test_01' AND (user_id IS NULL OR user_id = 'system' OR user_id = 'usr_admin');`,
+          `UPDATE devices SET user_id = $1, tenant_id = $1 
+           WHERE id = 'dev_test_01' AND (tenant_id IS NULL OR tenant_id = 'system' OR tenant_id = 'usr_admin');`,
           [adminId]
         ).catch(() => {});
 

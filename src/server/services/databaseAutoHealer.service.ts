@@ -321,16 +321,10 @@ export class DatabaseAutoHealer {
             WHERE table_schema = 'public' AND table_name = 'devices';
           `);
           const devCols = new Set(colRes.rows.map((r: any) => r.column_name));
-          if (!devCols.has('ip_address') || !devCols.has('data_flow_active') || !devCols.has('auth_token')) {
+          if (!devCols.has('ip_address') || !devCols.has('data_flow_active')) {
             await client.query(`
-              ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip VARCHAR(45);
               ALTER TABLE devices ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45);
               ALTER TABLE devices ADD COLUMN IF NOT EXISTS data_flow_active BOOLEAN DEFAULT TRUE;
-              ALTER TABLE devices ADD COLUMN IF NOT EXISTS auth_token VARCHAR(128);
-              ALTER TABLE devices ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) DEFAULT 'usr_admin';
-              ALTER TABLE devices ADD COLUMN IF NOT EXISTS type VARCHAR(32);
-              UPDATE devices SET ip_address = ip WHERE (ip_address IS NULL OR ip_address = '') AND (ip IS NOT NULL AND ip != '');
-              UPDATE devices SET ip = ip_address WHERE (ip IS NULL OR ip = '') AND (ip_address IS NOT NULL AND ip_address != '');
               UPDATE devices SET data_flow_active = TRUE WHERE data_flow_active IS NULL;
             `);
             recordDatabaseHealingEvent('devices tablosu ip_address ve data_flow_active kolonları otomatik onarıldı.', { table: 'devices' }, 'info');
