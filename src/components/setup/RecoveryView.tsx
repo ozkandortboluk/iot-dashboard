@@ -148,9 +148,9 @@ export const RecoveryView: React.FC<RecoveryViewProps> = ({ onRecovered }) => {
                 </code>
               </div>
               <div>
-                <span className="text-[10px] text-slate-500 font-sans block">Docker Ortamı:</span>
-                <code className="block bg-slate-900 p-2 rounded text-indigo-400 overflow-x-auto">
-                  docker compose exec app npm run generate-recovery-token
+                <span className="text-[10px] text-slate-500 font-sans block">Docker Ortamı (Anında Çalışan Inline Komut):</span>
+                <code className="block bg-slate-900 p-2 rounded text-indigo-400 overflow-x-auto text-[10px] leading-tight font-mono select-all">
+                  {`docker compose exec app node -e "const fs=require('fs'),path=require('path'),crypto=require('crypto');const f=path.join(process.cwd(),'data','.recovery_token'),t='rec_token_'+crypto.randomBytes(32).toString('hex');fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,t,{mode:0o600});console.log('\\nYeni Anahtar:\\n\\x1b[32m'+t+'\\x1b[0m\\n');"`}
                 </code>
               </div>
             </div>
