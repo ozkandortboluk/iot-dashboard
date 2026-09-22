@@ -33,8 +33,9 @@ export function extractSetupToken(req: Request): string | null {
 }
 
 export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: boolean = false): boolean {
-  if (process.env.VITEST !== 'true') {
-    return true; // Setup tokens disabled per user request
+  // Test exception is ONLY allowed when strictly running in test mode with VITEST
+  if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
+    return true;
   }
   const token = extractSetupToken(req);
   if (!token) return false;
@@ -46,8 +47,8 @@ export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: bool
  * require the server-side setup token even when the installation is locked.
  */
 export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
-  // Kurulum tokeni ve kilitleri kullanıcı talebi doğrultusunda devre dışı bırakıldı
-  if (process.env.VITEST !== 'true') {
+  // Test exception is ONLY allowed when strictly running in test mode with VITEST
+  if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
     next();
     return;
   }

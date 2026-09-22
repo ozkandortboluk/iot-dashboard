@@ -127,14 +127,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const setup = async (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean) => {
+  const setup = async (name: string, email: string, pass: string, companyName: string, _seedDemoData: boolean) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/auth/setup', {
+      const activeSetupToken = sessionStorage.getItem('nexus_setup_token') || '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (activeSetupToken) {
+        headers['X-Setup-Token'] = activeSetupToken;
+      }
+      const res = await fetch('/api/setup/create-admin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         credentials: 'include',
-        body: JSON.stringify({ name, email, password: pass, companyName, seedDemoData }),
+        body: JSON.stringify({ name, email, password: pass, passwordConfirm: pass, companyName }),
       });
 
       const contentType = res.headers.get('content-type');
@@ -144,7 +149,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Onboarding kurulum işlemi başarısız.');
+        throw new Error(data.error || data.message || 'Onboarding kurulum işlemi başarısız.');
       }
 
       const userData = data.user;

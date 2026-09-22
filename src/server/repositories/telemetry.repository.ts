@@ -1000,11 +1000,11 @@ export class TelemetryRepository {
 
       return {
         ...r,
-        id,
+        id: (r as any).id || id,
         tenantId,
         bootId,
         idempotencyKey,
-        timestamp,
+        timestamp: (r as any).timestamp || timestamp,
         source: r.source || (isDevSim ? 'simulator' : 'physical'),
         simulationRunId: r.simulationRunId,
       };

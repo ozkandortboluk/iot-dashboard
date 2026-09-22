@@ -4,6 +4,7 @@ import { DatabaseState } from '../../types.js';
 import { broadcast } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
+import { requireSetupAuth, isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
 import { setupService } from '../services/setup.service.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import {
@@ -49,7 +50,8 @@ router.get('/setup-status', async (req, res) => {
   // 1. Ensure database has completed initial hydration from PostgreSQL / disk cache
   await db.waitForInitialization().catch(() => {});
 
-  const wizardStatus = await setupService.getStatus().catch(() => null);
+  const isAuth = isRequestSetupAuthenticated(req);
+  const wizardStatus = await setupService.getStatus(isAuth).catch(() => null);
 
   let hasAdmin = false;
   let isDbReady = false;
@@ -76,7 +78,7 @@ router.get('/setup-status', async (req, res) => {
   });
 });
 
-router.post('/setup', async (req, res) => {
+router.post('/setup', requireSetupAuth, async (req, res) => {
   await db.waitForInitialization();
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`setup:${clientIp}`, 10);
@@ -94,15 +96,6 @@ router.post('/setup', async (req, res) => {
     return res.status(400).json({ error: 'Kurulum zaten tamamlanmış. Sistemde en az bir yönetici bulunmaktadır.' });
   }
 
-  // Optional Setup Secret Verification (if configured in environment)
-  const envSetupSecret = process.env.SETUP_SECRET || process.env.SETUP_ADMIN_TOKEN;
-  if (envSetupSecret) {
-    const providedSecret = req.headers['x-setup-secret'] || req.body?.setupSecret;
-    if (providedSecret !== envSetupSecret) {
-      return res.status(403).json({ error: 'Geçersiz ilk kurulum güvenlik anahtarı (Setup Secret).' });
-    }
-  }
-
   // Atomic mutex lock: Prevent concurrent race conditions
   if (isSetupInProgress) {
     return res.status(409).json({
@@ -116,36 +109,34 @@ router.post('/setup', async (req, res) => {
     return res.status(400).json({ error: validation.error || 'Geçersiz kurulum verisi.' });
   }
 
-  const { name, email, password, companyName, seedDemoData } = validation.data;
+  const { name, email, password, companyName } = validation.data;
 
   isSetupInProgress = true;
 
   try {
-    // Re-verify inside lock to guarantee mutual exclusion
-    const currentUsers = await db.getUsersAsync();
-    if (currentUsers.some(isRealAdminUser)) {
-      throw new Error('Kurulum zaten başka bir oturum tarafından tamamlandı.');
+    // Unified setup administrator creation via setupService
+    const result = await setupService.createAdministrator({
+      name,
+      email,
+      password,
+      passwordConfirm: password,
+      companyName,
+      ip: clientIp,
+    });
+
+    if (result.token) {
+      setSessionCookie(res, result.token);
     }
 
-    const adminUser = await db.registerUser(name, email, password, 'admin', companyName);
-
-    const token = await db.createSession(adminUser);
-
-    // Mark setup as permanently completed and transition DB state to READY
-    setupService.markSetupCompleted();
-    db.setDatabaseState(DatabaseState.READY);
-
-    // Set HttpOnly, Secure cookie
-    setSessionCookie(res, token);
-
     res.json({
-      user: adminUser,
-      token,
+      user: result.user,
+      token: result.token,
       message: 'Kurulum başarıyla tamamlandı ve güvenli oturum açıldı.',
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kurulum sırasında bir hata oluştu.';
-    res.status(400).json({ error: msg });
+    const statusCode = msg.includes('Kurulum zaten tamamlanmış') || msg.includes('zaten bir yönetici') ? 403 : 400;
+    res.status(statusCode).json({ error: msg });
   } finally {
     isSetupInProgress = false;
   }

@@ -82,9 +82,6 @@ const DOCKER_SECRET_PASSWORD_PATH = '/run/secrets/db_password';
 const DOCKER_SECRET_DATABASE_URL_PATH = '/run/secrets/database_url';
 const DOCKER_SECRET_SETUP_TOKEN_PATH = '/run/secrets/setup_token';
 
-// Canonical test setup token for automated CI & test runners
-export const CANONICAL_SETUP_TEST_TOKEN = 'setup_token_test_canonical_000000000000';
-
 export class SetupService {
   private static instance: SetupService;
   private runtimeConfig: DatabaseConfigPayload | null = null;
@@ -363,14 +360,15 @@ export class SetupService {
       return false;
     }
 
-    // Canonical test token support for automated tests and CI environments
-    if (trimmed === CANONICAL_SETUP_TEST_TOKEN) {
-      return true;
-    }
-
-    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
-    if (isTest && process.env.DISABLE_SETUP_TOKEN === 'true') {
-      return true;
+    // Test exception is ONLY allowed when strictly running in test mode with VITEST
+    const isStrictTest = process.env.NODE_ENV === 'test' && process.env.VITEST === 'true';
+    if (isStrictTest) {
+      if (process.env.DISABLE_SETUP_TOKEN === 'true') {
+        return true;
+      }
+      if (process.env.TEST_SETUP_TOKEN && trimmed === process.env.TEST_SETUP_TOKEN) {
+        return true;
+      }
     }
 
     const activeToken = this.getOrInitSetupToken(allowIfCompleted);

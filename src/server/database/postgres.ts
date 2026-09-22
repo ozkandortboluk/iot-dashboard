@@ -1975,14 +1975,113 @@ export class PostgresRepository {
     }
   }
 
-  public async bulkDeleteDevices(deviceIds: string[]): Promise<void> {
+  public async removeDevicesFromActiveTable(deviceIds: string[]): Promise<void> {
     if (!this.pool || !this.isConnected || !deviceIds.length) return;
-    await this.query(`DELETE FROM telemetry_readings WHERE device_id = ANY($1::text[]);`, [deviceIds]);
-    await this.query(`DELETE FROM telemetry_packets WHERE device_id = ANY($1::text[]);`, [deviceIds]);
-    await this.query(`DELETE FROM active_alarms WHERE device_id = ANY($1::text[]);`, [deviceIds]);
-    await this.query(`DELETE FROM alarm_events WHERE device_id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+  }
+
+  public async permanentlyPurgeDevices(deviceIds: string[]): Promise<void> {
+    if (!this.pool || !this.isConnected || !deviceIds.length) return;
+    await this.query(`DELETE FROM telemetry_readings WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM simulation_telemetry_readings WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM telemetry_packets WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM active_alarms WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM alarm_events WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM threshold_rules WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM notifications WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
     await this.query(`DELETE FROM device_commands WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
-    await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]);
+    await this.query(`DELETE FROM device_ws_messages_dedup WHERE device_id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+  }
+
+  public async getRulesForDevice(deviceId: string): Promise<ThresholdRule[]> {
+    if (!this.pool || !this.isConnected) return [];
+    try {
+      const res = await this.query(`SELECT * FROM threshold_rules WHERE device_id = $1;`, [deviceId]);
+      return (res.rows || []).map((r: any) => ({
+        id: r.id,
+        tenantId: r.user_id || r.tenant_id || 'usr_admin',
+        userName: r.user_name || 'Yönetici',
+        deviceId: r.device_id || 'all',
+        metricKey: r.metric_key,
+        operator: r.operator,
+        thresholdValue: Number(r.threshold_value),
+        severity: r.severity || 'warning',
+        enabled: r.enabled !== false,
+        messageTemplate: r.message_template || '',
+        hysteresis: Number(r.hysteresis || 1),
+        minBreachDurationSeconds: r.min_breach_duration_sec || 10,
+        repeatIntervalSeconds: r.repeat_interval_sec || 300,
+        notificationChannels: typeof r.notification_channels === 'string' ? JSON.parse(r.notification_channels) : r.notification_channels || ['app'],
+        activeHours: r.active_hours || '00:00-23:59',
+        recipients: typeof r.recipients === 'string' ? JSON.parse(r.recipients) : r.recipients || [],
+        disabledUntil: r.silenced_until ? new Date(r.silenced_until).toISOString() : undefined,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async getAlarmsForDevice(deviceId: string): Promise<ActiveAlarm[]> {
+    if (!this.pool || !this.isConnected) return [];
+    try {
+      const res = await this.query(`SELECT * FROM active_alarms WHERE device_id = $1;`, [deviceId]);
+      return (res.rows || []).map((r: any) => ({
+        id: r.id,
+        incidentId: r.incident_id || undefined,
+        lastEvaluatedAt: r.last_evaluated_at ? new Date(r.last_evaluated_at).toISOString() : undefined,
+        ruleId: r.rule_id,
+        deviceId: r.device_id,
+        deviceName: r.device_name,
+        tenantId: r.tenant_id || r.user_id,
+        metricKey: r.metric_key,
+        operator: r.operator,
+        thresholdValue: Number(r.threshold_value),
+        currentValue: Number(r.current_value),
+        severity: r.severity,
+        state: r.state,
+        firstBreachAt: r.first_breach_at ? new Date(r.first_breach_at).toISOString() : undefined,
+        triggeredAt: r.triggered_at ? new Date(r.triggered_at).toISOString() : undefined,
+        lastNotifiedAt: r.last_notified_at ? new Date(r.last_notified_at).toISOString() : undefined,
+        resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : undefined,
+        acknowledged: Boolean(r.acknowledged),
+        acknowledgedAt: r.acknowledged_at ? new Date(r.acknowledged_at).toISOString() : undefined,
+        acknowledgedBy: r.acknowledged_by || undefined,
+        silencedUntil: r.silenced_until ? new Date(r.silenced_until).toISOString() : undefined,
+        repeatCount: r.repeat_count || 0,
+        message: r.message,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async getTelemetryForDevice(deviceId: string, limit = 2000): Promise<TelemetryReading[]> {
+    if (!this.pool || !this.isConnected) return [];
+    try {
+      const res = await this.query(
+        `SELECT * FROM telemetry_readings WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2;`,
+        [deviceId, limit]
+      );
+      return (res.rows || []).map((r: any) => ({
+        id: r.id,
+        deviceId: r.device_id,
+        tenantId: r.tenant_id,
+        metric: r.metric,
+        value: Number(r.metric_value),
+        unit: r.unit,
+        timestamp: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        source: r.source || 'physical',
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async bulkDeleteDevices(deviceIds: string[]): Promise<void> {
+    return this.permanentlyPurgeDevices(deviceIds);
   }
 
   // ==========================================

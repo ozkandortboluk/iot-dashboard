@@ -14,6 +14,9 @@ import {
   Tag,
   Download,
   AlertCircle,
+  Bell,
+  Sliders,
+  Activity,
 } from 'lucide-react';
 import type { ArchivedDevice, TelemetryReading } from '../../types';
 import { apiFetch as fetch } from '../../lib/apiFetch';
@@ -305,6 +308,77 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
                           {out.state ? 'AÇIK (1)' : 'KAPALI (0)'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preserved Metrics & History */}
+              {((preserved.metrics && Object.keys(preserved.metrics).length > 0) || archivedDevice.metricHistory) && (
+                <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-2 text-xs">
+                  <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                    <Activity className="w-4 h-4" /> Korunan Son Metrik Durumu & Değerleri
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                    {preserved.metrics && Object.entries(preserved.metrics).map(([key, val]) => (
+                      <div key={key} className="bg-slate-900 p-2 rounded-lg border border-slate-800">
+                        <span className="text-slate-400 block text-[10px] uppercase font-mono">{key}</span>
+                        <span className="text-slate-100 font-mono font-medium text-xs">
+                          {typeof val === 'number' ? val.toFixed(2) : String(val)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preserved Rules */}
+              {archivedDevice.archivedRules && archivedDevice.archivedRules.length > 0 && (
+                <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-2 text-xs">
+                  <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                    <Sliders className="w-4 h-4" /> Korunan Eşik Kuralları ({archivedDevice.archivedRules.length})
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {archivedDevice.archivedRules.map((rule, idx) => (
+                      <div key={rule.id || idx} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                        <div>
+                          <span className="font-medium text-slate-200 block">{rule.name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {rule.metric} {rule.operator} {rule.threshold}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
+                          rule.severity === 'critical' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                          rule.severity === 'warning' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                          'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                        }`}>
+                          {rule.severity || 'info'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preserved Alarms */}
+              {archivedDevice.archivedAlarms && archivedDevice.archivedAlarms.length > 0 && (
+                <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 space-y-2 text-xs">
+                  <h4 className="text-xs font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-2">
+                    <Bell className="w-4 h-4" /> Korunan Alarmlar ({archivedDevice.archivedAlarms.length})
+                  </h4>
+                  <div className="space-y-1.5">
+                    {archivedDevice.archivedAlarms.map((alarm, idx) => (
+                      <div key={alarm.id || idx} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-medium text-slate-200 block">{alarm.title || alarm.message || 'Alarm'}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {alarm.timestamp ? new Date(alarm.timestamp).toLocaleString('tr-TR') : '—'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 font-mono">
+                          {alarm.severity || 'Kritik'}
                         </span>
                       </div>
                     ))}

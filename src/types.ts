@@ -258,26 +258,14 @@ export interface ArchivedDevice {
     compressedData: string; // Base64 gzipped JSON payload
     recentReadings?: any[];
   };
-  preservedSettings?: {
-    name: string;
-    apiKey: string;
-    apiKeyScopes?: string[];
-    type: string;
-    roleKey?: string;
-    hardwareModel?: string;
-    firmwareVersion?: string;
-    outputDefinitions?: DeviceOutputDefinition[];
-    metrics?: Record<string, any>;
-    tags?: string[];
-    siteId?: string;
-    zoneId?: string;
-    groupId?: string;
-    location?: string;
-    ipAddress?: string;
-    macAddress?: string;
-    rateLimitPerMin?: number;
-    encryptionMethod?: string;
-  };
+  preservedSettings?: Record<string, any>;
+  metricHistory?: Record<string, any>;
+  latestTelemetry?: Record<string, any>;
+  archivedRules?: ThresholdRule[];
+  archivedAlarms?: ActiveAlarm[];
+  archivedAlarmEvents?: any[];
+  archivedNotifications?: any[];
+  archivedCommands?: any[];
 }
 
 export interface Firmware {

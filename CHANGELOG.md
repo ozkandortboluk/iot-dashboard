@@ -33,6 +33,10 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
   - Sabit test kullanıcıları ve cihaz anahtarları prompt/kılavuz belgelerinden (`AGENTS.md`, `GEMINI.md`) arındırıldı.
   - `InitialDataSeeder`, `migration 019` ve veritabanı başlatma rutinlerine çevre korumaları eklenerek üretim modunda (`NODE_ENV=production`) test cihazları veya sentetik demo hesaplarının tohumlanması (seeding) kesin olarak kapatıldı.
   - Sürümleme kuralı revize edilerek küçük/ara düzeltmeler için ayrı sürüm açma zorunluluğu kaldırıldı; değişikliklerin anlamlı sürümler altında birleştirilmesi kuralı getirildi.
+- **Kurulum Güvenliği & Uç Nokta Konsolidasyonu (`setupAuth.ts`, `setup.service.ts`, `auth.ts`)**:
+  - `requireSetupAuth` ve `isRequestSetupAuthenticated` içindeki baypas kaldırıldı; test istisnası yalnızca `NODE_ENV === 'test' && VITEST === 'true'` koşuluna bağlandı, üretim ve genel çalışma zamanında token zorunlu hale getirildi.
+  - Sabit test tokeni (`setup_token_test_canonical_000000000000`) üretim bundle'ından ve kod tabanından tamamen kaldırıldı; üretim ortamında reddedilmesi doğrulandı.
+  - İkinci kurulum uç noktası olan `POST /api/auth/setup`, `requireSetupAuth` korumasına alındı ve merkezi `setupService.createAdministrator` akışına bağlanarak tek bir güvenli kurulum mimarisi oluşturuldu.
 
 ---
 

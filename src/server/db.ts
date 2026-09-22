@@ -1156,6 +1156,7 @@ class LocalDatabase {
   public async permanentlyDeleteArchivedDevice(deviceId: string, requestingUserId?: string, requestingUserName?: string): Promise<boolean> { return await this.deviceRepository.permanentlyDeleteArchivedDevice(deviceId, requestingUserId, requestingUserName); }
   public async bulkDeleteArchivedDevices(deviceIds: string[], requestingUserId?: string, requestingUserName?: string): Promise<number> { return await this.deviceRepository.bulkDeleteArchivedDevices(deviceIds, requestingUserId, requestingUserName); }
   public async clearArchivedDevices(requestingUserId?: string, targetTenantId?: string): Promise<number> { return await this.deviceRepository.clearArchivedDevices(requestingUserId, targetTenantId); }
+  public async purgeDeviceDataPermanently(deviceIds: string[]): Promise<void> { return await this.deviceRepository.purgeDeviceDataPermanently(deviceIds); }
   // Telemetry
   public async addTelemetryReading(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<TelemetryReading> { return await this.telemetryRepository.addTelemetryReading(reading); }
   public async addTelemetryReadingAsync(reading: Omit<TelemetryReading, 'id' | 'timestamp'>): Promise<any> { return await this.telemetryRepository.addTelemetryReadingAsync(reading); }

@@ -6,6 +6,8 @@ import type {
   TelemetryCompressionStats,
   DiscoveredNetworkDevice,
   TelemetryReading,
+  ThresholdRule,
+  ActiveAlarm,
   Site,
   Zone,
   DeviceGroup,
@@ -683,19 +685,103 @@ export class DeviceRepository {
     return dev;
   }
 
-  private createArchivedRecord(
+  public async purgeDeviceDataPermanently(deviceIds: string[]): Promise<void> {
+    if (!Array.isArray(deviceIds) || deviceIds.length === 0) return;
+    const idsSet = new Set(deviceIds);
+
+    // 1. Remove from active devices if any exist
+    if (this.db.data.devices) {
+      this.db.data.devices = this.db.data.devices.filter((d: Device) => !idsSet.has(d.id));
+    }
+
+    // 2. Remove telemetry from memory
+    if (this.db.data.telemetry) {
+      this.db.data.telemetry = this.db.data.telemetry.filter((t: any) => !idsSet.has(t.deviceId));
+    }
+
+    // 3. Remove history cache
+    if (this.db.data.history) {
+      for (const id of deviceIds) {
+        delete this.db.data.history[id];
+      }
+    }
+
+    // 4. Remove latest telemetry cache
+    if (this.db.telemetryRepository?.latestTelemetryCache) {
+      for (const id of deviceIds) {
+        delete this.db.telemetryRepository.latestTelemetryCache[id];
+      }
+    }
+
+    // 5. Remove threshold rules specifically configured for these devices
+    if (this.db.data.rules) {
+      this.db.data.rules = this.db.data.rules.filter((r: any) => !idsSet.has(r.deviceId));
+    }
+
+    // 6. Remove active alarms for these devices
+    if (this.db.data.activeAlarms) {
+      this.db.data.activeAlarms = this.db.data.activeAlarms.filter((a: any) => !idsSet.has(a.deviceId));
+    }
+
+    // 7. Remove alarm events for these devices
+    if (this.db.data.alarmEvents) {
+      this.db.data.alarmEvents = this.db.data.alarmEvents.filter((e: any) => !idsSet.has(e.deviceId));
+    }
+
+    // 8. Remove notifications for these devices
+    if (this.db.data.notifications) {
+      this.db.data.notifications = this.db.data.notifications.filter((n: any) => !idsSet.has(n.deviceId));
+    }
+
+    // 9. Remove commands for these devices
+    if (this.db.data.commands) {
+      this.db.data.commands = this.db.data.commands.filter((c: any) => !idsSet.has(c.deviceId));
+    }
+
+    // 10. Purge from PostgreSQL if connected
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.permanentlyPurgeDevices(deviceIds).catch((e: any) =>
+        console.warn('[PostgreSQL Permanent Purge Error]:', e.message)
+      );
+    }
+  }
+
+  private async createArchivedRecord(
     device: Device,
     deletedBy?: string,
     deletedByName?: string,
     deleteReason?: string
-  ): ArchivedDevice {
+  ): Promise<ArchivedDevice> {
     const now = new Date().toISOString();
 
-    // 1. Gather historical telemetry for this device
-    let rawReadings: any[] = [];
+    // 1. Gather historical telemetry for this device from all layers
+    const rawReadings: any[] = [];
     try {
+      const memReadings = (this.db.data.telemetry || []).filter((t: any) => t.deviceId === device.id);
+      rawReadings.push(...memReadings);
+
       if (this.db.telemetryRepository) {
-        rawReadings = this.db.telemetryRepository.getTelemetry(device.id, undefined, 2000) || [];
+        const repoReadings = this.db.telemetryRepository.getTelemetry(device.id, undefined, 2000) || [];
+        const existingIds = new Set(rawReadings.map((r: any) => r.id));
+        for (const rr of repoReadings) {
+          if (rr && !existingIds.has(rr.id)) {
+            rawReadings.push(rr);
+            existingIds.add(rr.id);
+          }
+        }
+      }
+
+      if (this.db.postgresRepo?.isReady()) {
+        const pgReadings = await this.db.postgresRepo.getTelemetryForDevice(device.id, 5000);
+        if (Array.isArray(pgReadings) && pgReadings.length > 0) {
+          const existingIds = new Set(rawReadings.map((r: any) => r.id));
+          for (const pr of pgReadings) {
+            if (pr && !existingIds.has(pr.id)) {
+              rawReadings.push(pr);
+              existingIds.add(pr.id);
+            }
+          }
+        }
       }
     } catch (e) {
       console.warn('[Archive] Could not collect telemetry readings for compression:', e);
@@ -729,6 +815,43 @@ export class DeviceRepository {
       compressedAt: now,
     };
 
+    // 3. Metric History & Latest Telemetry snapshot
+    const metricHistory = this.db.data.history?.[device.id]
+      ? JSON.parse(JSON.stringify(this.db.data.history[device.id]))
+      : undefined;
+    const latestTelemetry = this.db.telemetryRepository?.latestTelemetryCache?.[device.id]
+      ? JSON.parse(JSON.stringify(this.db.telemetryRepository.latestTelemetryCache[device.id]))
+      : undefined;
+
+    // 4. Gather Alarms, Rules, Events, Notifications & Commands
+    const deviceRules = (this.db.data.rules || []).filter((r: any) => r.deviceId === device.id);
+    if (this.db.postgresRepo?.isReady()) {
+      const pgRules = await this.db.postgresRepo.getRulesForDevice(device.id);
+      const ruleIds = new Set(deviceRules.map((r: any) => r.id));
+      for (const pr of pgRules) {
+        if (!ruleIds.has(pr.id)) {
+          deviceRules.push(pr);
+          ruleIds.add(pr.id);
+        }
+      }
+    }
+
+    const deviceAlarms = (this.db.data.activeAlarms || []).filter((a: any) => a.deviceId === device.id);
+    if (this.db.postgresRepo?.isReady()) {
+      const pgAlarms = await this.db.postgresRepo.getAlarmsForDevice(device.id);
+      const alarmIds = new Set(deviceAlarms.map((a: any) => a.id));
+      for (const pa of pgAlarms) {
+        if (!alarmIds.has(pa.id)) {
+          deviceAlarms.push(pa);
+          alarmIds.add(pa.id);
+        }
+      }
+    }
+
+    const deviceAlarmEvents = (this.db.data.alarmEvents || []).filter((e: any) => e.deviceId === device.id);
+    const deviceNotifications = (this.db.data.notifications || []).filter((n: any) => n.deviceId === device.id);
+    const deviceCommands = (this.db.data.commands || []).filter((c: any) => c.deviceId === device.id);
+
     const archivedRecord: ArchivedDevice = {
       id: device.id,
       device: { ...device, deletedAt: now },
@@ -740,15 +863,17 @@ export class DeviceRepository {
       telemetrySnapshot: {
         stats,
         compressedData: compressedBase64,
-        recentReadings: rawReadings.slice(0, 10),
+        recentReadings: rawReadings.slice(0, 50),
       },
       preservedSettings: {
         name: device.name,
         apiKey: device.apiKey,
         apiKeyScopes: device.apiKeyScopes,
         type: device.type,
+        deviceType: device.deviceType,
         roleKey: device.roleKey,
         hardwareModel: device.hardwareModel,
+        hardwareRevision: device.hardwareRevision,
         firmwareVersion: device.firmwareVersion,
         outputDefinitions: device.outputDefinitions,
         metrics: device.metrics,
@@ -761,7 +886,31 @@ export class DeviceRepository {
         macAddress: device.macAddress,
         rateLimitPerMin: device.rateLimitPerMin,
         encryptionMethod: device.encryptionMethod,
+        heartbeatTimeoutSeconds: device.heartbeatTimeoutSeconds,
+        expectedIntervalSeconds: device.expectedIntervalSeconds,
+        intervalMode: device.intervalMode,
+        customIntervalSeconds: device.customIntervalSeconds,
+        customHeartbeatTimeoutSeconds: device.customHeartbeatTimeoutSeconds,
+        maintenanceMode: device.maintenanceMode,
+        maintenanceReason: device.maintenanceReason,
+        maintenanceUntil: device.maintenanceUntil,
+        replacementHistory: device.replacementHistory,
+        powerSource: device.powerSource,
+        batteryLevel: device.batteryLevel,
+        isSimulated: device.isSimulated,
+        saveSimulatedDataToDb: device.saveSimulatedDataToDb,
+        simulatedMetrics: device.simulatedMetrics,
+        capabilities: device.capabilities,
+        otaStatus: device.otaStatus,
+        otaTargetFirmwareId: device.otaTargetFirmwareId,
       },
+      metricHistory,
+      latestTelemetry,
+      archivedRules: deviceRules,
+      archivedAlarms: deviceAlarms,
+      archivedAlarmEvents: deviceAlarmEvents,
+      archivedNotifications: deviceNotifications,
+      archivedCommands: deviceCommands,
     };
 
     return archivedRecord;
@@ -775,9 +924,9 @@ export class DeviceRepository {
     if (index !== -1) {
       const removed = this.db.data.devices.splice(index, 1)[0];
       
-      // Store in archivedDevices with compressed telemetry & full configuration
+      // Store in archivedDevices with compressed telemetry, metrics, rules & alarms
       if (!this.db.data.archivedDevices) this.db.data.archivedDevices = [];
-      const archivedRecord = this.createArchivedRecord(
+      const archivedRecord = await this.createArchivedRecord(
         removed,
         requestingUser?.id,
         requestingUser?.name,
@@ -788,15 +937,26 @@ export class DeviceRepository {
         ...this.db.data.archivedDevices.filter((a: any) => (a.id || a.device?.id) !== removed.id),
       ];
 
+      // Remove device-specific rules and active alarms from active pools while archived
+      if (this.db.data.rules) {
+        this.db.data.rules = this.db.data.rules.filter((r: any) => r.deviceId !== deviceId);
+      }
+      if (this.db.data.activeAlarms) {
+        this.db.data.activeAlarms = this.db.data.activeAlarms.filter((a: any) => a.deviceId !== deviceId);
+      }
+      if (this.db.telemetryRepository?.latestTelemetryCache) {
+        delete this.db.telemetryRepository.latestTelemetryCache[deviceId];
+      }
+
       this.db.addAuditLog(
         requestingUser?.id || 'system',
         requestingUser?.name || 'API Manager',
-        `Cihaz Arşive Taşındı & Silindi: ${removed.name} (ID: ${removed.id}, Telemetri sıkıştırıldı: ${archivedRecord.telemetrySnapshot?.stats.compressionRatioPercent || 0}% tasarruf)`,
+        `Cihaz Arşive Taşındı & Silindi: ${removed.name} (ID: ${removed.id}, Ayarlar, metrikler ve alarmlar arşivlendi, Telemetri tasarrufu: ${archivedRecord.telemetrySnapshot?.stats.compressionRatioPercent || 0}%)`,
         'medium'
       );
       this.db.saveData(this.db.data);
 
-      // Sync to PostgreSQL Repository
+      // In PostgreSQL: Remove device from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
         await this.db.postgresRepo.deleteDevice(deviceId).catch((e: any) => console.warn('[PG Error]', e.message));
       }
@@ -809,24 +969,29 @@ export class DeviceRepository {
     const removedIds: string[] = [];
 
     if (!this.db.data.archivedDevices) this.db.data.archivedDevices = [];
-    const newArchivedRecords: ArchivedDevice[] = [];
+    const devicesToArchive: Device[] = [];
 
     this.db.data.devices = this.db.data.devices.filter((d: Device) => {
       if (idsSet.has(d.id)) {
         if (!requestingUser || requestingUser.role === 'admin' || d.tenantId === requestingUser.id || d.userId === requestingUser.id) {
-          const archivedRecord = this.createArchivedRecord(
-            d,
-            requestingUser?.id,
-            requestingUser?.name,
-            'Toplu Cihaz Silme İşlemi'
-          );
+          devicesToArchive.push(d);
           removedIds.push(d.id);
-          newArchivedRecords.push(archivedRecord);
           return false;
         }
       }
       return true;
     });
+
+    const newArchivedRecords: ArchivedDevice[] = [];
+    for (const d of devicesToArchive) {
+      const archivedRecord = await this.createArchivedRecord(
+        d,
+        requestingUser?.id,
+        requestingUser?.name,
+        'Toplu Cihaz Silme İşlemi'
+      );
+      newArchivedRecords.push(archivedRecord);
+    }
 
     if (removedIds.length > 0) {
       const removedIdSet = new Set(removedIds);
@@ -834,18 +999,32 @@ export class DeviceRepository {
         ...newArchivedRecords,
         ...this.db.data.archivedDevices.filter((a: any) => !removedIdSet.has(a.id || a.device?.id)),
       ];
+
+      // Remove device-specific rules and active alarms from active pools while archived
+      if (this.db.data.rules) {
+        this.db.data.rules = this.db.data.rules.filter((r: any) => !removedIdSet.has(r.deviceId));
+      }
+      if (this.db.data.activeAlarms) {
+        this.db.data.activeAlarms = this.db.data.activeAlarms.filter((a: any) => !removedIdSet.has(a.deviceId));
+      }
+      if (this.db.telemetryRepository?.latestTelemetryCache) {
+        for (const id of removedIds) {
+          delete this.db.telemetryRepository.latestTelemetryCache[id];
+        }
+      }
+
       const userName = requestingUser?.name || requestingUser?.id || 'API Manager';
       this.db.addAuditLog(
         requestingUser?.id || 'system',
         userName,
-        `Toplu Cihaz Arşive Taşındı & Silindi: ${removedIds.length} adet cihaz ayarları ve telemetrisiyle arşivlendi`,
+        `Toplu Cihaz Arşive Taşındı & Silindi: ${removedIds.length} adet cihaz ayarları, metrikleri ve alarmlarıyla arşivlendi`,
         'high'
       );
       this.db.saveData(this.db.data);
 
-      // Sync to PostgreSQL
+      // In PostgreSQL: Remove devices from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkDeleteDevices(removedIds).catch((e: any) => console.warn('[PG Error]', e.message));
+        await this.db.postgresRepo.removeDevicesFromActiveTable(removedIds).catch((e: any) => console.warn('[PG Error]', e.message));
       }
     }
     return removedIds.length;
@@ -857,7 +1036,16 @@ export class DeviceRepository {
     // Normalize older archive entries that might just be Device objects
     const normalized: ArchivedDevice[] = list.map((item: any) => {
       if (item.device && item.preservedSettings) {
-        return item as ArchivedDevice;
+        return {
+          ...item,
+          metricHistory: item.metricHistory,
+          latestTelemetry: item.latestTelemetry,
+          archivedRules: item.archivedRules || [],
+          archivedAlarms: item.archivedAlarms || [],
+          archivedAlarmEvents: item.archivedAlarmEvents || [],
+          archivedNotifications: item.archivedNotifications || [],
+          archivedCommands: item.archivedCommands || [],
+        } as ArchivedDevice;
       }
       // Convert legacy raw Device into ArchivedDevice
       const dev: Device = item.device || item;
@@ -869,7 +1057,7 @@ export class DeviceRepository {
         deletedByName: item.deletedByName || 'Sistem',
         deleteReason: item.deleteReason || 'Silindi',
         tenantId: dev.tenantId || 'usr_admin',
-        preservedSettings: {
+        preservedSettings: item.preservedSettings || {
           name: dev.name,
           apiKey: dev.apiKey,
           apiKeyScopes: dev.apiKeyScopes,
@@ -902,6 +1090,13 @@ export class DeviceRepository {
           compressedData: '',
           recentReadings: [],
         },
+        metricHistory: item.metricHistory,
+        latestTelemetry: item.latestTelemetry,
+        archivedRules: item.archivedRules || [],
+        archivedAlarms: item.archivedAlarms || [],
+        archivedAlarmEvents: item.archivedAlarmEvents || [],
+        archivedNotifications: item.archivedNotifications || [],
+        archivedCommands: item.archivedCommands || [],
       };
     });
 
@@ -964,8 +1159,8 @@ export class DeviceRepository {
 
     if (index === -1) return null;
 
-    const archivedItem = this.db.data.archivedDevices.splice(index, 1)[0];
-    const rawDev: Device = archivedItem.device || archivedItem;
+    const archivedItem: ArchivedDevice = this.db.data.archivedDevices.splice(index, 1)[0];
+    const rawDev: Device = archivedItem.device || (archivedItem as any);
     const preserved = archivedItem.preservedSettings;
 
     // Check if device ID already exists in active devices, if so remove stale instance
@@ -974,7 +1169,7 @@ export class DeviceRepository {
       this.db.data.devices.splice(existingIndex, 1);
     }
 
-    // Reconstruct fully restored Device with all original configurations
+    // Reconstruct fully restored Device with all original configurations and metrics
     const restoredDevice: Device = {
       ...rawDev,
       ...(preserved || {}),
@@ -983,6 +1178,7 @@ export class DeviceRepository {
       apiKey: preserved?.apiKey || rawDev.apiKey,
       tenantId: rawDev.tenantId || preserved?.siteId || 'usr_admin',
       status: 'offline', // Will turn online when live heartbeat/telemetry arrives
+      metrics: preserved?.metrics || rawDev.metrics || {},
       deletedAt: undefined,
       lastSeen: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -991,17 +1187,111 @@ export class DeviceRepository {
     if (!this.db.data.devices) this.db.data.devices = [];
     this.db.data.devices.push(restoredDevice);
 
-    // Decompress and restore past telemetry records into telemetry repository
+    // 1. Decompress and restore past telemetry records into telemetry array & repository
+    let pastReadings: TelemetryReading[] = [];
     if (archivedItem.telemetrySnapshot?.compressedData) {
       try {
         const buffer = Buffer.from(archivedItem.telemetrySnapshot.compressedData, 'base64');
         const decompressed = zlib.gunzipSync(buffer).toString('utf8');
-        const pastReadings: TelemetryReading[] = JSON.parse(decompressed);
-        if (Array.isArray(pastReadings) && pastReadings.length > 0 && this.db.telemetryRepository) {
-          await this.db.telemetryRepository.addTelemetryBatchAsync(pastReadings).catch((e: any) => console.warn('[Restore Telemetry Batch Error]', e));
+        pastReadings = JSON.parse(decompressed);
+        if (Array.isArray(pastReadings) && pastReadings.length > 0) {
+          if (!this.db.data.telemetry) this.db.data.telemetry = [];
+          const existingIds = new Set(this.db.data.telemetry.map((t: any) => t.id));
+          for (const pr of pastReadings) {
+            if (!existingIds.has(pr.id)) {
+              this.db.data.telemetry.push(pr);
+              existingIds.add(pr.id);
+            }
+          }
+          if (this.db.telemetryRepository) {
+            await this.db.telemetryRepository.addTelemetryBatchAsync(pastReadings).catch((e: any) =>
+              console.warn('[Restore Telemetry Batch Error]', e)
+            );
+          }
         }
       } catch (err) {
         console.warn('[Restore] Could not restore decompressed telemetry history:', err);
+      }
+    }
+
+    // 2. Restore metric history
+    if (archivedItem.metricHistory) {
+      if (!this.db.data.history) this.db.data.history = {};
+      this.db.data.history[deviceId] = {
+        ...(this.db.data.history[deviceId] || {}),
+        ...archivedItem.metricHistory,
+      };
+    }
+
+    // 3. Restore latest telemetry cache
+    if (archivedItem.latestTelemetry && this.db.telemetryRepository) {
+      this.db.telemetryRepository.latestTelemetryCache[deviceId] = {
+        ...(this.db.telemetryRepository.latestTelemetryCache[deviceId] || {}),
+        ...archivedItem.latestTelemetry,
+      };
+    }
+
+    // 4. Restore archived threshold rules
+    if (Array.isArray(archivedItem.archivedRules) && archivedItem.archivedRules.length > 0) {
+      if (!this.db.data.rules) this.db.data.rules = [];
+      const existingRuleIds = new Set(this.db.data.rules.map((r: any) => r.id));
+      for (const rule of archivedItem.archivedRules) {
+        if (!existingRuleIds.has(rule.id)) {
+          this.db.data.rules.push(rule);
+          existingRuleIds.add(rule.id);
+        }
+        if (this.db.postgresRepo?.isReady()) {
+          await this.db.postgresRepo.saveThresholdRule(rule).catch(() => {});
+        }
+      }
+    }
+
+    // 5. Restore archived active alarms
+    if (Array.isArray(archivedItem.archivedAlarms) && archivedItem.archivedAlarms.length > 0) {
+      if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
+      const existingAlarmIds = new Set(this.db.data.activeAlarms.map((a: any) => a.id));
+      for (const alarm of archivedItem.archivedAlarms) {
+        if (!existingAlarmIds.has(alarm.id)) {
+          this.db.data.activeAlarms.push(alarm);
+          existingAlarmIds.add(alarm.id);
+        }
+        if (this.db.postgresRepo?.isReady()) {
+          await this.db.postgresRepo.saveAlarm(alarm).catch(() => {});
+        }
+      }
+    }
+
+    // 6. Restore alarm events
+    if (Array.isArray(archivedItem.archivedAlarmEvents) && archivedItem.archivedAlarmEvents.length > 0) {
+      if (!this.db.data.alarmEvents) this.db.data.alarmEvents = [];
+      const existingEventIds = new Set(this.db.data.alarmEvents.map((e: any) => e.id));
+      for (const ev of archivedItem.archivedAlarmEvents) {
+        if (!existingEventIds.has(ev.id)) {
+          this.db.data.alarmEvents.push(ev);
+          existingEventIds.add(ev.id);
+        }
+      }
+    }
+
+    // 7. Restore notifications & commands
+    if (Array.isArray(archivedItem.archivedNotifications) && archivedItem.archivedNotifications.length > 0) {
+      if (!this.db.data.notifications) this.db.data.notifications = [];
+      const existingNotifIds = new Set(this.db.data.notifications.map((n: any) => n.id));
+      for (const notif of archivedItem.archivedNotifications) {
+        if (!existingNotifIds.has(notif.id)) {
+          this.db.data.notifications.push(notif);
+          existingNotifIds.add(notif.id);
+        }
+      }
+    }
+    if (Array.isArray(archivedItem.archivedCommands) && archivedItem.archivedCommands.length > 0) {
+      if (!this.db.data.commands) this.db.data.commands = [];
+      const existingCmdIds = new Set(this.db.data.commands.map((c: any) => c.id));
+      for (const cmd of archivedItem.archivedCommands) {
+        if (!existingCmdIds.has(cmd.id)) {
+          this.db.data.commands.push(cmd);
+          existingCmdIds.add(cmd.id);
+        }
       }
     }
 
@@ -1009,7 +1299,7 @@ export class DeviceRepository {
     this.db.addAuditLog(
       requestingUserId || 'system',
       userName,
-      `Cihaz Arşivden Geri Yüklendi ve Sisteme Entegre Edildi: ${restoredDevice.name} (${restoredDevice.id})`,
+      `Cihaz Arşivden Geri Yüklendi ve Sisteme Entegre Edildi: ${restoredDevice.name} (${restoredDevice.id}, Ayarlar, metrikler ve alarmlar geri yüklendi)`,
       'medium'
     );
 
@@ -1037,11 +1327,14 @@ export class DeviceRepository {
     });
 
     if (this.db.data.archivedDevices.length < initialLen) {
+      // Completely wipe all device data, telemetry, history, rules, alarms, commands & PostgreSQL records
+      await this.purgeDeviceDataPermanently([deviceId]);
+
       const userName = requestingUserName || requestingUserId || 'Sistem Yöneticisi';
       this.db.addAuditLog(
         requestingUserId || 'system',
         userName,
-        `Arşivdeki Cihaz Kalıcı Olarak Silindi: ID ${deviceId}`,
+        `Arşivdeki Cihaz ve Tüm Verileri (Telemetri, Alarmlar, Ayarlar) Kalıcı Olarak Silindi: ID ${deviceId}`,
         'high'
       );
       this.db.saveData(this.db.data);
@@ -1066,11 +1359,14 @@ export class DeviceRepository {
 
     const deletedCount = initialLen - this.db.data.archivedDevices.length;
     if (deletedCount > 0) {
+      // Completely wipe all data for deleted devices
+      await this.purgeDeviceDataPermanently(deviceIds);
+
       const userName = requestingUserName || requestingUserId || 'Sistem Yöneticisi';
       this.db.addAuditLog(
         requestingUserId || 'system',
         userName,
-        `Arşivdeki ${deletedCount} Cihaz Kalıcı Olarak Silindi (Toplu İşlem)`,
+        `Arşivdeki ${deletedCount} Cihaz ve Tüm Verileri Kalıcı Olarak Silindi (Toplu İşlem)`,
         'high'
       );
       this.db.saveData(this.db.data);
@@ -1100,16 +1396,27 @@ export class DeviceRepository {
     if (!this.db.data.archivedDevices) return 0;
     const initialLen = this.db.data.archivedDevices.length;
     
+    let removedIds: string[] = [];
     if (targetTenantId && targetTenantId !== 'all') {
-      this.db.data.archivedDevices = this.db.data.archivedDevices.filter((a: any) => {
+      const remaining: any[] = [];
+      for (const a of this.db.data.archivedDevices) {
         const tId = a.tenantId || a.device?.tenantId;
-        return tId !== targetTenantId;
-      });
+        if (tId === targetTenantId) {
+          removedIds.push(a.id || a.device?.id);
+        } else {
+          remaining.push(a);
+        }
+      }
+      this.db.data.archivedDevices = remaining;
     } else {
+      removedIds = this.db.data.archivedDevices.map((a: any) => a.id || a.device?.id).filter(Boolean);
       this.db.data.archivedDevices = [];
     }
 
     const count = initialLen - (this.db.data.archivedDevices?.length || 0);
+    if (removedIds.length > 0) {
+      await this.purgeDeviceDataPermanently(removedIds);
+    }
     this.db.saveData(this.db.data);
     return count;
   }
