@@ -454,11 +454,11 @@ export const QuickAccessWidget: React.FC<QuickAccessWidgetProps> = ({
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor} ${status === 'critical' ? 'animate-ping' : ''}`} />
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <p className="font-bold text-slate-900 dark:text-white text-xs truncate">
                             {device.name}
                           </p>
-                          <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                          <span className="text-[10px] font-mono text-slate-400 shrink-0 hidden xs:inline-block">
                             {device.id}
                           </span>
                         </div>

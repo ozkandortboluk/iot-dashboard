@@ -4,6 +4,31 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.8] - 2026-09-22
+
+### 📱 Kayıtlı Saha Cihazları ve Listelerinde Mobil & Küçük Ekran Düzeni İyileştirmesi
+- **Kayıtlı Saha Cihazları Başlık & Eylem Çubuğu Optimizasyonu (`DevicesView.tsx`)**:
+  - Başlık metni küçük ekranlarda `Saha Cihazları` olarak kısaltıldı (`<span className="hidden xs:inline">Kayıtlı </span>`), taşmalar engellendi.
+  - "Sıralamayı Sıfırla" metni mobilde gizlenerek yalnızca ikon gösterildi (`hidden md:inline`).
+  - "Seçilenleri Sil" ve "Yeni Cihaz Ekle" butonlarının etiketleri küçük ekranlara göre adaptif hale getirildi (`Yeni Cihaz`, `Sil (N)`).
+  - Görünüm değiştirme butonlarının (Karo / Liste) iç dolguları dar ekranlara uyumlu biçimde ayarlandı.
+- **Liste Görünümü (Satırlar) Çakışma & Tablo Taşma Koruması (`DevicesView.tsx`)**:
+  - Satır içi flex elemanlarında `flex-wrap` kaldırılarak satırların tek hizada kalması sağlandı ve dikey uzama / çarpık yerleşimler engellendi.
+  - Cihaz isimlerine responsive maksimum genişlikler (`max-w-[95px] xs:max-w-[140px] sm:max-w-[200px] md:max-w-[280px]`) ve `truncate` uygulandı.
+  - Tesis (`hidden sm:inline-flex`), Bölge (`hidden md:inline-flex`), Cihaz Grubu (`hidden lg:inline-flex`) ve Sahip/Firma (`hidden xl:inline-flex`) rozetleri kademeli gizleme mantığına geçirildi.
+  - İkincil satırda IP adresi (`hidden sm:inline`), konum ve son sinyal bilgisi dar ekranlarda küçültülerek gizlendi veya kısaltıldı.
+  - Sağ eylem butonlarında: Aktif olmayan bakım modu butonu ve silme butonu ekstra dar ekranlarda gizlendi (`hidden xs:inline-flex`), kart göçü butonu mobilde gizlendi (`hidden sm:inline-flex`), yukarı/aşağı taşıma butonları mobilde gizlendi (`hidden md:flex`). Güç anahtarı ve Düzenleme (Ayarlar) butonu her ekranda erişilebilir tutuldu.
+- **Karo Görünümü (Kartlar) Düzeni (`DevicesView.tsx`)**:
+  - Kart üst barındaki durum etiketleri mobilde kısa biçime geçirildi (`BAKIM`, `AKTİF`, `KAPALI`).
+  - Eylem butonları küçük ekranlarda gizlenerek sadeleştirildi (`hidden sm:flex`, `hidden sm:inline-flex`).
+  - Kart rozetleri tek satırda taşma gizlemeli (`flex-nowrap overflow-hidden`) ve kademeli görünürlükle yapılandırıldı.
+  - Kart alt bilgisinde IP adresi dar ekranlarda gizlendi (`hidden xs:inline`), son sinyal bilgisi sağa hizalı kompakt hale getirildi.
+- **Cihaz Widget'ları Uyumluluğu (`DevicesWidget.tsx`, `QuickAccessWidget.tsx`)**:
+  - `DevicesWidget` listesinde cihaz ismi kırpması (`truncate max-w-[110px] xs:max-w-[160px]`), IP ve konum gizlemesi ile API anahtarı butonunun dar ekranlarda yalnızca ikon göstermesi (`hidden sm:inline`) sağlandı.
+  - `QuickAccessWidget` cihaz sağlık listesinde cihaz ID'si dar mobil ekranlarda gizlenerek cihaz adına yer açıldı.
+
+---
+
 ## 🚀 [v1.41.7] - 2026-09-22
 
 ### 📐 Üst Bar Buton ve İkonları İçin Adaptif Ölçekleme & Üst Üste Binme Koruması

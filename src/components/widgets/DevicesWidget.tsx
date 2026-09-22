@@ -57,16 +57,24 @@ export const DevicesWidget: React.FC<DevicesWidgetProps> = ({ config }) => {
                   )}
                   <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors.dot}`}></span>
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <p className="font-semibold text-slate-900 dark:text-white truncate">{dev.name}</p>
+                    <p className="font-semibold text-slate-900 dark:text-white truncate max-w-[110px] xs:max-w-[160px] sm:max-w-none">{dev.name}</p>
                     <DevicePowerIcon device={dev} />
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                    <span>{dev.location}</span>
-                    <span>•</span>
-                    <span className="font-mono">{dev.ipAddress}</span>
-                    <span>•</span>
+                    {dev.location ? (
+                      <>
+                        <span className="truncate max-w-[80px] xs:max-w-none">{dev.location}</span>
+                        <span className="hidden xs:inline">•</span>
+                      </>
+                    ) : null}
+                    {dev.ipAddress ? (
+                      <>
+                        <span className="font-mono hidden xs:inline">{dev.ipAddress}</span>
+                        <span className="hidden xs:inline">•</span>
+                      </>
+                    ) : null}
                     <span className={dev.status === 'online' ? 'text-emerald-500 font-medium' : 'text-rose-400'}>
                       {formatRelativeTime(dev.lastSeen)}
                     </span>
@@ -74,7 +82,7 @@ export const DevicesWidget: React.FC<DevicesWidgetProps> = ({ config }) => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${colors.bg} ${colors.text} ${colors.border}`}>
                   {getStatusLabel(dev.status)}
                 </span>
@@ -82,11 +90,11 @@ export const DevicesWidget: React.FC<DevicesWidgetProps> = ({ config }) => {
                 {/* API Key Copy */}
                 <button
                   onClick={() => handleCopy(dev.apiKey)}
-                  className="flex items-center gap-1 px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-mono text-slate-600 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-600 shrink-0 transition-colors"
+                  className="flex items-center gap-1 px-1.5 sm:px-2 py-1 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-mono text-slate-600 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-600 shrink-0 transition-colors"
                   title="API Key Kopyala"
                 >
                   <Shield className="w-3 h-3 text-blue-500" />
-                  <span>{generateMaskedKey(dev.apiKey)}</span>
+                  <span className="hidden sm:inline">{generateMaskedKey(dev.apiKey)}</span>
                   {copiedKey === dev.apiKey ? (
                     <Check className="w-3 h-3 text-emerald-500" />
                   ) : (
