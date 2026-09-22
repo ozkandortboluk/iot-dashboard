@@ -132,10 +132,10 @@ export const Header: React.FC<HeaderProps> = ({
   }, [customersList, rawDevices]);
 
   return (
-    <header className="sticky top-0 z-30 h-14 sm:h-16 bg-white/95 dark:bg-[#020617]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex items-center shadow-sm dark:shadow-none">
-      <div className="w-full px-2.5 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
+    <header className="sticky top-0 z-30 h-13 xs:h-14 sm:h-16 bg-white/95 dark:bg-[#020617]/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/80 transition-colors duration-200 flex items-center shadow-sm dark:shadow-none">
+      <div className="w-full px-2 xs:px-3 sm:px-4 md:px-6 lg:px-8 flex items-center justify-between gap-1 xs:gap-1.5 sm:gap-3 min-w-0">
         {/* Left Section: Mobile Menu Toggle, Brand Logo, Customer Title, Connection Badge & Admin Customer Switcher */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+        <div className="flex items-center gap-1 xs:gap-1.5 sm:gap-2.5 min-w-0 flex-1">
           {/* Mobile Sidebar Menu Toggle Button */}
           <button
             type="button"
@@ -144,12 +144,12 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label={isMobileMenuOpen ? 'Yan Menüyü Kapat' : 'Yan Menüyü Aç'}
             aria-expanded={isMobileMenuOpen}
             title={isMobileMenuOpen ? 'Yan Menüyü Gizle' : 'Yan Menüyü Aç'}
-            className="md:hidden p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer active:scale-95"
+            className="md:hidden h-8 w-8 sm:h-9 sm:w-9 p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer active:scale-95 flex items-center justify-center"
           >
             {isMobileMenuOpen ? (
-              <X className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
             ) : (
-              <Menu className="w-4 h-4" />
+              <Menu className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
             )}
           </button>
 
@@ -189,7 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ? `Sunucuya yeniden bağlanılıyor... (Kalan: ${reconnectCountdown}s, Deneme: #${reconnectAttempt || 1}) — Şimdi denemek için tıklayın`
                 : 'Bağlantı koptu. Tekrar bağlanmak için tıklayın.'
             }
-            className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-1.5 xs:px-2 lg:px-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer shrink-0 ${
               connectionStatus === 'connected'
                 ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/25 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
                 : connectionStatus === 'reconnecting'
@@ -199,17 +199,17 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {connectionStatus === 'connected' ? (
               <>
-                <Wifi className="w-4 h-4 text-emerald-500 shrink-0" />
+                <Wifi className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0" />
                 <span className="hidden lg:inline">{wsLatency}ms</span>
               </>
             ) : connectionStatus === 'reconnecting' ? (
               <>
-                <RefreshCw className="w-4 h-4 text-amber-500 animate-spin shrink-0" />
+                <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 animate-spin shrink-0" />
                 <span className="hidden lg:inline">{reconnectCountdown > 0 ? `${reconnectCountdown}s` : 'Bağlanıyor'}</span>
               </>
             ) : (
               <>
-                <WifiOff className="w-4 h-4 text-rose-500 shrink-0" />
+                <WifiOff className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0" />
                 <span className="hidden lg:inline">Kopuk</span>
               </>
             )}
@@ -234,20 +234,20 @@ export const Header: React.FC<HeaderProps> = ({
               id="header-simulator-toggle-btn"
               onClick={toggleSimulator}
               title={simulatorActive ? 'Simülatör Açık (Durdur)' : 'Simülatör Kapalı (Başlat)'}
-              className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-1.5 xs:px-2 lg:px-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-medium transition-all shrink-0 cursor-pointer ${
                 simulatorActive
                   ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30'
                   : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
               }`}
             >
-              {simulatorActive ? <Pause className="w-4 h-4 shrink-0" /> : <Play className="w-4 h-4 shrink-0" />}
+              {simulatorActive ? <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" /> : <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />}
               <span className="hidden lg:inline">{simulatorActive ? 'Simülatör' : 'Simülatör'}</span>
             </button>
           )}
         </div>
 
         {/* Right Section: Actions, Notifications & User Profile */}
-        <div className="flex items-center gap-1 xs:gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 xs:gap-1.5 sm:gap-2 shrink-0">
           {/* Add Widget & Edit Mode Buttons - Doğrudan üst barda görünür */}
           {activeTab === 'dashboard' && (
             <>
@@ -256,9 +256,9 @@ export const Header: React.FC<HeaderProps> = ({
                 id="header-add-widget-btn"
                 onClick={onOpenAddWidgetModal}
                 title="Yeni Widget Ekle"
-                className="flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all items-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all shrink-0 cursor-pointer active:scale-95"
               >
-                <Layers className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+                <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                 <span className="hidden xl:inline">Widget Ekle</span>
               </button>
 
@@ -268,13 +268,13 @@ export const Header: React.FC<HeaderProps> = ({
                   id="header-toggle-edit-mode-btn"
                   onClick={onToggleEditMode}
                   title={editMode ? 'Düzenlemeyi Tamamla' : 'Dashboard Düzenleme Modu'}
-                  className={`flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 rounded-xl text-xs font-semibold transition-all items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 ${
+                  className={`flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all shrink-0 cursor-pointer active:scale-95 ${
                     editMode
                       ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20'
                       : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
                   }`}
                 >
-                  <Sliders className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+                  <Sliders className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                   <span className="hidden xl:inline">{editMode ? 'Düzenlemeyi Bitir' : 'Düzenleme Modu'}</span>
                 </button>
               )}
@@ -287,13 +287,13 @@ export const Header: React.FC<HeaderProps> = ({
             id="header-help-btn"
             onClick={() => setActiveTab('help')}
             title="Yardım, SSS & Sözlük"
-            className={`flex p-1.5 xs:p-2 xl:px-3 xl:py-1.5 rounded-xl text-xs font-medium border transition-colors items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`hidden xs:flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 xl:px-3 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-medium border transition-colors shrink-0 cursor-pointer ${
               activeTab === 'help'
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
                 : 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border-indigo-200 dark:border-indigo-500/30'
             }`}
           >
-            <HelpCircle className="w-4 h-4 xl:w-3.5 xl:h-3.5 shrink-0" />
+            <HelpCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
             <span className="hidden xl:inline">Yardım & SSS</span>
           </button>
 
@@ -302,22 +302,22 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             id="header-theme-toggle-btn"
             onClick={toggleTheme}
-            className="flex p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
+            className="flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
             title={theme === 'dark' ? 'Açık Moda Geç' : 'Karanlık Moda Geç'}
           >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+            {theme === 'dark' ? <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" /> : <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-700 dark:text-slate-300 shrink-0" />}
           </button>
 
           {/* Notifications Bell */}
           <div ref={notificationsRef} className="relative z-50">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="p-1.5 xs:p-2 rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors relative shrink-0 cursor-pointer"
+              className="flex items-center justify-center h-8 w-8 sm:h-9 sm:w-9 p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 transition-colors relative shrink-0 cursor-pointer"
               title="Bildirimler"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white dark:border-[#020617]" />
+                <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 w-2 h-2 sm:w-2.5 sm:h-2.5 bg-rose-500 rounded-full border-2 border-white dark:border-[#020617]" />
               )}
             </button>
 
@@ -436,7 +436,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     className="w-full text-left px-4 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium flex items-center gap-2 transition cursor-pointer"
                   >
-                    <UserCog className="w-3.5 h-3.5 text-indigo-500" />
+                    <UserCog className="w-4 h-4 text-indigo-500 shrink-0" />
                     <span>Hesap & Şifre Ayarları</span>
                   </button>
 
@@ -447,7 +447,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     className="w-full text-left px-4 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 font-medium flex items-center gap-2 transition cursor-pointer"
                   >
-                    <LogOut className="w-3.5 h-3.5" />
+                    <LogOut className="w-4 h-4 shrink-0" />
                     <span>Oturumu Kapat</span>
                   </button>
                 </div>

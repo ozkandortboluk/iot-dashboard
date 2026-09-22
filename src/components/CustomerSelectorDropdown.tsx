@@ -113,7 +113,7 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
         id="header-customer-selector-btn"
         aria-label={selectedCustomer ? `Seçili Müşteri: ${selectedCustomer.companyName || selectedCustomer.name}` : 'Tüm Müşteriler'}
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`flex items-center gap-1.5 p-1.5 xs:p-2 lg:px-2.5 lg:py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-sm shrink-0 active:scale-95 ${
+        className={`flex items-center justify-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-1.5 xs:px-2 lg:px-2.5 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs font-semibold transition-all cursor-pointer shadow-sm shrink-0 active:scale-95 ${
           isOpen
             ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-500 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/20'
             : selectedCustomerId !== 'all'
@@ -149,7 +149,7 @@ export const CustomerSelectorDropdown: React.FC<CustomerSelectorDropdownProps> =
 
         {/* Chevron */}
         <ChevronDown
-          className={`hidden lg:inline w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+          className={`hidden lg:inline w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 transition-transform duration-200 shrink-0 ${
             isOpen ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''
           }`}
         />

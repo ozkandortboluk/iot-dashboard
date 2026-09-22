@@ -45,24 +45,28 @@ import {
 } from 'lucide-react';
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState<string>(
-    () => localStorage.getItem('nexus_active_tab') || 'dashboard'
-  );
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useState<boolean>(
     () => localStorage.getItem('nexus_edit_mode') === 'true'
   );
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
+  // Site her açıldığında ve kullanıcı giriş yaptığında/değiştiğinde doğrudan Canlı İzleme Dashboard ekranı açılır
   useEffect(() => {
-    localStorage.setItem('nexus_active_tab', activeTab);
-  }, [activeTab]);
+    setActiveTab('dashboard');
+    try {
+      localStorage.removeItem('nexus_active_tab');
+    } catch {
+      // ignore
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     localStorage.setItem('nexus_edit_mode', String(editMode));
   }, [editMode]);
-  const { user, logout } = useAuth();
-  const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
   // Dynamic animated tab pulse favicon synchronized with real-time state
   useAnimatedFavicon(isConnected, true);
@@ -80,7 +84,7 @@ function DashboardContent() {
   const safeActiveTab = canAccessTab(user.role, activeTab) ? activeTab : 'dashboard';
 
   const tabTitles: Record<string, string> = {
-    dashboard: isCustomer ? 'Özel Dashboard\'um' : 'Canlı İzleme Dashboard',
+    dashboard: 'Canlı İzleme Dashboard',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
     device_health: 'Cihaz Sağlığı & Metrikleri',
     firmware_ota: 'Firmware & OTA Yönetimi',
@@ -265,17 +269,6 @@ function DashboardContent() {
         >
           <Bell className="w-4 h-4" />
           <span>Bildirimler</span>
-        </button>
-        <button
-          id="mobile-bottom-menu-btn"
-          onClick={() => setIsMobileMenuOpen((prev) => !prev)}
-          className={`flex flex-col items-center gap-1 cursor-pointer transition-colors ${
-            isMobileMenuOpen ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-          title="Tüm Menüyü Aç / Kapat"
-        >
-          <Menu className="w-4 h-4" />
-          <span>Menü</span>
         </button>
         <button
           onClick={logout}

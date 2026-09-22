@@ -89,6 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Save to localStorage IMMEDIATELY before state updates
       localStorage.setItem('dashboard_token', data.token);
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
+      localStorage.removeItem('nexus_active_tab');
+      localStorage.removeItem('nexus_admin_selected_customer');
 
       setUser(userData);
       setToken(data.token);
@@ -186,6 +188,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     localStorage.removeItem('dashboard_token');
     localStorage.removeItem('dashboard_user');
+    localStorage.removeItem('nexus_active_tab');
+    localStorage.removeItem('nexus_admin_selected_customer');
     setUser(null);
     setToken(null);
   };

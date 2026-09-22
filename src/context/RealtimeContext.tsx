@@ -111,16 +111,23 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [simulatorActive, setSimulatorActive] = useState(true);
-  const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>(
-    () => localStorage.getItem('nexus_admin_selected_customer') || 'all'
-  );
+  const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>('all');
   const [customersList, setCustomersList] = useState<User[]>([]);
 
   const selectedCustomerForAdminRef = useRef(selectedCustomerForAdmin);
   useEffect(() => {
     selectedCustomerForAdminRef.current = selectedCustomerForAdmin;
-    localStorage.setItem('nexus_admin_selected_customer', selectedCustomerForAdmin);
   }, [selectedCustomerForAdmin]);
+
+  // Site her açıldığında ve kullanıcı oturum açtığında/değiştiğinde yönetici kendi merkez paneline ('all') yönlendirilir
+  useEffect(() => {
+    setSelectedCustomerForAdmin('all');
+    try {
+      localStorage.removeItem('nexus_admin_selected_customer');
+    } catch {
+      // ignore
+    }
+  }, [user?.id]);
 
   const getPendingCommand = useCallback(
     (deviceId: string, outputPin?: string): PendingCommandInfo | null => {
@@ -162,7 +169,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
     } else {
-      list = rawDevices.filter((d) => d.tenantId === user.id || (d as any).customerId === user.id || (d as any).assignedUserId === user.id);
+      list = rawDevices.filter((d) =>
+        d.tenantId === user.id ||
+        (d as any).userId === user.id ||
+        (d as any).customerId === user.id ||
+        (d as any).assignedUserId === user.id ||
+        (Boolean((user as any).tenantId) && d.tenantId === (user as any).tenantId)
+      );
     }
 
     const getDeviceBaseRank = (d: Device) => {
@@ -211,7 +224,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       return rawNotifications.filter((n) => !n.tenantId || n.tenantId === selectedCustomerForAdmin);
     }
-    return rawNotifications.filter((n) => !n.tenantId || n.tenantId === user.id);
+    return rawNotifications.filter(
+      (n) => !n.tenantId || n.tenantId === user.id || (Boolean((user as any).tenantId) && n.tenantId === (user as any).tenantId)
+    );
   }, [rawNotifications, user, selectedCustomerForAdmin, customersList]);
 
   const socketRef = useRef<WebSocket | null>(null);

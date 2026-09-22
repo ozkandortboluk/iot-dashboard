@@ -48,7 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const customerMenuItems = [
     {
       id: 'dashboard',
-      label: "Özel Dashboard'um",
+      label: 'Canlı İzleme Dashboard',
       icon: LayoutDashboard,
     },
     {

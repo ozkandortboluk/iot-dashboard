@@ -4,6 +4,46 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.41.7] - 2026-09-22
+
+### 📐 Üst Bar Buton ve İkonları İçin Adaptif Ölçekleme & Üst Üste Binme Koruması
+- **Mobil & Küçük Ekranlarda Adaptif Buton Boyutlandırması (`Header.tsx`, `CustomerSelectorDropdown.tsx`)**:
+  - Üst bardaki tüm eylem butonları (Mobil Menü, Canlı Bağlantı Rozeti, Müşteri Seçici, Simülatör, Widget Ekle, Düzenleme Modu, Yardım & SSS, Tema Seçici ve Bildirim Zili), küçük ekranlarda `h-8 w-8` (veya `h-8 px-1.5/2`), tablet ve masaüstünde ise `sm:h-9 sm:w-9` (veya `sm:h-9 sm:px-2.5/3`) olarak adaptif hale getirildi.
+  - Yatay boşluklar (`gap-1 xs:gap-1.5 sm:gap-2.5`), iç kenar dolguları (`px-2 xs:px-3 sm:px-4`) ve metin boyutları (`text-[10px]/text-[11px] sm:text-xs`) ekran genişliğine göre orantılı küçülerek dar mobil ekranlarda dahi butonların birbirinin üzerine binmesi, satır kırması veya taşması tamamen engellendi.
+- **İkon Boyutlarının Adaptif Eşitlenmesi**:
+  - Tüm ikonlar küçük ekranlarda `w-3.5 h-3.5` (14px), standart ve büyük ekranlarda `w-4 h-4` (16px) olarak tanımlandı; böylece hem tüm ikonların birbiriyle birebir aynı ebata sahip olması kuralı korundu hem de dar alanlara kusursuz uyum sağlandı.
+  - Ekstra dar ekranlarda (<360px) çakışmayı önlemek için Yardım butonu `hidden xs:flex` olarak optimize edildi.
+
+---
+
+## 🚀 [v1.41.6] - 2026-09-22
+
+### 📱 Mobil Alt Bar Menü Butonu Temizliği & Üst Bar İkon Boyut Standartlaştırması
+- **Alt Bar Menü Butonunun Kaldırılması (`App.tsx`)**:
+  - Küçük ekran ve mobil cihazlarda alt gezinme çubuğunda (`fixed bottom-0`) yer alan gereksiz "Menü" açma butonu (`mobile-bottom-menu-btn`) tamamen kaldırıldı.
+  - Mobil alt bar artık sadece doğrudan ekran sekmeleri (Dashboard, Cihazlar, Müşteriler/Analiz, Bildirimler ve Çıkış Yap) için ayrıldı; menü açma işlevi üst bardaki standart hamburger menüsü üzerinden yönetilmeye devam ediyor.
+- **Üst Bar İkon Boyutlarının Birebir Eşitlenmesi (`Header.tsx`, `CustomerSelectorDropdown.tsx`)**:
+  - Üst barda (Header) bulunan tüm ikonların (`X`, `Menu`, `Wifi`, `WifiOff`, `RefreshCw`, `ChevronDown`, `Pause`, `Play`, `Layers`, `Sliders`, `HelpCircle`, `Sun`, `Moon`, `Bell`, `UserCog`, `LogOut`) boyutları farklı responsive kırılımlarda (`xl:w-3.5 xl:h-3.5`, vb.) ortaya çıkan dengesizlikler giderilerek standart `w-4 h-4 shrink-0` (16x16px) ebatına eşitlendi.
+  - İkon butonlarının dikey/yatay hizalamaları, buton dolguları (`p-1.5 xs:p-2`, `h-9`) ve görsel dengesi kusursuzlaştırıldı.
+
+---
+
+## 🚀 [v1.41.5] - 2026-09-21
+
+### 📊 Varsayılan Canlı İzleme Dashboard Yönlendirmesi & Kullanıcı/Yönetici İzolasyonu
+- **Site Açılışında & Girişte Her Zaman Canlı İzleme Dashboard'u Açma (`App.tsx`)**:
+  - `activeTab` durumu açılışta `localStorage`'daki eski sekme yerine varsayılan olarak her zaman `'dashboard'` (Canlı İzleme Dashboard) olarak başlatıldı.
+  - Kullanıcı giriş yaptığında veya oturum değiştiğinde otomatik olarak Canlı İzleme Dashboard ekranının açılması güvenceye alındı (`setActiveTab('dashboard')`).
+- **Giriş Yapan Kullanıcının Kendi İzleme Ekranının Açılması (`RealtimeContext.tsx`)**:
+  - Müşteri veya alt kullanıcı giriş yaptığında yalnızca kendi kullanıcısına ve tenant'ına ait cihazların, alarmların ve telemetrinin listelendiği canlı izleme ekranı açılır (`tenantId`, `userId`, `customerId`, `assignedUserId`).
+- **Yönetici İçin Kendi Merkez Sayfasının Açılması (`RealtimeContext.tsx`)**:
+  - Yönetici (admin) ilk açılışta veya oturum açtığında müşteri seçim filtresi (`selectedCustomerForAdmin`) otomatik olarak `'all'` (tüm sistem / yönetici merkez paneli) durumuna ayarlanır. Önceki oturumlardan kalan müşteri seçimlerinin yöneticiyi tek müşteriye kitlemesi engellendi.
+  - Oturum açma (`login`) ve çıkış yapma (`logout`) süreçlerinde artık sekmeler ve müşteri filtreleri temizlenerek her zaman temiz bir ilk açılış deneyimi sağlandı (`AuthContext.tsx`).
+- **Menü & Sekme Başlıklarının Bütünleştirilmesi (`Sidebar.tsx`, `App.tsx`)**:
+  - Müşteri ve yönetici menülerindeki dashboard etiketleri "Canlı İzleme Dashboard" olarak teyit edildi ve tutarlı hale getirildi.
+
+---
+
 ## 🚀 [v1.41.4] - 2026-09-21
 
 ### 🔐 Yönetici Kurtarma Ekranı Tek Tıkla Kopyalanabilir Komut Entegrasyonu (`RecoveryView.tsx`)
