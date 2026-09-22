@@ -9,3 +9,23 @@ coverage
 .DS_Store
 *.db_config.json
 .db_config.json
+
+# Temporary ad-hoc scratch scripts & dumps
+fix_*
+fix-*
+get_*
+check_*
+test_*
+patch_*
+output.txt
+temp_*
+*.tmp
+*.txt
+!metadata.json
+!README.md
+cookies.txt
+e2e/
+tests/
+examples/
+docs/
+

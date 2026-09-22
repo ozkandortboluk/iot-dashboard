@@ -13,6 +13,18 @@ export const migration019: Migration = {
   name: 'restore_canonical_test_entities',
   disableTransaction: true,
   up: async (client: pg.PoolClient) => {
+    const isTestOrDev =
+      process.env.NODE_ENV !== 'production' ||
+      Boolean(process.env.VITEST) ||
+      process.env.ENABLE_TEST_ACCOUNT === 'true';
+
+    if (!isTestOrDev) {
+      console.log(
+        '[Migration 019] Production environment detected (NODE_ENV=production). Skipping canonical test entities restoration.'
+      );
+      return;
+    }
+
     console.log('[Migration 019] Restoring and guaranteeing canonical test administrator and device...');
 
     const CANONICAL_PASSWORD_HASH = '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.';

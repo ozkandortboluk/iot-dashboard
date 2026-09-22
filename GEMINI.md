@@ -1,49 +1,45 @@
 # Project Guidelines & Autonomous Developer Rules
 
-## MANDATORY RULE 1: Automatic Semantic Version Bumping on Every Change (Her Değişiklikte Sürüm Yükseltme)
+## KURAL 1: Anlamlı ve Planlı Sürümleme Politikası (Selective Semantic Versioning)
 
-1. **Automatic Version Increment on Every Task/Modification**:
-   - Whenever any code modification, feature addition, bugfix, or refactoring is performed in the project, the AI agent **MUST ALWAYS BUMP the application version** following Semantic Versioning (SemVer: `MAJOR.MINOR.PATCH`):
-     - **PATCH bump (`1.2.1` -> `1.2.2`)**: For bug fixes, minor UI adjustments, styling fixes, Docker/build tweaks, and non-breaking improvements.
-     - **MINOR bump (`1.2.x` -> `1.3.0`)**: For new features, new widgets, new API endpoints, major views, or protocol extensions.
-     - **MAJOR bump (`1.x.x` -> `2.0.0`)**: For breaking architectural redesigns or database schema overhauls.
-2. **Synchronized Multi-File Version Updates**:
-   - The agent MUST keep the following files strictly synchronized with the newly bumped version:
-     - `package.json` (`"version": "X.Y.Z"`)
-     - `src/config/version.ts` (`export const APP_VERSION = 'X.Y.Z'; export const APP_RELEASE_TAG = 'vX.Y.Z';`)
-     - `CHANGELOG.md` (Add a new chronological release block describing the changes)
-3. **No Hardcoded Version Strings in Components**:
-   - All UI components (e.g., `Sidebar.tsx`, `AccountSettingsView.tsx`, headers/footers) MUST import and display the version from `src/config/version.ts` rather than hardcoded string literals.
-
----
-
-## MANDATORY RULE 2: Code Examples in Help & Knowledge Center (Yardım & Bilgi Merkezi)
-
-1. **Always-Working Code Section (Örnekler & Çalışan Kod Blokları)**:
-   - The "Yardım & Bilgi Merkezi" (Help & Knowledge Center / `HelpView.tsx`) MUST ALWAYS maintain an active, fully featured, working code examples section (`code_examples` / "Çalışan Kod Örnekleri & API").
-   - This section must provide 100% executable, syntactically correct, and production-tested code snippets for real hardware and client integrations, including:
-     - **ESP32 & NodeMCU (ESP8266) HTTP Telemetry Ingestion with Response Piggybacking (Downlink command execution for relays/PWM)**
-     - **ESP32 Periodic Heartbeat / Ping (`/api/telemetry/ping`)** with dynamic timeout tolerance support
-     - **ESP32 / ESP8266 Live WebSocket 2-Way Client**
-     - **Compact Comma-Separated Fast Ingestion (`/api/v1/telemetry`)**
-     - **JSON Telemetry Ingestion (`/api/telemetry`)**
-     - **Device Output Control API (`/api/devices/:id/control`)**
-     - **Python Production IoT Agent with Auto-Reconnect & Heartbeat**
-     - **cURL & Node.js / JavaScript Fetch / Axios Telemetry & Control scripts**
-
-2. **Synchronization on Any API/Backend Modification**:
-   - Whenever any API endpoint, telemetry payload format, device control signature, heartbeat mechanism, or authentication header in the system is updated or introduced, the agent **MUST SIMULTANEOUSLY UPDATE all code snippets in `HelpView.tsx`** to reflect the new functionality.
-   - Any new platform feature (such as new metrics, token schemas, or WebSocket protocols) MUST immediately receive a working hardware/software code template in `HelpView.tsx`.
-
+1. **Küçük Değişikliklerde Sürüm Yükseltme Yapılmaz**:
+   - Her küçük UI düzeltmesi, CSS/stil rötuşu, ufak hata giderimi (bugfix) veya tekil refaktör için **ayrı bir sürüm numarası yükseltilmez**.
+   - Küçük düzeltmeler ve ara ayarlamalar, sürüm yükseltilmesi gereken anlamlı kilometre taşlarının (büyük özellikler, yeni modüller, mimari güncellemeler veya konsolide yayınlar) altına iliştirilir.
+2. **Sürüm Yükseltme Kriterleri**:
+   - Sürüm yükseltme yalnızca aşağıdaki durumlarda gerçekleştirilir:
+     - **PATCH bump (`x.y.Z`)**: Kritik güvenlik yamaları veya toplu/konsolide hata düzeltme paketleri yayınlandığında.
+     - **MINOR bump (`x.Y.0`)**: Yeni bir özellik, yeni bir API uç noktası, yeni bir görünüm veya kapsamlı işlevsellik eklendiğinde.
+     - **MAJOR bump (`X.0.0`)**: Geriye dönük uyumsuz köklü mimari veya veritabanı şema değişikliklerinde.
+3. **Senkronize Sürüm Güncelleme**:
+   - Bir sürüm yükseltildiğinde `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları birbiriyle tam senkron tutulur.
+   - `CHANGELOG.md` gereksiz mikro-girdilerle şişirilmez; yapılan işler sade, derli toplu ve anlamlı başlıklar altında özetlenir.
+4. **Bileşenlerde Sabit Sürüm Metni Bulunamaz**:
+   - Tüm UI bileşenleri sürüm bilgisini `src/config/version.ts` dosyasından içe aktarır.
 
 ---
 
-## MANDATORY RULE 3: Strict Usage of Canonical Test Account & Device (Sadece Belirlenen Test Hesabının Kullanımı)
+## KURAL 2: Yardım & Bilgi Merkezi Canlı Kod Örnekleri (Yardım & Bilgi Merkezi)
 
-1. **No Unnecessary Data Generation**: The AI agent MUST NOT create new test users, random accounts, or disposable test devices during its own verification, debugging, or code generation phases.
-2. **Canonical Test Credentials**: All testing, simulation, API interaction, and script examples MUST use the permanent test account and device:
-   - **User ID**: `usr_test_admin`
-   - **Email**: `test@nexusnodeiot.com.tr`
-   - **Password**: `test1234`
-   - **Device ID**: `dev_test_01`
-   - **Device API Key**: `dev_key_test_0000000000000000`
+1. **Her Zaman Çalışır Kod Blokları (`HelpView.tsx`)**:
+   - "Yardım & Bilgi Merkezi" (`HelpView.tsx`), donanım geliştiricileri ve sistem entegratörleri için 100% çalışan, sözdizimi doğrulanmış ve üretime hazır kod bloklarını korumaya devam eder:
+     - **ESP32 & NodeMCU (ESP8266) HTTP Telemetri Gönderimi ve Downlink Komut Yanıtı**
+     - **ESP32 Periyodik Heartbeat / Ping (`/api/telemetry/ping`)**
+     - **ESP32 / ESP8266 Canlı WebSocket İstemcisi**
+     - **Kompakt Virgülle Ayrılmış Hızlı Veri Akışı (`/api/v1/telemetry`)**
+     - **JSON Telemetri Yükleme (`/api/telemetry`)**
+     - **Cihaz Çıkış Kontrol API'si (`/api/devices/:id/control`)**
+     - **Python IoT Ajanı ve Node.js / cURL Entegrasyon Scriptleri**
+2. **API Güncellemelerinde Senkronizasyon**:
+   - Sistemde yeni bir API uç noktası, telemetri formatı veya protokol eklendiğinde `HelpView.tsx` içindeki örnek kodlar güncellenir.
+
+---
+
+## KURAL 3: Test Verisi İzolasyonu ve Production Seeding Koruması
+
+1. **Sabit Kimlik Bilgilerinin Kılavuz/Prompt Dosyalarında Bulunmaması**:
+   - `AGENTS.md`, `GEMINI.md` veya proje kök dokümanlarında asla sabit kullanıcı şifreleri, statik API anahtarları veya canlı hesap bilgileri tutulmaz.
+2. **Test Verileri Yalnızca CI Fixture'larında Yer Alır**:
+   - Test kullanıcıları, sahte cihazlar ve simülasyon parametreleri yalnızca `tests/`, `e2e/` veya CI test fixture ortamlarında tutulmalıdır.
+3. **Production Seeding Kesin Olarak Kapalıdır**:
+   - Üretim ortamında (`NODE_ENV === 'production'`) veritabanına otomatik demo veya test verisi tohumlama (seeding) yapılması kesin olarak engellenir.
+   - Canlı üretim veritabanına yalnızca operatör tarafından yetkilendirilmiş gerçek kullanıcı ve cihaz kayıtları girebilir.

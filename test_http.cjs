@@ -1,1 +1,0 @@
-const http = require('http'); const req = http.request('http://127.0.0.1:3006/api/auth/me', {headers:{'Cookie': 'nexus_session_token=test1234'}}, (res) => {console.log(res.statusCode);}); req.on('error', e => console.error(e)); req.end();

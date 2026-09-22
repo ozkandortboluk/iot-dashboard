@@ -13,3 +13,16 @@ uploads/firmware/
 backups/
 *.bak
 
+# Temporary scratch scripts & debug dumps
+fix_*
+fix-*
+get_*
+check_*
+test_*
+patch_*
+output.txt
+temp_*
+*.tmp
+cookies.txt
+
+

@@ -26,6 +26,13 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 - **Cihaz Widget'ları Uyumluluğu (`DevicesWidget.tsx`, `QuickAccessWidget.tsx`)**:
   - `DevicesWidget` listesinde cihaz ismi kırpması (`truncate max-w-[110px] xs:max-w-[160px]`), IP ve konum gizlemesi ile API anahtarı butonunun dar ekranlarda yalnızca ikon göstermesi (`hidden sm:inline`) sağlandı.
   - `QuickAccessWidget` cihaz sağlık listesinde cihaz ID'si dar mobil ekranlarda gizlenerek cihaz adına yer açıldı.
+- **Depo Temizliği & Production İmaj İzolasyonu**:
+  - Proje kök dizinindeki tüm geçici test, düzeltme, log ve scratch scriptleri (`fix_*`, `get_*`, `check_*`, `test_*`, `patch_*`, `output.txt`, `temp_db_async.txt`, `cookies.txt` vb.) tamamen temizlendi.
+  - `.dockerignore` ve `.gitignore` dosyaları güncellenerek bu tip geçici debug scriptlerinin, testlerin ve dokümantasyonların üretim Docker imajına ve depoya girmesi kesin olarak engellendi.
+- **Test Verisi & Production Seeding İzolasyonu**:
+  - Sabit test kullanıcıları ve cihaz anahtarları prompt/kılavuz belgelerinden (`AGENTS.md`, `GEMINI.md`) arındırıldı.
+  - `InitialDataSeeder`, `migration 019` ve veritabanı başlatma rutinlerine çevre korumaları eklenerek üretim modunda (`NODE_ENV=production`) test cihazları veya sentetik demo hesaplarının tohumlanması (seeding) kesin olarak kapatıldı.
+  - Sürümleme kuralı revize edilerek küçük/ara düzeltmeler için ayrı sürüm açma zorunluluğu kaldırıldı; değişikliklerin anlamlı sürümler altında birleştirilmesi kuralı getirildi.
 
 ---
 

@@ -55,56 +55,60 @@ export class InitialDataSeeder {
       // of the Setup Wizard (/api/setup/create-admin). Test accounts are restricted strictly to
       // test runners when ENABLE_TEST_ACCOUNT=true.
 
-      // 1. CANONICAL TEST DEVICE (dev_test_01)
+      // 1. CANONICAL TEST DEVICE (dev_test_01) - Only in test/development environments
+      const isTestOrDev = process.env.NODE_ENV !== 'production' || process.env.ENABLE_TEST_ACCOUNT === 'true';
       const testApiKey = 'dev_key_test_0000000000000000';
       const testApiKeyHash = crypto.createHash('sha256').update(testApiKey).digest('hex');
-      const supportedOutputs = [
-        { id: 'relay_1', name: 'Ana Güç Rölesi (Relay 1)', type: 'relay', pin: 18, status: false },
-        { id: 'relay_2', name: 'Soğutma Fanı (Relay 2)', type: 'relay', pin: 19, status: true },
-        { id: 'pwm_1', name: 'Hız Kontrolcü (PWM 1)', type: 'pwm', pin: 21, value: 65 },
-      ];
-      const initialMetrics = {
-        temperature: 24.5,
-        humidity: 52.0,
-        cpu: 34.2,
-        power: 85.4,
-        voltage: 224.8,
-      };
 
-      await client.query(`
-        INSERT INTO devices (
-          id, tenant_id, user_id, name, device_type, role_key,
-          api_key, api_key_hash, status, location, ip_address,
-          hardware_model, firmware_version, rate_limit_per_min, encryption_method,
-          is_simulated, data_flow_active, metrics, output_definitions,
-          capabilities, expected_interval_seconds, heartbeat_timeout_seconds,
-          last_seen, created_at
-        ) VALUES (
-          'dev_test_01', 'system', NULL,
-          'Kanonik Saha Test Cihazı (ESP32)', 'sensor', 'production_sensor',
-          $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100',
-          'ESP32-WROOM-32D', 'v1.0.0', 300, 'AES-256-GCM',
-          true, true, $3::jsonb, $4::jsonb,
-          $5::jsonb, 10, 60,
-          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          api_key = EXCLUDED.api_key,
-          api_key_hash = EXCLUDED.api_key_hash,
-          status = 'online',
-          ip_address = EXCLUDED.ip_address,
-          metrics = EXCLUDED.metrics,
-          output_definitions = EXCLUDED.output_definitions,
-          last_seen = CURRENT_TIMESTAMP;
-      `, [
-        testApiKey,
-        testApiKeyHash,
-        JSON.stringify(initialMetrics),
-        JSON.stringify(supportedOutputs),
-        JSON.stringify(['telemetry', 'relays', 'pwm', 'ota', 'heartbeat']),
-      ]);
-      counts.devices++;
+      if (isTestOrDev) {
+        const supportedOutputs = [
+          { id: 'relay_1', name: 'Ana Güç Rölesi (Relay 1)', type: 'relay', pin: 18, status: false },
+          { id: 'relay_2', name: 'Soğutma Fanı (Relay 2)', type: 'relay', pin: 19, status: true },
+          { id: 'pwm_1', name: 'Hız Kontrolcü (PWM 1)', type: 'pwm', pin: 21, value: 65 },
+        ];
+        const initialMetrics = {
+          temperature: 24.5,
+          humidity: 52.0,
+          cpu: 34.2,
+          power: 85.4,
+          voltage: 224.8,
+        };
+
+        await client.query(`
+          INSERT INTO devices (
+            id, tenant_id, user_id, name, device_type, role_key,
+            api_key, api_key_hash, status, location, ip_address,
+            hardware_model, firmware_version, rate_limit_per_min, encryption_method,
+            is_simulated, data_flow_active, metrics, output_definitions,
+            capabilities, expected_interval_seconds, heartbeat_timeout_seconds,
+            last_seen, created_at
+          ) VALUES (
+            'dev_test_01', 'system', NULL,
+            'Kanonik Saha Test Cihazı (ESP32)', 'sensor', 'production_sensor',
+            $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100',
+            'ESP32-WROOM-32D', 'v1.0.0', 300, 'AES-256-GCM',
+            true, true, $3::jsonb, $4::jsonb,
+            $5::jsonb, 10, 60,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            api_key = EXCLUDED.api_key,
+            api_key_hash = EXCLUDED.api_key_hash,
+            status = 'online',
+            ip_address = EXCLUDED.ip_address,
+            metrics = EXCLUDED.metrics,
+            output_definitions = EXCLUDED.output_definitions,
+            last_seen = CURRENT_TIMESTAMP;
+        `, [
+          testApiKey,
+          testApiKeyHash,
+          JSON.stringify(initialMetrics),
+          JSON.stringify(supportedOutputs),
+          JSON.stringify(['telemetry', 'relays', 'pwm', 'ota', 'heartbeat']),
+        ]);
+        counts.devices++;
+      }
 
       // 2. DASHBOARD LAYOUTS (dashboard_layouts)
       // Seed default 10-widget dashboard layout for the system (user_id = NULL)
@@ -170,11 +174,13 @@ export class InitialDataSeeder {
       `, [JSON.stringify({ version: APP_VERSION, state: 'INITIALIZED', seededCounts: counts })]);
       counts.systemEvents++;
 
-      // 5. IN-MEMORY DB.DATA CACHE SYNCHRONIZATION
-      try {
-        InitialDataSeeder.syncInMemoryCache(testApiKey, testApiKeyHash);
-      } catch (cacheErr: any) {
-        systemLogger.warn('database', `In-memory cache sync notice: ${cacheErr?.message || cacheErr}`);
+      // 5. IN-MEMORY DB.DATA CACHE SYNCHRONIZATION (dev/test only)
+      if (isTestOrDev) {
+        try {
+          InitialDataSeeder.syncInMemoryCache(testApiKey, testApiKeyHash);
+        } catch (cacheErr: any) {
+          systemLogger.warn('database', `In-memory cache sync notice: ${cacheErr?.message || cacheErr}`);
+        }
       }
 
       systemLogger.info('database', `[InitialDataSeeder] Veritabanı başlangıç şemaları hazırlandı: ${JSON.stringify(counts)}`);
