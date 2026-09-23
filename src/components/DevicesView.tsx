@@ -89,7 +89,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' | 'loading' | 'pending' } | null>(null);
 
   // Hierarchy Data & Filter State with Persistence
   const [sites, setSites] = useState<Site[]>([]);
@@ -862,6 +862,10 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
 
   const handleConfirmDelete = async () => {
     if (!deletingDevice) return;
+    setToast({
+      message: 'Cihaz ve geçmiş verileri arşiv havuzuna taşınıyor...',
+      type: 'loading',
+    });
     try {
       const devName = deletingDevice.name || deletingDevice.id;
       await deleteDevice(deletingDevice.id);
@@ -910,6 +914,10 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const handleConfirmBulkDelete = async () => {
     if (selectedDeviceIds.size === 0) return;
     setIsBulkDeleting(true);
+    setToast({
+      message: `Seçilen ${selectedDeviceIds.size} cihaz ve metrik verileri arşivleniyor...`,
+      type: 'loading',
+    });
     try {
       const idsToDelete = Array.from(selectedDeviceIds);
       const count = idsToDelete.length;
@@ -2128,78 +2136,8 @@ void sendHeartbeat() {
           {/* 3. Selected Device Outputs & Live Terminal */}
           {activeDevice && (
             <div className="space-y-6">
-              {/* Device Health & Tag Summary */}
+              {/* Tags Editor */}
               <div className="bg-white dark:bg-[#0f172a] rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2.5">
-                    {activeDevice.isSimulated ? (
-                      <span className="p-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-500 shrink-0 inline-flex items-center justify-center" title="Sanal Cihaz">
-                        <Bot className="w-5 h-5" />
-                      </span>
-                    ) : (
-                      <span className="p-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 shrink-0 inline-flex items-center justify-center" title="Gerçek Donanım">
-                        <Cpu className="w-5 h-5" />
-                      </span>
-                    )}
-                    <div>
-                      <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                        {activeDevice.name} — Donanım Durumu
-                      </h3>
-                      <p className="text-[10px] text-slate-500">
-                        Hiyerarşik Konum: {sites.find((s) => s.id === activeDevice.siteId)?.name || 'Tesis Tanımsız'} &gt; {zones.find((z) => z.id === activeDevice.zoneId)?.name || 'Bölge Tanımsız'} &gt; {groups.find((g) => g.id === activeDevice.groupId)?.name || 'Grup Tanımsız'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMaintenanceDevice(activeDevice)}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition cursor-pointer ${
-                        activeDevice.maintenanceMode
-                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 animate-pulse'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-amber-500/10 hover:text-amber-400'
-                      }`}
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                      <span>{activeDevice.maintenanceMode ? 'Bakım Modu Aktif' : 'Bakım Modu'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHardwareReplaceDevice(activeDevice)}
-                      className="px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-indigo-500/10 hover:text-indigo-400 transition cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Donanım Değiştir</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Diagnostic Metrics Strip (Health Score removed as requested) */}
-                {selectedHealthSummary && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-500 font-medium block">Veri Taze Mi?</span>
-                      <span className={`text-xs font-mono font-bold ${selectedHealthSummary.isFresh ? 'text-emerald-500' : 'text-amber-500'}`}>
-                        {selectedHealthSummary.isFresh ? '✓ Taze (≤2x Eşik)' : '⚠ Bayat (>2x Eşik)'}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-500 font-medium block">Son Veri Yaşı</span>
-                      <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {selectedHealthSummary.timeSinceLastSeenSeconds !== null ? `${selectedHealthSummary.timeSinceLastSeenSeconds} sn önce` : 'Veri Yok'}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                      <span className="text-[10px] text-slate-500 font-medium block">Saha Donanım Değişimi</span>
-                      <span className="text-xs font-mono font-bold text-indigo-400">
-                        {selectedHealthSummary.replacementCount > 0 ? `${selectedHealthSummary.replacementCount} Kez Değiştirildi` : 'Orijinal Donanım'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Tags Editor */}
                 <DeviceTagsEditor
                   tags={activeDevice.tags || []}
                   onSaveTags={(tags) => handleSaveTags(activeDevice.id, tags)}
@@ -3399,8 +3337,7 @@ void sendHeartbeat() {
       {/* Toast Notification */}
       {toast && (
         <ToastNotification
-          message={toast.message}
-          type={toast.type}
+          toast={toast}
           onClose={() => setToast(null)}
         />
       )}

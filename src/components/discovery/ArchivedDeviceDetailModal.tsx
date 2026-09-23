@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   RotateCcw,
@@ -17,6 +17,9 @@ import {
   Bell,
   Sliders,
   Activity,
+  Database,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import type { ArchivedDevice, TelemetryReading } from '../../types';
 import { apiFetch as fetch } from '../../lib/apiFetch';
@@ -41,11 +44,11 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
   const [isLoadingTelemetry, setIsLoadingTelemetry] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
 
-  const dev = archivedDevice.device;
+  const dev = archivedDevice.device || ({} as any);
   const preserved = archivedDevice.preservedSettings || ({} as any);
-  const stats = archivedDevice.telemetrySnapshot?.stats;
+  const snapshotStats = archivedDevice.telemetrySnapshot?.stats;
 
-  // Fetch decompressed telemetry history on mount or when tab changes
+  // Fetch decompressed telemetry history on mount
   useEffect(() => {
     let isMounted = true;
     const loadDecompressedTelemetry = async () => {
@@ -74,6 +77,38 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
     };
   }, [archivedDevice.id]);
 
+  // Dynamic calculations for real stats
+  const displayPointCount = useMemo(() => {
+    if (telemetryReadings.length > 0) return telemetryReadings.length;
+    return snapshotStats?.originalPointsCount || snapshotStats?.compressedPointsCount || archivedDevice.telemetrySnapshot?.recentReadings?.length || 0;
+  }, [telemetryReadings, snapshotStats, archivedDevice]);
+
+  const calculatedRawBytes = useMemo(() => {
+    if (telemetryReadings.length > 0) {
+      try {
+        return new Blob([JSON.stringify(telemetryReadings)]).size;
+      } catch {
+        return snapshotStats?.rawSizeBytes || 0;
+      }
+    }
+    return snapshotStats?.rawSizeBytes || 0;
+  }, [telemetryReadings, snapshotStats]);
+
+  const compressedStr = archivedDevice.telemetrySnapshot?.compressedData || '';
+  const calculatedCompressedBytes = useMemo(() => {
+    if (compressedStr) {
+      return Math.round((compressedStr.length * 3) / 4);
+    }
+    return snapshotStats?.compressedSizeBytes || 0;
+  }, [compressedStr, snapshotStats]);
+
+  const displaySavingsPercent = useMemo(() => {
+    if (calculatedRawBytes > 0) {
+      return Math.max(0, Math.round(((calculatedRawBytes - calculatedCompressedBytes) / calculatedRawBytes) * 100));
+    }
+    return snapshotStats?.compressionRatioPercent || 0;
+  }, [calculatedRawBytes, calculatedCompressedBytes, snapshotStats]);
+
   const formatBytes = (bytes: number) => {
     if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
@@ -90,6 +125,159 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+  };
+
+  // Helper to extract clean metric map for matrix rows
+  const parseRowMetricsMap = (r: any) => {
+    const timestamp = r.timestamp || r.created_at || r.time;
+    const formattedTime = timestamp ? new Date(timestamp).toLocaleString('tr-TR') : '—';
+    const sourceLabel = r.source === 'simulator' ? 'Simülatör' : r.source === 'manual_test' ? 'Test' : 'Fiziksel Cihaz';
+    const status = r.status || 'normal';
+
+    const metricsMap: Record<string, { value: string; unit?: string }> = {};
+
+    // 1. Single metric format
+    if (r.metric && r.value !== undefined) {
+      metricsMap[String(r.metric)] = {
+        value: typeof r.value === 'number' ? r.value.toFixed(2) : String(r.value),
+        unit: r.unit || '',
+      };
+    }
+
+    // 2. Metrics inside r.metrics object
+    if (r.metrics && typeof r.metrics === 'object') {
+      Object.entries(r.metrics).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && typeof v !== 'object') {
+          metricsMap[k] = {
+            value: typeof v === 'number' ? (v as number).toFixed(2) : String(v),
+          };
+        }
+      });
+    }
+
+    // 3. Known keys directly on root object
+    const knownKeys = ['temperature', 'humidity', 'pressure', 'power', 'voltage', 'rssi', 'battery', 'cpu', 'memory', 'bandwidth', 'current', 'co2', 'flowRate'];
+    knownKeys.forEach((key) => {
+      if (r[key] !== undefined && r[key] !== null && !metricsMap[key]) {
+        const unit = key === 'temperature' ? '°C' : key === 'humidity' ? '%' : key === 'pressure' ? 'hPa' : key === 'power' ? 'W' : key === 'voltage' ? 'V' : key === 'rssi' ? 'dBm' : key === 'battery' ? '%' : '';
+        const val = r[key];
+        metricsMap[key] = {
+          value: typeof val === 'number' ? val.toFixed(1) : String(val),
+          unit,
+        };
+      }
+    });
+
+    return {
+      timestamp: formattedTime,
+      sourceLabel,
+      status,
+      metricsMap,
+      sequence: r.sequence,
+      packetId: r.packetId || r.bootId,
+    };
+  };
+
+  // Group readings by timestamp so metrics arriving at the same second appear on the SAME row
+  const groupedTelemetryRows = useMemo(() => {
+    if (!telemetryReadings || telemetryReadings.length === 0) return [];
+
+    const map = new Map<string, {
+      groupKey: string;
+      rawTime: number;
+      formattedTimestamp: string;
+      sourceLabel: string;
+      status: string;
+      metricsMap: Record<string, { value: string; unit?: string }>;
+      pointCount: number;
+    }>();
+
+    telemetryReadings.forEach((r) => {
+      const rawTs = r.timestamp || r.created_at || r.time;
+      let groupKey: string;
+      let rawTime = 0;
+      let formatted = '—';
+
+      if (rawTs) {
+        const d = new Date(rawTs);
+        if (!isNaN(d.getTime())) {
+          // Normalize to second precision (e.g. 12:20:43) so all metrics sharing that second are grouped together
+          rawTime = Math.floor(d.getTime() / 1000) * 1000;
+          groupKey = `ts_${rawTime}`;
+          formatted = d.toLocaleString('tr-TR');
+        } else {
+          groupKey = `str_${String(rawTs)}`;
+          formatted = String(rawTs);
+        }
+      } else {
+        groupKey = `unknown_${Math.random()}`;
+      }
+
+      const parsed = parseRowMetricsMap(r);
+      const existing = map.get(groupKey);
+
+      if (!existing) {
+        map.set(groupKey, {
+          groupKey,
+          rawTime,
+          formattedTimestamp: formatted,
+          sourceLabel: parsed.sourceLabel,
+          status: parsed.status,
+          metricsMap: { ...parsed.metricsMap },
+          pointCount: 1,
+        });
+      } else {
+        // Merge metric values side by side
+        Object.entries(parsed.metricsMap).forEach(([k, v]) => {
+          existing.metricsMap[k] = v;
+        });
+
+        // Elevate severity if critical/warning
+        if (parsed.status === 'critical') {
+          existing.status = 'critical';
+        } else if (parsed.status === 'warning' && existing.status !== 'critical') {
+          existing.status = 'warning';
+        }
+
+        if (parsed.sourceLabel === 'Fiziksel Cihaz') {
+          existing.sourceLabel = 'Fiziksel Cihaz';
+        }
+        existing.pointCount += 1;
+      }
+    });
+
+    // Sort descending by timestamp (newest records first)
+    return Array.from(map.values()).sort((a, b) => b.rawTime - a.rawTime);
+  }, [telemetryReadings]);
+
+  // Dynamically compute horizontal metric column headers from the grouped rows
+  const uniqueMetricColumns = useMemo(() => {
+    const keysSet = new Set<string>();
+    groupedTelemetryRows.forEach((row) => {
+      Object.keys(row.metricsMap).forEach((k) => keysSet.add(k));
+    });
+    if (keysSet.size === 0) {
+      return ['temperature', 'humidity', 'pressure'];
+    }
+    return Array.from(keysSet);
+  }, [groupedTelemetryRows]);
+
+  // Helper to format metric header labels
+  const formatMetricHeader = (key: string) => {
+    const lower = key.toLowerCase();
+    if (lower === 'temperature' || lower === 'temp') return 'Sıcaklık (°C)';
+    if (lower === 'humidity' || lower === 'hum') return 'Nem (%)';
+    if (lower === 'pressure' || lower === 'press') return 'Basınç (hPa)';
+    if (lower === 'voltage' || lower === 'volt') return 'Voltaj (V)';
+    if (lower === 'power') return 'Güç (W)';
+    if (lower === 'rssi') return 'Sinyal (dBm)';
+    if (lower === 'battery') return 'Batarya (%)';
+    if (lower === 'cpu') return 'CPU (%)';
+    if (lower === 'memory' || lower === 'ram') return 'RAM (%)';
+    if (lower === 'current') return 'Akım (A)';
+    if (lower === 'co2') return 'CO₂ (ppm)';
+    if (lower === 'flowrate') return 'Debi (L/dk)';
+    return key.charAt(0).toUpperCase() + key.slice(1);
   };
 
   return (
@@ -130,38 +318,38 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
           </div>
         </div>
 
-        {/* Compression Summary Banner */}
+        {/* Compression & Storage Banner */}
         <div className="bg-slate-950/60 border-b border-slate-800 px-5 py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 flex-wrap">
             <div>
-              <span className="text-slate-500 block">Sıkıştırma Algoritması:</span>
-              <span className="font-semibold text-cyan-400 uppercase font-mono">{stats?.algorithm || 'gzip-base64'}</span>
+              <span className="text-slate-500 block text-[10px]">Sıkıştırma Algoritması:</span>
+              <span className="font-semibold text-cyan-400 uppercase font-mono">{snapshotStats?.algorithm || 'gzip-base64'}</span>
             </div>
             <div>
-              <span className="text-slate-500 block">Kayıt Sayısı:</span>
-              <span className="font-semibold text-slate-200 font-mono">{stats?.originalPointsCount || telemetryReadings.length} Telemetri Paketi</span>
+              <span className="text-slate-500 block text-[10px]">Saklanan Telemetri Sayısı:</span>
+              <span className="font-semibold text-slate-200 font-mono">{displayPointCount} Paketi</span>
             </div>
             <div>
-              <span className="text-slate-500 block">Ham Boyut:</span>
-              <span className="font-semibold text-slate-200 font-mono">{formatBytes(stats?.rawSizeBytes || 0)}</span>
+              <span className="text-slate-500 block text-[10px]">Ham Boyut:</span>
+              <span className="font-semibold text-slate-200 font-mono">{formatBytes(calculatedRawBytes)}</span>
             </div>
             <div>
-              <span className="text-slate-500 block">Sıkıştırılmış Boyut:</span>
-              <span className="font-semibold text-emerald-400 font-mono">{formatBytes(stats?.compressedSizeBytes || 0)}</span>
+              <span className="text-slate-500 block text-[10px]">Sıkıştırılmış Boyut:</span>
+              <span className="font-semibold text-emerald-400 font-mono">{formatBytes(calculatedCompressedBytes)}</span>
             </div>
             <div>
-              <span className="text-slate-500 block">Depolama Kazancı:</span>
+              <span className="text-slate-500 block text-[10px]">Depolama Tasarrufu:</span>
               <span className="inline-flex items-center gap-1 font-bold text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                %{stats?.compressionRatioPercent || 0} Tasarruf
+                %{displaySavingsPercent} Tasarruf
               </span>
             </div>
           </div>
-          <div className="text-slate-400">
+          <div className="text-slate-400 text-[11px]">
             Silinme Tarihi: <span className="font-mono text-slate-300">{new Date(archivedDevice.deletedAt).toLocaleString('tr-TR')}</span>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Navigation Sub-Tabs */}
         <div className="flex items-center gap-2 border-b border-slate-800 px-5 pt-3 bg-slate-900/50">
           <button
             type="button"
@@ -185,7 +373,7 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Geçmiş Telemetri Kayıtları ({telemetryReadings.length})</span>
+            <span>Geçmiş Telemetri Kayıtları ({groupedTelemetryRows.length > 0 ? groupedTelemetryRows.length : displayPointCount})</span>
           </button>
           <button
             type="button"
@@ -201,7 +389,7 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
           </button>
         </div>
 
-        {/* Content Body */}
+        {/* Modal Content Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
           {activeSubTab === 'settings' && (
             <div className="space-y-4">
@@ -300,7 +488,7 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
                     <Layers className="w-4 h-4" /> Tanımlı Çıkışlar & Röle Kanalları ({dev.outputDefinitions.length})
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {dev.outputDefinitions.map((out, idx) => (
+                    {dev.outputDefinitions.map((out: any, idx: number) => (
                       <div key={idx} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 flex items-center justify-between">
                         <div>
                           <span className="font-medium text-slate-200 block">{out.label || out.name}</span>
@@ -391,50 +579,95 @@ export const ArchivedDeviceDetailModal: React.FC<ArchivedDeviceDetailModalProps>
           {activeSubTab === 'telemetry' && (
             <div className="space-y-3">
               {isLoadingTelemetry ? (
-                <div className="p-8 text-center text-slate-400 text-xs animate-pulse">
-                  Sıkıştırılmış telemetri arşivi çözülüyor (Gzip decompression)...
+                <div className="p-8 text-center text-slate-400 text-xs animate-pulse flex flex-col items-center gap-2">
+                  <Database className="w-6 h-6 text-cyan-400 animate-spin" />
+                  <span>Sıkıştırılmış telemetri arşivi çözülüyor (GZIP Decompression)...</span>
                 </div>
               ) : telemetryError ? (
                 <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4" /> {telemetryError}
                 </div>
               ) : telemetryReadings.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs">
+                <div className="p-8 text-center text-slate-500 text-xs bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
                   Bu cihaza ait arşivlenmiş telemetri kaydı bulunmuyor.
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span>Çözülen Telemetri Paketleri ({telemetryReadings.length})</span>
-                    <span className="text-[11px] text-emerald-400 font-mono">100% Veri Bütünlüğü Doğrulandı</span>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 font-mono">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="text-slate-200 font-semibold">
+                        {groupedTelemetryRows.length} Zaman Damgası Satırı ({telemetryReadings.length} Telemetri Paketi Eşlendi)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-cyan-400 font-mono bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20">
+                        Zaman Senkronize Gruplama (Yan Yana)
+                      </span>
+                      <span className="text-[11px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        %100 Kayıpsız Bütünlük
+                      </span>
+                    </div>
                   </div>
+
                   <div className="overflow-x-auto border border-slate-800 rounded-xl max-h-96">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-950 text-slate-400 font-medium border-b border-slate-800">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-950 text-slate-300 font-semibold border-b border-slate-800 sticky top-0 z-10">
                         <tr>
-                          <th className="py-2 px-3">Zaman Damgası</th>
-                          <th className="py-2 px-3">Sıcaklık (°C)</th>
-                          <th className="py-2 px-3">Nem (%)</th>
-                          <th className="py-2 px-3">Basınç (hPa)</th>
-                          <th className="py-2 px-3">Güç (W)</th>
-                          <th className="py-2 px-3">Voltaj (V)</th>
-                          <th className="py-2 px-3">RSSI</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap bg-slate-950 min-w-[150px]">
+                            Zaman Damgası
+                          </th>
+                          {uniqueMetricColumns.map((colKey) => (
+                            <th key={colKey} className="py-2.5 px-3 whitespace-nowrap bg-slate-950 font-mono text-cyan-400 text-center">
+                              {formatMetricHeader(colKey)}
+                            </th>
+                          ))}
+                          <th className="py-2.5 px-3 whitespace-nowrap bg-slate-950 min-w-[100px] text-center">
+                            Kaynak
+                          </th>
+                          <th className="py-2.5 px-3 whitespace-nowrap bg-slate-950 min-w-[80px] text-center">
+                            Durum
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
-                        {telemetryReadings.map((r, idx) => (
-                          <tr key={`tel_detail_${r.timestamp || 'ts'}_${idx}`} className="hover:bg-slate-800/40 text-slate-300">
-                            <td className="py-2 px-3 text-slate-400">
-                              {r.timestamp ? new Date(r.timestamp).toLocaleString('tr-TR') : '—'}
-                            </td>
-                            <td className="py-2 px-3">{r.temperature !== undefined ? `${r.temperature.toFixed(1)} °C` : '—'}</td>
-                            <td className="py-2 px-3">{r.humidity !== undefined ? `${r.humidity.toFixed(1)} %` : '—'}</td>
-                            <td className="py-2 px-3">{r.pressure !== undefined ? `${r.pressure.toFixed(0)} hPa` : '—'}</td>
-                            <td className="py-2 px-3">{r.power !== undefined ? `${r.power.toFixed(1)} W` : '—'}</td>
-                            <td className="py-2 px-3">{r.voltage !== undefined ? `${r.voltage.toFixed(1)} V` : '—'}</td>
-                            <td className="py-2 px-3">{r.rssi !== undefined ? `${r.rssi} dBm` : '—'}</td>
-                          </tr>
-                        ))}
+                        {groupedTelemetryRows.map((row) => {
+                          return (
+                            <tr key={row.groupKey} className="hover:bg-slate-800/40 text-slate-300">
+                              <td className="py-2 px-3 text-slate-300 font-medium whitespace-nowrap">
+                                {row.formattedTimestamp}
+                              </td>
+                              {uniqueMetricColumns.map((colKey) => {
+                                const metricObj = row.metricsMap[colKey];
+                                return (
+                                  <td key={colKey} className="py-2 px-3 text-center font-semibold">
+                                    {metricObj ? (
+                                      <span className="text-emerald-300 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
+                                        {metricObj.value} {metricObj.unit || ''}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600 font-normal">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-2 px-3 text-center text-slate-400 text-[10px]">
+                                <span className="px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">
+                                  {row.sourceLabel}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-semibold ${
+                                  row.status === 'critical' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                                  row.status === 'warning' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                  'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  {row.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -86,7 +86,7 @@ function DashboardContent() {
   const tabTitles: Record<string, string> = {
     dashboard: 'Canlı İzleme Dashboard',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
-    device_health: 'Cihaz Sağlığı & Metrikleri',
+    device_health: 'Cihaz Sağlığı ve Bakım',
     firmware_ota: 'Firmware & OTA Yönetimi',
     network_discovery: 'Cihaz Keşfi ve Eşleştirme',
     customers: 'Müşteri Yönetimi & Hesaplar',

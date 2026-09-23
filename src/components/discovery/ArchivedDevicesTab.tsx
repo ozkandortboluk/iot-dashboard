@@ -44,7 +44,7 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Toast notification state
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' | 'loading' | 'pending' } | null>(null);
 
   // Bulk Delete Modal state
   const [deleteModalState, setDeleteModalState] = useState<{
@@ -153,6 +153,10 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
   // Single Restore
   const handleRestore = async (deviceId: string) => {
     setRestoringId(deviceId);
+    setToast({
+      message: 'Cihaz ve geçmiş telemetri verileri sisteme geri yükleniyor...',
+      type: 'loading',
+    });
     try {
       const res = await fetch(`/api/network/archived/${deviceId}/restore`, {
         method: 'POST',
@@ -191,6 +195,10 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
   const handleBulkRestore = async () => {
     if (selectedIds.size === 0) return;
     setIsBulkRestoring(true);
+    setToast({
+      message: `Seçilen ${selectedIds.size} cihaz ve geçmiş telemetrileri geri yükleniyor...`,
+      type: 'loading',
+    });
     try {
       const ids = Array.from(selectedIds);
       const res = await fetch('/api/network/archived/bulk-restore', {
@@ -258,6 +266,10 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
   // Confirmed Delete execution via BulkDeleteModal
   const handleConfirmModalDelete = async () => {
     setDeleteModalState((prev) => ({ ...prev, isProcessing: true }));
+    setToast({
+      message: 'Kalıcı silme işlemi gerçekleştiriliyor...',
+      type: 'loading',
+    });
     try {
       if (deleteModalState.mode === 'single' && deleteModalState.targetId) {
         const id = deleteModalState.targetId;
@@ -356,8 +368,7 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
       {/* Toast Notification */}
       {toast && (
         <ToastNotification
-          message={toast.message}
-          type={toast.type}
+          toast={toast}
           onClose={() => setToast(null)}
         />
       )}
@@ -633,7 +644,7 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
                       <Database className="w-3.5 h-3.5 text-cyan-400" />
                       <div>
                         <span className="text-slate-300 font-medium">
-                          {stats?.originalPointsCount || 0} Telemetri Paketi
+                          {stats?.originalPointsCount || stats?.compressedPointsCount || archived.telemetrySnapshot?.recentReadings?.length || 0} Telemetri Paketi
                         </span>
                         <span className="text-[10px] text-slate-500 block font-mono">
                           {formatBytes(stats?.rawSizeBytes || 0)} → {formatBytes(stats?.compressedSizeBytes || 0)}
@@ -753,7 +764,7 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap font-mono text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-300">{stats?.originalPointsCount || 0} Pkt</span>
+                          <span className="text-slate-300">{stats?.originalPointsCount || stats?.compressedPointsCount || archived.telemetrySnapshot?.recentReadings?.length || 0} Pkt</span>
                           <span className="text-slate-400 text-[10px]">
                             {formatBytes(stats?.rawSizeBytes || 0)} → {formatBytes(stats?.compressedSizeBytes || 0)}
                           </span>

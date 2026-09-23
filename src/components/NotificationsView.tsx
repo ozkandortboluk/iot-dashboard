@@ -85,7 +85,7 @@ export const NotificationsView: React.FC = () => {
 
   // Status & Feedback Messages
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' | 'loading' | 'pending' } | null>(null);
 
   const showNotificationMsg = (msg: string, isError = false) => {
     setToast({

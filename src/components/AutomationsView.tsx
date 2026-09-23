@@ -24,6 +24,7 @@ import {
 import type { Device, Automation } from '../types';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { useRealtime } from '../context/RealtimeContext';
+import { ToastNotification } from './common/ToastNotification';
 
 // In-memory module cache for 0ms instant tab switching
 let inMemoryAutomationsCache: Automation[] | null = null;
@@ -54,7 +55,7 @@ export const AutomationsView: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(() => !inMemoryAutomationsCache || inMemoryAutomationsCache.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' | 'loading' | 'pending' } | null>(null);
 
   // Search and Filter state
   const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('nexus_automations_search') || '');
@@ -93,14 +94,6 @@ export const AutomationsView: React.FC = () => {
     actionDeviceId: '',
     actionCommandPayload: '{\n  "relay_1": 1\n}',
   });
-
-  // Automatically hide toast after 3 seconds
-  useEffect(() => {
-    if (successToast) {
-      const timer = setTimeout(() => setSuccessToast(null), 3500);
-      return () => clearTimeout(timer);
-    }
-  }, [successToast]);
 
   // Fetch automations in background with fast SWR pattern
   const fetchAutomations = async (showRefreshSpinner = false) => {
@@ -148,13 +141,19 @@ export const AutomationsView: React.FC = () => {
         body: JSON.stringify({ enabled: newStatus }),
       });
       if (!res.ok) throw new Error('Güncelleme başarısız');
-      setSuccessToast(`"${auto.name}" ${newStatus ? 'etkinleştirildi' : 'devre dışı bırakıldı'}.`);
+      setToast({
+        message: `"${auto.name}" ${newStatus ? 'etkinleştirildi' : 'devre dışı bırakıldı'}.`,
+        type: 'success',
+      });
     } catch {
       // Revert on error
       setAutomations((prev) =>
         prev.map((item) => (item.id === auto.id ? { ...item, enabled: auto.enabled } : item))
       );
-      setError('Senaryo durumu güncellenemedi.');
+      setToast({
+        message: 'Senaryo durumu güncellenemedi.',
+        type: 'error',
+      });
     }
   };
 
@@ -162,12 +161,19 @@ export const AutomationsView: React.FC = () => {
   const handleTestTrigger = async (auto: Automation, e: React.MouseEvent) => {
     e.stopPropagation();
     setTestingId(auto.id);
+    setToast({
+      message: `"${auto.name}" senaryosu tetikleniyor ve komut sinyali iletiliyor...`,
+      type: 'loading',
+    });
     try {
       const res = await fetch(`/api/automations/${auto.id}/trigger`, {
         method: 'POST',
       });
       if (res.ok) {
-        setSuccessToast(`"${auto.name}" senaryosu başarıyla tetiklendi! Komut cihaza iletildi.`);
+        setToast({
+          message: `"${auto.name}" senaryosu başarıyla tetiklendi! Komut cihaza iletildi.`,
+          type: 'success',
+        });
         // Update lastTriggered optimistically
         setAutomations((prev) =>
           prev.map((item) =>
@@ -179,7 +185,10 @@ export const AutomationsView: React.FC = () => {
         throw new Error(errData.error || 'Tetikleme başarısız oldu');
       }
     } catch (e: any) {
-      setError(e.message || 'Manuel tetikleme sırasında hata oluştu.');
+      setToast({
+        message: e.message || 'Manuel tetikleme sırasında hata oluştu.',
+        type: 'error',
+      });
     } finally {
       setTestingId(null);
     }
@@ -189,6 +198,10 @@ export const AutomationsView: React.FC = () => {
     e.preventDefault();
     setError(null);
     setIsSaving(true);
+    setToast({
+      message: editingId ? 'Senaryo güncelleniyor...' : 'Yeni senaryo oluşturuluyor...',
+      type: 'loading',
+    });
     try {
       let parsedPayload = {};
       try {
@@ -228,9 +241,16 @@ export const AutomationsView: React.FC = () => {
 
       setIsFormOpen(false);
       setEditingId(null);
-      setSuccessToast(editingId ? 'Senaryo başarıyla güncellendi.' : 'Yeni senaryo başarıyla oluşturuldu.');
+      setToast({
+        message: editingId ? 'Senaryo başarıyla güncellendi.' : 'Yeni senaryo başarıyla oluşturuldu.',
+        type: 'success',
+      });
       fetchAutomations();
     } catch (e: any) {
+      setToast({
+        message: e.message || 'Otomasyon kaydedilemedi.',
+        type: 'error',
+      });
       setError(e.message);
     } finally {
       setIsSaving(false);
@@ -239,16 +259,27 @@ export const AutomationsView: React.FC = () => {
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`"${name}" adlı otomasyon senaryosunu silmek istediğinize emin misiniz?`)) return;
+    setToast({
+      message: `"${name}" senaryosu siliniyor...`,
+      type: 'loading',
+    });
     try {
       // Optimistic delete
       setAutomations((prev) => prev.filter((a) => a.id !== id));
-      await fetch(`/api/automations/${id}`, {
+      const res = await fetch(`/api/automations/${id}`, {
         method: 'DELETE',
       });
-      setSuccessToast(`"${name}" senaryosu silindi.`);
+      if (!res.ok) throw new Error('Silme işlemi başarısız oldu.');
+      setToast({
+        message: `"${name}" senaryosu başarıyla silindi.`,
+        type: 'success',
+      });
       fetchAutomations();
     } catch (e: any) {
-      setError('Silme işlemi sırasında hata oluştu.');
+      setToast({
+        message: e.message || 'Silme işlemi sırasında hata oluştu.',
+        type: 'error',
+      });
       fetchAutomations();
     }
   };
@@ -318,14 +349,11 @@ export const AutomationsView: React.FC = () => {
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* Toast Notification */}
-      {successToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-bounce">
-          <CheckCircle2 className="w-5 h-5 text-emerald-200" />
-          <span className="text-sm font-semibold">{successToast}</span>
-          <button onClick={() => setSuccessToast(null)} className="ml-2 hover:opacity-80">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+      {toast && (
+        <ToastNotification
+          toast={toast}
+          onClose={() => setToast(null)}
+        />
       )}
 
       {/* Header Section */}

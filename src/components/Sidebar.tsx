@@ -63,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'device_health',
-      label: 'Cihaz Sağlığı',
+      label: 'Cihaz Sağlığı ve Bakım',
       icon: ShieldCheck,
     },
     {
@@ -109,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'device_health',
-          label: 'Cihaz Sağlığı',
+          label: 'Cihaz Sağlığı ve Bakım',
           icon: ShieldCheck,
         },
         {
@@ -177,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'device_health',
-          label: 'Cihaz Sağlığı',
+          label: 'Cihaz Sağlığı ve Bakım',
           icon: ShieldCheck,
         },
         {
@@ -235,7 +235,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           id: 'device_health',
-          label: 'Cihaz Sağlığı',
+          label: 'Cihaz Sağlığı ve Bakım',
           icon: ShieldCheck,
         },
         {
