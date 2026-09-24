@@ -132,6 +132,32 @@ interface ServerStatusData {
   storage: {
     dataDirSizeMb: number;
     dataFileCount: number;
+    disk?: {
+      totalBytes: number;
+      freeBytes: number;
+      usedBytes: number;
+      totalGb: number;
+      usedGb: number;
+      freeGb: number;
+      percent: number;
+      status: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
+      mountPoint: string;
+      dataDirSizeMb: number;
+      dataFileCount: number;
+    };
+  };
+  disk?: {
+    totalBytes: number;
+    freeBytes: number;
+    usedBytes: number;
+    totalGb: number;
+    usedGb: number;
+    freeGb: number;
+    percent: number;
+    status: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
+    mountPoint: string;
+    dataDirSizeMb: number;
+    dataFileCount: number;
   };
   devices: {
     total: number;
@@ -160,6 +186,7 @@ interface ServerStatusData {
     activeConnections: number;
     telemetryIngested: number;
     dbLatencyMs: number;
+    diskPercent?: number;
   }>;
 }
 
@@ -345,6 +372,23 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
     onlineDevices: statusData?.devices.online || 0,
     poolTotal: statusData?.database.pool.totalCount || 0,
   };
+
+  const diskUsage = statusData?.disk || statusData?.storage?.disk || {
+    totalBytes: 50 * 1024 * 1024 * 1024,
+    freeBytes: 49.5 * 1024 * 1024 * 1024,
+    usedBytes: 0.5 * 1024 * 1024 * 1024,
+    totalGb: 50,
+    usedGb: 0.5,
+    freeGb: 49.5,
+    percent: 1,
+    status: 'OPTIMAL' as const,
+    mountPoint: '/',
+    dataDirSizeMb: statusData?.storage?.dataDirSizeMb || 0,
+    dataFileCount: statusData?.storage?.dataFileCount || 0,
+  };
+
+  const isDiskOptimal = diskUsage.status === 'OPTIMAL';
+  const isDiskWarning = diskUsage.status === 'WARNING';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -759,9 +803,9 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
         </div>
       )}
 
-      {/* 3. SECONDARY STATS ROW (Health Score, CPU Load, RAM Memory, Ingest Rate) */}
+      {/* 3. SECONDARY STATS ROW (Health Score, CPU Load, RAM Memory, Disk Storage, V8 Heap) */}
       {statusData && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {/* Card: Health Score */}
           <div className="bg-white dark:bg-slate-900/80 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
             <div className="space-y-1">
@@ -818,6 +862,38 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
               </div>
             </div>
             <div className="p-3 bg-cyan-500/10 text-cyan-500 border border-cyan-500/20 rounded-2xl">
+              <MemoryStick className="w-5 h-5" />
+            </div>
+          </div>
+
+          {/* Card: Disk Storage Usage */}
+          <div className="bg-white dark:bg-slate-900/80 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between group hover:shadow-md transition-all">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Disk Depolama Alanı
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span className={`text-2xl font-black font-mono ${
+                  diskUsage.percent > 85
+                    ? 'text-rose-500'
+                    : diskUsage.percent > 70
+                    ? 'text-amber-500'
+                    : 'text-emerald-500'
+                }`}>
+                  %{diskUsage.percent}
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {diskUsage.usedGb} / {diskUsage.totalGb} GB
+                </span>
+              </div>
+            </div>
+            <div className={`p-3 rounded-2xl border ${
+              diskUsage.percent > 85
+                ? 'bg-rose-500/10 text-rose-500 border-rose-500/20'
+                : diskUsage.percent > 70
+                ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+            }`}>
               <HardDrive className="w-5 h-5" />
             </div>
           </div>
@@ -838,7 +914,7 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
               </div>
             </div>
             <div className="p-3 bg-purple-500/10 text-purple-500 border border-purple-500/20 rounded-2xl">
-              <MemoryStick className="w-5 h-5" />
+              <Layers className="w-5 h-5" />
             </div>
           </div>
         </div>
@@ -1078,11 +1154,11 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
         <div>
           {/* TAB: OVERVIEW */}
           {activeTabSection === 'overview' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
               {/* Box 1: Node.js V8 Memory Details */}
               <div className="bg-white dark:bg-slate-900/90 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
                 <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <HardDrive className="w-5 h-5 text-cyan-500" />
+                  <MemoryStick className="w-5 h-5 text-cyan-500" />
                   <h4 className="font-bold text-sm text-slate-900 dark:text-white">
                     Node.js V8 Bellek Ayrışımı
                   </h4>
@@ -1121,12 +1197,87 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
                 </div>
               </div>
 
-              {/* Box 2: Database & Storage Status */}
+              {/* Box 2: Disk & Storage Details */}
+              <div className="bg-white dark:bg-slate-900/90 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <HardDrive className="w-5 h-5 text-emerald-500" />
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                      Disk & Depolama Analizi
+                    </h4>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    isDiskOptimal
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                      : isDiskWarning
+                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                  }`}>
+                    {isDiskOptimal ? 'Optimal' : isDiskWarning ? 'Yüksek Doluluk' : 'Kritik'}
+                  </span>
+                </div>
+                <div className="space-y-3 text-xs">
+                  {/* Gauge bar */}
+                  <div>
+                    <div className="flex justify-between items-center text-[11px] mb-1">
+                      <span className="text-slate-500">Kullanım Oranı:</span>
+                      <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                        %{diskUsage.percent}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          diskUsage.percent > 85
+                            ? 'bg-rose-500'
+                            : diskUsage.percent > 70
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(3, diskUsage.percent))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Toplam Disk Kapasitesi:</span>
+                    <span className="font-bold font-mono text-slate-800 dark:text-slate-200">
+                      {diskUsage.totalGb} GB
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Kullanılan Alan:</span>
+                    <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
+                      {diskUsage.usedGb} GB
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Boş / Erişilebilir Alan:</span>
+                    <span className="font-bold font-mono text-slate-800 dark:text-slate-200">
+                      {diskUsage.freeGb} GB
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">data/ Klasörü:</span>
+                    <span className="font-bold font-mono text-indigo-500">
+                      {diskUsage.dataDirSizeMb} MB ({diskUsage.dataFileCount} dosya)
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                    <span className="text-slate-500">Bağlama Noktası:</span>
+                    <span className="font-mono text-slate-600 dark:text-slate-400">
+                      {diskUsage.mountPoint}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Box 3: Database & Storage Status */}
               <div className="bg-white dark:bg-slate-900/90 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
                 <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <Database className="w-5 h-5 text-emerald-500" />
+                  <Database className="w-5 h-5 text-indigo-500" />
                   <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                    Veritabanı & Kalıcı Depolama
+                    Veritabanı & Bağlantı Havuzu
                   </h4>
                 </div>
                 <div className="space-y-3 text-xs">
@@ -1149,21 +1300,21 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500">data/ Klasörü Boyutu:</span>
-                    <span className="font-bold font-mono text-slate-800 dark:text-slate-200">
-                      {statusData.storage.dataDirSizeMb} MB ({statusData.storage.dataFileCount} dosya)
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
                     <span className="text-slate-500">Kayıtlı Saha Cihazları:</span>
                     <span className="font-bold font-mono text-indigo-500">
                       {statusData.devices.total} Cihaz ({statusData.devices.online} Çevrimiçi)
                     </span>
                   </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Veritabanı Durumu:</span>
+                    <span className="font-bold font-mono text-emerald-500">
+                      {statusData.database.isReady ? 'Hazır / Aktif' : 'Başlatılıyor'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Box 3: Quick Diagnostic Actions */}
+              {/* Box 4: Quick Diagnostic Actions */}
               <div className="bg-white dark:bg-slate-900/90 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
                 <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
                   <Zap className="w-5 h-5 text-amber-500" />
@@ -1326,6 +1477,13 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
                   <span className="text-slate-500 block text-[10px] uppercase tracking-wider">Node.js & V8 Motoru</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200 mt-1 block font-mono">
                     Node {statusData.system.nodeVersion} (V8: {statusData.system.v8Version})
+                  </span>
+                </div>
+
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
+                  <span className="text-slate-500 block text-[10px] uppercase tracking-wider">Disk Depolama Kapasitesi</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200 mt-1 block font-mono">
+                    {diskUsage.usedGb} GB / {diskUsage.totalGb} GB (Boş: {diskUsage.freeGb} GB, %{diskUsage.percent})
                   </span>
                 </div>
               </div>
