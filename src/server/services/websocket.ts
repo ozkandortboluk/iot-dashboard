@@ -548,7 +548,7 @@ export function initWebSocketServer(server: http.Server) {
     broadcast(event, payload);
   });
 
-  // Periodic device status checker
+  // Centralized periodic device watchdog status checker (Fixed 10s cadence, independent of UI/API queries)
   setInterval(async () => {
     try {
       const statusChanged = await db.checkDeviceStatuses();
@@ -561,7 +561,7 @@ export function initWebSocketServer(server: http.Server) {
     } catch (err: any) {
       console.error('[WebSocket DB Error]:', err?.message || err);
     }
-  }, 3000);
+  }, 10000);
 
   // Setup server-level HTTP upgrade routing
   server.on('upgrade', (request, socket, head) => {

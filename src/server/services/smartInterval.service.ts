@@ -231,20 +231,39 @@ export class SmartIntervalService {
     const offlineTimeoutMs = timeouts.offlineTimeoutSeconds * 1000;
     const warningTimeoutMs = timeouts.warningTimeoutSeconds * 1000;
 
-    // 3. Cihaz henüz hiç sinyal göndermemişse (yeni cihaz / ilk kurulum)
-    const latestLivenessMs = getLatestLivenessTimestamp(dev);
-    if (latestLivenessMs === 0) {
-      const isRecentlyCreated = !dev.recentIntervals || dev.recentIntervals.length === 0;
-      // İlk 3 dakika boyunca kurulum toleransı tanı
-      if (isRecentlyCreated && dev.status === 'online') {
+    // 3. Cihaz henüz hiç gerçek sinyal göndermemişse (yeni cihaz / ilk kurulum)
+    const hasReceivedAnySignal = Boolean(dev.lastTelemetryAt || dev.lastHeartbeatAt || dev.lastMessageAt || (dev.recentIntervals && dev.recentIntervals.length > 0));
+    const createdAtMs = dev.createdAt ? new Date(dev.createdAt).getTime() : 0;
+    const isCreatedAtValid = !isNaN(createdAtMs) && createdAtMs > 0;
+    const elapsedSinceCreationMs = isCreatedAtValid ? Math.max(0, nowMs - createdAtMs) : Infinity;
+
+    if (!hasReceivedAnySignal) {
+      if (elapsedSinceCreationMs < SmartIntervalService.CREATION_GRACE_PERIOD_MS) {
+        const remainingGraceSec = Math.round((SmartIntervalService.CREATION_GRACE_PERIOD_MS - elapsedSinceCreationMs) / 1000);
         return {
-          newStatus: dev.status,
+          newStatus: dev.status || 'online',
           changed: false,
-          reason: 'Yeni cihaz ilk bağlantı toleransı aktif',
+          reason: `Yeni cihaz ilk kurulum ve bağlantı toleransı aktif (${remainingGraceSec} sn kaldı)`,
           timeoutSeconds: timeouts.offlineTimeoutSeconds,
+          isConfirmedOffline: false,
         };
       }
 
+      // 3 dakikalık kurulum süresi aşıldı ve hala sinyal yok
+      const changed = dev.status !== 'offline';
+      dev.status = 'offline';
+      return {
+        newStatus: 'offline',
+        changed,
+        reason: 'Yeni cihaz ilk kurulum süresi (3 dk) içinde sinyal veya veri iletmedi',
+        timeoutSeconds: timeouts.offlineTimeoutSeconds,
+        isConfirmedOffline: true,
+      };
+    }
+
+    // 4. Son sinyalden bu yana geçen süreyi kontrol et (En güncel zaman: telemetry, heartbeat, message veya lastSeen)
+    const latestLivenessMs = getLatestLivenessTimestamp(dev);
+    if (latestLivenessMs === 0) {
       const changed = dev.status !== 'offline';
       dev.status = 'offline';
       return {
@@ -256,7 +275,6 @@ export class SmartIntervalService {
       };
     }
 
-    // 4. Son sinyalden bu yana geçen süreyi kontrol et (En güncel zaman: telemetry, heartbeat, message veya lastSeen)
     const elapsedMs = Math.max(0, nowMs - latestLivenessMs);
     const graceBufferSeconds = Math.max(5, Math.min(20, Math.round(timeouts.offlineTimeoutSeconds * 0.25)));
     const confirmedOfflineThresholdMs = (timeouts.offlineTimeoutSeconds + graceBufferSeconds) * 1000;
@@ -264,7 +282,8 @@ export class SmartIntervalService {
 
     if (elapsedMs > offlineTimeoutMs) {
       dev.consecutiveMissedTicks = (dev.consecutiveMissedTicks || 0) + 1;
-      const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs || dev.consecutiveMissedTicks >= 3;
+      // Güvenilir zaman toleransı: API çağrı sıklığından bağımsız, doğrudan zaman bazlı confirmedOfflineThresholdMs
+      const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs;
 
       const changed = dev.status !== 'offline';
       dev.status = 'offline';
@@ -305,6 +324,46 @@ export class SmartIntervalService {
         elapsedSeconds,
       };
     }
+  }
+
+  /**
+   * Cihazın bağlantı durumundan bağımsız olarak telemetri (ölçüm) verisinin bayatlayıp bayatlamadığını kontrol eder.
+   * Cihaz WebSocket veya Ping ile çevrimiçi kalıyor olabilir ancak sensör telemetrisi durmuş olabilir (NO_DATA).
+   */
+  public isDeviceTelemetryStale(dev: Partial<Device>, nowMs: number = Date.now()): {
+    isStale: boolean;
+    elapsedSeconds: number;
+    staleThresholdSeconds: number;
+    lastTelemetryAt?: string;
+  } {
+    const timeouts = this.calculateDeviceTimeouts(dev);
+    const staleThresholdSeconds = timeouts.offlineTimeoutSeconds;
+    if (!dev.lastTelemetryAt) {
+      return {
+        isStale: false,
+        elapsedSeconds: 0,
+        staleThresholdSeconds,
+        lastTelemetryAt: undefined,
+      };
+    }
+
+    const lastTelemetryMs = new Date(dev.lastTelemetryAt).getTime();
+    if (isNaN(lastTelemetryMs) || lastTelemetryMs <= 0) {
+      return {
+        isStale: false,
+        elapsedSeconds: 0,
+        staleThresholdSeconds,
+        lastTelemetryAt: undefined,
+      };
+    }
+
+    const elapsedSeconds = Math.max(0, Math.round((nowMs - lastTelemetryMs) / 1000));
+    return {
+      isStale: elapsedSeconds > staleThresholdSeconds,
+      elapsedSeconds,
+      staleThresholdSeconds,
+      lastTelemetryAt: dev.lastTelemetryAt,
+    };
   }
 
   /**

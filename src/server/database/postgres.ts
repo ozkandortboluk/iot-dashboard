@@ -556,6 +556,8 @@ export class PostgresRepository {
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(256);
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
           UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
           UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;
@@ -1230,6 +1232,7 @@ export class PostgresRepository {
       lastTelemetryAt: r.last_telemetry_at ? new Date(r.last_telemetry_at).toISOString() : undefined,
       lastHeartbeatAt: r.last_heartbeat_at ? new Date(r.last_heartbeat_at).toISOString() : undefined,
       lastOfflineNotifiedAt: r.last_offline_notified_at ? new Date(r.last_offline_notified_at).toISOString() : undefined,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : undefined,
       outputDefinitions: Array.isArray(r.output_definitions) ? r.output_definitions : (typeof r.output_definitions === 'string' ? JSON.parse(r.output_definitions) : undefined),
       capabilities: Array.isArray(r.capabilities) ? r.capabilities : (typeof r.capabilities === 'string' ? JSON.parse(r.capabilities) : undefined),
     };
@@ -1858,8 +1861,8 @@ export class PostgresRepository {
       INSERT INTO notifications (
         id, user_id, tenant_id, type, title, message, severity, device_id, device_name,
         is_read, alarm_id, rule_id, alarm_state, acknowledged,
-        acknowledged_at, acknowledged_by, repeat_count, current_value, threshold_value, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        acknowledged_at, acknowledged_by, repeat_count, current_value, threshold_value, event_key, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       ON CONFLICT (id) DO UPDATE SET
         tenant_id = EXCLUDED.tenant_id,
         user_id = EXCLUDED.user_id,
@@ -1872,30 +1875,40 @@ export class PostgresRepository {
         acknowledged = EXCLUDED.acknowledged,
         acknowledged_at = EXCLUDED.acknowledged_at,
         acknowledged_by = EXCLUDED.acknowledged_by,
-        repeat_count = EXCLUDED.repeat_count;
+        repeat_count = EXCLUDED.repeat_count,
+        event_key = COALESCE(EXCLUDED.event_key, notifications.event_key);
     `;
-    await this.query(sql, [
-      n.id,
-      tenantId,
-      tenantId,
-      (n as any).type || 'alert',
-      n.title,
-      n.message,
-      n.severity || 'info',
-      n.deviceId || null,
-      n.deviceName || null,
-      Boolean(n.read),
-      n.alarmId || null,
-      n.ruleId || null,
-      n.alarmState || null,
-      Boolean(n.acknowledged),
-      n.acknowledgedAt || null,
-      n.acknowledgedBy || null,
-      n.repeatCount || 0,
-      n.currentValue ?? null,
-      n.thresholdValue ?? null,
-      n.timestamp || new Date().toISOString(),
-    ]);
+    try {
+      await this.query(sql, [
+        n.id,
+        tenantId,
+        tenantId,
+        (n as any).type || 'alert',
+        n.title,
+        n.message,
+        n.severity || 'info',
+        n.deviceId || null,
+        n.deviceName || null,
+        Boolean(n.read),
+        n.alarmId || null,
+        n.ruleId || null,
+        n.alarmState || null,
+        Boolean(n.acknowledged),
+        n.acknowledgedAt || null,
+        n.acknowledgedBy || null,
+        n.repeatCount || 0,
+        n.currentValue ?? null,
+        n.thresholdValue ?? null,
+        n.eventKey || null,
+        n.timestamp || new Date().toISOString(),
+      ]);
+    } catch (err: any) {
+      if (err?.code === '23505' && n.eventKey) {
+        // Unique constraint violation on event_key across cluster instances: safely ignore duplicate insert
+        return;
+      }
+      throw err;
+    }
   }
 
   public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<void> {
@@ -3775,6 +3788,7 @@ export class PostgresRepository {
         repeatCount: r.repeat_count || 0,
         currentValue: r.current_value,
         thresholdValue: r.threshold_value,
+        eventKey: r.event_key || undefined,
       }));
     } catch {
       return [];

@@ -1777,6 +1777,8 @@ export class TelemetryRepository {
       return; // Silencing shouldn't create a visual notification box, just history
     }
 
+    const notifEventKey = `alarm:${alarm.id}:${eventType}:${eventType === 'REPEAT' ? alarm.repeatCount : (alarm.incidentId || alarm.triggeredAt || 'latest')}`;
+
     this.db.addNotification({
       tenantId: alarm.tenantId,
       title: formattedTitle,
@@ -1787,6 +1789,7 @@ export class TelemetryRepository {
       alarmId: alarm.id,
       ruleId: alarm.ruleId,
       alarmState: eventType,
+      eventKey: `${notifEventKey}:${alarm.tenantId}`,
       acknowledged: alarm.acknowledged,
       acknowledgedAt: alarm.acknowledgedAt,
       acknowledgedBy: alarm.acknowledgedBy,
@@ -1812,6 +1815,7 @@ export class TelemetryRepository {
         alarmId: alarm.id,
         ruleId: alarm.ruleId,
         alarmState: eventType,
+        eventKey: `${notifEventKey}:usr_admin`,
         acknowledged: alarm.acknowledged,
         acknowledgedAt: alarm.acknowledgedAt,
         acknowledgedBy: alarm.acknowledgedBy,
@@ -2546,9 +2550,11 @@ export class TelemetryRepository {
         if (rule.tenantId && rule.tenantId !== 'usr_admin' && deviceOwnerId !== rule.tenantId) continue;
         if (rule.tenantId === 'usr_admin' && rule.deviceId === 'all' && deviceOwnerId !== 'usr_admin') continue;
 
-        const lastSeenStr = device.lastSeen || device.createdAt;
-        const lastSeenMs = lastSeenStr ? new Date(lastSeenStr).getTime() : nowMs;
-        const timeSinceLastDataMs = nowMs - lastSeenMs;
+        // Bağlantı canlılığı (ping/pong) ile veri canlılığı ayrımı:
+        // Cihaz WebSocket/Heartbeat ile çevrimiçi kalabilir ancak sensör telemetrisi durmuş olabilir.
+        const lastTelemetryStr = device.lastTelemetryAt || device.lastSeen || device.createdAt;
+        const lastTelemetryMs = lastTelemetryStr ? new Date(lastTelemetryStr).getTime() : nowMs;
+        const timeSinceLastDataMs = nowMs - lastTelemetryMs;
         const isBreached = timeSinceLastDataMs >= durationMs;
 
         const alarmKey = `alarm_${rule.id}_${device.id}_${rule.metricKey}`;
@@ -2581,7 +2587,7 @@ export class TelemetryRepository {
                   .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
                   .replace(/{customerName}/g, customerName);
 
-              this.emitAlarmNotification(existingAlarm, 'REPEAT', `🔄 [TEKRAR] Cihaz Çevrimdışı: ${device.name}`, `(Tekrar) Cihaz ${minutes} dakikadır veri göndermiyor.\n\n${msg}`, 'System Worker');
+              this.emitAlarmNotification(existingAlarm, 'REPEAT', `🔄 [TEKRAR] Telemetri Akışı Kesildi (Veri Yok): ${device.name}`, `(Tekrar) Cihazdan ${minutes} dakikadır telemetri/ölçüm verisi alınamıyor.\n\n${msg}`, 'System Worker');
               hasChanges = true;
             }
           } else {
@@ -2605,7 +2611,7 @@ export class TelemetryRepository {
               lastNotifiedAt: new Date(nowMs).toISOString(),
               acknowledged: false,
               repeatCount: 1,
-              message: `Cihaz ${rule.thresholdValue} dakikadan uzun süredir çevrimdışı.`
+              message: `Cihazdan ${rule.thresholdValue} dakikadan uzun süredir telemetri/ölçüm verisi alınamıyor.`
             };
             if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
             this.db.data.activeAlarms.push(newAlarm);
@@ -2621,7 +2627,7 @@ export class TelemetryRepository {
                   .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
                   .replace(/{customerName}/g, customerName);
 
-            this.emitAlarmNotification(newAlarm, 'OPEN', `🚨 [${rule.severity}] Cihaz Çevrimdışı: ${device.name}`, msg, 'System Worker');
+            this.emitAlarmNotification(newAlarm, 'OPEN', `🚨 [${rule.severity}] Telemetri Akışı Kesildi (Veri Yok): ${device.name}`, msg, 'System Worker');
             hasChanges = true;
           }
         } else {
@@ -2647,7 +2653,7 @@ export class TelemetryRepository {
                   .replace(/{timestamp}/g, new Date().toLocaleString('tr-TR', { timeZone: rule.timezone || 'Europe/Istanbul' }))
                   .replace(/{customerName}/g, customerName);
 
-            this.emitAlarmNotification(existingAlarm, 'RESOLVED', `✅ [ÇÖZÜLDÜ] Cihaz Yeniden Çevrimiçi: ${device.name}`, `Cihazdan tekrar veri alınmaya başlandı. Alarm çözüldü.\n\nÖnceki Alarm:\n${msg}`, 'System Worker');
+            this.emitAlarmNotification(existingAlarm, 'RESOLVED', `✅ [ÇÖZÜLDÜ] Telemetri Akışı Yeniden Başladı: ${device.name}`, `Cihazdan tekrar telemetri ölçüm verisi alınmaya başlandı. Alarm çözüldü.\n\nÖnceki Alarm:\n${msg}`, 'System Worker');
             hasChanges = true;
           }
         }

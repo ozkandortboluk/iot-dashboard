@@ -232,6 +232,7 @@ export interface Device {
   websocketConnected?: boolean;
   lastMessageAt?: string;
 
+  createdAt?: string;
   deletedAt?: string;
   updatedAt?: string;
   version?: number;
@@ -769,6 +770,7 @@ export interface NotificationItem {
   alarmId?: string;
   ruleId?: string;
   alarmState?: 'OPEN' | 'RESOLVED' | 'REPEAT' | 'ACKNOWLEDGED';
+  eventKey?: string;
   acknowledged?: boolean;
   acknowledgedAt?: string;
   acknowledgedBy?: string;

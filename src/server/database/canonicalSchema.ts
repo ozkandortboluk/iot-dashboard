@@ -783,6 +783,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'repeat_count', type: 'INT', nullable: false, defaultValue: '0' },
         { name: 'current_value', type: 'DOUBLE PRECISION', nullable: true },
         { name: 'threshold_value', type: 'DOUBLE PRECISION', nullable: true },
+        { name: 'event_key', type: 'VARCHAR(256)', nullable: true },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
         { name: 'updated_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
@@ -791,6 +792,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'idx_notifications_tenant', columns: ['tenant_id'] },
         { name: 'idx_notifications_device', columns: ['device_id'] },
         { name: 'idx_notifications_read', columns: ['is_read'] },
+        { name: 'idx_notifications_event_key', columns: ['event_key'] },
         { name: 'idx_notifications_created', columns: ['created_at DESC'] }
       ]
     },

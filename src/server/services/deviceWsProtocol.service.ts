@@ -209,6 +209,7 @@ export class DeviceWsProtocolService {
     if (hadOfflineNotification || wasOfflineOrWarning) {
       updates.status = 'online';
       if (hadOfflineNotification) {
+        const incidentKey = device.lastOfflineNotifiedAt || nowIso;
         updates.lastOfflineNotifiedAt = undefined;
         device.lastOfflineNotifiedAt = undefined;
         db.addAuditLog(
@@ -224,6 +225,7 @@ export class DeviceWsProtocolService {
           severity: 'info',
           deviceId: device.id,
           deviceName: device.name,
+          eventKey: `device_online:${device.id}:${incidentKey}`,
         });
         broadcast('devices:updated', db.getDevices());
       }
@@ -606,6 +608,7 @@ export class DeviceWsProtocolService {
     }
 
     if (wasOfflineNotified) {
+      const incidentKey = dev.lastOfflineNotifiedAt || nowIso;
       updates.lastOfflineNotifiedAt = undefined;
       dev.lastOfflineNotifiedAt = undefined;
       db.addAuditLog(
@@ -621,6 +624,7 @@ export class DeviceWsProtocolService {
         severity: 'info',
         deviceId: dev.id,
         deviceName: dev.name,
+        eventKey: `device_online:${dev.id}:${incidentKey}`,
       });
     }
 

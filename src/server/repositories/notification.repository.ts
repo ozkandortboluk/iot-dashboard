@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { NotificationItem, DashboardLayout, WidgetConfig } from '../../types.js';
 import { defaultWidgets } from '../initialData.js';
 import { validateAndSanitizeWidgets } from '../../lib/widgetValidation.js';
@@ -18,11 +19,29 @@ export class NotificationRepository {
     return this.db.data.notifications;
   }
 
-  public async addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>): Promise<NotificationItem> {
+  public async addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'> & { id?: string; eventKey?: string }): Promise<NotificationItem> {
     if (!this.db.data.notifications) this.db.data.notifications = [];
+
+    // Deduplication check: if eventKey is provided, check if already present
+    if (notif.eventKey) {
+      const existing = this.db.data.notifications.find((n: any) => n.eventKey === notif.eventKey);
+      if (existing) {
+        return existing;
+      }
+    }
+
+    const deterministicId = notif.id || (notif.eventKey
+      ? `notif_evk_${crypto.createHash('sha256').update(notif.eventKey).digest('hex').substring(0, 24)}`
+      : `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+
+    const existingById = this.db.data.notifications.find((n: any) => n.id === deterministicId);
+    if (existingById) {
+      return existingById;
+    }
+
     const fullNotif: NotificationItem = {
       ...notif,
-      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: deterministicId,
       timestamp: new Date().toISOString(),
       read: false,
     };

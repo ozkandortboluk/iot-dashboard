@@ -100,6 +100,7 @@ export class DeviceRepository {
 
       // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery)
       if (evalResult.newStatus === 'online' && dev.lastOfflineNotifiedAt) {
+        const incidentId = dev.lastOfflineNotifiedAt;
         this.db.addAuditLog(
           dev.tenantId || 'system',
           'Sistem Sinyal Takibi',
@@ -113,6 +114,7 @@ export class DeviceRepository {
           severity: 'info',
           deviceId: dev.id,
           deviceName: dev.name,
+          eventKey: `device_online:${dev.id}:${incidentId}`,
         });
         dev.lastOfflineNotifiedAt = undefined;
         hasChanges = true;
@@ -145,6 +147,7 @@ export class DeviceRepository {
             severity: 'critical',
             deviceId: dev.id,
             deviceName: dev.name,
+            eventKey: `device_offline:${dev.id}:${dev.lastOfflineNotifiedAt}`,
           });
         }
       }
@@ -166,7 +169,6 @@ export class DeviceRepository {
   }
 
   public getDevices(requestingUserId?: string, targetCustomerId?: string): Device[] {
-    this.checkDeviceStatuses();
     let list: Device[] = this.db.data.devices || [];
     const users = this.db.data.users || [];
     const reqUser = users.find((u: any) => u.id === requestingUserId);
@@ -380,6 +382,7 @@ export class DeviceRepository {
       customIntervalSeconds: deviceData.customIntervalSeconds,
       recentIntervals: [],
       dataFlowActive: deviceData.dataFlowActive !== false,
+      createdAt: (deviceData as any).createdAt || new Date().toISOString(),
       lastSeen: new Date().toISOString(),
     };
 
@@ -1686,6 +1689,7 @@ export class DeviceRepository {
         severity: 'info',
         deviceId: dev.id,
         deviceName: dev.name,
+        eventKey: `device_online:${dev.id}:${new Date(now).toISOString().substring(0, 16)}`,
       });
     }
 
