@@ -63,7 +63,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 export async function safeJson<T = any>(res: Response, fallback: T): Promise<T> {
   try {
     const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/json')) {
+    if (!contentType.includes('application/json')) {
       return fallback;
     }
     return (await res.json()) as T;

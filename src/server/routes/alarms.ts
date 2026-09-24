@@ -111,8 +111,7 @@ router.delete('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = await db.alarmRepository.deleteAlarm(req.params.id, currentUser);
-    if (!success) return res.status(404).json({ error: 'Alarm bulunamadı.' });
+    await db.alarmRepository.deleteAlarm(req.params.id, currentUser);
     res.json({ success: true, message: 'Alarm kaydı silindi.' });
   } catch (err: any) {
     res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
@@ -280,8 +279,7 @@ notificationsRouter.delete('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = await db.alarmRepository.deleteNotification(req.params.id, currentUser);
-    if (!success) return res.status(404).json({ error: 'Bildirim bulunamadı.' });
+    await db.alarmRepository.deleteNotification(req.params.id, currentUser);
     res.json({ success: true, message: 'Bildirim silindi.' });
   } catch (err: any) {
     res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
@@ -388,8 +386,7 @@ dispatchLogsRouter.delete('/:id', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const success = await db.alarmRepository.deleteDispatchLog(req.params.id, currentUser);
-    if (!success) return res.status(404).json({ error: 'Kayıt bulunamadı.' });
+    await db.alarmRepository.deleteDispatchLog(req.params.id, currentUser);
     res.json({ success: true, message: 'İletim kaydı silindi.' });
   } catch (err: any) {
     res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });

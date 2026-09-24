@@ -1081,20 +1081,43 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const deleteNotification = useCallback(async (id: string) => {
-    setRawNotifications((prev) => prev.filter((n) => n.id !== id));
+    let deletedItem: NotificationItem | undefined;
+    setRawNotifications((prev) => {
+      deletedItem = prev.find((n) => n.id === id);
+      return prev.filter((n) => n.id !== id);
+    });
     try {
-      await fetch(`/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/notifications/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        if (deletedItem) {
+          const itemToRestore = deletedItem;
+          setRawNotifications((prev) => (prev.some((n) => n.id === id) ? prev : [itemToRestore, ...prev]));
+        }
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || `Bildirim silinemedi (${res.status})`);
+      }
     } catch (e) {
       console.error('deleteNotification error:', e);
+      throw e;
     }
   }, []);
 
   const deleteAllNotifications = useCallback(async () => {
-    setRawNotifications([]);
+    let previousList: NotificationItem[] = [];
+    setRawNotifications((prev) => {
+      previousList = prev;
+      return [];
+    });
     try {
-      await fetch('/api/notifications/delete-all', { method: 'POST' });
+      const res = await fetch('/api/notifications/delete-all', { method: 'POST' });
+      if (!res.ok) {
+        setRawNotifications(previousList);
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || `Bildirimler silinemedi (${res.status})`);
+      }
     } catch (e) {
       console.error('deleteAllNotifications error:', e);
+      throw e;
     }
   }, []);
 

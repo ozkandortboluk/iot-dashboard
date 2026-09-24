@@ -1768,18 +1768,24 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
+    const trigVal = (alarm as any).triggerValue ?? alarm.currentValue ?? 0;
+    const isSim = Boolean(alarm.isSimulation);
+    const src = alarm.source || 'physical';
+    const env = alarm.environment || 'production';
     const sql = `
       INSERT INTO active_alarms (
         id, incident_id, last_evaluated_at, rule_id, device_id, device_name, user_id, tenant_id, metric_key, operator,
-        threshold_value, current_value, severity, state, first_breach_at,
+        threshold_value, current_value, trigger_value, severity, state, first_breach_at,
         triggered_at, last_notified_at, resolved_at, acknowledged,
-        acknowledged_at, acknowledged_by, silenced_until, repeat_count, message, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+        acknowledged_at, acknowledged_by, silenced_until, repeat_count, message,
+        is_simulation, source, environment, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
       ON CONFLICT (id) DO UPDATE SET
         incident_id = EXCLUDED.incident_id,
         last_evaluated_at = EXCLUDED.last_evaluated_at,
         state = EXCLUDED.state,
         current_value = EXCLUDED.current_value,
+        trigger_value = EXCLUDED.trigger_value,
         last_notified_at = EXCLUDED.last_notified_at,
         resolved_at = EXCLUDED.resolved_at,
         acknowledged = EXCLUDED.acknowledged,
@@ -1788,6 +1794,9 @@ export class PostgresRepository {
         silenced_until = EXCLUDED.silenced_until,
         repeat_count = EXCLUDED.repeat_count,
         message = EXCLUDED.message,
+        is_simulation = EXCLUDED.is_simulation,
+        source = EXCLUDED.source,
+        environment = EXCLUDED.environment,
         updated_at = CURRENT_TIMESTAMP;
     `;
     await this.query(sql, [
@@ -1803,6 +1812,7 @@ export class PostgresRepository {
       alarm.operator,
       alarm.thresholdValue,
       alarm.currentValue,
+      trigVal,
       alarm.severity,
       alarm.state,
       alarm.firstBreachAt || null,
@@ -1815,18 +1825,35 @@ export class PostgresRepository {
       alarm.silencedUntil || null,
       alarm.repeatCount || 0,
       alarm.message || '',
+      isSim,
+      src,
+      env,
       alarm.updatedAt || new Date().toISOString(),
     ]);
   }
 
-  public async deleteActiveAlarm(alarmId: string): Promise<void> {
-    if (!this.pool || !this.isConnected) return;
-    await this.query(`DELETE FROM active_alarms WHERE id = $1;`, [alarmId]);
+  public async deleteActiveAlarm(alarmId: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    let sql = `DELETE FROM active_alarms WHERE id = $1`;
+    const params: any[] = [alarmId];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (user_id = $2 OR tenant_id = $2)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return (res?.rowCount || 0) > 0;
   }
 
-  public async bulkDeleteActiveAlarms(alarmIds: string[]): Promise<void> {
-    if (!this.pool || !this.isConnected || !alarmIds.length) return;
-    await this.query(`DELETE FROM active_alarms WHERE id = ANY($1::text[]);`, [alarmIds]);
+  public async bulkDeleteActiveAlarms(alarmIds: string[], userId?: string, isAdmin: boolean = true): Promise<number> {
+    if (!this.pool || !this.isConnected || !alarmIds.length) return 0;
+    let sql = `DELETE FROM active_alarms WHERE id = ANY($1::text[])`;
+    const params: any[] = [alarmIds];
+    if (!isAdmin && userId && userId !== 'usr_admin') {
+      sql += ` AND (user_id = $2 OR tenant_id = $2)`;
+      params.push(userId);
+    }
+    const res = await this.query(sql, params);
+    return res?.rowCount || 0;
   }
 
   public async bulkAcknowledgeAlarms(alarmIds: string[], ackBy: string): Promise<void> {
