@@ -187,6 +187,8 @@ export interface Device {
   rssi?: number;
   lastSeen: string;
   previousLastSeen?: string; // Timestamp of previous packet for precise inter-arrival delta calculation
+  lastTelemetryAt?: string; // Timestamp of last valid telemetry packet received
+  lastHeartbeatAt?: string; // Timestamp of last ping/pong/heartbeat signal received
   lastOfflineNotifiedAt?: string; // Cooldown tracker to prevent offline notification flapping
   consecutiveMissedTicks?: number; // Watchdog debounce counter
   rateLimitPerMin: number;

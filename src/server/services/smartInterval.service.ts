@@ -4,6 +4,7 @@ export interface CalculatedTimeouts {
   expectedIntervalSeconds: number;
   offlineTimeoutSeconds: number;
   heartbeatTimeoutSeconds: number;
+  warningTimeoutSeconds: number;
   intervalMode: 'auto' | 'manual';
 }
 
@@ -15,6 +16,21 @@ export interface WatchdogEvaluationResult {
   isConfirmedOffline?: boolean;
   graceBufferSeconds?: number;
   elapsedSeconds?: number;
+}
+
+/**
+ * Returns the most recent timestamp among lastTelemetryAt, lastHeartbeatAt, lastMessageAt, and lastSeen.
+ * Allows the watchdog to evaluate device liveness based on the freshest signal vector.
+ */
+export function getLatestLivenessTimestamp(dev: Partial<Device>): number {
+  const timestamps = [
+    dev.lastTelemetryAt ? new Date(dev.lastTelemetryAt).getTime() : 0,
+    dev.lastHeartbeatAt ? new Date(dev.lastHeartbeatAt).getTime() : 0,
+    dev.lastMessageAt ? new Date(dev.lastMessageAt).getTime() : 0,
+    dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0,
+  ].filter((t) => !isNaN(t) && t > 0);
+
+  return timestamps.length > 0 ? Math.max(...timestamps) : 0;
 }
 
 export class SmartIntervalService {
@@ -65,11 +81,16 @@ export class SmartIntervalService {
 
     // Tutarlılık kuralı: heartbeatTimeoutSeconds ile offlineTimeoutSeconds AYNI değere kilitlenir.
     const heartbeatTimeoutSeconds = offlineTimeoutSeconds;
+    const warningTimeoutSeconds = Math.max(
+      SmartIntervalService.MIN_OFFLINE_TIMEOUT_SECONDS,
+      Math.round(offlineTimeoutSeconds * 0.7)
+    );
 
     return {
       expectedIntervalSeconds: expectedInterval,
       offlineTimeoutSeconds,
       heartbeatTimeoutSeconds,
+      warningTimeoutSeconds,
       intervalMode,
     };
   }
@@ -88,11 +109,14 @@ export class SmartIntervalService {
   public processDeviceTelemetryArrival(dev: Device, nowMs: number = Date.now()): Device {
     const previousLastSeen = dev.lastSeen ? new Date(dev.lastSeen).getTime() : 0;
     const wasOffline = dev.status === 'offline';
+    const nowIso = new Date(nowMs).toISOString();
 
     // 1. Cihaz sinyal üretti -> online duruma geçiş
     dev.status = 'online';
     dev.previousLastSeen = dev.lastSeen;
-    dev.lastSeen = new Date(nowMs).toISOString();
+    dev.lastSeen = nowIso;
+    dev.lastTelemetryAt = nowIso;
+    dev.lastMessageAt = nowIso;
     dev.consecutiveMissedTicks = 0;
 
     const currentCalculated = this.calculateDeviceTimeouts(dev);
@@ -205,10 +229,11 @@ export class SmartIntervalService {
 
     const timeouts = this.calculateDeviceTimeouts(dev);
     const offlineTimeoutMs = timeouts.offlineTimeoutSeconds * 1000;
-    const warningTimeoutMs = offlineTimeoutMs * 0.85;
+    const warningTimeoutMs = timeouts.warningTimeoutSeconds * 1000;
 
     // 3. Cihaz henüz hiç sinyal göndermemişse (yeni cihaz / ilk kurulum)
-    if (!dev.lastSeen) {
+    const latestLivenessMs = getLatestLivenessTimestamp(dev);
+    if (latestLivenessMs === 0) {
       const isRecentlyCreated = !dev.recentIntervals || dev.recentIntervals.length === 0;
       // İlk 3 dakika boyunca kurulum toleransı tanı
       if (isRecentlyCreated && dev.status === 'online') {
@@ -225,31 +250,35 @@ export class SmartIntervalService {
       return {
         newStatus: 'offline',
         changed,
-        reason: 'Cihazdan henüz ilk telemetri sinyali alınmadı',
+        reason: 'Cihazdan henüz ilk telemetri veya canlılık sinyali alınmadı',
         timeoutSeconds: timeouts.offlineTimeoutSeconds,
+        isConfirmedOffline: true,
       };
     }
 
-    // 4. Son sinyalden bu yana geçen süreyi kontrol et (Fiziksel & Sanal cihazlar için eşit kural)
-    const elapsedMs = Math.max(0, nowMs - new Date(dev.lastSeen).getTime());
+    // 4. Son sinyalden bu yana geçen süreyi kontrol et (En güncel zaman: telemetry, heartbeat, message veya lastSeen)
+    const elapsedMs = Math.max(0, nowMs - latestLivenessMs);
     const graceBufferSeconds = Math.max(5, Math.min(20, Math.round(timeouts.offlineTimeoutSeconds * 0.25)));
     const confirmedOfflineThresholdMs = (timeouts.offlineTimeoutSeconds + graceBufferSeconds) * 1000;
-    const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs;
     const elapsedSeconds = Math.round(elapsedMs / 1000);
 
     if (elapsedMs > offlineTimeoutMs) {
+      dev.consecutiveMissedTicks = (dev.consecutiveMissedTicks || 0) + 1;
+      const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs || dev.consecutiveMissedTicks >= 3;
+
       const changed = dev.status !== 'offline';
       dev.status = 'offline';
       return {
         newStatus: 'offline',
         changed,
-        reason: `Veri gönderim sıklığının 2 katı sürede (${timeouts.offlineTimeoutSeconds} sn) sinyal alınamadı.`,
+        reason: `Veri gönderim sıklığının 2 katı sürede (${timeouts.offlineTimeoutSeconds} sn) sinyal alınamadı. En son sinyalden bu yana ${elapsedSeconds} sn geçti.`,
         timeoutSeconds: timeouts.offlineTimeoutSeconds,
         isConfirmedOffline,
         graceBufferSeconds,
         elapsedSeconds,
       };
     } else if (elapsedMs > warningTimeoutMs) {
+      dev.consecutiveMissedTicks = 0;
       const changed = dev.status !== 'warning';
       if (dev.status === 'online') {
         dev.status = 'warning';
@@ -264,6 +293,7 @@ export class SmartIntervalService {
         elapsedSeconds,
       };
     } else {
+      dev.consecutiveMissedTicks = 0;
       const changed = dev.status !== 'online';
       dev.status = 'online';
       return {

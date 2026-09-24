@@ -551,8 +551,11 @@ export class PostgresRepository {
           console.log(`[PostgreSQL Schema PASS] SchemaAuditor ${healRes.actionsTaken.length} adet otomatik şema düzeltmesi uyguladı ve doğruladı.`);
         }
 
-        // 2. Data synchronization for backwards compatibility
+        // 2. Data synchronization and schema harmonization for backwards compatibility
         await client.query(`
+          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
+          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
           UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
           UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;
@@ -1030,12 +1033,13 @@ export class PostgresRepository {
         ota_status, ota_target_firmware_id, ota_progress, ota_error_message, ota_last_check_at,
         expected_interval_seconds, auto_detected_interval_seconds, heartbeat_timeout_seconds,
         interval_mode, custom_interval_seconds, recent_intervals,
-        websocket_connected, last_message_at, output_definitions, capabilities,
+        websocket_connected, last_message_at, last_telemetry_at, last_heartbeat_at, last_offline_notified_at,
+        output_definitions, capabilities,
         created_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
         $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, 
-        $33, $34, $35, $36, $37, $38, $39
+        $33, $34, $35, $36, $37, $38, $39, $40, $41, $42
       )
       ON CONFLICT (id) DO UPDATE SET
         tenant_id = EXCLUDED.tenant_id,
@@ -1073,6 +1077,9 @@ export class PostgresRepository {
         recent_intervals = EXCLUDED.recent_intervals,
         websocket_connected = EXCLUDED.websocket_connected,
         last_message_at = COALESCE(EXCLUDED.last_message_at, devices.last_message_at),
+        last_telemetry_at = COALESCE(EXCLUDED.last_telemetry_at, devices.last_telemetry_at),
+        last_heartbeat_at = COALESCE(EXCLUDED.last_heartbeat_at, devices.last_heartbeat_at),
+        last_offline_notified_at = EXCLUDED.last_offline_notified_at,
         output_definitions = EXCLUDED.output_definitions,
         capabilities = EXCLUDED.capabilities;
     `;
@@ -1113,6 +1120,9 @@ export class PostgresRepository {
       JSON.stringify(dev.recentIntervals || []),
       Boolean(dev.websocketConnected),
       dev.lastMessageAt || null,
+      dev.lastTelemetryAt || null,
+      dev.lastHeartbeatAt || null,
+      dev.lastOfflineNotifiedAt || null,
       JSON.stringify(dev.outputDefinitions || []),
       JSON.stringify(dev.capabilities || []),
       (dev as any).createdAt || new Date().toISOString(),
@@ -1217,6 +1227,9 @@ export class PostgresRepository {
       recentIntervals: Array.isArray(r.recent_intervals) ? r.recent_intervals : (typeof r.recent_intervals === 'string' ? JSON.parse(r.recent_intervals) : []),
       websocketConnected: Boolean(r.websocket_connected),
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : undefined,
+      lastTelemetryAt: r.last_telemetry_at ? new Date(r.last_telemetry_at).toISOString() : undefined,
+      lastHeartbeatAt: r.last_heartbeat_at ? new Date(r.last_heartbeat_at).toISOString() : undefined,
+      lastOfflineNotifiedAt: r.last_offline_notified_at ? new Date(r.last_offline_notified_at).toISOString() : undefined,
       outputDefinitions: Array.isArray(r.output_definitions) ? r.output_definitions : (typeof r.output_definitions === 'string' ? JSON.parse(r.output_definitions) : undefined),
       capabilities: Array.isArray(r.capabilities) ? r.capabilities : (typeof r.capabilities === 'string' ? JSON.parse(r.capabilities) : undefined),
     };
@@ -1258,7 +1271,10 @@ export class PostgresRepository {
     }
     if (!deviceId) return;
     const now = new Date().toISOString();
-    const seen = lastSeenIso || now;
+    // Do NOT force status to offline on disconnect; only watchdog determines offline state.
+    // If status is omitted on disconnect, leave status unchanged.
+    const effectiveStatus = status !== undefined ? status : (isConnected ? 'online' : null);
+    const seen = lastSeenIso || (isConnected ? now : null);
     const msgAt = lastMessageAtIso || (isConnected ? now : null);
     await this.query(
       `UPDATE devices
@@ -1267,7 +1283,7 @@ export class PostgresRepository {
            last_seen = COALESCE($4::timestamptz, last_seen),
            last_message_at = COALESCE($5::timestamptz, last_message_at)
        WHERE id = $1;`,
-      [deviceId, isConnected, status || (isConnected ? 'online' : 'offline'), seen, msgAt]
+      [deviceId, isConnected, effectiveStatus, seen, msgAt]
     );
   }
 

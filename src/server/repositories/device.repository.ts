@@ -103,9 +103,17 @@ export class DeviceRepository {
         this.db.addAuditLog(
           dev.tenantId || 'system',
           'Sistem Sinyal Takibi',
-          `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) telemetri akışını yeniden sağladı.`,
+          `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) sinyal/veri akışını yeniden sağladı.`,
           'low'
         );
+        this.db.addNotification({
+          tenantId: dev.tenantId || 'usr_admin',
+          title: `Cihaz Yeniden Çevrimiçi`,
+          message: `${dev.name} cihazı bağlantıyı yeniden sağladı ve sistem durumu normale döndü.`,
+          severity: 'info',
+          deviceId: dev.id,
+          deviceName: dev.name,
+        });
         dev.lastOfflineNotifiedAt = undefined;
         hasChanges = true;
       }
@@ -1659,8 +1667,27 @@ export class DeviceRepository {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) return null;
 
+    const hadOfflineNotification = !!dev.lastOfflineNotifiedAt;
     const now = Date.now();
     smartIntervalService.processDeviceTelemetryArrival(dev, now);
+
+    if (hadOfflineNotification) {
+      dev.lastOfflineNotifiedAt = undefined;
+      this.db.addAuditLog(
+        dev.tenantId || 'system',
+        'Sistem Sinyal Takibi',
+        `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri akışını yeniden sağladı.`,
+        'low'
+      );
+      this.db.addNotification({
+        tenantId: dev.tenantId || 'usr_admin',
+        title: `Cihaz Yeniden Çevrimiçi`,
+        message: `${dev.name} cihazı veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
+        severity: 'info',
+        deviceId: dev.id,
+        deviceName: dev.name,
+      });
+    }
 
     this.db.saveData(this.db.data);
     if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }

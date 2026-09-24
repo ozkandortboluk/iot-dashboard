@@ -423,6 +423,9 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'recent_intervals', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'websocket_connected', type: 'BOOLEAN', nullable: false, defaultValue: 'FALSE' },
         { name: 'last_message_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'last_telemetry_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'last_heartbeat_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'last_offline_notified_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'output_definitions', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'capabilities', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }

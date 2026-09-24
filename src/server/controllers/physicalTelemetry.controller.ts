@@ -80,6 +80,9 @@ export class PhysicalTelemetryController {
     if (firmwareVersion) devUpdates.firmwareVersion = firmwareVersion.toString();
 
     const processedDev = await db.processDeviceTelemetryArrival(device.id);
+    const nowIso = new Date().toISOString();
+    devUpdates.lastHeartbeatAt = nowIso;
+    devUpdates.lastMessageAt = nowIso;
     if (processedDev) {
       devUpdates.status = processedDev.status;
       devUpdates.lastSeen = processedDev.lastSeen;

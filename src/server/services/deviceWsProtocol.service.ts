@@ -94,6 +94,9 @@ export class DeviceWsProtocolService {
 
   /**
    * Unregister a disconnected device socket.
+   * NOTE: WebSocket disconnection MUST NOT immediately mark device as offline!
+   * The device may be reconnecting, transmitting over HTTP, or experiencing short-term Wi-Fi jitter.
+   * Only the watchdog determines offline status based on liveness timestamps.
    */
   public unregisterDeviceSocket(deviceId: string, ws: AuthenticatedWebSocket) {
     if (!deviceId) return;
@@ -103,27 +106,23 @@ export class DeviceWsProtocolService {
       sockets.delete(ws);
       if (sockets.size === 0) {
         this.activeDeviceSockets.delete(deviceId);
-        const nowIso = new Date().toISOString();
-        // Mark as disconnected from WebSocket
+        // Mark as disconnected from WebSocket without altering device status or lastSeen
         const dev = db.getDeviceById(deviceId);
         if (dev) {
           db.updateDevice(deviceId, {
             websocketConnected: false,
-            // If device has no other active connections, update status
-            status: 'offline',
-            lastSeen: nowIso,
           });
           broadcast('devices:updated', db.getDevices());
           broadcast('device:status', {
             deviceId,
-            status: 'offline',
+            status: dev.status,
             websocketConnected: false,
-            lastSeen: nowIso,
+            lastSeen: dev.lastSeen,
           });
         }
 
-        // Direct atomic sync to PostgreSQL
-        db.postgresRepo?.updateDeviceWsStatus(deviceId, false, 'offline', nowIso).catch((err) => {
+        // Direct atomic sync to PostgreSQL (only update websocketConnected, leave status & lastSeen intact)
+        db.postgresRepo?.updateDeviceWsStatus(deviceId, false, undefined).catch((err) => {
           console.warn(`[DeviceWsProtocol] Postgres updateDeviceWsStatus disconnect error (${deviceId}):`, err?.message || err);
         });
       }
@@ -191,11 +190,45 @@ export class DeviceWsProtocolService {
     const updates: Partial<Device> = {
       lastMessageAt: nowIso,
       websocketConnected: true,
-      status: 'online',
+      consecutiveMissedTicks: 0,
     };
-    if (type !== 'telemetry') {
+    if (type === 'telemetry') {
+      updates.lastTelemetryAt = nowIso;
+    } else if (type === 'ping' || type === 'pong' || type === 'hello') {
+      updates.lastHeartbeatAt = nowIso;
       updates.lastSeen = nowIso;
+      updates.status = 'online';
+    } else {
+      updates.lastSeen = nowIso;
+      updates.status = 'online';
     }
+
+    // If an offline notification was previously sent or device was offline, recover!
+    const wasOfflineOrWarning = device.status === 'offline' || device.status === 'warning';
+    const hadOfflineNotification = !!device.lastOfflineNotifiedAt;
+    if (hadOfflineNotification || wasOfflineOrWarning) {
+      updates.status = 'online';
+      if (hadOfflineNotification) {
+        updates.lastOfflineNotifiedAt = undefined;
+        device.lastOfflineNotifiedAt = undefined;
+        db.addAuditLog(
+          device.tenantId || 'system',
+          'Sistem Sinyal Takibi',
+          `Cihaz Yeniden Çevrimiçi: ${device.name} (WebSocket üzerinden ${type} alındı).`,
+          'low'
+        );
+        db.addNotification({
+          tenantId: device.tenantId || 'usr_admin',
+          title: `Cihaz Yeniden Çevrimiçi`,
+          message: `${device.name} cihazı WebSocket üzerinden veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
+          severity: 'info',
+          deviceId: device.id,
+          deviceName: device.name,
+        });
+        broadcast('devices:updated', db.getDevices());
+      }
+    }
+
     db.updateDevice(deviceId, updates);
 
     // 4. Dispatch according to message type
@@ -521,7 +554,7 @@ export class DeviceWsProtocolService {
   }
 
   /**
-   * Handle 'ping' message from device -> return 'pong'.
+   * Handle 'ping' message from device -> return 'pong' and record heartbeat liveness.
    */
   private handlePing(ws: AuthenticatedWebSocket, device: Device, messageId: string): boolean {
     const pongMessage: UnifiedWsMessage = {
@@ -535,6 +568,7 @@ export class DeviceWsProtocolService {
     };
 
     safeSend(ws, JSON.stringify(pongMessage));
+    this.handleDevicePong(device.id);
     return true;
   }
 
@@ -542,13 +576,74 @@ export class DeviceWsProtocolService {
    * Handle 'pong' message from device.
    */
   private handlePong(ws: AuthenticatedWebSocket, device: Device, messageId: string): boolean {
-    // Device confirmed alive
-    db.updateDevice(device.id, {
-      lastSeen: new Date().toISOString(),
-      websocketConnected: true,
-      status: 'online',
-    });
+    this.handleDevicePong(device.id);
     return true;
+  }
+
+  /**
+   * Handle device pong (either protocol pong message or RFC 6455 pong frame).
+   * Confirms TCP/socket liveness and keeps device status fresh.
+   */
+  public handleDevicePong(deviceId: string): void {
+    if (!deviceId) return;
+    const nowIso = new Date().toISOString();
+    const dev = db.getDeviceById(deviceId);
+    if (!dev) return;
+
+    const wasOfflineOrWarning = dev.status === 'offline' || dev.status === 'warning';
+    const wasOfflineNotified = !!dev.lastOfflineNotifiedAt;
+
+    const updates: Partial<Device> = {
+      lastMessageAt: nowIso,
+      lastHeartbeatAt: nowIso,
+      lastSeen: nowIso,
+      websocketConnected: true,
+      consecutiveMissedTicks: 0,
+    };
+
+    if (wasOfflineOrWarning) {
+      updates.status = 'online';
+    }
+
+    if (wasOfflineNotified) {
+      updates.lastOfflineNotifiedAt = undefined;
+      dev.lastOfflineNotifiedAt = undefined;
+      db.addAuditLog(
+        dev.tenantId || 'system',
+        'Sistem Sinyal Takibi',
+        `Cihaz Yeniden Çevrimiçi: ${dev.name} (WebSocket canlılık sinyali alındı).`,
+        'low'
+      );
+      db.addNotification({
+        tenantId: dev.tenantId || 'usr_admin',
+        title: `Cihaz Yeniden Çevrimiçi`,
+        message: `${dev.name} cihazı WebSocket üzerinden canlılık sinyali (pong) iletti ve normal çalışma durumuna döndü.`,
+        severity: 'info',
+        deviceId: dev.id,
+        deviceName: dev.name,
+      });
+    }
+
+    db.updateDevice(deviceId, updates);
+
+    if (wasOfflineOrWarning || wasOfflineNotified) {
+      broadcast('devices:updated', db.getDevices());
+      broadcast('device:status', {
+        deviceId,
+        status: 'online',
+        websocketConnected: true,
+        lastSeen: nowIso,
+      });
+    }
+
+    // Direct atomic sync to PostgreSQL
+    db.postgresRepo?.updateDeviceWsStatus(
+      deviceId,
+      true,
+      updates.status || dev.status,
+      nowIso,
+      nowIso
+    ).catch(() => {});
   }
 
   /**

@@ -655,6 +655,9 @@ export function initWebSocketServer(server: http.Server) {
 
     ws.on('pong', () => {
       ws.isAlive = true;
+      if (ws.device?.id) {
+        deviceWsProtocolService.handleDevicePong(ws.device.id);
+      }
     });
 
     // Send system greeting & initial status

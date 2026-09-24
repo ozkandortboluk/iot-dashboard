@@ -253,6 +253,43 @@ describe('SmartIntervalService - Watchdog and Dynamic Frequency Engine', () => {
     const confirmedResult = service.evaluateDeviceWatchdog(dev, now + 10000);
     expect(confirmedResult.isConfirmedOffline).toBe(true);
   });
+
+  it('evaluates liveness using the newest timestamp among telemetry, heartbeat, message, and lastSeen', () => {
+    const now = 1700000000000;
+    // Telemetry was sent 120s ago (exceeds timeout), BUT WebSocket pong / heartbeat was received 10s ago
+    const dev = createMockDevice({
+      id: 'test_dev_liveness_multi',
+      tenantId: 'tenant_1',
+      name: 'Multi Liveness Device',
+      status: 'online',
+      expectedIntervalSeconds: 30,
+      lastSeen: new Date(now - 120000).toISOString(),
+      lastTelemetryAt: new Date(now - 120000).toISOString(),
+      lastHeartbeatAt: new Date(now - 10000).toISOString(), // 10s ago (fresh!)
+      lastMessageAt: new Date(now - 10000).toISOString(),
+    });
+
+    const result = service.evaluateDeviceWatchdog(dev, now);
+    // Device must NOT be offline because heartbeat pong is fresh!
+    expect(result.newStatus).toBe('online');
+    expect(result.isConfirmedOffline).toBe(false);
+  });
+
+  it('enters warning state before dropping to confirmed offline (two-stage status)', () => {
+    const now = 1700000000000;
+    const dev = createMockDevice({
+      id: 'test_dev_twostage',
+      tenantId: 'tenant_1',
+      name: 'Two Stage Device',
+      status: 'online',
+      expectedIntervalSeconds: 30, // offline timeout = 60s, warning = 42s
+      lastSeen: new Date(now - 45000).toISOString(), // 45s elapsed (> 42s warning, < 60s offline)
+    });
+
+    const result = service.evaluateDeviceWatchdog(dev, now);
+    expect(result.newStatus).toBe('warning');
+    expect(result.isConfirmedOffline).toBe(false);
+  });
 });
 
 describe('TenantSecurityService - Strict Isolation Rules', () => {
