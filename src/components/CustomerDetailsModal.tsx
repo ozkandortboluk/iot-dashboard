@@ -41,6 +41,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   const [formData, setFormData] = useState({
     name: customer.name || '',
@@ -154,17 +155,24 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   };
 
   const handleResetPassword = async () => {
+    setIsResettingPassword(true);
+    setErrorMsg('');
     try {
       const token = localStorage.getItem('dashboard_token');
       const res = await fetch(`/api/admin/tenants/${customer.id}/reset-password`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      if (!res.ok) throw new Error('Parola sıfırlama başarısız.');
-      setSuccessMsg('Parola sıfırlama bağlantısı gönderildi.');
-      setTimeout(() => setSuccessMsg(''), 5000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Parola sıfırlama bağlantısı gönderilemedi.');
+      }
+      setSuccessMsg(data.message || 'Parola sıfırlama bağlantısı müşterinin kayıtlı e-posta adresine başarıyla gönderildi.');
+      setTimeout(() => setSuccessMsg(''), 6000);
     } catch (err: any) {
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'E-posta servisi ile iletişim kurulamadı.');
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -436,9 +444,11 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
                   </div>
                   <button
                     onClick={handleResetPassword}
-                    className="px-3.5 py-2 border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 font-semibold rounded-xl transition-colors shrink-0 cursor-pointer"
+                    disabled={isResettingPassword}
+                    className="px-3.5 py-2 border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 font-semibold rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
                   >
-                    Bağlantı Gönder
+                    {isResettingPassword && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{isResettingPassword ? 'Gönderiliyor...' : 'Bağlantı Gönder'}</span>
                   </button>
                 </div>
               </div>

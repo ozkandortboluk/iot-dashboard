@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticateUser, requireAdmin, requireAdminOrStaff } from '../../middleware/auth.js';
 import { db } from '../../db.js';
+import { passwordResetService } from '../../services/passwordReset.service.js';
 
 export const adminTenantsRouter = Router();
 
@@ -299,14 +300,20 @@ adminTenantsRouter.post('/:id/terminate-sessions', requireAdmin, async (req, res
 // POST /api/admin/tenants/:id/reset-password
 adminTenantsRouter.post('/:id/reset-password', requireAdmin, async (req, res) => {
   try {
-    const allUsers = await db.getUsersAsync();
-    const tenant = allUsers.find((u: any) => u.id === req.params.id);
-    if (!tenant) return res.status(404).json({ error: 'Kullanıcı/Müşteri bulunamadı.' });
-    
-    // In a real app, send an email. For now, just return success.
-    res.json({ message: 'Parola sıfırlama bağlantısı e-posta adresine gönderildi.' });
+    const adminUser = (req as any).user || { name: 'Admin' };
+    const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+    const baseUrl = process.env.APP_BASE_URL || process.env.APP_URL || `${proto}://${host}`;
+
+    const result = await passwordResetService.adminSendPasswordReset({
+      userId: req.params.id,
+      baseUrl,
+      adminName: adminUser.name,
+    });
+
+    res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    res.status(400).json({ error: err.message || 'Parola sıfırlama bağlantısı gönderilemedi.' });
   }
 });
 

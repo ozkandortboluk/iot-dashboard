@@ -831,6 +831,10 @@ export interface NotificationServiceConfig {
     smtpHost?: string;
     smtpPort?: number;
     smtpUser?: string;
+    smtpPass?: string;
+    smtpSecure?: boolean;
+    resendApiKey?: string;
+    appBaseUrl?: string;
     fromEmail: string;
     fromName: string;
   };

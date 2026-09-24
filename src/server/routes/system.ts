@@ -21,6 +21,7 @@ import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../mi
 import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
 import { DataMaintenanceService } from '../database/dataMaintenance.js';
+import { emailService } from '../services/email.service.js';
 
 const startTime = Date.now();
 
@@ -283,6 +284,45 @@ systemRouter.get('/system/events', authenticateUser, requireAdmin, (req, res) =>
 systemRouter.post('/system/events/clear', authenticateUser, requireAdmin, async (req, res) => {
   systemLogger.clearEvents();
   res.json({ success: true, message: 'Sistem olay günlükleri başarıyla temizlendi.' });
+});
+
+// Email Server Configuration (Resend & SMTP)
+systemRouter.get('/system/email-config', authenticateUser, requireAdmin, (_req, res) => {
+  try {
+    const config = emailService.getEmailConfig();
+    res.json(config);
+  } catch (err: any) {
+    res.status(500).json({ error: 'E-posta yapılandırması alınamadı: ' + (err?.message || err) });
+  }
+});
+
+systemRouter.put('/system/email-config', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const updated = emailService.updateEmailConfig(req.body);
+    res.json({
+      success: true,
+      message: 'E-posta sunucu ayarları başarıyla kaydedildi.',
+      config: updated,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'E-posta yapılandırması güncellenemedi: ' + (err?.message || err) });
+  }
+});
+
+systemRouter.post('/system/email-config/test', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const to = (req.body.to || '').trim();
+    if (!to || !to.includes('@')) {
+      return res.status(400).json({ error: 'Geçerli bir test alıcı e-posta adresi giriniz.' });
+    }
+    const result = await emailService.sendTestEmail({ to });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Test e-postası gönderilemedi: ' + (err?.message || err) });
+  }
 });
 
 // Admin Stats & Quotas

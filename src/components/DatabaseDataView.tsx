@@ -47,11 +47,13 @@ import {
   Bot,
   Save,
   RotateCcw,
+  Mail,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { DatabaseAutoHealerPanel } from './database/DatabaseAutoHealerPanel';
+import { EmailServerSettingsPanel } from './database/EmailServerSettingsPanel';
 import type {
   DatabaseEngineType,
   DatabaseEngineConfig,
@@ -145,7 +147,7 @@ export const DatabaseDataView: React.FC = () => {
     };
   };
 
-  const [activeTab, setActiveTab] = useState<'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users'>('auto_healer');
+  const [activeTab, setActiveTab] = useState<'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users' | 'email_settings'>('auto_healer');
   const [opCategoryFilter, setOpCategoryFilter] = useState<'all' | 'widget' | 'api' | 'system' | 'sync'>('all');
 
   // Retention Policies State
@@ -1026,6 +1028,7 @@ export const DatabaseDataView: React.FC = () => {
           { id: 'retention', label: 'Veri Saklama & Otomatik Temizlik', icon: Trash2, badge: 'Eski Kayıt Silme' },
           { id: 'collections', label: 'Koleksiyonlar & Şema', icon: Layers },
           { id: 'users', label: 'Kullanıcı Veritabanı', icon: Users },
+          { id: 'email_settings', label: 'E-Posta & Mail Sunucu Ayarları', icon: Mail, badge: 'SMTP / Resend' },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -1053,6 +1056,9 @@ export const DatabaseDataView: React.FC = () => {
 
       {/* TAB: DATABASE AUTO-HEALER & SYSTEM EVENT LOGS */}
       {activeTab === 'auto_healer' && <DatabaseAutoHealerPanel />}
+
+      {/* TAB: EMAIL SERVER SETTINGS (RESEND & SMTP) */}
+      {activeTab === 'email_settings' && <EmailServerSettingsPanel />}
 
       {/* TAB: TIMESCALEDB TIME-SERIES & COMPRESSION MANAGEMENT */}
       {activeTab === 'timescale' && (

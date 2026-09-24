@@ -4,6 +4,41 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.43.0] - 2026-09-24
+
+### 📧 E-Posta & Mail Sunucu Yapılandırma Paneli (PostgreSQL & Veritabanı Yönetimi)
+- **E-Posta & Mail Sunucu Ayarları Alt Başlığı (`DatabaseDataView.tsx`, `EmailServerSettingsPanel.tsx`)**:
+  - PostgreSQL & Veritabanı Yönetimi sayfasına "E-Posta & Mail Sunucu Ayarları" sekmesi ve yönetim arayüzü eklendi.
+  - Resend API, Özel SMTP (Nodemailer) ve Simülasyon modları arasında dinamik geçiş desteği sağlandı.
+  - `EMAIL_FROM`, `From Name`, `APP_BASE_URL`, `RESEND_API_KEY`, `SMTP Host/Port/User/Pass` ve `SSL/TLS` parametreleri için sunucu seviyesinde güvenli kayıt ve istemci tarafında maskeleme (`••••••••`) uygulandı.
+- **Canlı Test & Hizmet Bütünlüğü (`/api/system/email-config/test`)**:
+  - Giden sunucu yapılandırmasını anında test etmek için canlı e-posta gönderim aracı entegre edildi.
+  - DNS (SPF, DMARC) ve teslimat rehberi kartı kullanıcı erişimine sunuldu.
+
+---
+
+## 🚀 [v1.42.0] - 2026-09-24
+
+### 🔐 Güvenli E-Posta Gönderim Mimarisi (Resend) & OWASP Şifre Sıfırlama Akışı
+- **İşlem E-Postası Servisi (`email.service.ts`)**:
+  - Resend API tabanlı güvenli e-posta iletim altyapısı kuruldu. API anahtarı ve gönderici adresi (`bildirim@nexusnodeiot.com.tr`) yalnızca sunucu ortam değişkenlerinde (`RESEND_API_KEY`, `EMAIL_FROM`) tutulur; istemci tarafına veya GitHub'a sızmaz.
+  - Geliştirme, simülasyon ve test ortamları için güvenli düşme (fallback) mimarisi sağlandı.
+- **OWASP Şifre Sıfırlama & Hesap Numaralandırma Koruması (`passwordReset.service.ts`, `auth.ts`)**:
+  - `POST /api/auth/forgot-password`: Kayıtlı olan ve olmayan tüm e-posta adresleri için harici saldırganlara bilgi sızdırmayan özdeş genel yanıt (anti-enumeration) döndürülür.
+  - Kriptografik güvenli tek kullanımlık rastgele token üretimi ve veritabanında yalnızca SHA-256 özetinin saklanması sağlandı.
+  - 15 dakikalık kısa geçerlilik süresi ve IP/E-posta tabanlı hız sınırlandırması (rate limiting) uygulandı.
+  - `GET /api/auth/verify-reset-token`: Token geçerliliği kontrol edilerek kullanıcıya maskeli e-posta bilgisi sunulur.
+  - `POST /api/auth/reset-password`: Yeni şifre belirlendiğinde token tüketilir (`used = true`), kullanıcı şifresi güncellenir ve kullanıcının diğer cihazlardaki tüm aktif oturumları anında sonlandırılır.
+- **Yönetici Paneli Entegrasyonu (`admin/tenants.ts`, `CustomerDetailsModal.tsx`)**:
+  - Müşteri Yönetim Modalı'ndaki "Bağlantı Gönder" butonu gerçek `PasswordResetService` akışına bağlandı.
+  - E-posta gönderimi başarısız olduğunda arayüzde doğru hata mesajı ve durum bildirimi gösterilmesi sağlandı.
+- **Giriş Ekranı Şifremi Unuttum Deneyimi (`LoginView.tsx`)**:
+  - Giriş ekranına "Şifremi Unuttum?" bağlantısı ve modern form eklendi.
+  - URL üzerinden gelen sıfırlama bağlantıları (`?token=...` veya `#reset-password?token=...`) otomatik algılanarak şifre yenileme ekranına geçiş ve doğrulama akışı sağlandı.
+  - React hook çağırma kuralları (unconditional top-level hooks) tam uyumlu hale getirildi.
+
+---
+
 ## 🚀 [v1.41.8] - 2026-09-22
 
 ### 📱 Kayıtlı Saha Cihazları ve Listelerinde Mobil & Küçük Ekran Düzeni İyileştirmesi

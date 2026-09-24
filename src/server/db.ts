@@ -1106,6 +1106,7 @@ class LocalDatabase {
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> { return await this.userRepository.authenticate(email, pass); }
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
   public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }
+  public async resetPasswordDirect(userId: string, newPass: string): Promise<void> { return this.userRepository.resetPasswordDirect(userId, newPass); }
   public async updateUserRole(userId: string, newRole: User['role']): Promise<User> { return this.userRepository.updateUserRole(userId, newRole); }
   public deleteUser(userId: string) { return this.userRepository.deleteUser(userId); }
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
@@ -1834,9 +1835,22 @@ class LocalDatabase {
     const whatsappToken = process.env.WHATSAPP_API_TOKEN || (decrypt ? decryptSecret(raw.whatsapp?.apiToken) : raw.whatsapp?.apiToken) || '';
     const telegramToken = process.env.TELEGRAM_BOT_TOKEN || (decrypt ? decryptSecret(raw.telegram?.botToken) : raw.telegram?.botToken) || '';
     const webhookSecret = process.env.WEBHOOK_SECRET_HEADER || (decrypt ? decryptSecret(raw.webhook?.secretHeader) : raw.webhook?.secretHeader) || '';
+    const dbResendKey = decrypt ? decryptSecret((raw.email as any)?.resendApiKey) : (raw.email as any)?.resendApiKey;
+    const resendApiKey = (dbResendKey && dbResendKey.trim().length > 0)
+      ? dbResendKey
+      : ((process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.startsWith('re_')) ? process.env.RESEND_API_KEY : '');
+
+    const dbSmtpPass = decrypt ? decryptSecret((raw.email as any)?.smtpPass) : (raw.email as any)?.smtpPass;
+    const smtpPass = (dbSmtpPass && dbSmtpPass.trim().length > 0)
+      ? dbSmtpPass
+      : (process.env.SMTP_PASS || '');
 
     return {
-      email: { ...raw.email },
+      email: {
+        ...raw.email,
+        resendApiKey,
+        smtpPass,
+      },
       whatsapp: {
         ...raw.whatsapp,
         apiToken: whatsappToken,
@@ -1855,6 +1869,26 @@ class LocalDatabase {
 
   public updateServiceConfig(newConfig: Partial<NotificationServiceConfig>): NotificationServiceConfig {
     const current = this.getServiceConfig(true);
+
+    let emailResendApiKey = (current.email as any)?.resendApiKey || '';
+    if (newConfig.email?.resendApiKey !== undefined) {
+      const incoming = (newConfig.email.resendApiKey || '').trim();
+      if (incoming && !isMaskedSecret(incoming)) {
+        emailResendApiKey = incoming;
+      } else if (!incoming) {
+        emailResendApiKey = '';
+      }
+    }
+
+    let emailSmtpPass = (current.email as any)?.smtpPass || '';
+    if (newConfig.email?.smtpPass !== undefined) {
+      const incoming = (newConfig.email.smtpPass || '').trim();
+      if (incoming && !isMaskedSecret(incoming)) {
+        emailSmtpPass = incoming;
+      } else if (!incoming) {
+        emailSmtpPass = '';
+      }
+    }
 
     let whatsappApiToken = current.whatsapp?.apiToken || '';
     if (newConfig.whatsapp?.apiToken !== undefined) {
@@ -1887,7 +1921,12 @@ class LocalDatabase {
     }
 
     this.data.serviceConfig = {
-      email: { ...current.email, ...newConfig.email },
+      email: {
+        ...current.email,
+        ...newConfig.email,
+        resendApiKey: encryptSecret(emailResendApiKey),
+        smtpPass: encryptSecret(emailSmtpPass),
+      },
       whatsapp: {
         ...current.whatsapp,
         ...newConfig.whatsapp,

@@ -7,6 +7,8 @@ import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.
 import { requireSetupAuth, isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
 import { setupService } from '../services/setup.service.js';
 import { isRealAdminUser } from '../database/postgres.js';
+import { passwordResetService } from '../services/passwordReset.service.js';
+import { emailService } from '../services/email.service.js';
 import {
   validateSetupInput,
   validateRegistrationInput,
@@ -242,6 +244,111 @@ router.post('/revoke-all-sessions', authenticateUser, async (req, res) => {
 router.get('/me', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
   res.json({ user: authReq.user, token: authReq.sessionToken });
+});
+
+// POST /api/auth/forgot-password (Public, Rate-Limited, OWASP Anti-Enumeration)
+router.post('/forgot-password', async (req, res) => {
+  await db.waitForInitialization();
+  const clientIp = getClientIp(req);
+  const { email } = req.body;
+
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Lütfen geçerli bir e-posta adresi giriniz.' });
+  }
+
+  const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+  const baseUrl = process.env.APP_BASE_URL || process.env.APP_URL || `${proto}://${host}`;
+
+  try {
+    const result = await passwordResetService.requestPasswordReset({
+      email,
+      clientIp,
+      baseUrl,
+    });
+    res.json(result);
+  } catch (err: any) {
+    const isRateLimit = err?.message?.includes('Çok fazla istek');
+    res.status(isRateLimit ? 429 : 400).json({ error: err.message || 'İstek işlenemedi.' });
+  }
+});
+
+// GET /api/auth/verify-reset-token (Public)
+router.get('/verify-reset-token', async (req, res) => {
+  await db.waitForInitialization();
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  if (!token) {
+    return res.status(400).json({ valid: false, error: 'Sıfırlama belirteci (token) eksik.' });
+  }
+
+  const verification = await passwordResetService.verifyToken(token);
+  if (!verification.valid) {
+    return res.status(400).json(verification);
+  }
+
+  res.json({
+    valid: true,
+    emailMasked: verification.emailMasked,
+  });
+});
+
+// POST /api/auth/reset-password (Public, Rate-Limited, Consumes Token, Terminates Sessions)
+router.post('/reset-password', async (req, res) => {
+  await db.waitForInitialization();
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`reset_pwd:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: 'Çok fazla deneme yapıldı. Lütfen birkaç dakika sonra tekrar deneyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  const { token, newPassword } = req.body;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'Geçersiz veya eksik sıfırlama bağlantısı.' });
+  }
+
+  if (!newPassword || typeof newPassword !== 'string') {
+    return res.status(400).json({ error: 'Yeni şifre gereklidir.' });
+  }
+
+  try {
+    const result = await passwordResetService.resetPassword(token, newPassword);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Şifre sıfırlama işlemi başarısız oldu.' });
+  }
+});
+
+// POST /api/auth/test-email (Requires Admin Authentication)
+router.post('/test-email', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  if (authReq.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Bu işlem yalnızca yöneticiler tarafından gerçekleştirilebilir.' });
+  }
+
+  const targetEmail = req.body.to || authReq.user.email;
+  if (!targetEmail || !targetEmail.includes('@')) {
+    return res.status(400).json({ error: 'Geçerli bir test alıcı e-postası gereklidir.' });
+  }
+
+  const result = await emailService.sendTestEmail({ to: targetEmail });
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: result.error || 'Test e-postası gönderilemedi.',
+      provider: result.provider,
+    });
+  }
+
+  res.json({
+    success: true,
+    message: `Test e-postası başarıyla gönderildi (${targetEmail}).`,
+    messageId: result.messageId,
+    provider: result.provider,
+    simulated: Boolean(result.simulated),
+  });
 });
 
 export const authRouter = router;

@@ -1,7 +1,7 @@
 {
   "name": "nexusnode-iot",
   "private": true,
-  "version": "1.41.8",
+  "version": "1.43.0",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -30,6 +30,7 @@
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
+    "@types/nodemailer": "^8.0.2",
     "@yudiel/react-qr-scanner": "^2.6.0",
     "bcryptjs": "^3.0.3",
     "busboy": "^1.6.0",
@@ -41,6 +42,7 @@
     "express-async-errors": "^3.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "nodemailer": "^10.0.10",
     "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",

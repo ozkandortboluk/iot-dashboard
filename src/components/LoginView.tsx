@@ -15,10 +15,11 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   XCircle, 
-  Server,
-  ChevronDown,
-  ChevronUp,
-  Info
+  Info,
+  Mail,
+  KeyRound,
+  ArrowLeft,
+  ShieldCheck
 } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
 
@@ -47,7 +48,7 @@ export const LoginView: React.FC = () => {
   const { login, register, isLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
   
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,6 +56,16 @@ export const LoginView: React.FC = () => {
   const [role, setRole] = useState<'customer' | 'operator'>('customer');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Password reset specific states
+  const [resetToken, setResetToken] = useState('');
+  const [isVerifyingToken, setIsVerifyingToken] = useState(false);
+  const [tokenVerificationError, setTokenVerificationError] = useState('');
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
+  const [isSubmittingReset, setIsSubmittingReset] = useState(false);
+  const [forgotSuccessMsg, setForgotSuccessMsg] = useState('');
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
 
   // Database Connection Status State
   const [dbStatusData, setDbStatusData] = useState<DbStatusData | null>(null);
@@ -112,6 +123,44 @@ export const LoginView: React.FC = () => {
     }
   }, []);
 
+  // Token Verification
+  const verifyToken = useCallback(async (tokenToVerify: string) => {
+    setIsVerifyingToken(true);
+    setTokenVerificationError('');
+    try {
+      const res = await fetch(`/api/auth/verify-reset-token?token=${encodeURIComponent(tokenToVerify)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.valid) {
+        setTokenVerificationError(data.error || 'Şifre sıfırlama bağlantısı geçersiz veya süresi dolmuş.');
+      } else {
+        setMaskedEmail(data.emailMasked || '');
+      }
+    } catch {
+      setTokenVerificationError('Bağlantı doğrulanamadı. Lütfen sunucu bağlantınızı kontrol ediniz.');
+    } finally {
+      setIsVerifyingToken(false);
+    }
+  }, []);
+
+  // Detect ?token=... or #reset-password?token=... in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    let token = urlParams.get('token');
+    
+    if (!token && window.location.hash.includes('token=')) {
+      const hashPart = window.location.hash.split('?')[1];
+      if (hashPart) {
+        token = new URLSearchParams(hashPart).get('token');
+      }
+    }
+
+    if (token) {
+      setResetToken(token);
+      setAuthMode('reset-password');
+      verifyToken(token);
+    }
+  }, [verifyToken]);
+
   useEffect(() => {
     fetchDbStatus();
     const interval = setInterval(fetchDbStatus, 10000); // 10s auto refresh
@@ -156,6 +205,86 @@ export const LoginView: React.FC = () => {
         const msg = err instanceof Error ? err.message : 'Giriş yapılamadı. Lütfen e-posta ve şifrenizi kontrol ediniz.';
         setError(msg);
       }
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setForgotSuccessMsg('');
+
+    if (!email.trim() || !email.includes('@')) {
+      setError('Lütfen geçerli bir e-posta adresi giriniz.');
+      return;
+    }
+
+    setIsSubmittingForgot(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'İstek gönderilemedi.');
+      }
+      setForgotSuccessMsg(
+        data.message ||
+        'Eğer bu e-posta adresi sistemimizde kayıtlı ise, şifre sıfırlama talimatları ve bağlantısı gönderilmiştir.'
+      );
+    } catch (err: any) {
+      setError(err.message || 'İstek işlenirken bir sorun oluştu.');
+    } finally {
+      setIsSubmittingForgot(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (password.length < 8) {
+      setError('Yeni şifreniz en az 8 karakter olmalıdır.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Girdiğiniz şifreler birbiriyle eşleşmiyor.');
+      return;
+    }
+
+    setIsSubmittingReset(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: resetToken,
+          newPassword: password,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Şifre güncellenemedi.');
+      }
+      setResetPasswordSuccess(true);
+      setSuccessMsg(data.message || 'Şifreniz başarıyla güncellendi! Yeni şifrenizle giriş yapabilirsiniz.');
+
+      // Return to login mode after 3 seconds
+      setTimeout(() => {
+        setAuthMode('login');
+        setPassword('');
+        setConfirmPassword('');
+        setResetPasswordSuccess(false);
+        if (window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }, 3500);
+    } catch (err: any) {
+      setError(err.message || 'Şifre güncellenirken bir sorun oluştu.');
+    } finally {
+      setIsSubmittingReset(false);
     }
   };
 
@@ -209,44 +338,29 @@ export const LoginView: React.FC = () => {
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${getDotClass(dbStatusData?.dbStatusColor)}`} />
               <span className={`relative inline-flex rounded-full h-2 w-2 ${getDotClass(dbStatusData?.dbStatusColor)}`} />
             </span>
-            <span className="font-bold text-xs">
-              {dbStatusData ? (
-                dbStatusData.dbEngine === 'postgres'
-                  ? 'PostgreSQL (Aktif)'
-                  : dbStatusData.dbEngine === 'local'
-                  ? 'Yerel Depolama'
-                  : 'PostgreSQL Bağlı Değil'
-              ) : (
-                'Yükleniyor...'
-              )}
+            <span className="hidden sm:inline">
+              {dbStatusData?.dbStatusLabel || 'Veritabanı Kontrol Ediliyor...'}
             </span>
-            {isDbPopoverOpen ? (
-              <ChevronUp className="w-3.5 h-3.5 opacity-60 ml-0.5" />
-            ) : (
-              <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-0.5" />
-            )}
           </button>
 
-          {/* Database Status Popover Card */}
+          {/* Database Info Popover */}
           {isDbPopoverOpen && (
-            <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-4 z-40 text-xs space-y-3 transition-all animate-in fade-in duration-150">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
-                  <Server className="w-4 h-4 text-indigo-500" />
-                  <span>Veritabanı Durumu</span>
-                </div>
+            <div className="absolute right-0 mt-2 w-72 sm:w-80 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 text-xs space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Database className="w-4 h-4 text-indigo-500" />
+                  Veritabanı Durumu
+                </span>
                 <button
                   type="button"
                   onClick={fetchDbStatus}
-                  disabled={isDbFetching}
-                  className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                  className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
                   title="Yenile"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isDbFetching ? 'animate-spin text-indigo-500' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${isDbFetching ? 'animate-spin' : ''}`} />
                 </button>
               </div>
 
-              {/* Status Row */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400">Veritabanı Tipi:</span>
@@ -273,18 +387,9 @@ export const LoginView: React.FC = () => {
                     </span>
                   </div>
                 )}
-
-                {dbStatusData?.databaseState && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Sistem Durum Kodu:</span>
-                    <span className="font-mono font-semibold text-xs px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-700 dark:text-slate-300">
-                      {dbStatusData.databaseState}
-                    </span>
-                  </div>
-                )}
               </div>
 
-              {/* Status Message / Info Box */}
+              {/* Status Message */}
               <div className={`p-2.5 rounded-xl border text-[11px] leading-relaxed ${
                 dbStatusData?.dbStatusColor === 'rose'
                   ? 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
@@ -297,13 +402,6 @@ export const LoginView: React.FC = () => {
                   <span>{dbStatusData?.dbMessage || 'Veritabanı durumu yükleniyor...'}</span>
                 </div>
               </div>
-
-              {/* Troubleshooting hint if not ready */}
-              {dbStatusData?.dbStatusColor === 'rose' && (
-                <div className="p-2 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-[10px] text-slate-600 dark:text-slate-400">
-                  💡 <strong>Giriş İpucu:</strong> Veritabanı yanıt vermediği için oturum açma işlemleri başarısız olabilir. Lütfen PostgreSQL servisinizin çalıştığından emin olun veya birkaç saniye sonra tekrar deneyin.
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -332,16 +430,24 @@ export const LoginView: React.FC = () => {
           <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold rounded-full mt-1">
             <Sparkles className="w-3.5 h-3.5" />
             <span>
-              {authMode === 'register' ? 'Müşteri Kayıt Portalı' : 'Müşteri & IoT Cihaz Girişi'}
+              {authMode === 'register' && 'Müşteri Kayıt Portalı'}
+              {authMode === 'login' && 'Müşteri & IoT Cihaz Girişi'}
+              {authMode === 'forgot-password' && 'Güvenli Hesap Kurtarma'}
+              {authMode === 'reset-password' && 'Yeni Şifre Belirleme'}
             </span>
           </div>
+
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            {authMode === 'register' ? 'Yeni Hesap Oluştur' : 'Giriş Yapın'}
+            {authMode === 'register' && 'Yeni Hesap Oluştur'}
+            {authMode === 'login' && 'Giriş Yapın'}
+            {authMode === 'forgot-password' && 'Şifrenizi mi Unuttunuz?'}
+            {authMode === 'reset-password' && 'Yeni Şifrenizi Belirleyin'}
           </h1>
           <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto">
-            {authMode === 'register'
-              ? 'Müşteri hesabı açarak cihazlarınızı güvenle izleyin ve yönetin.'
-              : 'E-posta adresiniz ve şifrenizle IoT platformuna hemen erişin.'}
+            {authMode === 'register' && 'Müşteri hesabı açarak cihazlarınızı güvenle izleyin ve yönetin.'}
+            {authMode === 'login' && 'E-posta adresiniz ve şifrenizle IoT platformuna hemen erişin.'}
+            {authMode === 'forgot-password' && 'Kayıtlı e-posta adresinizi girin. Size tek kullanımlık güvenli şifre sıfırlama bağlantısı gönderelim.'}
+            {authMode === 'reset-password' && 'Hesabınız için güçlü ve yeni bir şifre belirleyerek güvenliğinizi sağlayın.'}
           </p>
         </div>
 
@@ -370,52 +476,43 @@ export const LoginView: React.FC = () => {
             </button>
           </div>
 
-          {/* Warning Banner if Database in Error state */}
-          {dbStatusData?.dbStatusColor === 'rose' && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs rounded-xl flex items-start gap-2.5 font-medium">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block font-bold mb-0.5">PostgreSQL Veritabanı Bağlantı Hatası</strong>
-                <span>Veritabanı yanıt vermediği için oturum açma işlemi başarısız olabilir. Bağlantının tekrar kurulmasını bekleyin.</span>
-              </div>
+          {/* Mode Switcher Tabs (Only visible in login & register modes) */}
+          {(authMode === 'login' || authMode === 'register') && (
+            <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'login'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Giriş Yap</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setError('');
+                  setSuccessMsg('');
+                }}
+                className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  authMode === 'register'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Yeni Kayıt</span>
+              </button>
             </div>
           )}
-
-          {/* Mode Switcher Tabs */}
-          <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('login');
-                setError('');
-                setSuccessMsg('');
-              }}
-              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'login'
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Giriş Yap</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('register');
-                setError('');
-                setSuccessMsg('');
-              }}
-              className={`py-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                authMode === 'register'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Yeni Kayıt</span>
-            </button>
-          </div>
 
           {error && (
             <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs rounded-xl flex items-center gap-2 font-medium">
@@ -431,104 +528,341 @@ export const LoginView: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-            {authMode === 'register' && (
-              <>
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                    Ad Soyad
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="ör. Ahmet Yılmaz"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-                  />
-                </div>
+          {/* ================= MODE 1 & 2: LOGIN / REGISTER ================= */}
+          {(authMode === 'login' || authMode === 'register') && (
+            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+              {authMode === 'register' && (
+                <>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                      Ad Soyad
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="ör. Ahmet Yılmaz"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                    Hesap Türü / Rol
-                  </label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as 'customer' | 'operator')}
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-                  >
-                    <option value="customer">Müşteri Portalı Hesabı (Kendi cihazlarını izleme)</option>
-                    <option value="operator">Saha / Sistem Operatörü</option>
-                  </select>
-                </div>
-              </>
-            )}
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                      Hesap Türü / Rol
+                    </label>
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as 'customer' | 'operator')}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                    >
+                      <option value="customer">Müşteri Portalı Hesabı (Kendi cihazlarını izleme)</option>
+                      <option value="operator">Saha / Sistem Operatörü</option>
+                    </select>
+                  </div>
+                </>
+              )}
 
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                E-posta Adresi
-              </label>
-              <input
-                type="email"
-                required
-                placeholder="ör. yonetici@sirket.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                Şifre
-              </label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
-              />
-            </div>
-
-            {authMode === 'register' && (
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
-                  Şifre Tekrar
+                  E-posta Adresi
                 </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="ör. yonetici@sirket.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-slate-700 dark:text-slate-300 font-semibold">
+                    Şifre
+                  </label>
+                  {authMode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('forgot-password');
+                        setError('');
+                        setSuccessMsg('');
+                        setForgotSuccessMsg('');
+                      }}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                    >
+                      Şifremi Unuttum?
+                    </button>
+                  )}
+                </div>
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
                 />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 mt-2"
-            >
-              <span>
-                {isLoading
-                  ? authMode === 'register'
-                    ? 'Kayıt Yapılıyor...'
-                    : 'Giriş Yapılıyor...'
-                  : authMode === 'register'
-                  ? 'Kayıt Ol ve Giriş Yap'
-                  : 'Sisteme Giriş Yap'}
-              </span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                    Şifre Tekrar
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                  />
+                </div>
+              )}
 
-          {/* Toggle link below form */}
-          <div className="text-center pt-2">
-            {authMode === 'login' ? (
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 mt-2"
+              >
+                <span>
+                  {isLoading
+                    ? authMode === 'register'
+                      ? 'Kayıt Yapılıyor...'
+                      : 'Giriş Yapılıyor...'
+                    : authMode === 'register'
+                    ? 'Kayıt Ol ve Giriş Yap'
+                    : 'Sisteme Giriş Yap'}
+                </span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          )}
+
+          {/* ================= MODE 3: FORGOT PASSWORD (OWASP) ================= */}
+          {authMode === 'forgot-password' && (
+            <div className="space-y-4 text-xs">
+              {forgotSuccessMsg ? (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-2xl space-y-3 leading-relaxed">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold text-sm mb-1 text-slate-900 dark:text-white">
+                        Sıfırlama Talebi Alındı
+                      </strong>
+                      <p>{forgotSuccessMsg}</p>
+                    </div>
+                  </div>
+                  <div className="p-2.5 bg-emerald-500/5 rounded-xl border border-emerald-500/10 text-[11px] text-emerald-600 dark:text-emerald-400">
+                    ⏱️ Güvenliğiniz için bağlantı <strong>15 dakika</strong> geçerlidir. E-posta birkaç dakika içinde gelen kutunuza veya spam klasörünüze ulaşacaktır.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login');
+                      setForgotSuccessMsg('');
+                      setError('');
+                    }}
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Giriş Ekranına Dön</span>
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                  <div className="p-3 bg-indigo-500/5 border border-indigo-500/15 rounded-xl text-indigo-700 dark:text-indigo-300 flex items-start gap-2">
+                    <Mail className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                    <span>
+                      Hesabınıza kayıtlı e-posta adresinizi giriniz. Tek kullanımlık şifre yenileme bağlantısı e-posta adresinize iletilecektir.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                      Kayıtlı E-posta Adresi
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="ör. adiniz@sirket.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingForgot}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingForgot ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Sıfırlama Bağlantısı Gönderiliyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Sıfırlama Bağlantısı Gönder</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setError('');
+                        setForgotSuccessMsg('');
+                      }}
+                      className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Giriş Ekranına Geri Dön</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* ================= MODE 4: RESET PASSWORD WITH TOKEN ================= */}
+          {authMode === 'reset-password' && (
+            <div className="space-y-4 text-xs">
+              {isVerifyingToken ? (
+                <div className="p-8 text-center space-y-3">
+                  <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin mx-auto" />
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                    Sıfırlama bağlantısı doğrulanıyor...
+                  </p>
+                </div>
+              ) : tokenVerificationError ? (
+                <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-300 rounded-2xl space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold text-sm mb-1 text-slate-900 dark:text-white">
+                        Geçersiz veya Süresi Dolmuş Bağlantı
+                      </strong>
+                      <p>{tokenVerificationError}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('forgot-password');
+                      setError('');
+                      setTokenVerificationError('');
+                    }}
+                    className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>Yeni Bir Bağlantı Talep Edin</span>
+                  </button>
+                </div>
+              ) : resetPasswordSuccess ? (
+                <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-2xl text-center space-y-3">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Şifreniz Başarıyla Güncellendi!
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    Tüm aktif oturumlarınız sonlandırıldı. Giriş ekranına yönlendiriliyorsunuz...
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                  {maskedEmail && (
+                    <div className="p-3 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">Hesap:</span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">{maskedEmail}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                      Yeni Şifre (En az 8 karakter)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1.5">
+                      Yeni Şifre Tekrar
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs transition-colors"
+                    />
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+                    <div className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                      Güvenlik Kriterleri:
+                    </div>
+                    <p>• En az 8 karakter uzunluğunda olmalıdır.</p>
+                    <p>• Yeni şifreniz kaydedildiğinde diğer cihazlardaki açık oturumlarınız otomatik kapatılır.</p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReset}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingReset ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Yeni Şifre Kaydediliyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="w-4 h-4" />
+                        <span>Yeni Şifreyi Kaydet ve Giriş Yap</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setError('');
+                        if (window.history.replaceState) {
+                          window.history.replaceState(null, '', window.location.pathname);
+                        }
+                      }}
+                      className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Giriş Ekranına Dön</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* Toggle link below form (only for login / register) */}
+          {authMode === 'login' && (
+            <div className="text-center pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -540,7 +874,11 @@ export const LoginView: React.FC = () => {
               >
                 Hesabınız yok mu? Yeni Müşteri Kaydı Oluşturun
               </button>
-            ) : (
+            </div>
+          )}
+
+          {authMode === 'register' && (
+            <div className="text-center pt-2">
               <button
                 type="button"
                 onClick={() => {
@@ -552,11 +890,10 @@ export const LoginView: React.FC = () => {
               >
                 Zaten bir hesabınız var mı? Giriş Yapın
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
-

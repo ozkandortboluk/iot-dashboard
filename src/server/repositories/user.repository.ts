@@ -329,6 +329,28 @@ export class UserRepository {
     this.addAuditLog(userId, user.name, 'Kullanıcı Şifresini Başarıyla Güncelledi', 'low');
   }
 
+  public async resetPasswordDirect(userId: string, newPass: string): Promise<void> {
+    const passRes = validatePassword(newPass);
+    if (!passRes.valid) {
+      throw new Error(passRes.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.');
+    }
+    const newHash = hashPassword(newPass.trim());
+
+    if (this.isPgReady()) {
+      await this.db.postgresRepo.updateUserPassword(userId, newHash);
+      return;
+    }
+
+    const user = (this.db.data.users || []).find((u: any) => u.id === userId);
+    if (!user) throw new Error('Kullanıcı bulunamadı.');
+
+    if (!this.db.data.passwords) {
+      this.db.data.passwords = {};
+    }
+    this.db.data.passwords[userId] = newHash;
+    this.db.saveData(this.db.data, true);
+  }
+
   public async updateUserRole(userId: string, newRole: User['role']): Promise<User> {
     if (this.isPgReady()) {
       const user = await this.db.postgresRepo.getUserById(userId);
