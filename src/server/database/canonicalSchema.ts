@@ -792,7 +792,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'idx_notifications_tenant', columns: ['tenant_id'] },
         { name: 'idx_notifications_device', columns: ['device_id'] },
         { name: 'idx_notifications_read', columns: ['is_read'] },
-        { name: 'idx_notifications_event_key', columns: ['event_key'] },
+        { name: 'idx_notifications_event_key', columns: ['event_key'], unique: true, where: 'event_key IS NOT NULL' },
         { name: 'idx_notifications_created', columns: ['created_at DESC'] }
       ]
     },
@@ -1688,6 +1688,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     repeat_count INT DEFAULT 0,
     current_value DOUBLE PRECISION,
     threshold_value DOUBLE PRECISION,
+    event_key VARCHAR(256),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -1696,6 +1697,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_device ON notifications(device_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 
 -- 2.11 AUDIT LOGS

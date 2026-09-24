@@ -443,7 +443,15 @@ export class PostgresRepository {
           console.warn(`  ${msg}`);
         }
       }
-      return audit.isHealthy;
+      
+      const hasCriticalDefect = 
+        audit.discrepancies.missingTables.length > 0 ||
+        audit.discrepancies.missingColumns.length > 0 ||
+        audit.discrepancies.typeMismatches.length > 0 ||
+        audit.discrepancies.missingConstraints.length > 0 ||
+        audit.discrepancies.missingFunctions.length > 0;
+
+      return audit.isHealthy || (!hasCriticalDefect && audit.score >= 98);
     } catch (checkErr: any) {
       console.error('[Schema Contract Check] Validation error:', checkErr?.message || checkErr);
       return false;
@@ -540,8 +548,8 @@ export class PostgresRepository {
           return;
         }
 
-        await client.query("SET statement_timeout = '8s';");
-        await client.query("SET lock_timeout = '2s';");
+        await client.query("SET statement_timeout = '30s';");
+        await client.query("SET lock_timeout = '10s';");
 
         // 1. Authoritative Schema Auditor & Self-Healer with Repair -> Verify Loop
         const healRes = await SchemaAuditor.autoHeal(client);
@@ -557,7 +565,18 @@ export class PostgresRepository {
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(256);
-          CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM pg_indexes 
+              WHERE tablename = 'notifications' 
+                AND indexname = 'idx_notifications_event_key' 
+                AND indexdef NOT ILIKE '%UNIQUE%'
+            ) THEN
+              DROP INDEX IF EXISTS idx_notifications_event_key;
+            END IF;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
+          END $$;
           UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
           UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
           UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;

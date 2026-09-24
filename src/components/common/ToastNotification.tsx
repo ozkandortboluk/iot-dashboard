@@ -33,8 +33,6 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
 }) => {
   const activeObj = toast || message;
 
-  if (!activeObj) return null;
-
   let text = '';
   let type: ToastType = propType || 'success';
   let toastTitle: string | undefined = propTitle;
@@ -43,7 +41,7 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
   if (typeof activeObj === 'string') {
     text = activeObj;
     if (propType) type = propType;
-  } else if (typeof activeObj === 'object') {
+  } else if (typeof activeObj === 'object' && activeObj !== null) {
     text = activeObj.text || activeObj.message || '';
     type = activeObj.type || propType || 'success';
     toastTitle = activeObj.title || propTitle;
@@ -53,8 +51,8 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
   const isPendingType = type === 'loading' || type === 'pending';
 
   useEffect(() => {
-    // Do not auto-dismiss loading / pending toasts; they wait for real backend completion
-    if (isPendingType) {
+    // Do not auto-dismiss if no active toast or loading/pending toasts; they wait for real backend completion
+    if (!activeObj || isPendingType) {
       return;
     }
     const timer = setTimeout(() => {
@@ -62,6 +60,8 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
     }, duration);
     return () => clearTimeout(timer);
   }, [activeObj, isPendingType, onClose, duration]);
+
+  if (!activeObj) return null;
 
   const typeStyles = {
     success: {

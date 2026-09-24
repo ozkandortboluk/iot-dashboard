@@ -1,4 +1,4 @@
-import { pgTable, varchar, text, doublePrecision, integer, bigint, boolean, timestamp, jsonb, index, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, text, doublePrecision, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { CANONICAL_SCHEMA_METADATA } from '../server/database/canonicalSchema.js';
 
@@ -320,6 +320,7 @@ export const notifications = pgTable('notifications', {
   repeatCount: integer('repeat_count').default(0).notNull(),
   currentValue: doublePrecision('current_value'),
   thresholdValue: doublePrecision('threshold_value'),
+  eventKey: varchar('event_key', { length: 256 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
@@ -327,6 +328,7 @@ export const notifications = pgTable('notifications', {
   tenantIdx: index('idx_notifications_tenant').on(table.tenantId),
   deviceIdx: index('idx_notifications_device').on(table.deviceId),
   readIdx: index('idx_notifications_read').on(table.isRead),
+  eventKeyIdx: uniqueIndex('idx_notifications_event_key').on(table.eventKey),
   createdIdx: index('idx_notifications_created').on(table.createdAt),
 }));
 

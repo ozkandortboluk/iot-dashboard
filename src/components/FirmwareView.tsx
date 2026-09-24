@@ -42,20 +42,7 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 }) => {
   const isAdmin = currentUser.role === 'admin';
   const canManageOta = hasPermission(currentUser.role, 'manage_ota');
-
-  if (!canAccessTab(currentUser.role, 'firmware_ota')) {
-    return (
-      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
-        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
-          <ShieldAlert className="w-8 h-8" />
-        </div>
-        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-          Firmware ve OTA yönetimi yalnızca <strong>Yönetici (Admin)</strong> ve <strong>Operatör</strong> rollerine açıktır.
-        </p>
-      </div>
-    );
-  }
+  const hasAccess = canAccessTab(currentUser.role, 'firmware_ota');
 
   const [activeTab, setActiveTab] = useState<'compiler' | 'library' | 'deploy' | 'jobs'>('compiler');
 
@@ -118,6 +105,8 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
   };
 
   useEffect(() => {
+    if (!hasAccess) return;
+
     fetchFirmwares();
     fetchOtaJobs();
 
@@ -127,7 +116,7 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [hasAccess]);
 
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -289,6 +278,20 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
   const activeCount = devices.filter((d) => d.otaStatus === 'PENDING' || d.otaStatus === 'DOWNLOADING').length;
   const successCount = devices.filter((d) => d.otaStatus === 'SUCCESS').length;
   const failedCount = devices.filter((d) => d.otaStatus === 'FAILED').length;
+
+  if (!hasAccess) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto text-center space-y-4">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto border border-rose-500/20">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white">Yetkisiz Erişim</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+          Firmware ve OTA yönetimi yalnızca <strong>Yönetici (Admin)</strong> ve <strong>Operatör</strong> rollerine açıktır.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

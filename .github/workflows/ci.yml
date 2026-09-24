@@ -2,9 +2,14 @@ name: Continuous Integration & Test Pipeline
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ '**' ]
+    tags: [ 'v*' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ '**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:

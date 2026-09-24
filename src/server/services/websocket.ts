@@ -40,6 +40,7 @@ export function isAllowedWsOrigin(origin?: string | null): boolean {
 
 let wss: WebSocketServer | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
+let watchdogInterval: NodeJS.Timeout | null = null;
 
 // Safe message delivery with backpressure check
 export function safeSend(client: AuthenticatedWebSocket, message: string): boolean {
@@ -536,6 +537,25 @@ export function getWebSocketClientsCount(): number {
   return wss ? wss.clients.size : 0;
 }
 
+export function stopWebSocketServer() {
+  if (watchdogInterval) {
+    clearInterval(watchdogInterval);
+    watchdogInterval = null;
+  }
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+  if (wss) {
+    try {
+      wss.close();
+    } catch {
+      // ignore
+    }
+    wss = null;
+  }
+}
+
 export function initWebSocketServer(server: http.Server) {
   // Use noServer: true to cleanly handle HTTP upgrade events and avoid path collision
   wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
@@ -549,7 +569,8 @@ export function initWebSocketServer(server: http.Server) {
   });
 
   // Centralized periodic device watchdog status checker (Fixed 10s cadence, independent of UI/API queries)
-  setInterval(async () => {
+  if (watchdogInterval) clearInterval(watchdogInterval);
+  watchdogInterval = setInterval(async () => {
     try {
       const statusChanged = await db.checkDeviceStatuses();
       if (statusChanged) {

@@ -1671,10 +1671,11 @@ export class DeviceRepository {
     if (!dev) return null;
 
     const hadOfflineNotification = !!dev.lastOfflineNotifiedAt;
+    const incidentId = dev.lastOfflineNotifiedAt;
     const now = Date.now();
     smartIntervalService.processDeviceTelemetryArrival(dev, now);
 
-    if (hadOfflineNotification) {
+    if (hadOfflineNotification && incidentId) {
       dev.lastOfflineNotifiedAt = undefined;
       this.db.addAuditLog(
         dev.tenantId || 'system',
@@ -1689,7 +1690,7 @@ export class DeviceRepository {
         severity: 'info',
         deviceId: dev.id,
         deviceName: dev.name,
-        eventKey: `device_online:${dev.id}:${new Date(now).toISOString().substring(0, 16)}`,
+        eventKey: `device_online:${dev.id}:${incidentId}`,
       });
     }
 

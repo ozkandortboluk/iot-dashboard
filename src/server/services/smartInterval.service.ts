@@ -232,7 +232,13 @@ export class SmartIntervalService {
     const warningTimeoutMs = timeouts.warningTimeoutSeconds * 1000;
 
     // 3. Cihaz henüz hiç gerçek sinyal göndermemişse (yeni cihaz / ilk kurulum)
-    const hasReceivedAnySignal = Boolean(dev.lastTelemetryAt || dev.lastHeartbeatAt || dev.lastMessageAt || (dev.recentIntervals && dev.recentIntervals.length > 0));
+    const hasReceivedAnySignal = Boolean(
+      dev.lastTelemetryAt ||
+      dev.lastHeartbeatAt ||
+      dev.lastMessageAt ||
+      dev.lastSeen ||
+      (dev.recentIntervals && dev.recentIntervals.length > 0)
+    );
     const createdAtMs = dev.createdAt ? new Date(dev.createdAt).getTime() : 0;
     const isCreatedAtValid = !isNaN(createdAtMs) && createdAtMs > 0;
     const elapsedSinceCreationMs = isCreatedAtValid ? Math.max(0, nowMs - createdAtMs) : Infinity;
