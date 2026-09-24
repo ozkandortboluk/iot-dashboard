@@ -133,6 +133,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: BarChart3,
         },
         {
+          id: 'server_status',
+          label: 'Sunucu Durumu',
+          icon: Activity,
+        },
+        {
           id: 'notifications',
           label: 'Bildirimler & Alarmlar',
           icon: Bell,
@@ -190,6 +195,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       section: 'SİSTEM & DESTEK',
       items: [
+        {
+          id: 'server_status',
+          label: 'Sunucu Durumu',
+          icon: Activity,
+        },
         {
           id: 'notifications',
           label: 'Bildirimler & Alarmlar',
@@ -267,6 +277,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'notifications',
           label: 'Bildirimler & Alarmlar',
           icon: Bell,
+        },
+        {
+          id: 'server_status',
+          label: 'Sunucu Durumu & Metrikler',
+          icon: Activity,
         },
         {
           id: 'database_data',

@@ -22,6 +22,7 @@ import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { SystemLogsView } from './components/system/SystemLogsView';
+import { ServerStatusView } from './components/system/ServerStatusView';
 import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
 import { MaintenanceView } from './components/setup/MaintenanceView';
 import { RecoveryView } from './components/setup/RecoveryView';
@@ -94,6 +95,7 @@ function DashboardContent() {
     analytics: 'Veri Analizi & Raporlama',
     notifications: 'Bildirimler & Alarmlar',
     database_data: 'PostgreSQL & Veritabanı Yönetimi',
+    server_status: 'Sunucu Durumu & Canlı Sistem Metrikleri',
     security: 'Güvenlik & Audit Logları',
     system_logs: 'Sunucu Sistem & Hata Günlükleri',
     deployment: 'Sunucu & DB Kurulum Rehberi',
@@ -211,6 +213,9 @@ function DashboardContent() {
           {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'analytics' && <AnalyticsView />}
           {safeActiveTab === 'notifications' && <NotificationsView />}
           {isAdmin && safeActiveTab === 'database_data' && <DatabaseDataView />}
+          {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'server_status' && (
+            <ServerStatusView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
           {isAdmin && safeActiveTab === 'security' && <SecurityView />}
           {isAdmin && safeActiveTab === 'system_logs' && <SystemLogsView />}
           {isAdmin && safeActiveTab === 'deployment' && <DeploymentView />}

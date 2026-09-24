@@ -44,6 +44,7 @@ import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
 import { systemLogsRouter } from './src/server/routes/systemLogs.js';
 import { setupRouter } from './src/server/routes/setup.js';
+import { serverStatusRouter } from './src/server/routes/serverStatus.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
@@ -155,6 +156,7 @@ app.use('/api', (req, res, next) => {
     req.path.startsWith('/setup') ||
     req.path.startsWith('/auth') ||
     req.path === '/system/status' ||
+    req.path.startsWith('/server') ||
     req.path.startsWith('/health') ||
     req.path.startsWith('/database') ||
     req.path.startsWith('/system-logs')
@@ -212,6 +214,8 @@ app.use('/api/ota', otaRouter);
 app.use('/api/compiler', compilerRouter);
 app.use('/api/system-logs', systemLogsRouter);
 app.use('/api/system/logs', systemLogsRouter);
+app.use('/api/server', serverStatusRouter);
+app.use('/api/server-status', serverStatusRouter);
 
 // Diagnostic HTTP status observer for 5xx responses across the system
 app.use((req, res, next) => {
