@@ -190,6 +190,8 @@ export interface Device {
   lastTelemetryAt?: string; // Timestamp of last valid telemetry packet received
   lastHeartbeatAt?: string; // Timestamp of last ping/pong/heartbeat signal received
   lastOfflineNotifiedAt?: string; // Cooldown tracker to prevent offline notification flapping
+  lastOfflineNotificationTime?: number; // Milliseconds timestamp of last sent offline notification (Anti-flap cooldown)
+  stableOnlineCount?: number; // Consecutive telemetry/ping count while online before clearing offline recovery status
   consecutiveMissedTicks?: number; // Watchdog debounce counter
   rateLimitPerMin: number;
   encryptionMethod: string;

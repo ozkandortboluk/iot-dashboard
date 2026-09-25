@@ -9,6 +9,10 @@ describe('Password Reset & Transactional Email Architecture', () => {
 
   beforeEach(async () => {
     await db.waitForInitialization();
+    await emailService.updateEmailConfig({
+      provider: 'simulated',
+      fromEmail: 'destek@nexusnodeiot.com.tr',
+    });
 
     // Create unique test user for password reset testing
     const uniqueEmail = `test_pwd_${Date.now()}_${crypto.randomBytes(4).toString('hex')}@nexusnodeiot.com.tr`;

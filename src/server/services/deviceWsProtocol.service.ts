@@ -203,12 +203,18 @@ export class DeviceWsProtocolService {
       updates.status = 'online';
     }
 
+    // Increment stable online counter for anti-flapping
+    device.stableOnlineCount = (device.stableOnlineCount || 0) + 1;
+    updates.stableOnlineCount = device.stableOnlineCount;
+
     // If an offline notification was previously sent or device was offline, recover!
     const wasOfflineOrWarning = device.status === 'offline' || device.status === 'warning';
     const hadOfflineNotification = !!device.lastOfflineNotifiedAt;
+    const isStablyOnline = device.stableOnlineCount >= 2;
+
     if (hadOfflineNotification || wasOfflineOrWarning) {
       updates.status = 'online';
-      if (hadOfflineNotification) {
+      if (hadOfflineNotification && isStablyOnline) {
         const incidentKey = device.lastOfflineNotifiedAt || nowIso;
         updates.lastOfflineNotifiedAt = undefined;
         device.lastOfflineNotifiedAt = undefined;
@@ -221,7 +227,7 @@ export class DeviceWsProtocolService {
         db.addNotification({
           tenantId: device.tenantId || 'usr_admin',
           title: `Cihaz Yeniden Çevrimiçi`,
-          message: `${device.name} cihazı WebSocket üzerinden veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
+          message: `${device.name} cihazı WebSocket üzerinden kararlı veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
           severity: 'info',
           deviceId: device.id,
           deviceName: device.name,
@@ -595,19 +601,23 @@ export class DeviceWsProtocolService {
     const wasOfflineOrWarning = dev.status === 'offline' || dev.status === 'warning';
     const wasOfflineNotified = !!dev.lastOfflineNotifiedAt;
 
+    dev.stableOnlineCount = (dev.stableOnlineCount || 0) + 1;
+    const isStablyOnline = dev.stableOnlineCount >= 2;
+
     const updates: Partial<Device> = {
       lastMessageAt: nowIso,
       lastHeartbeatAt: nowIso,
       lastSeen: nowIso,
       websocketConnected: true,
       consecutiveMissedTicks: 0,
+      stableOnlineCount: dev.stableOnlineCount,
     };
 
     if (wasOfflineOrWarning) {
       updates.status = 'online';
     }
 
-    if (wasOfflineNotified) {
+    if (wasOfflineNotified && isStablyOnline) {
       const incidentKey = dev.lastOfflineNotifiedAt || nowIso;
       updates.lastOfflineNotifiedAt = undefined;
       dev.lastOfflineNotifiedAt = undefined;

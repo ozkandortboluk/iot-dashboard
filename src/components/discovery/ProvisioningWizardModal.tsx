@@ -376,12 +376,17 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                   <div>
                     <h4 className="text-xs font-bold text-slate-200">Cihaz Üzerindeki QR Kodu Okutun</h4>
                     <p className="text-[11px] text-slate-400 mt-0.5">Kamera akışından donanım kimliği ve MAC adresi çözümlenir.</p>
+                    
+                    {/* Camera Permission Warning Disabled Banner */}
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-[11px] text-amber-400 font-medium">
+                      <span>📷 Kamera izni uyarısı geçici olarak kapatılmıştır (Sadece siz tekrar açana kadar devre dışıdır)</span>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleSimulateQrScan}
                     disabled={isCameraActive}
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition-all disabled:opacity-50"
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition-all disabled:opacity-50 cursor-pointer"
                   >
                     {isCameraActive ? 'Kamera Okuyor...' : 'QR Kodu Tara / Simüle Et'}
                   </button>

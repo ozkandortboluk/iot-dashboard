@@ -316,6 +316,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
   it('6. Soak Test: 15 consecutive rapid cycles of telemetry, command queueing, and ACK validation', async () => {
     const soakCycles = 10;
     const soakBootId = `boot_soak_${Date.now()}`;
+    const testStartTimeIso = new Date().toISOString();
 
     for (let i = 1; i <= soakCycles; i++) {
       if (!db.getDeviceById(testDeviceId)) {
@@ -354,21 +355,17 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
       const cycleCmdId = cmdRes.body.command.id;
 
       // 3. Device claims command
-      let claimRes = await request(app)
-        .get('/api/commands/device/commands')
-        .set('x-device-id', testDeviceId)
-        .set('x-api-key', testApiKey);
-
-      expect(claimRes.status).toBe(200);
-      let target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId || c.commandId === cycleCmdId);
-      if (!target) {
-        // Retry polling in case concurrent test worker held a temporary row lock
-        await new Promise((r) => setTimeout(r, 80));
-        claimRes = await request(app)
+      let target: any = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const claimRes = await request(app)
           .get('/api/commands/device/commands')
           .set('x-device-id', testDeviceId)
           .set('x-api-key', testApiKey);
+
+        expect(claimRes.status).toBe(200);
         target = claimRes.body.commands?.find((c: any) => c.id === cycleCmdId || c.commandId === cycleCmdId);
+        if (target) break;
+        await new Promise((r) => setTimeout(r, 50));
       }
       expect(target).toBeDefined();
 
@@ -387,10 +384,11 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
       expect(ackRes.body.success).toBe(true);
     }
 
-    // Verify all 15 soak commands reached applied status
+    // Verify all soak commands from current run reached applied status
     const allCmds = await db.getCommands(testDeviceId);
-    const soakCmds = allCmds.filter((c) => c.command === 'SOAK_PULSE');
+    const soakCmds = allCmds.filter((c) => c.command === 'SOAK_PULSE' && (c.createdAt || c.created_at || '') >= testStartTimeIso);
+    const unapplied = soakCmds.filter((c) => c.status !== 'applied');
     expect(soakCmds.length).toBeGreaterThanOrEqual(soakCycles);
-    expect(soakCmds.every((c) => c.status === 'applied')).toBe(true);
+    expect(unapplied.length).toBe(0);
   }, 35000);
 });

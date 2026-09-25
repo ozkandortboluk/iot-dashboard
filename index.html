@@ -10,6 +10,27 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="description" content="NexusNode IoT (nexusnodeiot.com.tr) - Endüstriyel Gerçek Zamanlı Telemetri, Saha Cihaz Yönetimi ve OTA Platformu" />
     <meta name="theme-color" content="#4f46e5" />
+    <meta http-equiv="Permissions-Policy" content="camera=(), microphone=()" />
+    <script>
+      (function() {
+        try {
+          if (navigator && navigator.mediaDevices) {
+            navigator.mediaDevices.getUserMedia = function() {
+              return Promise.reject(new DOMException('Kamera kullanımı engellendi', 'NotAllowedError'));
+            };
+          }
+          if (navigator && navigator.permissions && navigator.permissions.query) {
+            var orig = navigator.permissions.query.bind(navigator.permissions);
+            navigator.permissions.query = function(p) {
+              if (p && (p.name === 'camera' || p.name === 'microphone')) {
+                return Promise.resolve({ state: 'denied', name: p.name });
+              }
+              return orig(p);
+            };
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

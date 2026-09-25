@@ -98,13 +98,14 @@ export class DeviceRepository {
         hasChanges = true;
       }
 
-      // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery)
-      if (evalResult.newStatus === 'online' && dev.lastOfflineNotifiedAt) {
+      // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery) - Kararlı çevrimiçi paketi doğrulama (Anti-Flap)
+      const isStablyOnline = (dev.stableOnlineCount || 0) >= 2;
+      if (evalResult.newStatus === 'online' && dev.lastOfflineNotifiedAt && isStablyOnline) {
         const incidentId = dev.lastOfflineNotifiedAt;
         this.db.addAuditLog(
           dev.tenantId || 'system',
           'Sistem Sinyal Takibi',
-          `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) sinyal/veri akışını yeniden sağladı.`,
+          `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) kararlı sinyal/veri akışını yeniden sağladı.`,
           'low'
         );
         this.db.addNotification({
@@ -120,10 +121,16 @@ export class DeviceRepository {
         hasChanges = true;
       }
 
-      // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi (Sadece BİR KERE)
+      // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi
+      // Anti-Flap Cooldown: Son bildirim üzerinden en az 5 dakika (300.000 ms) geçmemişse tekrar bildirim fırtınası oluşturma!
       if (evalResult.newStatus === 'offline' && evalResult.isConfirmedOffline) {
-        if (!dev.lastOfflineNotifiedAt) {
+        const lastNotifiedTime = dev.lastOfflineNotificationTime || 0;
+        const cooldownActive = (now - lastNotifiedTime) < 300000; // 5 dakika soğuma süresi
+
+        if (!dev.lastOfflineNotifiedAt && !cooldownActive) {
           dev.lastOfflineNotifiedAt = new Date(now).toISOString();
+          dev.lastOfflineNotificationTime = now;
+          dev.stableOnlineCount = 0;
           hasChanges = true;
 
           const timeoutSec = evalResult.timeoutSeconds;
@@ -1675,18 +1682,19 @@ export class DeviceRepository {
     const now = Date.now();
     smartIntervalService.processDeviceTelemetryArrival(dev, now);
 
-    if (hadOfflineNotification && incidentId) {
+    const isStablyOnline = (dev.stableOnlineCount || 0) >= 2;
+    if (hadOfflineNotification && incidentId && isStablyOnline) {
       dev.lastOfflineNotifiedAt = undefined;
       this.db.addAuditLog(
         dev.tenantId || 'system',
         'Sistem Sinyal Takibi',
-        `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) veri akışını yeniden sağladı.`,
+        `Cihaz Yeniden Çevrimiçi: ${dev.name} (IP: ${dev.ipAddress || 'Bilinmiyor'}) kararlı veri akışını yeniden sağladı.`,
         'low'
       );
       this.db.addNotification({
         tenantId: dev.tenantId || 'usr_admin',
         title: `Cihaz Yeniden Çevrimiçi`,
-        message: `${dev.name} cihazı veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
+        message: `${dev.name} cihazı kararlı veri akışını yeniden sağladı ve normal çalışma durumuna döndü.`,
         severity: 'info',
         deviceId: dev.id,
         deviceName: dev.name,

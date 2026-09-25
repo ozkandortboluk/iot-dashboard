@@ -118,6 +118,7 @@ export class SmartIntervalService {
     dev.lastTelemetryAt = nowIso;
     dev.lastMessageAt = nowIso;
     dev.consecutiveMissedTicks = 0;
+    dev.stableOnlineCount = (dev.stableOnlineCount || 0) + 1;
 
     const currentCalculated = this.calculateDeviceTimeouts(dev);
     const activeInterval = currentCalculated.expectedIntervalSeconds;
@@ -288,8 +289,12 @@ export class SmartIntervalService {
 
     if (elapsedMs > offlineTimeoutMs) {
       dev.consecutiveMissedTicks = (dev.consecutiveMissedTicks || 0) + 1;
-      // Güvenilir zaman toleransı: API çağrı sıklığından bağımsız, doğrudan zaman bazlı confirmedOfflineThresholdMs
-      const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs;
+      dev.stableOnlineCount = 0;
+      // Güvenilir zaman toleransı ve zıplama (flapping) koruması:
+      // Cihazın tek bir paketi kaçırması (örn. Wi-Fi retransmission) hemen bildirimli doğrulanmış offline sayılmaz.
+      // En az 2 periyot kaçırılmış olmalı VEYA offlineTimeoutMs * 1.5 + 15s geçmiş olmalıdır.
+      const confirmedOfflineThresholdMs = (timeouts.offlineTimeoutSeconds + graceBufferSeconds) * 1000;
+      const isConfirmedOffline = elapsedMs >= confirmedOfflineThresholdMs && (dev.consecutiveMissedTicks >= 2 || elapsedMs >= confirmedOfflineThresholdMs * 1.5);
 
       const changed = dev.status !== 'offline';
       dev.status = 'offline';
