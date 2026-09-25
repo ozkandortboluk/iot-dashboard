@@ -146,11 +146,12 @@ export const LoginView: React.FC = () => {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     let token = urlParams.get('token');
-    
-    if (!token && window.location.hash.includes('token=')) {
-      const hashPart = window.location.hash.split('?')[1];
-      if (hashPart) {
-        token = new URLSearchParams(hashPart).get('token');
+
+    if (!token && window.location.hash) {
+      const hash = window.location.hash;
+      const match = hash.match(/[?&]token=([^&]+)/) || hash.match(/token=([^&]+)/);
+      if (match && match[1]) {
+        token = decodeURIComponent(match[1]);
       }
     }
 

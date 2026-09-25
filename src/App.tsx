@@ -72,7 +72,14 @@ function DashboardContent() {
   // Dynamic animated tab pulse favicon synchronized with real-time state
   useAnimatedFavicon(isConnected, true);
 
-  if (!user) {
+  // If the URL contains a password reset token/link, force showing the reset screen even if a session is open
+  const isResetPasswordUrl = Boolean(
+    window.location.search.includes('token=') ||
+    window.location.hash.includes('token=') ||
+    window.location.hash.includes('reset-password')
+  );
+
+  if (!user || isResetPasswordUrl) {
     return <LoginView />;
   }
 

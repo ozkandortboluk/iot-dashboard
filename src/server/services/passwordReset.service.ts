@@ -246,8 +246,11 @@ export class PasswordResetService {
     await this.saveTokenRecord(record);
 
     // 5. Construct secure URL
-    // Format: `${baseUrl}/#reset-password?token=${rawToken}` or `${baseUrl}/reset-password?token=${rawToken}`
-    const resetUrl = `${baseUrl.replace(/\/+$/, '')}/#reset-password?token=${rawToken}`;
+    const appBaseUrl = emailService.getAppBaseUrl();
+    const effectiveBaseUrl = (appBaseUrl && !appBaseUrl.includes('localhost') && !appBaseUrl.includes('127.0.0.1'))
+      ? appBaseUrl
+      : (baseUrl || appBaseUrl);
+    const resetUrl = `${effectiveBaseUrl.replace(/\/+$/, '')}/#reset-password?token=${rawToken}`;
 
     // 6. Send email
     const sendResult = await emailService.sendPasswordResetEmail({
@@ -303,7 +306,11 @@ export class PasswordResetService {
 
     await this.saveTokenRecord(record);
 
-    const resetUrl = `${baseUrl.replace(/\/+$/, '')}/#reset-password?token=${rawToken}`;
+    const appBaseUrl = emailService.getAppBaseUrl();
+    const effectiveBaseUrl = (appBaseUrl && !appBaseUrl.includes('localhost') && !appBaseUrl.includes('127.0.0.1'))
+      ? appBaseUrl
+      : (baseUrl || appBaseUrl);
+    const resetUrl = `${effectiveBaseUrl.replace(/\/+$/, '')}/#reset-password?token=${rawToken}`;
 
     const sendResult = await emailService.sendPasswordResetEmail({
       to: user.email,

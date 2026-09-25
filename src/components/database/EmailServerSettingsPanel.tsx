@@ -407,34 +407,48 @@ export const EmailServerSettingsPanel: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Gönderici E-Posta */}
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                       Gönderici E-Posta Adresi (EMAIL_FROM)
                     </label>
-                    {provider === 'resend' && fromEmail !== 'onboarding@resend.dev' && (
-                      <button
-                        type="button"
-                        onClick={() => setFromEmail('onboarding@resend.dev')}
-                        className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-                        title="Resend varsayılan test adresine ayarla"
-                      >
-                        ⚡ Test için onboarding@resend.dev Kullan
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {provider === 'resend' && !fromEmail.includes('@bildirim.nexusnodeiot.com.tr') && (
+                        <button
+                          type="button"
+                          onClick={() => setFromEmail('sistem@bildirim.nexusnodeiot.com.tr')}
+                          className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                          title="Doğrulanmış bildirim.nexusnodeiot.com.tr alt alan adına ayarla"
+                        >
+                          ✨ @bildirim.nexusnodeiot.com.tr Kullan
+                        </button>
+                      )}
+                      {provider === 'resend' && fromEmail !== 'onboarding@resend.dev' && (
+                        <button
+                          type="button"
+                          onClick={() => setFromEmail('onboarding@resend.dev')}
+                          className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium cursor-pointer"
+                          title="Resend varsayılan test adresine ayarla"
+                        >
+                          ⚡ Test için onboarding@resend.dev
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <input
                     type="email"
                     value={fromEmail}
                     onChange={(e) => setFromEmail(e.target.value)}
-                    placeholder="bildirim@nexusnodeiot.com.tr"
+                    placeholder="sistem@bildirim.nexusnodeiot.com.tr"
                     required
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
                   />
                   <div className="flex items-center justify-between mt-1 text-[11px] text-slate-400">
                     <span>
-                      {provider === 'resend' && fromEmail === 'onboarding@resend.dev'
-                        ? '✅ Resend varsayılan test adresi aktif. (Herhangi bir alan adı doğrulaması gerektirmez)'
-                        : 'Resend veya SMTP üzerinde doğrulanmış alan adı adresi.'}
+                      {provider === 'resend' && fromEmail.includes('@bildirim.nexusnodeiot.com.tr')
+                        ? '✅ Doğrulanmış Resend alt alan adı aktif. Tüm e-posta adreslerine canlı mail gönderilebilir.'
+                        : provider === 'resend' && fromEmail === 'onboarding@resend.dev'
+                        ? '⚠️ Resend kısıtlı test adresi. Yalnızca kendi Resend kayıtlı e-postanıza mail gönderir.'
+                        : 'Resend panelinde eklediğiniz alt alan adı uzantılı e-posta adresi.'}
                     </span>
                   </div>
                 </div>

@@ -104,7 +104,7 @@ export class EmailService {
       return fromEnv;
     }
 
-    return 'NexusNode IoT <bildirim@nexusnodeiot.com.tr>';
+    return 'NexusNode IoT <sistem@bildirim.nexusnodeiot.com.tr>';
   }
 
   /**
