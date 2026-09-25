@@ -1872,7 +1872,7 @@ class LocalDatabase {
 
     let emailResendApiKey = (current.email as any)?.resendApiKey || '';
     if (newConfig.email?.resendApiKey !== undefined) {
-      const incoming = (newConfig.email.resendApiKey || '').trim();
+      const incoming = (newConfig.email.resendApiKey || '').trim().replace(/^["']|["']$/g, '');
       if (incoming && !isMaskedSecret(incoming)) {
         emailResendApiKey = incoming;
       } else if (!incoming) {

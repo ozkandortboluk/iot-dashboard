@@ -143,7 +143,7 @@ export const EmailServerSettingsPanel: React.FC = () => {
 
       if (provider === 'resend') {
         if (resendApiKey && resendApiKey !== resendApiKeyMasked) {
-          payload.resendApiKey = resendApiKey.trim();
+          payload.resendApiKey = resendApiKey.trim().replace(/^["']|["']$/g, '');
         }
       } else if (provider === 'smtp') {
         payload.smtpHost = smtpHost.trim();

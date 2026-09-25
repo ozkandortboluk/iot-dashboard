@@ -172,7 +172,7 @@ export class EmailService {
 
     let finalResendApiKey = (currentEmail as any)?.resendApiKey || '';
     if (update.resendApiKey !== undefined) {
-      const incoming = (update.resendApiKey || '').trim();
+      const incoming = (update.resendApiKey || '').trim().replace(/^["']|["']$/g, '');
       if (incoming && !incoming.includes('••••') && !incoming.includes('****')) {
         finalResendApiKey = incoming;
       } else if (!incoming) {
@@ -298,8 +298,16 @@ export class EmailService {
     }
 
     // 3. Resend API Provider
-    const apiKey = this.getResendApiKey();
-    if (emailConfig.provider === 'resend' && apiKey) {
+    if (emailConfig.provider === 'resend') {
+      const apiKey = this.getResendApiKey();
+      if (!apiKey) {
+        return {
+          success: false,
+          provider: 'resend',
+          error: 'Resend API Anahtarı bulunamadı veya yapılandırılmadı. Lütfen E-Posta Sunucu Ayarlarından "re_" ile başlayan geçerli bir Resend API Anahtarı girip kaydediniz.',
+        };
+      }
+
       try {
         const payload: Record<string, any> = {
           from: fromAddress,
@@ -323,18 +331,28 @@ export class EmailService {
         const data: any = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          const errorMessage = data?.message || data?.error?.message || `HTTP ${response.status} Resend Gönderim Hatası`;
-          console.error(`[EmailService] Resend API Hatası (${to}):`, errorMessage);
+          const rawMessage = data?.message || data?.error?.message || (typeof data === 'string' ? data : `HTTP ${response.status} Resend Gönderim Hatası`);
+          console.error(`[EmailService] Resend API Hatası (${to}):`, rawMessage);
 
-          const lowerErr = errorMessage.toLowerCase();
+          const lowerErr = rawMessage.toLowerCase();
           const isDomainUnverified = lowerErr.includes('not verified') || 
-                                    (lowerErr.includes('domain') && lowerErr.includes('verify'));
+                                    (lowerErr.includes('domain') && lowerErr.includes('verify')) ||
+                                    lowerErr.includes('testing emails') ||
+                                    lowerErr.includes('own email address');
 
-          let formattedError = errorMessage;
+          let formattedError = rawMessage;
           if (isDomainUnverified) {
             const domainMatch = fromAddress.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
             const domainName = domainMatch ? domainMatch[1] : 'alan adınız';
-            formattedError = `Resend Alan Adı Doğrulama Hatası: '${domainName}' alan adı Resend hesabınızda henüz doğrulanmamış. Lütfen Resend panelinden (https://resend.com/domains) alan adınızı doğrulayın veya test için 'onboarding@resend.dev' e-posta adresini kullanın.`;
+            if (lowerErr.includes('testing emails') || lowerErr.includes('own email address')) {
+              formattedError = `Resend Test Modu Kısıtlaması: Resend 'onboarding@resend.dev' adresini kullanırken yalnızca kendi Resend hesabınıza kayıtlı e-posta adresine mail gönderebilirsiniz (${to}). Farklı alıcılara mail gönderebilmek için Resend panelinden (https://resend.com/domains) kendi alan adınızı doğrulamanız gerekmektedir.`;
+            } else {
+              formattedError = `Resend Alan Adı Doğrulama Hatası: '${domainName}' alan adı Resend hesabınızda henüz doğrulanmamış. Lütfen Resend panelinden (https://resend.com/domains) alan adınızı doğrulayın veya test amaçlı 'onboarding@resend.dev' e-posta adresini kullanın.`;
+            }
+          } else if (response.status === 401 || lowerErr.includes('invalid_api_key') || lowerErr.includes('api key') || lowerErr.includes('unauthorized')) {
+            formattedError = `Geçersiz Resend API Anahtarı: Girilen Resend API Anahtarı (re_...) geçersiz veya yetkisiz. Lütfen Resend panelinden (https://resend.com/api-keys) 're_' ile başlayan aktif bir API anahtarı alıp kaydediniz.`;
+          } else if (lowerErr.includes('from') && (lowerErr.includes('invalid') || lowerErr.includes('format'))) {
+            formattedError = `Geçersiz Gönderici E-posta Adresi: Gönderici e-posta adresi ('${fromAddress}') geçerli değil. Test için 'onboarding@resend.dev' veya kendi doğrulanmış alan adınızı kullanınız.`;
           }
 
           return {

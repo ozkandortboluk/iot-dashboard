@@ -246,8 +246,25 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
     }
   };
 
-  const handleSimulateQrScan = () => {
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const handleSimulateQrScan = async () => {
     setIsCameraActive(true);
+    setCameraError(null);
+
+    if (navigator?.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setCameraPermissionGranted(true);
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('[Camera Permission]', err);
+        setCameraPermissionGranted(false);
+        setCameraError(err?.message || 'Kamera izni reddedildi veya kameraya erişilemedi.');
+      }
+    }
+
     setTimeout(() => {
       const demoMac = `3C:71:BF:${Math.floor(Math.random() * 89 + 10)}:${Math.floor(Math.random() * 89 + 10)}:${Math.floor(Math.random() * 89 + 10)}`;
       const demoCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -367,7 +384,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                 </div>
               </div>
 
-              {/* QR Camera Simulation */}
+              {/* QR Camera Simulation & Permission Request */}
               {method === 'qr_scan' && (
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-center space-y-3">
                   <div className="w-16 h-16 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
@@ -376,19 +393,32 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                   <div>
                     <h4 className="text-xs font-bold text-slate-200">Cihaz Üzerindeki QR Kodu Okutun</h4>
                     <p className="text-[11px] text-slate-400 mt-0.5">Kamera akışından donanım kimliği ve MAC adresi çözümlenir.</p>
-                    
-                    {/* Camera Permission Warning Disabled Banner */}
-                    <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-[11px] text-amber-400 font-medium">
-                      <span>📷 Kamera izni uyarısı geçici olarak kapatılmıştır (Sadece siz tekrar açana kadar devre dışıdır)</span>
+
+                    {/* Camera Permission Request Active Warning Banner */}
+                    <div className="mt-2.5 p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left text-[11px] text-amber-300 space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-400">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                        <span>Kamera Erişim İzni Uyarısı (Etkin)</span>
+                      </div>
+                      <p className="text-[10px] text-amber-200/90 leading-relaxed">
+                        QR kod taraması yapabilmek için tarayıcınız kamera erişim izni talep eder. Lütfen beliren popup penceresinde "İzin Ver" butonuna tıklayınız.
+                      </p>
                     </div>
+
+                    {cameraError && (
+                      <div className="mt-2 p-2 bg-rose-500/20 border border-rose-500/30 rounded text-[11px] text-rose-300">
+                        ⚠️ {cameraError}
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
                     onClick={handleSimulateQrScan}
                     disabled={isCameraActive}
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition-all disabled:opacity-50 cursor-pointer"
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 mx-auto"
                   >
-                    {isCameraActive ? 'Kamera Okuyor...' : 'QR Kodu Tara / Simüle Et'}
+                    <Camera className="w-3.5 h-3.5" />
+                    {isCameraActive ? 'Kamera İzni İsteniyor & Okunuyor...' : 'Kamera İzni Al & QR Tara'}
                   </button>
                 </div>
               )}
