@@ -70,6 +70,7 @@ import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser, i
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
+const SYSTEM_CONFIG_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_system_config.json') : path.join(DATA_DIR, 'system_config.json');
 
 interface DatabaseSchema {
   users: User[];
@@ -490,6 +491,14 @@ class LocalDatabase {
           this.data.otaJobs = hydrated.otaJobs;
         }
 
+        if (hydrated.serviceConfig) {
+          this.data.serviceConfig = hydrated.serviceConfig;
+          this.saveLocalSystemConfig(hydrated.serviceConfig);
+          console.log('[PostgreSQL] E-Posta ve Resend sunucu ayarları veritabanından yüklendi.');
+        } else if (this.data.serviceConfig) {
+          await this.postgresRepo.saveSystemSetting('service_config', this.data.serviceConfig);
+        }
+
         console.log(`[PostgreSQL Repository] Aktif veritabanı bağlandı ve bellek PostgreSQL ile senkronize edildi (${this.data.devices.length} cihaz, ${this.data.users.length} kullanıcı).`);
       }
     } catch (hydrateErr: any) {
@@ -628,6 +637,32 @@ class LocalDatabase {
     }
   }
 
+  private saveLocalSystemConfig(config: NotificationServiceConfig): void {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      fs.writeFileSync(SYSTEM_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.warn('[SystemConfig] Local save error:', err?.message || err);
+    }
+  }
+
+  private loadLocalSystemConfig(): NotificationServiceConfig | null {
+    try {
+      if (fs.existsSync(SYSTEM_CONFIG_FILE)) {
+        const content = fs.readFileSync(SYSTEM_CONFIG_FILE, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[SystemConfig] Local load error:', err?.message || err);
+    }
+    return null;
+  }
+
   private loadData(): DatabaseSchema {
     const emptyData: DatabaseSchema = {
       users: [],
@@ -646,6 +681,11 @@ class LocalDatabase {
       replacementHistory: [],
       subscriptions: [],
     };
+
+    const localSysConfig = this.loadLocalSystemConfig();
+    if (localSysConfig) {
+      emptyData.serviceConfig = localSysConfig;
+    }
 
     if (this.isPostgresProductionMode()) {
       console.log('[BOOTSTRAP] PostgreSQL mode active, skipping db.json load into RAM.');
@@ -1944,7 +1984,16 @@ class LocalDatabase {
         secretHeader: encryptSecret(webhookSecretHeader),
       },
     };
+
     this.saveData(this.data);
+    this.saveLocalSystemConfig(this.data.serviceConfig);
+
+    if (this.postgresRepo?.isReady()) {
+      this.postgresRepo.saveSystemSetting('service_config', this.data.serviceConfig).catch((err: any) => {
+        console.warn('[PostgreSQL] Service config save error:', err?.message || err);
+      });
+    }
+
     return this.getServiceConfig(true);
   }
 

@@ -90,4 +90,25 @@ describe('Email Server & Mail Configuration Architecture', () => {
     expect(result.messageId).toBeDefined();
     expect(result.simulated).toBe(true);
   });
+
+  it('6. System Settings Persistence: preserves Resend API key and settings across reloads', async () => {
+    emailService.updateEmailConfig({
+      provider: 'resend',
+      fromEmail: 'sistem@bildirim.nexusnodeiot.com.tr',
+      fromName: 'NexusNode Persistence Test',
+      resendApiKey: 're_persistence_test_key_999888777',
+    });
+
+    const activeKeyBefore = emailService.getResendApiKey();
+    expect(activeKeyBefore).toBe('re_persistence_test_key_999888777');
+
+    // Simulate database re-sync
+    await db.initPostgresRepository();
+
+    const currentConfig = emailService.getEmailConfig();
+    expect(currentConfig.fromEmail).toBe('sistem@bildirim.nexusnodeiot.com.tr');
+    expect(currentConfig.fromName).toBe('NexusNode Persistence Test');
+    expect(currentConfig.hasResendApiKey).toBe(true);
+    expect(emailService.getResendApiKey()).toBe('re_persistence_test_key_999888777');
+  });
 });

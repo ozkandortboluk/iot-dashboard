@@ -21,6 +21,7 @@ import type {
   DispatchLogItem,
   Firmware,
   OtaDeploymentJob,
+  NotificationServiceConfig,
 } from '../../types.js';
 
 
@@ -561,6 +562,11 @@ export class PostgresRepository {
 
         // 2. Data synchronization and schema harmonization for backwards compatibility
         await client.query(`
+          CREATE TABLE IF NOT EXISTS system_settings (
+            key VARCHAR(64) PRIMARY KEY,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
           ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
@@ -3091,6 +3097,7 @@ export class PostgresRepository {
     sessions?: any[];
     firmwares?: Firmware[];
     otaJobs?: OtaDeploymentJob[];
+    serviceConfig?: NotificationServiceConfig;
   } | null> {
 
     if (!this.pool) return null;
@@ -3296,6 +3303,15 @@ export class PostgresRepository {
         });
       }
 
+      // 8. Service Config / System Settings
+      let serviceConfig: NotificationServiceConfig | undefined = undefined;
+      try {
+        const scVal = await this.getSystemSetting<NotificationServiceConfig>('service_config');
+        if (scVal && typeof scVal === 'object') {
+          serviceConfig = scVal;
+        }
+      } catch {}
+
       return {
         users,
         passwords,
@@ -3306,6 +3322,7 @@ export class PostgresRepository {
         sessions,
         firmwares,
         otaJobs,
+        serviceConfig,
       };
     } catch (err: any) {
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
@@ -3931,5 +3948,41 @@ export class PostgresRepository {
         console.warn('[PostgresRepository] cleanupExpiredWsMessages error:', errMsg);
       }
     }
+  }
+
+  /**
+   * Save a system setting key-value pair into PostgreSQL (system_settings table)
+   */
+  public async saveSystemSetting(key: string, value: any): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    try {
+      await this.query(
+        `INSERT INTO system_settings (key, value, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW();`,
+        [key, JSON.stringify(value)]
+      );
+      return true;
+    } catch (err: any) {
+      console.warn(`[PostgresRepository] saveSystemSetting error (${key}):`, err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * Get a system setting by key from PostgreSQL (system_settings table)
+   */
+  public async getSystemSetting<T>(key: string): Promise<T | null> {
+    if (!this.pool || !this.isConnected) return null;
+    try {
+      const res = await this.query(`SELECT value FROM system_settings WHERE key = $1 LIMIT 1;`, [key]);
+      if (res?.rows && res.rows.length > 0) {
+        const val = res.rows[0].value;
+        return typeof val === 'string' ? JSON.parse(val) : val;
+      }
+    } catch (err: any) {
+      console.warn(`[PostgresRepository] getSystemSetting error (${key}):`, err?.message || err);
+    }
+    return null;
   }
 }
