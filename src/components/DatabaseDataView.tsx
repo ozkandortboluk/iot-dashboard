@@ -54,6 +54,8 @@ import { useRealtime } from '../context/RealtimeContext';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { DatabaseAutoHealerPanel } from './database/DatabaseAutoHealerPanel';
 import { EmailServerSettingsPanel } from './database/EmailServerSettingsPanel';
+import { DatabaseGrowthPanel } from './database/DatabaseGrowthPanel';
+import { ScheduledBackupsPanel } from './database/ScheduledBackupsPanel';
 import type {
   DatabaseEngineType,
   DatabaseEngineConfig,
@@ -147,7 +149,8 @@ export const DatabaseDataView: React.FC = () => {
     };
   };
 
-  const [activeTab, setActiveTab] = useState<'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users' | 'email_settings'>('auto_healer');
+  const [activeCategory, setActiveCategory] = useState<'analytics' | 'explorer' | 'settings'>('analytics');
+  const [activeTab, setActiveTab] = useState<'growth_analytics' | 'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users' | 'email_settings' | 'scheduled_backups'>('growth_analytics');
   const [opCategoryFilter, setOpCategoryFilter] = useState<'all' | 'widget' | 'api' | 'system' | 'sync'>('all');
 
   // Retention Policies State
@@ -1018,41 +1021,181 @@ export const DatabaseDataView: React.FC = () => {
         </div>
       </div>
 
-      {/* Modern Navigation Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 sm:gap-6 px-1 overflow-x-auto">
-        {[
-          { id: 'auto_healer', label: 'Otomatik Onarım & Sistem Olay Günlüğü', icon: ShieldAlert, badge: 'Self-Healing' },
-          { id: 'timescale', label: 'TimescaleDB & Veri Sıkıştırma (Geçmiş Kayıt)', icon: Clock, badge: 'Ana Veritabanı' },
-          { id: 'postgres', label: 'PostgreSQL & Sunucu Kurulumu', icon: Server },
-          { id: 'explorer', label: 'Tablo Veri Gezgini & SQL Yönetimi', icon: Table, badge: 'İçerik & Düzeltme' },
-          { id: 'retention', label: 'Veri Saklama & Otomatik Temizlik', icon: Trash2, badge: 'Eski Kayıt Silme' },
-          { id: 'collections', label: 'Koleksiyonlar & Şema', icon: Layers },
-          { id: 'users', label: 'Kullanıcı Veritabanı', icon: Users },
-          { id: 'email_settings', label: 'E-Posta & Mail Sunucu Ayarları', icon: Mail, badge: 'SMTP / Resend' },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`pb-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition cursor-pointer whitespace-nowrap ${
-                isActive
-                  ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-500'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              {tab.badge && (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* 2-Tier Grouped Navigation */}
+      <div className="space-y-3">
+        {/* Tier 1: Main Category Group Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            {
+              id: 'analytics' as const,
+              title: '📊 Analitik & Performans',
+              desc: 'Doluluk, büyüme trendleri, self-healing & TimescaleDB',
+              icon: BarChart3,
+            },
+            {
+              id: 'explorer' as const,
+              title: '🗃️ Veri Gezgini & Tablolar',
+              desc: 'Tablo içerikleri, kullanıcılar & SQL konsolu',
+              icon: Database,
+            },
+            {
+              id: 'settings' as const,
+              title: '⚙️ Sunucu & Konfigürasyon',
+              desc: 'PostgreSQL kurulumu, mail sunucusu & saklama ilkeleri',
+              icon: Server,
+            },
+          ].map((cat) => {
+            const Icon = cat.icon;
+            const isCatActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => {
+                  setActiveCategory(cat.id);
+                  if (cat.id === 'analytics' && !['growth_analytics', 'auto_healer', 'timescale'].includes(activeTab)) {
+                    setActiveTab('growth_analytics');
+                  } else if (cat.id === 'explorer' && !['explorer', 'users', 'collections'].includes(activeTab)) {
+                    setActiveTab('explorer');
+                  } else if (cat.id === 'settings' && !['scheduled_backups', 'postgres', 'email_settings', 'retention'].includes(activeTab)) {
+                    setActiveTab('scheduled_backups');
+                  }
+                }}
+                className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex items-start gap-3 ${
+                  isCatActive
+                    ? 'bg-indigo-50/80 dark:bg-indigo-950/50 border-indigo-500/80 dark:border-indigo-500 shadow-sm'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`p-2 rounded-lg shrink-0 ${
+                    isCatActive
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <h3
+                    className={`text-xs font-bold truncate ${
+                      isCatActive ? 'text-indigo-900 dark:text-indigo-200' : 'text-slate-800 dark:text-slate-200'
+                    }`}
+                  >
+                    {cat.title}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{cat.desc}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Tier 2: Sub-tabs within Selected Category */}
+        <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 sm:gap-4 px-1 overflow-x-auto bg-slate-50/50 dark:bg-slate-900/40 p-1.5 rounded-lg border">
+          {activeCategory === 'analytics' && (
+            <>
+              {[
+                { id: 'growth_analytics' as const, label: 'Doluluk & Büyüme Trendleri', icon: BarChart3, badge: 'Timescale & Postgres' },
+                { id: 'auto_healer' as const, label: 'Otomatik Onarım & Sistem Olay Günlüğü', icon: ShieldAlert, badge: 'Self-Healing' },
+                { id: 'timescale' as const, label: 'TimescaleDB & Veri Sıkıştırma', icon: Clock, badge: 'Ana Veritabanı' },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-3 py-2 text-xs font-semibold flex items-center gap-2 rounded-md transition cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                    {tab.badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+          {activeCategory === 'explorer' && (
+            <>
+              {[
+                { id: 'explorer' as const, label: 'Tablo Veri Gezgini & SQL Yönetimi', icon: Table, badge: 'İçerik & Düzeltme' },
+                { id: 'users' as const, label: 'Kullanıcı Veritabanı', icon: Users },
+                { id: 'collections' as const, label: 'Koleksiyonlar & Şema Yapısı', icon: Layers },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-3 py-2 text-xs font-semibold flex items-center gap-2 rounded-md transition cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                    {tab.badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+          {activeCategory === 'settings' && (
+            <>
+              {[
+                { id: 'scheduled_backups' as const, label: 'Zamanlanmış Snapshot Yedeği', icon: HardDrive, badge: 'Afet Kurtarma' },
+                { id: 'postgres' as const, label: 'PostgreSQL & Sunucu Kurulumu', icon: Server },
+                { id: 'email_settings' as const, label: 'E-Posta & Mail Sunucu Ayarları', icon: Mail, badge: 'SMTP / Resend' },
+                { id: 'retention' as const, label: 'Veri Saklama & Otomatik Temizlik', icon: Trash2, badge: 'Eski Kayıt Silme' },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-3 py-2 text-xs font-semibold flex items-center gap-2 rounded-md transition cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/80 dark:border-slate-700'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                    {tab.badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* TAB: SCHEDULED BACKUPS & DISASTER RECOVERY */}
+      {activeTab === 'scheduled_backups' && <ScheduledBackupsPanel />}
+
+      {/* TAB: DATABASE GROWTH & CAPACITY ANALYTICS */}
+      {activeTab === 'growth_analytics' && <DatabaseGrowthPanel />}
 
       {/* TAB: DATABASE AUTO-HEALER & SYSTEM EVENT LOGS */}
       {activeTab === 'auto_healer' && <DatabaseAutoHealerPanel />}

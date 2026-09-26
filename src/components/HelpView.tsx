@@ -30,9 +30,11 @@ import {
   Check,
 } from 'lucide-react';
 import { NexusNodeLogo } from './NexusNodeLogo';
+import { DeploymentView } from './DeploymentView';
 
 interface HelpViewProps {
   onNavigateToTab?: (tab: string) => void;
+  initialTab?: 'code_examples' | 'faq' | 'dictionary' | 'guides' | 'troubleshooting' | 'server_deployment';
 }
 
 interface FAQItem {
@@ -52,8 +54,8 @@ interface DictionaryTerm {
   example?: string;
 }
 
-export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab }) => {
-  const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'code_examples' | 'guides' | 'troubleshooting'>('code_examples');
+export const HelpView: React.FC<HelpViewProps> = ({ onNavigateToTab, initialTab }) => {
+  const [activeTab, setActiveTab] = useState<'faq' | 'dictionary' | 'code_examples' | 'guides' | 'troubleshooting' | 'server_deployment'>(initialTab || 'code_examples');
   const [selectedCodeCategory, setSelectedCodeCategory] = useState<'all' | 'esp32' | 'nodemcu' | 'ota' | 'ping' | 'control' | 'python' | 'curl' | 'nodejs' | 'logs'>('all');
   const [activeCodeExampleId, setActiveCodeExampleId] = useState<string>('code_esp32_http_telemetry');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2776,6 +2778,21 @@ Body:
             6 Adım
           </span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('server_deployment')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'server_deployment'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+          }`}
+        >
+          <Server className="w-4 h-4 text-blue-300" />
+          <span>Sunucu & DB Kurulum Rehberi</span>
+          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-200 font-mono">
+            Docker & Production
+          </span>
+        </button>
       </div>
 
       {/* TAB 0: COMPREHENSIVE WORKING CODE EXAMPLES & API */}
@@ -3491,6 +3508,13 @@ void loop() {
 }`}</pre>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB 5: SERVER & DATABASE DEPLOYMENT GUIDE */}
+      {activeTab === 'server_deployment' && (
+        <div className="animate-fade-in">
+          <DeploymentView />
         </div>
       )}
     </div>

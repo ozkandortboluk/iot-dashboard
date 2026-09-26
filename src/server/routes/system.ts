@@ -368,6 +368,83 @@ databaseRouter.get('/pool-stats', authenticateUser, requireAdmin, async (req, re
   res.json(stats);
 });
 
+databaseRouter.get('/growth-analytics', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const analytics = await db.getDatabaseGrowthAnalytics();
+    res.json(analytics);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Büyüme analitiği alınamadı: ' + (err?.message || err) });
+  }
+});
+
+// Scheduled Backups & Disaster Recovery Endpoints
+databaseRouter.get('/scheduled-backups/config', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    res.json({
+      config: db.getScheduledBackupConfig(),
+      snapshots: db.listDetailedSnapshots(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Zamanlanmış yedekleme yapılandırması alınamadı: ' + (err?.message || err) });
+  }
+});
+
+databaseRouter.post('/scheduled-backups/config', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const updated = db.updateScheduledBackupConfig(req.body);
+    res.json({
+      success: true,
+      message: 'Zamanlanmış yedekleme ayarları güncellendi.',
+      config: updated,
+      snapshots: db.listDetailedSnapshots(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Yapılandırma kaydı başarısız: ' + (err?.message || err) });
+  }
+});
+
+databaseRouter.post('/scheduled-backups/trigger-now', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db.triggerSnapshot('manual');
+    res.json({
+      success: true,
+      message: `Anlık snapshot yedeği başarıyla alındı (${snapshot.filename}).`,
+      snapshot,
+      snapshots: db.listDetailedSnapshots(),
+      config: db.getScheduledBackupConfig(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Snapshot tetikleme başarısız: ' + (err?.message || err) });
+  }
+});
+
+databaseRouter.delete('/scheduled-backups/:filename', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const ok = db.deleteBackupFile(filename);
+    if (ok) {
+      res.json({ success: true, message: `Snapshot yedeği silindi: ${filename}`, snapshots: db.listDetailedSnapshots() });
+    } else {
+      res.status(404).json({ success: false, error: 'Yedek dosyası bulunamadı veya silinemedi.' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Silme işlemi hatası: ' + (err?.message || err) });
+  }
+});
+
+databaseRouter.get('/scheduled-backups/download/:filename', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = db.getBackupFilePath(filename);
+    if (!filePath) {
+      return res.status(404).json({ error: 'İstenen snapshot dosyası sunucuda bulunamadı.' });
+    }
+    res.download(filePath, filename);
+  } catch (err: any) {
+    res.status(500).json({ error: 'İndirme hatası: ' + (err?.message || err) });
+  }
+});
+
 databaseRouter.post('/backup', authenticateUser, requireAdmin, async (req, res) => {
   const result = await db.createBackup();
   if (result.success) {
@@ -729,8 +806,37 @@ timescaleRouter.get('/continuous-aggregates', authenticateUser, (req, res) => {
 });
 
 timescaleRouter.get('/export', authenticateUser, async (req, res) => {
-  const { deviceId, metric, bucket = '5m', format = 'json', startTime, endTime } = req.query;
+  const { deviceId, metric, bucket = '5m', format = 'json', mode = 'bucket', startTime, endTime, limit = '5000' } = req.query;
   try {
+    const bom = '\uFEFF';
+
+    if (mode === 'raw') {
+      const rawData = await db.getTelemetryAsync(
+        deviceId && deviceId !== 'all' ? (deviceId as string) : undefined,
+        metric && metric !== 'all' ? (metric as string) : undefined,
+        Math.min(Number(limit) || 5000, 20000)
+      );
+
+      if (format === 'csv') {
+        const csvHeader = 'Timestamp,Device ID,Device Name,Metric,Value,Unit,Status\n';
+        const csvRows = rawData
+          .map((d: any) =>
+            `"${d.timestamp}","${d.deviceId}","${d.deviceName || ''}","${d.metric}",${d.value},"${d.unit || ''}","${d.status || 'normal'}"`
+          )
+          .join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="telemetry_raw_export_${Date.now()}.csv"`);
+        return res.send(bom + csvHeader + csvRows);
+      }
+
+      return res.json({
+        exportedAt: new Date().toISOString(),
+        recordCount: rawData.length,
+        mode: 'raw',
+        data: rawData,
+      });
+    }
+
     const data = await db.queryTimeBucketTelemetryAsync({
       deviceId: deviceId as string,
       metric: metric as string,
@@ -742,15 +848,16 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
     if (format === 'csv') {
       const csvHeader = 'Timestamp,Device ID,Metric,Average,Minimum,Maximum,Sample Count\n';
       const csvRows = data.map((d) => `"${d.timeBucket}","${d.deviceId}","${d.metric}",${d.avgValue},${d.minValue},${d.maxValue},${d.readingCount}`).join('\n');
-      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="timescaledb_export_${Date.now()}.csv"`);
-      return res.send(csvHeader + csvRows);
+      return res.send(bom + csvHeader + csvRows);
     }
 
     res.json({
       exportedAt: new Date().toISOString(),
       recordCount: data.length,
       bucket,
+      mode: 'bucket',
       data,
     });
   } catch (err: any) {

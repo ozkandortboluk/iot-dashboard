@@ -97,6 +97,31 @@ export interface User {
   status?: "active" | "suspended";
   deletedAt?: string; // System level role
   avatarUrl?: string;
+  avatarColor?: 'indigo' | 'emerald' | 'violet' | 'amber' | 'rose' | 'cyan' | 'slate';
+  title?: string;
+  department?: string;
+  timezone?: string;
+  preferences?: {
+    theme?: 'light' | 'dark' | 'system';
+    refreshIntervalSec?: number;
+    defaultTab?: string;
+    soundAlerts?: boolean;
+    audioVolume?: number;
+    language?: 'tr' | 'en';
+    timeFormat?: '24h' | '12h';
+    alertThresholdLevels?: {
+      critical?: boolean;
+      warning?: boolean;
+      deviceOffline?: boolean;
+      otaEvents?: boolean;
+      systemUpdates?: boolean;
+    };
+    quietHours?: {
+      enabled?: boolean;
+      start?: string;
+      end?: string;
+    };
+  };
   notificationPreferences?: {
     app?: boolean;
     email?: boolean;
@@ -862,6 +887,35 @@ export interface NotificationServiceConfig {
     enabled: boolean;
     defaultEndpoint?: string;
     secretHeader?: string;
+  };
+}
+
+export interface ScheduledBackupConfig {
+  enabled: boolean;
+  frequencyHours: number;
+  preferredTime: string;
+  maxBackupRetentionCount: number;
+  includeHypertables: boolean;
+  includeMetadata: boolean;
+  autoVerifySnapshots: boolean;
+  lastBackupAt?: string;
+  nextBackupAt?: string;
+}
+
+export interface BackupSnapshotItem {
+  id: string;
+  filename: string;
+  sizeBytes: number;
+  createdAt: string;
+  triggerType: 'scheduled' | 'manual' | 'auto_healer';
+  status: 'completed' | 'verified' | 'failed' | 'in_progress';
+  hypertableIncluded: boolean;
+  totalRecordsCount: number;
+  checksum?: string;
+  verificationReport?: {
+    isHealthy: boolean;
+    tablesVerified: number;
+    verifiedAt: string;
   };
 }
 

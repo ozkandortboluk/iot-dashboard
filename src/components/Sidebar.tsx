@@ -289,11 +289,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: Database,
         },
         {
-          id: 'deployment',
-          label: 'Sunucu Kurulum Rehberi',
-          icon: Server,
-        },
-        {
           id: 'security',
           label: 'Güvenlik & Audit Logları',
           icon: ShieldCheck,

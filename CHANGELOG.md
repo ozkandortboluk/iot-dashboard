@@ -4,6 +4,58 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.46.0] - 2026-09-26
+
+### 📈 Gelişmiş Veri Analizi, Çoklu Metrik Karşılaştırma & Dışa Aktarma Merkezi (AnalyticsView)
+- **Çoklu Görsel Analiz & Perspektif Sekmeleri**:
+  - `Zaman Serisi & Trendler`, `İkili Metrik Karşılaştırma`, `İstatistiksel Zeka & Dağılım`, `Detaylı Veri Tablosu` ve `Dışa Aktarma Merkezi` sekmeleri ile zenginleştirildi.
+  - Grafik türü seçimi (Alan/Area, Çizgi/Line, Çubuk/Bar) ve TimescaleDB min-max aralık yayılım bandı eklendi.
+  - Dinamik **Eşik Referans Çizgisi (Reference Line)** ile kritik limit değerlerinin grafik üzerinde anlık takibi sağlandı.
+- **İkili Metrik & Çift Y-Ekseni Karşılaştırma (Dual Y-Axis)**:
+  - İki farklı metriği (örn. Sıcaklık vs Nem, Basınç vs Güç) sol ve sağ Y eksenleri üzerinden korelasyon analiziyle karşılaştırma imkanı sunuldu.
+- **İstatistiksel Zeka Paneli**:
+  - Ortalama, standart sapma (σ), P95 yüzdelik dilimi, trend eğilim yüzdesi ve eşik aşım olay adetleri dinamik hesaplandı.
+- **Gelişmiş Dışa Aktarma & Raporlama Merkezi (`/api/timescale/export`)**:
+  - Hem TimescaleDB zaman dilimli (`bucket`) hem de ham (`raw`) sensör ölçümlerini kapsayan export altyapısı sağlandı.
+  - Excel ile tam uyumlu UTF-8 BOM destekli CSV ve yapılandırılmış JSON formatları eklendi.
+  - Özel tarih ve saat aralığı (Custom Date/Time Range) seçici entegre edildi.
+  - Yazdırma ve PDF raporlama desteği sağlandı.
+- **Arama, Sıralama ve Sayfalama Özellikli Veri Tablosu**:
+  - Canlı arama filtresi, sütun bazlı sıralama ve 10/15/25/50 satırlık sayfalama kontrolü entegre edildi.
+
+---
+
+## 🚀 [v1.45.0] - 2026-09-26
+
+### 👤 Gelişmiş Hesap, Profil & Güvenlik Yönetim Merkezi (AccountSettingsView)
+- **Zenginleştirilmiş Profil & Kurumsal Bilgi Yönetimi**:
+  - Unvan/Görev, Departman, Zaman Dilimi (Timezone) ve 7 farklı canlı avatar tema rengi (Indigo, Emerald, Violet, Amber, Rose, Cyan, Slate) seçici eklendi.
+  - Form alanları genişletildi, kullanıcı deneyimi akıcı ve modern görsel öğelerle güçlendirildi.
+- **Aktif Oturumlar & Cihaz Güvenliği (`/api/profile/sessions`, `/api/profile/sessions/revoke-others`)**:
+  - Kullanıcının açık olan tüm web ve mobil oturumlarının anlık listelenmesi, IP adresi, cihaz türü ve son etkinlik gösterimi sağlandı.
+  - Mevcut oturum haricindeki tüm diğer cihaz oturumlarını tek tıkla sonlandırma özelliği eklendi.
+- **Bildirim Kanalları Canlı Test & Akustik Alarm Simülasyonu**:
+  - E-posta, WhatsApp, Telegram, SMS ve Uygulama İçi bildirim kanalları için doğrudan hesap sayfasından "Test Gönder" işlevi sağlandı.
+  - Web Audio API tabanlı sentetik alarm sesi dinleme ve test aracı (Chime, Bip, Radar) entegre edildi.
+  - Bildirim tetikleyici olay seviyeleri (Kritik, Uyarı, Offline, OTA) ve Gece Sessiz Saatleri (Do Not Disturb) yapılandırması sunuldu.
+- **Kişisel API Jetonu & GDPR/KVKK Veri İndirme**:
+  - Harici IoT ve Python scriptleri için Kişisel Erişim Jetonu (Personal Access Token) kopyalama desteği eklendi.
+  - "Tüm Hesap Verilerimi İndir" butonu ile kullanıcı ve cihaz verilerinin JSON formatında dışa aktarımı (`/api/profile/export-data`) sağlandı.
+  - Son kullanıcı etkinliklerinin zaman çizgisi halinde izlenebildiği "Hesap Geçmişi" (Audit Timeline) sekmesi eklendi.
+
+---
+
+## 🚀 [v1.44.0] - 2026-09-25
+
+### 💾 TimescaleDB Hypertable Zamanlanmış Otomatik Snapshot & Afet Kurtarma Modülü
+- **Zamanlanmış Snapshot Yönetimi (`ScheduledBackupsPanel.tsx`, `system.ts`)**:
+  - Otomatik zamanlanmış veritabanı ve TimescaleDB hypertable snapshot yedekleme yönetim paneli eklendi.
+  - Snapshot frekansı (Her 6 Saat, Her 12 Saat, Günlük, Haftalık), saklama sınırı (7, 14, 30 snapshot) ve tercih edilen otomatik çalışma saati tanımlama yeteneği sağlandı.
+  - Afet kurtarma hazırlığı için anlık "Şimdi Snapshot Al (Trigger-Now)" tetikleme ve otomatik bütünlük/checksum doğrulama aracı entegre edildi.
+  - Snapshot geçmiş tablosunda tek tıkla dosya indirme (download), geri yükleme (restore) ve silme (delete) işlemleri sunuldu.
+
+---
+
 ## 🚀 [v1.43.0] - 2026-09-24
 
 ### 📧 E-Posta & Mail Sunucu Yapılandırma Paneli (PostgreSQL & Veritabanı Yönetimi)

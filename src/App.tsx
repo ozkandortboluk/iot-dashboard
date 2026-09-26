@@ -225,7 +225,7 @@ function DashboardContent() {
           )}
           {isAdmin && safeActiveTab === 'security' && <SecurityView />}
           {isAdmin && safeActiveTab === 'system_logs' && <SystemLogsView />}
-          {isAdmin && safeActiveTab === 'deployment' && <DeploymentView />}
+          {isAdmin && safeActiveTab === 'deployment' && <HelpView initialTab="server_deployment" onNavigateToTab={(tab) => setActiveTab(tab)} />}
           {safeActiveTab === 'account_settings' && <AccountSettingsView />}
           {safeActiveTab === 'help' && <HelpView onNavigateToTab={(tab) => setActiveTab(tab)} />}
         </main>

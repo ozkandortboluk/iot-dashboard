@@ -534,6 +534,44 @@ export class UserRepository {
     this.db.saveData(this.db.data, true);
   }
 
+  public async terminateUserOtherSessions(userId: string, currentToken: string) {
+    if (this.isPgReady()) {
+      await this.db.postgresRepo.query(
+        `DELETE FROM user_sessions WHERE user_id = $1 AND token <> $2;`,
+        [userId, currentToken]
+      ).catch((e: any) => console.warn('[PG Error terminateOtherSessions]', e?.message || e));
+    }
+    this.db.data.sessions = (this.db.data.sessions || []).filter(
+      (s: any) => s.userId !== userId || s.token === currentToken
+    );
+    this.db.saveData(this.db.data, true);
+  }
+
+  public async getUserSessions(userId: string): Promise<any[]> {
+    if (this.isPgReady()) {
+      const res = await this.db.postgresRepo.query(
+        `SELECT id, token, created_at, expires_at FROM user_sessions WHERE user_id = $1 AND expires_at > NOW() ORDER BY created_at DESC;`,
+        [userId]
+      ).catch(() => null);
+      if (res && res.rows && res.rows.length > 0) {
+        return res.rows.map((r: any) => ({
+          id: r.id || (r.token ? r.token.slice(0, 16) : 'sess'),
+          token: r.token,
+          createdAt: r.created_at,
+          expiresAt: r.expires_at,
+        }));
+      }
+    }
+    return (this.db.data.sessions || [])
+      .filter((s: any) => s.userId === userId && new Date(s.expiresAt).getTime() > Date.now())
+      .map((s: any) => ({
+        id: s.token.slice(0, 16),
+        token: s.token,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+      }));
+  }
+
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {
     if (this.isPgReady()) {
       await this.db.postgresRepo.softDeleteUser(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
