@@ -3,12 +3,22 @@ dist
 .git
 .github
 *.log
+logs/
 coverage
 .env
-.env.local
-.DS_Store
-*.db_config.json
+.env.*
+data/
+secrets/
+uploads/
+backups/
+*.key
+*.pem
+*.secret*
+.vault_key
+.setup_token
 .db_config.json
+.system_secrets.json
+.DS_Store
 
 # Temporary ad-hoc scratch scripts & dumps
 fix_*
@@ -20,12 +30,11 @@ patch_*
 output.txt
 temp_*
 *.tmp
-*.txt
-!metadata.json
-!README.md
 cookies.txt
 e2e/
 tests/
 examples/
 docs/
+!metadata.json
+!README.md
 

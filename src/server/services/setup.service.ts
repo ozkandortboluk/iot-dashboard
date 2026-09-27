@@ -32,6 +32,7 @@ export interface SetupStatusResponse {
   setupTokenRequired: boolean;
   isSetupAuthenticated?: boolean;
   setupToken?: string;
+  devSetupToken?: string;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -573,7 +574,11 @@ export class SetupService {
     if (pool) {
       let client: any = null;
       try {
-        client = await pool.connect();
+        const connectPromise = pool.connect();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PostgreSQL bağlantı zaman aşımı')), 3000)
+        );
+        client = await Promise.race([connectPromise, timeoutPromise]);
         // Connection test
         await client.query('SELECT 1;');
         isDbConnected = true;
@@ -690,6 +695,7 @@ export class SetupService {
       setupTokenRequired,
       isSetupAuthenticated: systemMode !== 'SETUP' ? true : isAuthenticated,
       setupToken: isAuthenticated ? activeSetupToken : undefined,
+      devSetupToken: process.env.NODE_ENV !== 'production' ? activeSetupToken : undefined,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,

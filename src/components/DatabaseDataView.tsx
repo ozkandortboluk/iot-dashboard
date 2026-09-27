@@ -357,7 +357,7 @@ export const DatabaseDataView: React.FC = () => {
       const saved = localStorage.getItem('nexusnode_last_postgres_url');
       if (saved && saved.trim()) return saved.trim();
     } catch {}
-    return 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+    return 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
   });
   const [savingPostgresUrl, setSavingPostgresUrl] = useState(false);
   const [saveUrlSuccess, setSaveUrlSuccess] = useState(false);
@@ -607,7 +607,7 @@ export const DatabaseDataView: React.FC = () => {
   };
 
   const handleResetDefaultUrl = () => {
-    const defaultUrl = 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
+    const defaultUrl = 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
     setInputPostgresUrl(defaultUrl);
     try {
       localStorage.setItem('nexusnode_last_postgres_url', defaultUrl);
@@ -1659,7 +1659,7 @@ export const DatabaseDataView: React.FC = () => {
                       type="text"
                       value={inputPostgresUrl}
                       onChange={(e) => handleUrlChange(e.target.value)}
-                      placeholder={engineConfig?.postgresUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable'}
+                      placeholder={engineConfig?.postgresUrl || 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable'}
                       className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-blue-500"
                     />
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -1724,7 +1724,7 @@ export const DatabaseDataView: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  İpucu: Docker / VPS sunucunuz için yapılandırılmış adres: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable</code>
+                  İpucu: Docker / VPS sunucunuz için varsayılan adres şablonu: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable</code>
                 </p>
                 <div className="mt-2 p-2.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/30 rounded-lg text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
                   <Info className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />

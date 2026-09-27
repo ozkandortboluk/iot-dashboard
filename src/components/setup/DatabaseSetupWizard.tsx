@@ -25,6 +25,8 @@ import {
   RotateCcw,
   Trash2,
   Play,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../../config/version';
 
@@ -144,6 +146,11 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
   // Recovery & Reset State
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetActionLoading, setResetActionLoading] = useState<'preserve' | 'full' | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetTokenInput, setResetTokenInput] = useState<string>('');
+  const [devSetupToken, setDevSetupToken] = useState<string | null>(null);
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   // Verifies the Setup Security Token with the backend API
   const verifyToken = async (candidateToken: string, showToastError: boolean = true): Promise<boolean> => {
@@ -218,9 +225,17 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         const tokenRequired = Boolean(data.setupTokenRequired);
         setSetupTokenRequired(tokenRequired);
 
+        if (data.devSetupToken) {
+          setDevSetupToken(data.devSetupToken);
+        }
+
         if (data.setupToken) {
           setSetupToken(data.setupToken);
           sessionStorage.setItem('nexus_setup_token', data.setupToken);
+          setIsTokenVerified(true);
+        } else if (data.devSetupToken && !savedToken) {
+          setSetupToken(data.devSetupToken);
+          sessionStorage.setItem('nexus_setup_token', data.devSetupToken);
           setIsTokenVerified(true);
         } else if (data.isSetupAuthenticated || !tokenRequired) {
           setIsTokenVerified(true);
@@ -274,10 +289,20 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
 
   // Safe Setup Reset
   const handleResetSetup = async (preserveConfig: boolean) => {
+    const actionKey = preserveConfig ? 'preserve' : 'full';
+    setResetActionLoading(actionKey);
     setResetLoading(true);
     setError(null);
+    setResetError(null);
     try {
-      const activeToken = setupToken || sessionStorage.getItem('nexus_setup_token');
+      const activeToken =
+        resetTokenInput.trim() ||
+        setupToken ||
+        sessionStorage.getItem('nexus_setup_token') ||
+        tokenInput.trim() ||
+        devSetupToken ||
+        '';
+
       const res = await fetch('/api/setup/reset', {
         method: 'POST',
         headers: {
@@ -285,7 +310,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           ...(activeToken ? { 'X-Setup-Token': activeToken } : {}),
         },
         credentials: 'include',
-        body: JSON.stringify({ preserveConfig }),
+        body: JSON.stringify({
+          preserveConfig,
+          setupToken: activeToken || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -298,6 +326,8 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       setIsTokenVerified(true);
       setSetupTokenRequired(false);
       setResetModalOpen(false);
+      setResetError(null);
+      setResetTokenInput('');
       setTestSuccess(false);
       setTestResult(null);
       setInitComplete(false);
@@ -324,10 +354,18 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       const nextStep = preserveConfig ? 2 : 1;
       await fetchStatus(nextStep);
       setCurrentStep(nextStep);
+      setSuccessBanner(
+        preserveConfig
+          ? 'Kurulum adımları sıfırlandı. Veritabanı bağlantı parametreleriniz korundu.'
+          : 'Kurulum ve tüm parametreler başarıyla sıfırlandı. 1. Adım başlatıldı.'
+      );
     } catch (err: any) {
-      setError(err?.message || 'Kurulum sıfırlanırken bir hata oluştu.');
+      const msg = err?.message || 'Kurulum sıfırlanırken bir hata oluştu.';
+      setError(msg);
+      setResetError(msg);
     } finally {
       setResetLoading(false);
+      setResetActionLoading(null);
     }
   };
 
@@ -716,6 +754,23 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       {/* Main Content Body */}
       <main className="max-w-3xl mx-auto w-full px-6 py-6 flex-1 flex flex-col justify-center">
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden backdrop-blur-sm">
+          {successBanner && (
+            <div className="mb-6 p-4 rounded-xl bg-emerald-950/30 border border-emerald-800/50 text-emerald-300 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <p className="font-medium">{successBanner}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuccessBanner(null)}
+                className="text-emerald-400 hover:text-emerald-200 text-xs p-1 cursor-pointer"
+                title="Kapat"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {error && (
             <div className="mb-6 p-4 rounded-xl bg-rose-950/30 border border-rose-800/50 text-rose-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -1635,15 +1690,36 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       {/* Reset Confirmation Modal */}
       <AnimatePresence>
         {resetModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !resetLoading) {
+                setResetModalOpen(false);
+                setResetError(null);
+              }
+            }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5"
+              className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 relative"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetModalOpen(false);
+                  setResetError(null);
+                }}
+                disabled={resetLoading}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-200 p-1 rounded-lg transition cursor-pointer"
+                title="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3 pr-6">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
                   <RotateCcw className="w-5 h-5" />
                 </div>
                 <div>
@@ -1656,16 +1732,71 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 Kurulum yarım kalmış veya kilitlenmişse aşağıdaki seçeneklerden biriyle sihirbazı sıfırlayabilir ve yeni bir kurulum oturumu başlatabilirsiniz:
               </p>
 
-              <div className="space-y-3">
+              {/* Error feedback directly inside the modal */}
+              {resetError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start gap-2.5 text-xs text-rose-300 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1">
+                    <p className="font-semibold text-rose-200">Sıfırlama İşlemi Başarısız Oldu</p>
+                    <p className="text-rose-300/90 leading-relaxed text-[11px]">{resetError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Setup Token input field if unverified or required */}
+              {(!isTokenVerified || resetError?.includes('Setup Token') || resetError?.includes('anahtar')) && (
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-amber-300 flex items-center gap-1.5">
+                      <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Kurulum Güvenlik Anahtarı (Setup Token)</span>
+                    </span>
+                    {devSetupToken && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetTokenInput(devSetupToken);
+                          setResetError(null);
+                        }}
+                        className="text-[10px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                      >
+                        Geliştirici Anahtarını Doldur
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={resetTokenInput}
+                    onChange={(e) => {
+                      setResetTokenInput(e.target.value);
+                      setResetError(null);
+                    }}
+                    placeholder="data/.setup_token veya konsoldaki anahtarı girin..."
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Sunucu kilit durumunu sıfırlamak için Setup Token gereklidir.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-3 pt-1">
                 <button
                   type="button"
                   disabled={resetLoading}
                   onClick={() => handleResetSetup(true)}
-                  className="w-full text-left p-3.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 hover:border-indigo-500/60 transition cursor-pointer group"
+                  className="w-full text-left p-3.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 hover:border-indigo-500/60 transition cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-white group-hover:text-indigo-400">
-                      Adımları Baştan Başlat (Veritabanı Ayarlarını Koru)
+                    <span className="text-xs font-semibold text-white group-hover:text-indigo-400 flex items-center gap-2">
+                      {resetActionLoading === 'preserve' ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+                          <span>Adımlar Sıfırlanıyor...</span>
+                        </>
+                      ) : (
+                        <span>Adımları Baştan Başlat (Veritabanı Ayarlarını Koru)</span>
+                      )}
                     </span>
                     <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400" />
                   </div>
@@ -1678,12 +1809,21 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   type="button"
                   disabled={resetLoading}
                   onClick={() => handleResetSetup(false)}
-                  className="w-full text-left p-3.5 rounded-xl bg-rose-950/20 hover:bg-rose-950/40 border border-rose-800/40 hover:border-rose-700 transition cursor-pointer group"
+                  className="w-full text-left p-3.5 rounded-xl bg-rose-950/20 hover:bg-rose-950/40 border border-rose-800/40 hover:border-rose-700 transition cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-rose-300 group-hover:text-rose-200 flex items-center gap-1.5">
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Tamamen Sıfırla (Tüm Ayarları Temizle)</span>
+                    <span className="text-xs font-semibold text-rose-300 group-hover:text-rose-200 flex items-center gap-2">
+                      {resetActionLoading === 'full' ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 text-rose-400 animate-spin" />
+                          <span>Tüm Ayarlar Siliniyor...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Tamamen Sıfırla (Tüm Ayarları Temizle)</span>
+                        </>
+                      )}
                     </span>
                     <ArrowRight className="w-4 h-4 text-rose-500 group-hover:text-rose-300" />
                   </div>
@@ -1697,8 +1837,11 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 <button
                   type="button"
                   disabled={resetLoading}
-                  onClick={() => setResetModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition cursor-pointer"
+                  onClick={() => {
+                    setResetModalOpen(false);
+                    setResetError(null);
+                  }}
+                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition cursor-pointer disabled:opacity-50"
                 >
                   Vazgeç
                 </button>

@@ -45,6 +45,7 @@ import { compilerRouter } from './src/server/routes/compiler.js';
 import { systemLogsRouter } from './src/server/routes/systemLogs.js';
 import { setupRouter } from './src/server/routes/setup.js';
 import { serverStatusRouter } from './src/server/routes/serverStatus.js';
+import { secretsRouter } from './src/server/routes/secrets.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
@@ -164,9 +165,15 @@ app.use('/api', (req, res, next) => {
     return next();
   }
 
+  const isProduction = process.env.NODE_ENV === 'production';
   const dbState = db.getDatabaseState();
-  const isPgReady = db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
-  const isSystemReady = isPgReady || dbState === DatabaseState.READY;
+  const isPgReady = Boolean(db.postgresRepo?.isReady());
+  
+  // In production, system readiness strictly requires working PostgreSQL connection AND READY state.
+  // Neither dbState === READY without PostgreSQL nor isPgReady alone is sufficient.
+  const isSystemReady = isProduction 
+    ? (isPgReady && dbState === DatabaseState.READY)
+    : (isPgReady || dbState === DatabaseState.READY);
 
   if (!isSystemReady) {
     const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
@@ -216,6 +223,7 @@ app.use('/api/system-logs', systemLogsRouter);
 app.use('/api/system/logs', systemLogsRouter);
 app.use('/api/server', serverStatusRouter);
 app.use('/api/server-status', serverStatusRouter);
+app.use('/api/system/secrets', secretsRouter);
 
 // Diagnostic HTTP status observer for 5xx responses across the system
 app.use((req, res, next) => {
@@ -285,11 +293,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   }
 });
 
-// Initialize WebSocket, OTA Worker & Background Simulation Engines when Database is READY (PostgreSQL or Local WAL)
+// Initialize WebSocket, OTA Worker & Background Simulation Engines when Database is READY (PostgreSQL in Production, or Local WAL in Dev)
 let backgroundWorkersStarted = false;
 export function startBackgroundWorkers() {
   if (backgroundWorkersStarted) return;
-  if (db.getDatabaseState() !== DatabaseState.READY) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isPgReady = Boolean(db.postgresRepo?.isReady());
+  const isReady = isProduction ? (isPgReady && db.getDatabaseState() === DatabaseState.READY) : (db.getDatabaseState() === DatabaseState.READY);
+
+  if (!isReady) {
     console.log('[Workers] Veritabanı hazır (READY) olmadığı için arka plan servisleri bekletiliyor.');
     return;
   }
