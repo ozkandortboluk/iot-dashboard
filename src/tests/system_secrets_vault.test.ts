@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { systemSecretsService } from '../server/services/systemSecrets.service.js';
+import { setupService } from '../server/services/setup.service.js';
 import { secretsRouter } from '../server/routes/secrets.js';
 import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret } from '../server/utils/crypto.js';
 import { db } from '../server/db.js';
@@ -211,6 +214,81 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       const jsonString = JSON.stringify(res.body);
       expect(jsonString).not.toContain('super_secret_pg_pass_9988!');
       expect(jsonString).not.toContain('vault_test_password_xyz_456!');
+    });
+  });
+
+  describe('4. P0 Security Hardening & Zero-Plaintext Storage Validation', () => {
+    it('should never write plaintext password to .db_config.json on disk', () => {
+      const dbConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+
+      const testSecretPassword = 'my_super_secret_pg_pass_9988_unique!';
+      setupService.saveRuntimeSecretConfig({
+        host: '10.0.0.99',
+        port: 5432,
+        database: 'vault_test_db',
+        user: 'vault_test_user',
+        password: testSecretPassword,
+        sslMode: 'disable',
+      });
+
+      expect(fs.existsSync(dbConfigPath)).toBe(true);
+      const rawFileContent = fs.readFileSync(dbConfigPath, 'utf8');
+
+      // MUST NOT contain the plaintext password!
+      expect(rawFileContent).not.toContain(testSecretPassword);
+
+      const parsed = JSON.parse(rawFileContent);
+      expect(parsed.password).toBeUndefined();
+      expect(parsed.hasPassword).toBe(true);
+      expect(parsed.passwordRef).toBe('vault:database.password');
+
+      // Verify that in-memory runtimeConfig still resolves the password correctly via Vault
+      const reloaded = setupService.loadRuntimeSecretConfig();
+      expect(reloaded?.password).toBe(testSecretPassword);
+    });
+
+    it('should automatically migrate legacy plaintext password from .db_config.json to Vault and scrub disk', () => {
+      const dbConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+
+      const legacyPassword = 'legacy_unencrypted_password_to_migrate_123';
+      const legacyPayload = {
+        host: '10.0.0.100',
+        port: 5432,
+        database: 'legacy_db',
+        user: 'legacy_user',
+        password: legacyPassword, // Legacy plaintext on disk!
+        sslMode: 'disable',
+      };
+      fs.writeFileSync(dbConfigPath, JSON.stringify(legacyPayload, null, 2), { mode: 0o600 });
+
+      // Run loadRuntimeSecretConfig which triggers legacy migration
+      const reloaded = setupService.loadRuntimeSecretConfig();
+      expect(reloaded?.password).toBe(legacyPassword);
+
+      // Verify disk file was scrubbed of plaintext password!
+      const diskContent = fs.readFileSync(dbConfigPath, 'utf8');
+      expect(diskContent).not.toContain(legacyPassword);
+      const scrubbedJson = JSON.parse(diskContent);
+      expect(scrubbedJson.password).toBeUndefined();
+      expect(scrubbedJson.hasPassword).toBe(true);
+    });
+
+    it('should reject unencrypted plaintext secret in production unless allowLegacyPlaintext is set', () => {
+      const originalEnv = process.env.NODE_ENV;
+      try {
+        process.env.NODE_ENV = 'production';
+
+        const plaintextVal = 'unencrypted_api_token_12345';
+        // Without allowLegacyPlaintext, decryptSecret must reject plaintext in production
+        const rejected = decryptSecret(plaintextVal);
+        expect(rejected).toBe('');
+
+        // With allowLegacyPlaintext explicitly enabled during migration, it allows reading for re-encryption
+        const migrated = decryptSecret(plaintextVal, { allowLegacyPlaintext: true, context: 'test_migration' });
+        expect(migrated).toBe(plaintextVal);
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
     });
   });
 });

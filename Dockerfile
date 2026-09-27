@@ -32,11 +32,10 @@ RUN npm install --omit=dev --legacy-peer-deps
 # Copy built bundle and runtime assets from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/data ./data
 COPY --from=builder /app/metadata.json ./metadata.json
 
-# Ensure data directory exists for local fallback cache
-RUN mkdir -p /app/data
+# Ensure clean runtime directories exist for volumes and local state
+RUN mkdir -p /app/data /app/secrets /app/uploads /app/logs /app/backups
 
 EXPOSE 3000
 

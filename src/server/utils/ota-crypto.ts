@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { systemSecretsService } from '../services/systemSecrets.service.js';
 
 const KEYS_DIR = path.join(process.cwd(), 'uploads', 'keys');
 const FIRMWARE_STORAGE_DIR = path.join(process.cwd(), 'uploads', 'firmware');
@@ -58,10 +59,14 @@ export function getEd25519KeyPair(): KeyPair {
 
   const activeKeyId = process.env.OTA_SIGNING_KEY_ID || 'root_ed25519_v1';
 
-  // 1. Check direct PEM string from environment secret
-  if (process.env.OTA_SIGNING_PRIVATE_KEY) {
+  // 1. Check direct PEM string from environment secret or AES-256-GCM Vault
+  const rawEnvOrVaultKey = process.env.OTA_SIGNING_PRIVATE_KEY ||
+    systemSecretsService.getSecret('ota.signing_private_key') ||
+    systemSecretsService.getSecret('ota_signing_private_key');
+
+  if (rawEnvOrVaultKey) {
     try {
-      const privateKeyPem = process.env.OTA_SIGNING_PRIVATE_KEY.replace(/\\n/g, '\n');
+      const privateKeyPem = rawEnvOrVaultKey.replace(/\\n/g, '\n');
       const privKeyObj = crypto.createPrivateKey(privateKeyPem);
       const pubKeyObj = crypto.createPublicKey(privKeyObj);
       const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
@@ -69,7 +74,7 @@ export function getEd25519KeyPair(): KeyPair {
       cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
       return cachedKeyPair;
     } catch (err: any) {
-      console.error('[OTA Crypto] OTA_SIGNING_PRIVATE_KEY ortam değişkeni ayrıştırılamadı:', err.message);
+      console.error('[OTA Crypto] OTA imzalama özel anahtarı ayrıştırılamadı:', err.message);
     }
   }
 

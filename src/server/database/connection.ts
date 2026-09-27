@@ -3,6 +3,7 @@ import path from 'node:path';
 import pg from 'pg';
 const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
+import { systemSecretsService } from '../services/systemSecrets.service.js';
 
 import { DatabaseState } from '../../types.js';
 export { DatabaseState };
@@ -76,20 +77,43 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     return candidate;
   }
 
-  // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret)
+  // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret or Vault)
   try {
     const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
     if (fs.existsSync(secretPath)) {
       const raw = fs.readFileSync(secretPath, 'utf8');
       const cfg = JSON.parse(raw);
       if (cfg && cfg.host && cfg.database) {
+        // Resolve password from Vault if not present in config file
+        let resolvedPass = cfg.password;
+        if (!resolvedPass) {
+          resolvedPass = systemSecretsService.getDatabasePassword();
+        }
+        if (!resolvedPass && fs.existsSync('/run/secrets/db_password')) {
+          try {
+            resolvedPass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
+          } catch {}
+        }
         const encUser = encodeURIComponent(cfg.user || 'postgres');
-        const encPass = cfg.password !== undefined ? encodeURIComponent(cfg.password) : '';
+        const encPass = resolvedPass !== undefined && resolvedPass !== '' ? encodeURIComponent(resolvedPass) : '';
         const auth = encPass ? `${encUser}:${encPass}` : encUser;
         const p = cfg.port || 5432;
         const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
         return `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
       }
+    }
+  } catch {}
+
+  // 5. System Secrets Vault database configuration (AES-256-GCM encrypted)
+  try {
+    const vaultDb = systemSecretsService.getDatabaseConfig();
+    if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
+      const encUser = encodeURIComponent(vaultDb.user || 'postgres');
+      const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
+      const auth = encPass ? `${encUser}:${encPass}` : encUser;
+      const p = vaultDb.port || 5432;
+      const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
+      return `postgresql://${auth}@${vaultDb.host}:${p}/${vaultDb.database}${sslParam}`;
     }
   } catch {}
 

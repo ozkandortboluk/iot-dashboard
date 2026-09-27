@@ -180,7 +180,8 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     expect(composeContent).toMatch(/app:/);
     expect(composeContent).toMatch(/build:/);
     expect(composeContent).toMatch(/timescaledb:[\s\S]*service_healthy/);
-    expect(composeContent).toMatch(/DATABASE_URL:/);
+    expect(composeContent).toMatch(/ENCRYPTION_KEY:/);
+    expect(composeContent).toMatch(/DB_HOST:/);
     expect(composeContent).toMatch(/\/api\/health\/live/);
 
     // Service 3: proxy (Nginx)

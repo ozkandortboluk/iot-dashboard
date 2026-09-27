@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret } from '../utils/crypto.js';
+import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret, sanitizeLogString as sanitizeLogUtil } from '../utils/crypto.js';
 import { systemLogger } from './systemLogger.service.js';
 
 export type SecretCategory = 'database' | 'email' | 'notifications' | 'third_party' | 'custom';
@@ -308,6 +308,17 @@ export class SystemSecretsService {
     // If masked, do not overwrite existing
     if (isMaskedSecret(plainValue)) {
       return;
+    }
+
+    // Security constraint: Encryption key and ciphertext must NEVER share the same storage boundary!
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey === 'encryption_key' ||
+      lowerKey === 'encryptionkey' ||
+      lowerKey.includes('master_key') ||
+      lowerKey.includes('vault_key')
+    ) {
+      throw new Error('Encryption key cannot be stored inside the secret vault. Encryption key and ciphertext must remain in separate security boundaries.');
     }
 
     const trimmed = plainValue ? plainValue.trim() : '';
@@ -686,16 +697,7 @@ export class SystemSecretsService {
   // ============================================================================
 
   public sanitizeLogString(str?: string): string {
-    if (!str || typeof str !== 'string') return '';
-    return str
-      // Mask postgresql://user:password@host (handles passwords with @ or special characters)
-      .replace(/(postgres(?:ql)?:\/\/[^:\/\s]+:)([\s\S]*?)(@[a-zA-Z0-9_.-]+:\d+(?:\/[^\s?]*)?(?:\?[^\s]*)?)/gi, '$1••••••••$3')
-      // Mask re_ API keys
-      .replace(/re_[a-zA-Z0-9_-]{20,}/g, 're_••••••••')
-      // Mask bot tokens (Telegram)
-      .replace(/\b\d{8,10}:[a-zA-Z0-9_-]{30,}\b/g, '••••••••:••••••••')
-      // Mask bearer tokens
-      .replace(/(Bearer\s+)[a-zA-Z0-9_.-]{16,}/gi, '$1••••••••');
+    return sanitizeLogUtil(str);
   }
 }
 

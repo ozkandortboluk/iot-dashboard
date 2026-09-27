@@ -4,6 +4,29 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.46.2] - 2026-09-27
+
+### 🔒 P0 Güvenlik Sıkılaştırması: Sıfır-Plaintext (Zero-Plaintext) Secret Vault & Kriptografik İzolasyon
+- **Sabit ve Tahmin Edilebilir AES Fallback Kaldırıldı (`crypto.ts`)**:
+  - `nexus_iot_secure_notification_secret_key_2026_salt` ve benzeri sabit şifreleme anahtarları tamamen kaldırıldı.
+  - Şifreleme anahtarı yalnızca güvenli kaynaklardan (`ENCRYPTION_KEY`, `/run/secrets/encryption_key` veya POSIX `0600` izinli `data/.vault_key`) çözümlenir.
+  - Üretim ortamında (`NODE_ENV === 'production'`) anahtar sağlanmamışsa Secret Vault güvenli şekilde "yapılandırılmamış" moduna geçer ve kontrolsüz işlem yapılması önlenir.
+- **`.db_config.json` İçinden Plaintext Şifre Kaldırıldı & Otomatik Migration (`setup.service.ts`, `connection.ts`)**:
+  - `.db_config.json` dosyasına asla düz metin (plaintext) parola yazılmaz; yalnızca `hasPassword` ve `passwordRef` tutulur.
+  - Disk üzerinde tespit edilen eski düz metin parolalar ilk okumada otomatik olarak AES-256-GCM Vault kasasına taşınır ve diskteki dosya anında temizlenir (scrub).
+  - Veritabanı bağlantı çözümleyicisi (`connection.ts`), şifreyi Vault veya Docker secret üzerinden güvenli çözer.
+- **Docker Compose Runtime Ortamından Hassas Bilgiler Arındırıldı (`docker-compose.yml`)**:
+  - `app` konteynerinin ortam değişkenlerinden `DB_PASSWORD`, `POSTGRES_PASSWORD` ve `DATABASE_URL` kaldırıldı.
+  - İlk kurulum ve bootstrap için `POSTGRES_INIT_PASSWORD` desteği ile initialization secret'ı ile uygulamanın runtime secret'ı birbirinden ayrıldı, mevcut disk hacimleri (volumes) korundu.
+- **Kontrollü `decryptSecret()` ve Plaintext Reddi**:
+  - `enc:v1:` formatında olmayan değerler üretim modunda doğrudan reddedilir; sessiz plaintext kabulü sonlandırıldı.
+  - Geriye dönük uyumluluk yalnızca açık kontrollü migration seçeneği (`allowLegacyPlaintext`) ile sınırlandırıldı.
+- **Şifreleme Anahtarı & Şifreli Veri Güvenlik Sınırı İzolasyonu (`systemSecrets.service.ts`)**:
+  - `ENCRYPTION_KEY` hiçbir zaman veritabanı tablolarına (`system_settings`), `.system_secrets.json` veya frontend'e yazılmaz.
+  - `setSecret()` üzerinde anahtarın kasaya kaydedilmesini engelleyen kısıtlama uygulanarak anahtar ile şifreli verinin aynı sınırda bulunması engellendi.
+
+---
+
 ## 🚀 [v1.46.1] - 2026-09-26
 
 ### 🛡️ Üretim Ortamı PostgreSQL READY Durumu Güçlendirmesi & Kesinti / İyileşme Dayanıklılığı
