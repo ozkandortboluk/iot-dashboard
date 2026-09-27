@@ -13,6 +13,8 @@ import { isRealAdminUser } from '../database/postgres.js';
 import { db } from '../db.js';
 import { defaultWidgets } from '../initialData.js';
 import { DatabaseState, type AuditLog, type User } from '../../types.js';
+import { systemSecretsService } from './systemSecrets.service.js';
+import { isVaultConfigured, getVaultStatus } from '../utils/crypto.js';
 
 export interface DatabaseConfigPayload {
   host: string;
@@ -29,10 +31,11 @@ export interface SetupStatusResponse {
   setupRequired: boolean;
   isCompleted: boolean;
   isDbReady?: boolean;
+  isVaultConfigured?: boolean;
+  vaultStatus?: 'READY' | 'UNCONFIGURED';
   setupTokenRequired: boolean;
   isSetupAuthenticated?: boolean;
   setupToken?: string;
-  devSetupToken?: string;
   currentStep: number;
   isDbConnected: boolean;
   isTimescaleAvailable: boolean;
@@ -125,7 +128,7 @@ export class SetupService {
         }
       }
 
-      // 2. Check protected server-side runtime configuration file
+      // 2. Check protected server-side runtime configuration file (.db_config.json)
       if (fs.existsSync(RUNTIME_SECRET_FILE)) {
         const raw = fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8');
         const parsed = JSON.parse(raw);
@@ -133,10 +136,35 @@ export class SetupService {
           this.isCompletedState = Boolean(parsed.isCompleted);
           this.completedAtDate = parsed.completedAt || null;
 
-          let pass = parsed.password || '';
-          // If password was stored in docker secret
+          // LEGACY MIGRATION: If legacy plaintext password exists in .db_config.json,
+          // migrate immediately to encrypted Vault and scrub from disk
+          if (parsed.password && typeof parsed.password === 'string' && !parsed.password.includes('••••')) {
+            systemLogger.warn('security', '[Security Migration] .db_config.json içinde eski plaintext şifre tespit edildi. Güvenli Vault kasasına taşınıyor.');
+            systemSecretsService.setSecret('database.password', parsed.password, {
+              category: 'database',
+              label: 'PostgreSQL Password',
+              isSensitive: true,
+              updatedBy: 'legacy_migration',
+            }).catch(() => {});
+
+            // Scrub password from disk
+            try {
+              const scrubbed = { ...parsed };
+              delete scrubbed.password;
+              scrubbed.hasPassword = true;
+              scrubbed.passwordRef = 'vault:database.password';
+              scrubbed.updatedAt = new Date().toISOString();
+              fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
+            } catch {}
+          }
+
+          // Resolve real password from Vault, Docker secret, or env
+          let pass = systemSecretsService.getDatabasePassword();
           if (!pass && fs.existsSync(DOCKER_SECRET_PASSWORD_PATH)) {
             pass = fs.readFileSync(DOCKER_SECRET_PASSWORD_PATH, 'utf8').trim();
+          }
+          if (!pass && process.env.POSTGRES_PASSWORD) {
+            pass = process.env.POSTGRES_PASSWORD;
           }
 
           this.runtimeConfig = {
@@ -144,12 +172,27 @@ export class SetupService {
             port: Number(parsed.port) || 5432,
             database: parsed.database || 'iot_dashboard',
             user: parsed.user || 'iot_user',
-            password: pass || process.env.POSTGRES_PASSWORD || '',
+            password: pass,
             sslMode: parsed.sslMode || 'disable',
             rejectUnauthorized: parsed.rejectUnauthorized ?? false,
           };
           return this.runtimeConfig;
         }
+      }
+
+      // 3. Check protected system secrets vault (AES-256-GCM encrypted)
+      const vaultDb = systemSecretsService.getDatabaseConfig();
+      if (vaultDb.isConfigured && vaultDb.host) {
+        this.runtimeConfig = {
+          host: vaultDb.host,
+          port: vaultDb.port,
+          database: vaultDb.database,
+          user: vaultDb.user,
+          password: vaultDb.password,
+          sslMode: (vaultDb.sslMode as any) || 'disable',
+          rejectUnauthorized: false,
+        };
+        return this.runtimeConfig;
       }
 
       // 3. Fallback to process.env.DATABASE_URL
@@ -209,7 +252,9 @@ export class SetupService {
         port: config.port,
         database: config.database,
         user: config.user,
-        password: config.password || '',
+        // Plaintext password is NEVER written to .db_config.json
+        hasPassword: Boolean(config.password),
+        passwordRef: config.password ? 'vault:database.password' : undefined,
         sslMode: config.sslMode || 'disable',
         rejectUnauthorized: config.rejectUnauthorized ?? false,
         isCompleted: Boolean(isCompleted),
@@ -230,6 +275,25 @@ export class SetupService {
       try {
         fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
       } catch {}
+
+      // Synchronize password to AES-256-GCM encrypted system secrets vault
+      if (config.password && !config.password.includes('••••')) {
+        systemSecretsService.setSecret('database.password', config.password, {
+          category: 'database',
+          label: 'PostgreSQL Password',
+          isSensitive: true,
+          updatedBy: 'setup_wizard',
+        }).catch(() => {});
+      }
+
+      systemSecretsService.updateDatabaseSecrets({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.user,
+        password: config.password,
+        sslMode: config.sslMode,
+      }, 'setup_wizard').catch(() => {});
     } catch (err: any) {
       systemLogger.error('database', `Runtime secret konfigürasyonu kaydedilemedi: ${err?.message || err}`);
       throw new Error(`Konfigürasyon dosyası yazılamadı: ${err?.message || err}`, { cause: err });
@@ -422,7 +486,7 @@ export class SetupService {
       throw new Error('Veritabanı adresi geçersiz karakterler içeriyor.');
     }
 
-    // Disallow dangerous SSRF & Cloud Metadata addresses
+    // Disallow dangerous SSRF & Cloud Metadata addresses and reserved/loopback ranges
     const blockedHosts = [
       '169.254.169.254',
       'metadata.google.internal',
@@ -431,9 +495,18 @@ export class SetupService {
       '100.100.100.200',
       'fd00:ec2::254',
       '0.0.0.0',
+      '::',
+      '0000:0000:0000:0000:0000:0000:0000:0000',
     ];
 
-    if (blockedHosts.includes(lower) || lower.startsWith('169.254.')) {
+    if (
+      blockedHosts.includes(lower) ||
+      lower.startsWith('169.254.') ||
+      lower.startsWith('100.64.') ||
+      lower.startsWith('0.') ||
+      lower.startsWith('224.') ||
+      lower.startsWith('240.')
+    ) {
       systemLogger.warn('security', `Engellenen veritabanı adresi denemesi (SSRF engeli): ${trimmed}`);
       throw new Error('Güvenlik Kuralı: Belirtilen veritabanı adresine (SSRF / Bulut Metadata koruması) bağlantı kurulması engellenmiştir.');
     }
@@ -480,6 +553,7 @@ export class SetupService {
         completedAt: this.completedAtDate,
         updatedAt: new Date().toISOString(),
       };
+      delete updated.password; // Ensure password is never in .db_config.json
       fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(updated, null, 2), {
         encoding: 'utf8',
         mode: 0o600,
@@ -576,7 +650,7 @@ export class SetupService {
       try {
         const connectPromise = pool.connect();
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('PostgreSQL bağlantı zaman aşımı')), 3000)
+          setTimeout(() => reject(new Error('Connection timeout')), 2500)
         );
         client = await Promise.race([connectPromise, timeoutPromise]);
         // Connection test
@@ -665,6 +739,12 @@ export class SetupService {
       }
     }
 
+    const vaultReady = isVaultConfigured();
+    // In production, if Secret Vault has no master encryption key configured, enforce SETUP mode
+    if (process.env.NODE_ENV === 'production' && !vaultReady) {
+      systemMode = 'SETUP';
+    }
+
     const setupRequired = systemMode === 'SETUP';
     const isCompleted = systemMode !== 'SETUP';
     const isDbReady = Boolean(isDbConnected && migrationsComplete && schemaVerified && hasAdmin);
@@ -684,7 +764,9 @@ export class SetupService {
       currentStep = 1;
     }
 
-    const setupTokenRequired = systemMode === 'SETUP';
+    const isDev = process.env.NODE_ENV === 'development';
+    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev);
+    const setupTokenRequired = systemMode === 'SETUP' && !isDev;
     const activeSetupToken = systemMode === 'SETUP' ? this.getOrInitSetupToken(true) : undefined;
 
     return {
@@ -692,10 +774,11 @@ export class SetupService {
       setupRequired,
       isCompleted,
       isDbReady,
+      isVaultConfigured: vaultReady,
+      vaultStatus: (vaultReady ? 'READY' : 'UNCONFIGURED') as 'READY' | 'UNCONFIGURED',
       setupTokenRequired,
-      isSetupAuthenticated: systemMode !== 'SETUP' ? true : isAuthenticated,
-      setupToken: isAuthenticated ? activeSetupToken : undefined,
-      devSetupToken: process.env.NODE_ENV !== 'production' ? activeSetupToken : undefined,
+      isSetupAuthenticated: isAuth,
+      setupToken: isAuth ? activeSetupToken : undefined,
       currentStep,
       isDbConnected,
       isTimescaleAvailable,
