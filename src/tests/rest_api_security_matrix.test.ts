@@ -51,6 +51,7 @@ function createTestApp() {
   app.use('/api/rules', rulesRouter);
   app.use('/api/system/secrets', secretsRouter);
   app.use('/api/setup', authenticateUser, setupRouter);
+  app.use('/api/unmapped-custom-route', authenticateUser, (_req, res) => res.json({ ok: true }));
 
   // Test route for production error leakage validation
   app.get('/api/test-error', (_req, _res) => {
@@ -388,5 +389,24 @@ describe('NexusNode IoT REST API Security & Service Token Matrix (18 Mandatory S
     const deviceIds = res.body.map((d: any) => d.id);
     expect(deviceIds).toContain(tenantADeviceId);
     expect(deviceIds).not.toContain(tenantBDeviceId);
+  });
+
+  it('19. Service token → Unmapped/Unknown endpoint → MUST be rejected with 403 (Strict Allowlist)', async () => {
+    const res = await request(app)
+      .get('/api/unmapped-custom-route')
+      .set('Authorization', `Bearer ${validServiceTokenA}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/izin verilenler listesinde \(allowlist\) kayıtlı değildir/i);
+  });
+
+  it('20. Cookie auth state-changing request without Origin/Referer → MUST be rejected with 403 (Hardened CSRF)', async () => {
+    const res = await request(app)
+      .post('/api/devices')
+      .set('Cookie', [`nexus_session_token=${tenantAToken}`])
+      .send({ name: 'CSRF Attack Device', type: 'sensor' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Origin veya Referer başlığı zorunludur/i);
   });
 });

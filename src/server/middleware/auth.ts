@@ -92,8 +92,15 @@ export async function authenticateUser(req: express.Request, res: express.Respon
       });
     }
 
+    // Strict Default-Deny Allowlist Check for Service Tokens
     const requiredScope = getRequiredScopeForRoute(req.method, reqPath);
-    if (requiredScope && !hasScope(verifiedService.serviceToken.scopes, requiredScope)) {
+    if (!requiredScope) {
+      return res.status(403).json({
+        error: `Yetkisiz İşlem (403): Servis jetonları için '${reqPath}' uç noktası izin verilenler listesinde (allowlist) kayıtlı değildir.`,
+      });
+    }
+
+    if (!hasScope(verifiedService.serviceToken.scopes, requiredScope)) {
       return res.status(403).json({
         error: `Yetkisiz İşlem (403): Bu işlem için '${requiredScope}' yetkisi (scope) gereklidir.`,
       });
@@ -107,16 +114,21 @@ export async function authenticateUser(req: express.Request, res: express.Respon
     return next();
   }
 
-  // 2. Browser Cookie Session CSRF Validation for State-Changing Requests
+  // 2. Browser Cookie Session Strict CSRF Validation for State-Changing Requests
   if (isCookieAuth && !isFromHeader && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    const origin = (req.headers.origin || req.headers.referer || '').toString();
-    if (origin) {
-      const isAllowed = ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
-      if (!isAllowed) {
-        return res.status(403).json({
-          error: 'CSRF Koruması (403): Yetkisiz Origin/Referer üzerinden gelen çerez tabanlı istek engellendi.',
-        });
-      }
+    const originHeader = req.headers.origin || req.headers.referer;
+    if (!originHeader) {
+      return res.status(403).json({
+        error: 'CSRF Koruması (403): Çerez tabanlı durum değiştiren isteklerde Origin veya Referer başlığı zorunludur.',
+      });
+    }
+
+    const origin = originHeader.toString();
+    const isAllowed = ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin));
+    if (!isAllowed) {
+      return res.status(403).json({
+        error: 'CSRF Koruması (403): Yetkisiz Origin/Referer üzerinden gelen çerez tabanlı istek engellendi.',
+      });
     }
   }
 
