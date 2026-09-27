@@ -4,6 +4,24 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.46.1] - 2026-09-26
+
+### 🛡️ Üretim Ortamı PostgreSQL READY Durumu Güçlendirmesi & Kesinti / İyileşme Dayanıklılığı
+- **Üretimde READY Durumunun PostgreSQL Bağlantısına Kesin Bağlanması (`db.ts`, `postgres.ts`)**:
+  - Üretim ortamında (`NODE_ENV === 'production'`) veritabanının `READY` durumuna geçmesi çalışan ve şeması doğrulanmış gerçek bir PostgreSQL bağlantısına (`postgresRepo.isReady()`) bağlandı.
+  - Veritabanı başlatılırken veya bağlantı başarısız olduğunda sistemin sahte bir şekilde `READY` moduna geçmesi ve bellek içi/yerel WAL verisine sessizce sapması (split-brain) engellendi.
+  - PostgreSQL bağlantısı kurulamadığında veya koptuğunda durum anında `DB_UNAVAILABLE` olarak işaretlendi.
+- **Sunucu API Koruma Katmanı Sıkılaştırması (`server.ts`)**:
+  - `server.ts` içerisindeki middleware koruması, üretim modunda hem `dbState === DatabaseState.READY` hem de `postgresRepo.isReady()` koşulunun her ikisinin de aynı anda sağlanmasını zorunlu kıldı.
+  - Veritabanı arızası durumunda tüm operasyonel REST API uç noktaları güvenli `503 DB_UNAVAILABLE` yanıtı vererek tutarsız veri yazımını önleyecek şekilde korumaya alındı.
+- **Bağlantı Kopması, Yeniden Başlama & Geri Gelme Otomasyonu (Auto-Reconnect)**:
+  - `PostgresRepository` üzerinde bağlantı durumu değişiklik dinleyicisi (`onConnectionChange`) eklendi; sorgu kesintileri (`isConnectionIssue`), havuz hataları ve yeniden başlatmalarda durum anlık olarak üst katmanlara bildirildi.
+  - Veritabanı geri geldiğinde sistemin otomatik olarak `READY` durumuna geçmesi ve API'lerin kesintisiz yeniden açılması sağlandı.
+- **Kapsamlı Dayanıklılık Test Paketi (`src/tests/production_db_ready_lifecycle.test.ts`)**:
+  - Üretim modu başlatma koruması, bağlantı kopması (connection drop), otomatik yeniden bağlanma ve kurtarma (recovery) senaryolarını doğrulayan 10 yeni birim/entegrasyon testi eklendi.
+
+---
+
 ## 🚀 [v1.46.0] - 2026-09-26
 
 ### 📈 Gelişmiş Veri Analizi, Çoklu Metrik Karşılaştırma & Dışa Aktarma Merkezi (AnalyticsView)

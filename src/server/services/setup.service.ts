@@ -13,6 +13,7 @@ import { isRealAdminUser } from '../database/postgres.js';
 import { db } from '../db.js';
 import { defaultWidgets } from '../initialData.js';
 import { DatabaseState, type AuditLog, type User } from '../../types.js';
+import { systemSecretsService } from './systemSecrets.service.js';
 
 export interface DatabaseConfigPayload {
   host: string;
@@ -124,7 +125,7 @@ export class SetupService {
         }
       }
 
-      // 2. Check protected server-side runtime configuration file
+      // 2. Check protected server-side runtime configuration file (.db_config.json)
       if (fs.existsSync(RUNTIME_SECRET_FILE)) {
         const raw = fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8');
         const parsed = JSON.parse(raw);
@@ -149,6 +150,21 @@ export class SetupService {
           };
           return this.runtimeConfig;
         }
+      }
+
+      // 3. Check protected system secrets vault (AES-256-GCM encrypted)
+      const vaultDb = systemSecretsService.getDatabaseConfig();
+      if (vaultDb.isConfigured && vaultDb.host) {
+        this.runtimeConfig = {
+          host: vaultDb.host,
+          port: vaultDb.port,
+          database: vaultDb.database,
+          user: vaultDb.user,
+          password: vaultDb.password,
+          sslMode: (vaultDb.sslMode as any) || 'disable',
+          rejectUnauthorized: false,
+        };
+        return this.runtimeConfig;
       }
 
       // 3. Fallback to process.env.DATABASE_URL
@@ -229,6 +245,16 @@ export class SetupService {
       try {
         fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
       } catch {}
+
+      // Synchronize with AES-256-GCM encrypted system secrets vault
+      systemSecretsService.updateDatabaseSecrets({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.user,
+        password: config.password,
+        sslMode: config.sslMode,
+      }, 'setup_wizard').catch(() => {});
     } catch (err: any) {
       systemLogger.error('database', `Runtime secret konfigürasyonu kaydedilemedi: ${err?.message || err}`);
       throw new Error(`Konfigürasyon dosyası yazılamadı: ${err?.message || err}`, { cause: err });
