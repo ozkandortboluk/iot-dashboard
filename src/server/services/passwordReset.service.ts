@@ -262,9 +262,11 @@ export class PasswordResetService {
 
     console.log(`[PasswordResetService] ${user.email} için sıfırlama e-postası tetiklendi (Provider: ${sendResult.provider}, Sim: ${Boolean(sendResult.simulated)})`);
 
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+
     return {
       ...genericResponse,
-      simulatedUrl: sendResult.simulated ? resetUrl : undefined,
+      ...(isTest ? { simulatedUrl: sendResult.simulated ? resetUrl : undefined } : {}),
     };
   }
 

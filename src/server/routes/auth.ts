@@ -23,7 +23,10 @@ let isSetupInProgress = false;
 
 // Helper to reliably extract client IP with Express proxy trust support
 function getClientIp(req: Request): string {
-  return req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  if (req.ip) return req.ip;
+  const socketIp = req.socket?.remoteAddress;
+  if (socketIp) return socketIp;
+  return '127.0.0.1';
 }
 
 // Cookie helper: Set secure, HttpOnly, SameSite session cookie
@@ -176,7 +179,6 @@ router.post('/login', async (req, res) => {
 
   res.json({
     user: result.user,
-    token: result.token,
     message: 'Giriş başarılı',
   });
 });
@@ -213,7 +215,7 @@ router.post('/register', async (req, res) => {
     const user = await db.registerUser(name, email, password, 'customer', companyName);
     const token = await db.createSession(user);
     setSessionCookie(res, token);
-    res.json({ user, token, message: 'Hesap başarıyla oluşturuldu.' });
+    res.json({ user, message: 'Hesap başarıyla oluşturuldu.' });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
     res.status(400).json({ error: msg });
@@ -243,7 +245,7 @@ router.post('/revoke-all-sessions', authenticateUser, async (req, res) => {
 
 router.get('/me', authenticateUser, (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  res.json({ user: authReq.user, token: authReq.sessionToken });
+  res.json({ user: authReq.user });
 });
 
 // POST /api/auth/forgot-password (Public, Rate-Limited, OWASP Anti-Enumeration)
@@ -256,9 +258,15 @@ router.post('/forgot-password', async (req, res) => {
     return res.status(400).json({ error: 'Lütfen geçerli bir e-posta adresi giriniz.' });
   }
 
+  // Sanitize host header to prevent Host Header Poisoning attacks
+  let rawHost = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'nexusnodeiot.com.tr';
+  if (typeof rawHost === 'string' && rawHost.includes(',')) {
+    rawHost = rawHost.split(',')[0].trim();
+  }
+  const sanitizedHost = String(rawHost).replace(/[^a-zA-Z0-9.:-]/g, '');
   const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
-  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
-  const baseUrl = process.env.APP_BASE_URL || process.env.APP_URL || `${proto}://${host}`;
+  const derivedBaseUrl = `${proto}://${sanitizedHost || 'nexusnodeiot.com.tr'}`;
+  const baseUrl = process.env.APP_BASE_URL || process.env.APP_URL || derivedBaseUrl;
 
   try {
     const result = await passwordResetService.requestPasswordReset({

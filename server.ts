@@ -88,7 +88,9 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 const app = express();
-app.set('trust proxy', true);
+// Configure Trust Proxy: Trust loopback/reverse proxy by default or TRUST_PROXY env setting
+const trustProxyConfig = process.env.TRUST_PROXY || 'loopback';
+app.set('trust proxy', trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : trustProxyConfig);
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3000', 10);
 const server = http.createServer(app);
 

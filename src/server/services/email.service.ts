@@ -249,7 +249,8 @@ export class EmailService {
       console.log(`[Konu]       : ${subject}`);
       console.log(`[Mesaj ID]   : ${simMessageId}`);
       if (text) {
-        console.log(`[Metin İçeriği]:\n${text}`);
+        const sanitizedText = text.replace(/(token=)[a-zA-Z0-9_-]{16,}/gi, '$1[MASKED_RECOVERY_TOKEN]');
+        console.log(`[Metin İçeriği]:\n${sanitizedText}`);
       }
       console.log('================================================================\n');
 

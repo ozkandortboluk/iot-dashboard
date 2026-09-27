@@ -2693,6 +2693,7 @@ class LocalDatabase {
     bucket: '1m' | '5m' | '15m' | '30m' | '1h' | '6h' | '1d';
     startTime?: string;
     endTime?: string;
+    allowedDeviceIds?: string[];
   }): Promise<import('../types.js').TimeBucketDataPoint[]> {
     const pool = this.getPgPool();
     if (pool && this.isPostgresProductionMode()) {
@@ -2711,6 +2712,7 @@ class LocalDatabase {
         const queryMetric = params.metric && params.metric !== 'all' ? params.metric : null;
         const queryStart = params.startTime ? new Date(params.startTime).toISOString() : null;
         const queryEnd = params.endTime ? new Date(params.endTime).toISOString() : null;
+        const allowed = params.allowedDeviceIds && params.allowedDeviceIds.length > 0 ? params.allowedDeviceIds : null;
 
         const sql = `
           SELECT 
@@ -2726,11 +2728,12 @@ class LocalDatabase {
             AND ($3::text IS NULL OR metric = $3)
             AND ($4::timestamptz IS NULL OR created_at >= $4)
             AND ($5::timestamptz IS NULL OR created_at <= $5)
+            AND ($6::text[] IS NULL OR device_id = ANY($6))
           GROUP BY "timeBucket", device_id, metric
           ORDER BY "timeBucket" ASC;
         `;
 
-        const res = await pool.query(sql, [interval, queryDev, queryMetric, queryStart, queryEnd]);
+        const res = await pool.query(sql, [interval, queryDev, queryMetric, queryStart, queryEnd, allowed]);
         if (res.rows && res.rows.length > 0) {
           return res.rows.map((r: any) => ({
             timeBucket: new Date(r.timeBucket).toISOString(),
@@ -2756,8 +2759,9 @@ class LocalDatabase {
     bucket: '1m' | '5m' | '15m' | '1h' | '1d';
     startTime?: string;
     endTime?: string;
+    allowedDeviceIds?: string[];
   }): import('../types.js').TimeBucketDataPoint[] {
-    const { deviceId, metric, bucket } = params;
+    const { deviceId, metric, bucket, allowedDeviceIds } = params;
     const bucketDurationMs =
       bucket === '1m' ? 60000 :
       bucket === '5m' ? 300000 :
@@ -2766,6 +2770,9 @@ class LocalDatabase {
       86400000;
 
     let readings = this.telemetryRepository.getTelemetry();
+    if (allowedDeviceIds && Array.isArray(allowedDeviceIds)) {
+      readings = readings.filter((r) => allowedDeviceIds.includes(r.deviceId));
+    }
     if (deviceId && deviceId !== 'all') {
       readings = readings.filter((r) => r.deviceId === deviceId);
     }

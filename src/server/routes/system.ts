@@ -786,14 +786,34 @@ timescaleRouter.post('/policies', authenticateUser, requireAdmin, async (req, re
 });
 
 timescaleRouter.get('/time-bucket', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
   const { deviceId, metric, bucket = '5m', startTime, endTime } = req.query;
+
+  const isAdmin = user.role === 'admin';
+  const userDevices = db.getDevices(user.id, user.id);
+  const userDeviceIds = userDevices.map((d) => d.id);
+
+  const targetDeviceId = deviceId as string | undefined;
+
+  if (!isAdmin) {
+    if (targetDeviceId && targetDeviceId !== 'all') {
+      if (!userDeviceIds.includes(targetDeviceId)) {
+        return res.status(403).json({ error: 'Bu cihaza ve verilerine erişim yetkiniz bulunmamaktadır.' });
+      }
+    } else if (userDeviceIds.length === 0) {
+      return res.json([]);
+    }
+  }
+
   try {
     const result = await db.queryTimeBucketTelemetryAsync({
-      deviceId: deviceId as string,
+      deviceId: targetDeviceId,
       metric: metric as string,
       bucket: (bucket as any) || '5m',
       startTime: startTime as string,
       endTime: endTime as string,
+      allowedDeviceIds: !isAdmin ? userDeviceIds : undefined,
     });
     res.json(result);
   } catch (err: any) {
@@ -807,20 +827,56 @@ timescaleRouter.get('/continuous-aggregates', authenticateUser, (req, res) => {
 });
 
 timescaleRouter.get('/export', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
   const { deviceId, metric, bucket = '5m', format = 'json', mode = 'bucket', startTime, endTime, limit = '5000' } = req.query;
+
+  const isAdmin = user.role === 'admin';
+  const userDevices = db.getDevices(user.id, user.id);
+  const userDeviceIds = userDevices.map((d) => d.id);
+
+  const targetDeviceId = deviceId as string | undefined;
+
+  if (!isAdmin) {
+    if (targetDeviceId && targetDeviceId !== 'all') {
+      if (!userDeviceIds.includes(targetDeviceId)) {
+        return res.status(403).json({ error: 'Bu cihaza ve verilerine erişim yetkiniz bulunmamaktadır.' });
+      }
+    } else if (userDeviceIds.length === 0) {
+      if (format === 'csv') {
+        const bom = '\uFEFF';
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="telemetry_export_${Date.now()}.csv"`);
+        return res.send(bom + 'Timestamp,Device ID,Metric,Value,Unit,Status\n');
+      }
+      return res.json({
+        exportedAt: new Date().toISOString(),
+        recordCount: 0,
+        mode,
+        data: [],
+      });
+    }
+  }
+
   try {
     const bom = '\uFEFF';
 
     if (mode === 'raw') {
       const rawData = await db.getTelemetryAsync(
-        deviceId && deviceId !== 'all' ? (deviceId as string) : undefined,
+        targetDeviceId && targetDeviceId !== 'all' ? targetDeviceId : undefined,
         metric && metric !== 'all' ? (metric as string) : undefined,
-        Math.min(Number(limit) || 5000, 20000)
+        Math.min(Number(limit) || 5000, 20000),
+        !isAdmin ? user.id : undefined,
+        !isAdmin ? user.id : undefined
       );
+
+      const filteredRawData = !isAdmin
+        ? rawData.filter((d: any) => userDeviceIds.includes(d.deviceId))
+        : rawData;
 
       if (format === 'csv') {
         const csvHeader = 'Timestamp,Device ID,Device Name,Metric,Value,Unit,Status\n';
-        const csvRows = rawData
+        const csvRows = filteredRawData
           .map((d: any) =>
             `"${d.timestamp}","${d.deviceId}","${d.deviceName || ''}","${d.metric}",${d.value},"${d.unit || ''}","${d.status || 'normal'}"`
           )
@@ -832,18 +888,19 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
 
       return res.json({
         exportedAt: new Date().toISOString(),
-        recordCount: rawData.length,
+        recordCount: filteredRawData.length,
         mode: 'raw',
-        data: rawData,
+        data: filteredRawData,
       });
     }
 
     const data = await db.queryTimeBucketTelemetryAsync({
-      deviceId: deviceId as string,
+      deviceId: targetDeviceId,
       metric: metric as string,
       bucket: (bucket as any) || '5m',
       startTime: startTime as string,
       endTime: endTime as string,
+      allowedDeviceIds: !isAdmin ? userDeviceIds : undefined,
     });
 
     if (format === 'csv') {

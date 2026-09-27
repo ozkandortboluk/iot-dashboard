@@ -83,12 +83,31 @@ firmwareRouter.get('/keys/trusted', authenticateUser, (_req: Request, res: Respo
   res.json(trustedKeys);
 });
 
-// GET /api/firmwares/:id - Get firmware details
+// GET /api/firmwares/:id - Get firmware details (Tenant-scoped for non-admin)
 firmwareRouter.get('/:id', authenticateUser, (req: Request, res: Response) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
   const { id } = req.params;
   const fw = db.getFirmwareById(id);
   if (!fw) {
     return res.status(404).json({ error: 'Firmware bulunamadı.' });
+  }
+
+  // Tenant Isolation: Non-admin customers only see active firmwares relevant to their devices
+  if (user.role !== 'admin') {
+    const userDevices = db.getDevices().filter((d) => d.tenantId === user.id);
+    const userRoleKeys = new Set(userDevices.map((d) => (d.roleKey || '').toUpperCase()).filter(Boolean));
+    const userDeviceTypes = new Set(userDevices.map((d) => (d.deviceType || d.type || '').toLowerCase()).filter(Boolean));
+
+    const isAuthorized =
+      fw.isActive &&
+      (userRoleKeys.has(fw.roleKey.toUpperCase()) ||
+        userDeviceTypes.has(fw.deviceType.toLowerCase()) ||
+        fw.deviceType === 'all');
+
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Bu firmware yazılımına erişim yetkiniz bulunmamaktadır.' });
+    }
   }
 
   res.json(sanitizeFirmware(fw));

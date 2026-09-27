@@ -8,7 +8,10 @@ import { requireSetupAuth, isRequestSetupAuthenticated, extractSetupToken } from
 export const setupRouter = Router();
 
 function getClientIp(req: Request): string {
-  return req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  if (req.ip) return req.ip;
+  const socketIp = req.socket?.remoteAddress;
+  if (socketIp) return socketIp;
+  return '127.0.0.1';
 }
 
 /**

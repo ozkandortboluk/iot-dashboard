@@ -86,14 +86,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const userData = data.user;
 
-      // Save to localStorage IMMEDIATELY before state updates
-      localStorage.setItem('dashboard_token', data.token);
+      // Save user to localStorage; token is stored in HttpOnly cookie
+      if (data.token) {
+        localStorage.setItem('dashboard_token', data.token);
+        setToken(data.token);
+      }
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
       localStorage.removeItem('nexus_active_tab');
       localStorage.removeItem('nexus_admin_selected_customer');
 
       setUser(userData);
-      setToken(data.token);
     } finally {
       setIsLoading(false);
     }

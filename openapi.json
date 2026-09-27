@@ -148,8 +148,8 @@
                 "type": "object",
                 "required": ["email", "password"],
                 "properties": {
-                  "email": { "type": "string", "example": "admin@dashboard.io" },
-                  "password": { "type": "string", "example": "admin123" }
+                  "email": { "type": "string", "example": "user@example.com" },
+                  "password": { "type": "string", "example": "your_secure_password" }
                 }
               }
             }
