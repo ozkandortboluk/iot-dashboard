@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { hashPassword, verifyPassword, verifyAndMigratePassword } from '../utils/crypto.js';
+import { hashPassword, verifyPassword } from '../utils/crypto.js';
 import { normalizeEmail, validateEmail, validatePassword } from '../utils/validation.js';
 import { defaultWidgets } from '../initialData.js';
 import type { User, UserSession } from '../../types.js';
@@ -118,9 +118,8 @@ export class UserRepository {
       const record = await this.db.postgresRepo.getUserWithPassword(cleanEmail);
       if (record) {
         const { user, passwordHash: storedHash } = record;
-        const authCheck = verifyAndMigratePassword(pass, storedHash);
-        if (storedHash && authCheck.isValid) {
-          if (authCheck.needsMigration) {
+        if (storedHash && verifyPassword(pass, storedHash)) {
+          if (!storedHash.startsWith('$2')) {
             const newHashed = hashPassword(pass);
             await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch((e: any) =>
               console.warn('[PG Error]', e?.message || e)
@@ -133,7 +132,7 @@ export class UserRepository {
             else this.db.data.users.push(user);
           }
           if (this.db.data.passwords) {
-            this.db.data.passwords[user.id] = storedHash.startsWith('$2') ? storedHash : hashPassword(pass);
+            this.db.data.passwords[user.id] = storedHash;
           }
 
           const token = await this.createSession(user);
@@ -152,17 +151,15 @@ export class UserRepository {
       return null;
     }
     const storedHash = (this.db.data.passwords || {})[user.id];
-    const authCheck = verifyAndMigratePassword(pass, storedHash);
-    if (storedHash && authCheck.isValid) {
-      if (authCheck.needsMigration) {
-        const newHashed = hashPassword(pass);
-        this.db.data.passwords[user.id] = newHashed;
+    if (storedHash && verifyPassword(pass, storedHash)) {
+      if (!storedHash.startsWith('$2')) {
+        this.db.data.passwords[user.id] = hashPassword(pass);
         this.db.saveData(this.db.data, true);
-        if (this.isPgReady()) {
-          await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch(() => {});
-        }
       }
       const token = await this.createSession(user);
+      if (this.isPgReady()) {
+        await this.db.postgresRepo.saveUser(user, storedHash).catch(() => {});
+      }
       this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
       return { user, token };
     }
@@ -309,8 +306,7 @@ export class UserRepository {
       const record = await this.db.postgresRepo.getUserWithPassword(userId);
       if (!record) throw new Error('Kullanıcı bulunamadı.');
       const { user, passwordHash: currentHash } = record;
-      const authCheck = verifyAndMigratePassword(oldPass, currentHash);
-      if (!currentHash || !authCheck.isValid) {
+      if (!currentHash || !verifyPassword(oldPass, currentHash)) {
         this.addAuditLog(userId, user.name, 'Başarısız Şifre Değiştirme Denemesi (Eski Şifre Hatalı)', 'high');
         throw new Error('Mevcut şifreniz hatalı.');
       }
@@ -323,8 +319,7 @@ export class UserRepository {
     if (!user) throw new Error('Kullanıcı bulunamadı.');
 
     const currentHash = (this.db.data.passwords || {})[userId];
-    const authCheck = verifyAndMigratePassword(oldPass, currentHash);
-    if (!currentHash || !authCheck.isValid) {
+    if (!currentHash || !verifyPassword(oldPass, currentHash)) {
       this.addAuditLog(userId, user.name, 'Başarısız Şifre Değiştirme Denemesi (Eski Şifre Hatalı)', 'high');
       throw new Error('Mevcut şifreniz hatalı.');
     }

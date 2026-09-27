@@ -6,14 +6,6 @@ coverage/
 .env*
 !.env.example
 data/
-data/.db_config.json
-data/.system_secrets.json
-data/.setup_token
-data/.vault_key
-*.secret*
-*.pem
-*.key
-secrets/
 db.json
 uploads/keys/
 uploads/firmware/

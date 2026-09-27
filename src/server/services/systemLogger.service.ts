@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import type { SystemEvent, SystemEventLevel, SystemEventCategory, SystemLoggerConfig } from '../../types.js';
-import { sanitizeLogString } from '../utils/crypto.js';
 
 const LEVEL_WEIGHTS: Record<SystemEventLevel, number> = {
   info: 1,
@@ -270,22 +269,17 @@ class SystemLoggerService {
       }
     }
 
-    const cleanMessage = sanitizeLogString(message);
-    const cleanDetails = detailsString ? sanitizeLogString(detailsString) : undefined;
-    const cleanStack = stack ? sanitizeLogString(stack) : undefined;
-    const cleanPath = pathStr ? sanitizeLogString(pathStr) : undefined;
-
     const event: SystemEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
       level,
       category,
-      message: cleanMessage,
-      details: cleanDetails,
+      message,
+      details: detailsString,
       source: source || 'system',
-      stack: cleanStack,
+      stack,
       method,
-      path: cleanPath,
+      path: pathStr,
       ip,
       userId,
       statusCode,
@@ -299,7 +293,7 @@ class SystemLoggerService {
 
     // Structured console output - Route safely to stdout (console.log) to avoid triggering container supervisor false-positive alerts
     const logPrefix = `[SystemLog][${level.toUpperCase()}][${category.toUpperCase()}]`;
-    console.log(`${logPrefix} ${cleanMessage}${source ? ` (${source})` : ''}`);
+    console.log(`${logPrefix} ${message}${source ? ` (${source})` : ''}`);
 
     // Schedule async file persistence if enabled
     if (this.logToFile) {

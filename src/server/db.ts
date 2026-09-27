@@ -266,13 +266,6 @@ class LocalDatabase {
   private stateChangeListeners: Array<(newState: DatabaseState, oldState: DatabaseState) => void> = [];
 
   public getDatabaseState(): DatabaseState {
-    if (process.env.NODE_ENV === 'production') {
-      // In production, READY state is strictly coupled to an active, working PostgreSQL connection.
-      // If the connection was dropped or postgresRepo is not ready, downgrade from READY to DB_UNAVAILABLE.
-      if (this.dbState === DatabaseState.READY && !this.postgresRepo?.isReady()) {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-      }
-    }
     return this.dbState;
   }
 
@@ -284,12 +277,6 @@ class LocalDatabase {
   }
 
   public setDatabaseState(newState: DatabaseState): void {
-    if (newState === DatabaseState.READY && process.env.NODE_ENV === 'production') {
-      if (!this.postgresRepo?.isReady()) {
-        console.warn('[Database State Machine] Üretim modunda çalışan PostgreSQL bağlantısı olmadan READY durumuna geçilemez. DB_UNAVAILABLE atanıyor.');
-        newState = DatabaseState.DB_UNAVAILABLE;
-      }
-    }
     if (this.dbState !== newState) {
       const oldState = this.dbState;
       console.log(`[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
@@ -323,38 +310,10 @@ class LocalDatabase {
     this.startAutoQuotaCheck();
     this.startQueueWorker();
     this.startAutoRetentionWorker();
-    
-    // In production, READY state MUST be coupled to an active, working PostgreSQL connection.
-    // In development or test environments, default to READY for local WAL / in-memory development.
-    if (process.env.NODE_ENV === 'production') {
-      this.setDatabaseState(DatabaseState.DB_CONNECTING);
-    } else {
-      this.setDatabaseState(DatabaseState.READY);
-    }
-
-    // Bind repository connection changes to update DB state accordingly
-    this.postgresRepo.onConnectionChange((connected, isReady) => {
-      if (process.env.NODE_ENV === 'production') {
-        if (!connected || !isReady) {
-          if (this.dbState === DatabaseState.READY) {
-            console.warn('[Database State Machine] Üretim ortamında PostgreSQL bağlantısı kesildi. Durum DB_UNAVAILABLE olarak güncelleniyor.');
-            this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-          }
-        } else if (connected && isReady) {
-          if (
-            this.dbState === DatabaseState.DB_UNAVAILABLE ||
-            this.dbState === DatabaseState.DB_CONNECTING ||
-            this.dbState === DatabaseState.DB_INITIALIZING
-          ) {
-            console.log('[Database State Machine] Üretim ortamında PostgreSQL bağlantısı sağlandı. Durum READY yapılıyor.');
-            this.setDatabaseState(DatabaseState.READY);
-          }
-        }
-      }
-    });
-
+    // Default to READY so the local WAL database operates seamlessly when PostgreSQL is not connected
+    this.setDatabaseState(DatabaseState.READY);
     this.initPromise = this.initPostgresRepository().catch(() => false);
-    this.startPostgresAutoReconnect();
+    // this.startPostgresAutoReconnect(); // MÜŞTERİ TALEBİ ÜZERİNE İPTAL EDİLDİ - AutoHealer kullanılıyor
     this.startAutoBackupWorker();
     this.autoHealer.startWatchdog(30000);
   }
@@ -401,7 +360,7 @@ class LocalDatabase {
 
   private postgresAutoReconnectInterval: any = null;
 
-  public startPostgresAutoReconnect(): void {
+  private startPostgresAutoReconnect(): void {
     if (this.postgresAutoReconnectInterval) return;
     this.postgresAutoReconnectInterval = setInterval(async () => {
       if (!this.postgresRepo.isReady()) {
@@ -410,14 +369,7 @@ class LocalDatabase {
           await this.initPostgresRepository().catch(() => {});
         }
       }
-    }, process.env.NODE_ENV === 'test' ? 500 : 5000);
-  }
-
-  public stopPostgresAutoReconnect(): void {
-    if (this.postgresAutoReconnectInterval) {
-      clearInterval(this.postgresAutoReconnectInterval);
-      this.postgresAutoReconnectInterval = null;
-    }
+    }, 10000);
   }
 
   private getPgSslOption(url: string) {
@@ -430,9 +382,6 @@ class LocalDatabase {
     this.pgPoolUrl = '';
     this.postgresRepo.setPool(null);
     this.postgresRepo.setConnected(false);
-    if (process.env.NODE_ENV === 'production') {
-      this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-    }
   }
 
   public getPgPool(): PgPoolType | null {
@@ -457,12 +406,7 @@ class LocalDatabase {
     if (!url) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production') {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Üretim Hatası]: DATABASE_URL yapılandırılmamış. Üretim ortamında PostgreSQL zorunludur.');
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-      }
+      this.setDatabaseState(DatabaseState.READY);
       return false;
     }
 
@@ -470,12 +414,7 @@ class LocalDatabase {
     if (!pool) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production') {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Üretim Hatası]: PostgreSQL bağlantı havuzu oluşturulamadı.');
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-      }
+      this.setDatabaseState(DatabaseState.READY);
       return false;
     }
 
@@ -491,13 +430,8 @@ class LocalDatabase {
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
       }
-      if (process.env.NODE_ENV === 'production') {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.warn(`[PostgreSQL Üretim Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-        console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
-      }
+      this.setDatabaseState(DatabaseState.READY);
+      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
       return false;
     } finally {
       if (client) {
@@ -610,15 +544,9 @@ class LocalDatabase {
       }
     }
 
-    if (this.postgresRepo.isReady()) {
-      this.setDatabaseState(DatabaseState.READY);
-    } else if (process.env.NODE_ENV === 'production') {
-      this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-    } else {
-      this.setDatabaseState(DatabaseState.READY);
-    }
+    this.setDatabaseState(DatabaseState.READY);
 
-    return this.postgresRepo.isReady();
+    return true;
   }
 
   public async syncAllToPostgres(): Promise<{ success: boolean; message: string; counts?: Record<string, number> }> {
@@ -831,7 +759,7 @@ class LocalDatabase {
 
     // Ensure default databaseSettings with user-defined TimescaleDB URL or environment DATABASE_URL
     const defaultEnvDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
-    const fallbackDbUrl = defaultEnvDbUrl || 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
+    const fallbackDbUrl = defaultEnvDbUrl || 'postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable';
 
     if (!parsed.databaseSettings) {
       parsed.databaseSettings = {
@@ -987,13 +915,13 @@ class LocalDatabase {
       }
 
       try {
-        const { execFile } = await import('node:child_process');
+        const { exec } = await import('node:child_process');
         const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
+        const execAsync = promisify(exec);
         
         // Ensure pg_dump is available in the environment before executing
         try {
-          await execFileAsync('pg_dump', ['--version']);
+          await execAsync('pg_dump --version');
         } catch (missingErr) {
           console.warn('[BACKUP] pg_dump is not installed in this environment. Falling back to simple JSON metadata backup.');
           const fallbackFilename = `db_metadata_backup_${timestamp}.json`;
@@ -1005,7 +933,7 @@ class LocalDatabase {
           return { success: true, filename: fallbackFilename, size: stats.size };
         }
 
-        await execFileAsync('pg_dump', ['--dbname', dbUrl, '-f', backupPath]);
+        await execAsync(`pg_dump "${dbUrl}" > "${backupPath}"`);
         
         this.pruneBackups();
         const stats = await fs.promises.stat(backupPath);
@@ -2835,7 +2763,7 @@ class LocalDatabase {
     return {
       activeEngine: this.getActiveEngine(),
       postgresUrl: maskedUrl,
-      rawPostgresUrl: maskedUrl, // Strictly masked to prevent leaking raw passwords to frontend
+      rawPostgresUrl: rawUrl,
       isPostgresConnected: this.postgresRepo.isReady(),
       postgresVersion: this.data.databaseSettings?.postgresVersion || 'PostgreSQL 16 (TimescaleDB v2.14)',
       timescaleVersion: '2.14.2 (IoT Hypertable & Continuous Aggregates Active)',
@@ -3045,7 +2973,7 @@ class LocalDatabase {
             ? [
                 `"${parsedHost}" adresi Docker Compose ağı içerisindeki dahili konteyner servis adıdır. Uygulama sunucunuzda Docker Compose ("docker compose up") ile çalıştığında TimescaleDB konteynerine bu isimle otomatik olarak bağlanır.`,
                 `Eğer bu bulut önizleme ortamından (Cloud Run / AI Studio) canlı test ediyorsanız; "timescaledb" yerine sunucunuzun dış statik IP adresini veya alan adını (örn: 91.151.95.66 veya db.nexusnodeiot.com.tr) girmeniz gerekir.`,
-                `Sunucunuzda POSTGRES_PASSWORD ortam değişkeninin veya kurulum sihirbazında girdiğiniz veritabanı parolasının doğru yapılandırıldığından emin olun.`,
+                `Sunucunuzda docker-compose.yml dosyasında POSTGRES_PASSWORD=kastamonuaraccalalibeyli.37 olarak tanımlandığından emin olun.`,
               ]
             : [
                 `Sunucu alan adı veya IP adresinin (${parsedHost}) doğru yazıldığından emin olun.`,
@@ -3162,10 +3090,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: iot_admin
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-GUCLU_PAROLA_GIRINIZ}
+      POSTGRES_PASSWORD: GizliSifreniz123!
       POSTGRES_DB: iot_dashboard_db
     ports:
-      - "127.0.0.1:5432:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -3181,9 +3109,9 @@ services:
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@dashboard.io
-      PGADMIN_DEFAULT_PASSWORD: \${PGADMIN_PASSWORD:-GUCLU_ADMIN_PAROLASI}
+      PGADMIN_DEFAULT_PASSWORD: AdminSifresi123!
     ports:
-      - "127.0.0.1:5050:80"
+      - "5050:80"
     depends_on:
       - timescaledb
 
@@ -3193,8 +3121,7 @@ volumes:
 `;
 
     const envExample = `# Dashboard Ortam Değişkenleri (.env)
-# Not: Parola ve gizli bilgileri doğrudan web kurulum sihirbazından veya kasa (vault) üzerinden girebilirsiniz.
-DATABASE_URL=postgresql://iot_admin:GUCLU_PAROLANIZ@localhost:5432/iot_dashboard_db?sslmode=disable
+DATABASE_URL=postgresql://iot_admin:GizliSifreniz123!@localhost:5432/iot_dashboard_db?sslmode=disable
 DB_ENGINE=postgres
 `;
 
@@ -4126,5 +4053,4 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
 }
 
 
-export { LocalDatabase };
 export const db = new LocalDatabase();

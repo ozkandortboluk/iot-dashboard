@@ -1,5 +1,5 @@
 import { systemLogger } from './systemLogger.service.js';
-import { DatabaseState, type DatabaseEngineType } from '../../types.js';
+import type { DatabaseEngineType } from '../../types.js';
 import { SchemaAuditor, type SchemaHealingResult } from '../database/schemaAuditor.js';
 import { CANONICAL_SCHEMA_METADATA, getCanonicalTableCreationOrder } from '../database/canonicalSchema.js';
 
@@ -467,9 +467,6 @@ export class DatabaseAutoHealer {
     try {
       if (!pool) {
         status = 'down';
-        if (process.env.NODE_ENV === 'production') {
-          this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        }
         return {
           status,
           isPostgresConnected: false,
@@ -582,9 +579,6 @@ export class DatabaseAutoHealer {
       if (this.dbInstance.data.databaseSettings) {
         this.dbInstance.data.databaseSettings.isPostgresConnected = false;
         this.dbInstance.data.databaseSettings.isSchemaHealthy = false;
-      }
-      if (process.env.NODE_ENV === 'production') {
-        this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
       }
     } finally {
       this.isHealingInProgress = false;

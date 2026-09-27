@@ -481,13 +481,8 @@ class ServerStatusService {
 
     healthScore = Math.max(10, Math.min(100, healthScore));
 
-    const isProduction = process.env.NODE_ENV === 'production';
-    const isSystemReady = isProduction
-      ? (isPostgresReady && dbState === DatabaseState.READY)
-      : (isPostgresReady || dbState === DatabaseState.READY);
-
     return {
-      status: isSystemReady && healthScore >= 70 ? 'HEALTHY' : healthScore >= 50 ? 'DEGRADED' : 'CRITICAL',
+      status: (isPostgresReady || dbState === DatabaseState.READY) && healthScore >= 70 ? 'HEALTHY' : healthScore >= 50 ? 'DEGRADED' : 'CRITICAL',
       healthScore,
       timestamp: new Date().toISOString(),
       serverUptime: {

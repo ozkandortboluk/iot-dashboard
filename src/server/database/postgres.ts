@@ -121,7 +121,6 @@ export class PostgresRepository {
 
   private validUserIdsCache: Set<string> = new Set();
   private validUserIdsCacheExpiry = 0;
-  private connectionChangeListeners: Array<(connected: boolean, isReady: boolean) => void> = [];
 
   constructor(pool?: Pool | null) {
     if (pool) {
@@ -135,27 +134,7 @@ export class PostgresRepository {
         this.isSchemaEnsured = false;
         this.validUserIdsCache.clear();
       }
-      this.notifyConnectionChange();
     });
-  }
-
-  public onConnectionChange(listener: (connected: boolean, isReady: boolean) => void): () => void {
-    this.connectionChangeListeners.push(listener);
-    return () => {
-      this.connectionChangeListeners = this.connectionChangeListeners.filter((l) => l !== listener);
-    };
-  }
-
-  public notifyConnectionChange(): void {
-    const connected = this.getIsConnected();
-    const ready = this.isReady();
-    for (const listener of this.connectionChangeListeners) {
-      try {
-        listener(connected, ready);
-      } catch (err) {
-        console.error('[PostgresRepository] connectionChangeListener error:', err);
-      }
-    }
   }
 
   public getPoolStats() {
@@ -168,7 +147,6 @@ export class PostgresRepository {
     this.connectionErrorNotified = false;
     this.isSchemaEnsured = false;
     this.validUserIdsCache.clear();
-    this.notifyConnectionChange();
   }
 
   public setConnected(connected: boolean, schemaEnsured?: boolean) {
@@ -187,7 +165,6 @@ export class PostgresRepository {
         console.warn('[PostgreSQL Auto Schema Ensure Warning]:', err?.message || err);
       });
     }
-    this.notifyConnectionChange();
   }
 
   public getPool(): Pool | null {
@@ -680,7 +657,6 @@ export class PostgresRepository {
     if (this.pool && ((this.pool as any).ending || (this.pool as any).ended)) {
       this.pool = null;
       this.isConnected = false;
-      this.notifyConnectionChange();
     }
 
     // 2. Attempt transparent recovery from unified shared pool if available
@@ -689,7 +665,6 @@ export class PostgresRepository {
       if (shared && !(shared as any).ending && !(shared as any).ended) {
         this.pool = shared;
         this.isConnected = true;
-        this.notifyConnectionChange();
       }
     }
 
@@ -739,7 +714,6 @@ export class PostgresRepository {
           this.pool = null;
         }
         systemLogger.error('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
-        this.notifyConnectionChange();
       } else {
         systemLogger.error('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
       }

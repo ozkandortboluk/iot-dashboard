@@ -122,9 +122,8 @@ systemRouter.get(['/system/status', '/system-status'], (req, res) => {
   const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const isPostgresConnected = !!db.postgresRepo?.getIsConnected();
   const isSchemaEnsured = !!db.postgresRepo?.getIsSchemaEnsured();
-  const isProduction = process.env.NODE_ENV === 'production';
-  const isLocalReady = !isProduction && dbState === DatabaseState.READY;
-  const isReady = isProduction ? isPostgresReady : (isPostgresReady || isLocalReady);
+  const isLocalReady = dbState === DatabaseState.READY;
+  const isReady = isPostgresReady || isLocalReady;
   const poolStats = db.postgresRepo?.getPoolStats() || undefined;
 
   let dbEngine: 'postgres' | 'local' | 'disconnected' = 'local';

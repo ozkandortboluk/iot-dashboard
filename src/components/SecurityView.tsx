@@ -4,7 +4,6 @@ import { formatDateTime } from '../lib/utils';
 import { ShieldCheck, ShieldAlert, Lock, Key, Eye, UserCheck, Activity, Terminal } from 'lucide-react';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { useAuth } from '../context/AuthContext';
-import { SystemSecretsPanel } from './system/SystemSecretsPanel';
 
 export const SecurityView: React.FC = () => {
   const { user } = useAuth();
@@ -83,9 +82,6 @@ export const SecurityView: React.FC = () => {
           </p>
         </div>
       </div>
-
-      {/* AES-256-GCM System Secrets Vault Panel */}
-      <SystemSecretsPanel />
 
       {/* Audit Logs Stream */}
       <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">

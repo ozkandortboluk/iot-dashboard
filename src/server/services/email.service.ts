@@ -1,7 +1,6 @@
 import nodemailer from 'nodemailer';
 import { db } from '../db.js';
 import { maskSecret } from '../utils/crypto.js';
-import { systemSecretsService } from './systemSecrets.service.js';
 
 export interface SendEmailOptions {
   to: string;
@@ -59,11 +58,6 @@ export class EmailService {
       }
     } catch {
       // Fallback
-    }
-
-    const fromVault = systemSecretsService.getResendApiKey();
-    if (fromVault && fromVault.startsWith('re_')) {
-      return fromVault;
     }
 
     const fromEnv = (process.env.RESEND_API_KEY || '').trim();
@@ -126,8 +120,7 @@ export class EmailService {
     }
 
     const resendKey = this.getResendApiKey();
-    const vaultSmtpPass = systemSecretsService.getSmtpPassword();
-    const smtpPass = emailConfig.smtpPass || vaultSmtpPass || process.env.SMTP_PASS || '';
+    const smtpPass = emailConfig.smtpPass || process.env.SMTP_PASS || '';
     const smtpHost = emailConfig.smtpHost || process.env.SMTP_HOST || '';
     const smtpPort = Number(emailConfig.smtpPort || process.env.SMTP_PORT || 587);
     const smtpSecure = Boolean(emailConfig.smtpSecure ?? (smtpPort === 465));
