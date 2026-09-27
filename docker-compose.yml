@@ -34,8 +34,10 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+    # Security: Route public traffic via Nginx reverse proxy (nexus_proxy).
+    # App node port is restricted to localhost loopback or internal nexus_net container network.
     ports:
-      - "${PORT_BIND:-3000:3000}"
+      - "${PORT_BIND:-127.0.0.1:3000:3000}"
     environment:
       NODE_ENV: production
       PORT: 3000

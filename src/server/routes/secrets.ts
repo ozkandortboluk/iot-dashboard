@@ -365,13 +365,51 @@ secretsRouter.post('/test-database', authenticateUser, requireAdmin, async (req:
   }
 });
 
+const testEmailCooldownMap: Map<string, number> = new Map();
+
+/**
+ * Checks and enforces a strict 20-second cooldown between consecutive test email sends per IP/Admin
+ */
+function checkTestEmailCooldown(ip: string): { allowed: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  const COOLDOWN_MS = 20000; // 20 seconds cooldown
+  const lastSent = testEmailCooldownMap.get(ip) || 0;
+  const elapsed = now - lastSent;
+  if (elapsed < COOLDOWN_MS) {
+    const retryAfter = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+    return { allowed: false, retryAfterSeconds: retryAfter };
+  }
+  testEmailCooldownMap.set(ip, now);
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
 /**
  * POST /api/system/secrets/test-email
  * Tests email sending using either provided parameters or stored vault secrets.
- * Strictly requires Admin authentication & authorization, input validation, and rate limiting.
+ * Strictly requires Admin authentication & authorization, input validation, rate limiting (3/5min) and a 20s cooldown.
  */
 secretsRouter.post('/test-email', authenticateUser, requireAdmin, async (req: Request, res: Response) => {
-  if (!checkVaultRateLimit(req, res, 'test_email', 10)) return;
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+  // 1. Strict Rate Limit: Max 3 requests per minute per IP
+  const rateCheck = rateLimiterService.checkIpRateLimit(`vault_api:test_email:${clientIp}`, 3);
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: 'Test e-postası gönderme kotasına ulaşıldı (En fazla 5 dakikada 3 istek). Lütfen bekleyip tekrar deneyin.',
+      retryAfterSeconds: rateCheck.retryAfterSeconds,
+    });
+  }
+
+  // 2. Cooldown Enforcement: Minimum 20 seconds between consecutive test email dispatches
+  const cooldownCheck = checkTestEmailCooldown(clientIp);
+  if (!cooldownCheck.allowed) {
+    return res.status(429).json({
+      success: false,
+      error: `Test e-postaları arasında en az 20 saniye beklenmelidir. Lütfen ${cooldownCheck.retryAfterSeconds} saniye sonra tekrar deneyiniz.`,
+      retryAfterSeconds: cooldownCheck.retryAfterSeconds,
+    });
+  }
 
   const { testRecipient } = req.body || {};
   const recipient = String(testRecipient || '').trim();

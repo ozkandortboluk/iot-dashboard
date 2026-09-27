@@ -486,7 +486,7 @@ export class SetupService {
       throw new Error('Veritabanı adresi geçersiz karakterler içeriyor.');
     }
 
-    // Disallow dangerous SSRF & Cloud Metadata addresses
+    // Disallow dangerous SSRF & Cloud Metadata addresses and reserved/loopback ranges
     const blockedHosts = [
       '169.254.169.254',
       'metadata.google.internal',
@@ -495,9 +495,18 @@ export class SetupService {
       '100.100.100.200',
       'fd00:ec2::254',
       '0.0.0.0',
+      '::',
+      '0000:0000:0000:0000:0000:0000:0000:0000',
     ];
 
-    if (blockedHosts.includes(lower) || lower.startsWith('169.254.')) {
+    if (
+      blockedHosts.includes(lower) ||
+      lower.startsWith('169.254.') ||
+      lower.startsWith('100.64.') ||
+      lower.startsWith('0.') ||
+      lower.startsWith('224.') ||
+      lower.startsWith('240.')
+    ) {
       systemLogger.warn('security', `Engellenen veritabanı adresi denemesi (SSRF engeli): ${trimmed}`);
       throw new Error('Güvenlik Kuralı: Belirtilen veritabanı adresine (SSRF / Bulut Metadata koruması) bağlantı kurulması engellenmiştir.');
     }

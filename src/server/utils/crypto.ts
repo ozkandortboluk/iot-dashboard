@@ -7,11 +7,30 @@ export function hashPassword(password: string): string {
   return bcrypt.hashSync(password, 10);
 }
 
+/**
+ * Strictly verifies a password against a valid bcrypt hash ($2a$, $2b$, $2y$, $2$).
+ * Plaintext password hashes are STRICTLY REJECTED to prevent fallback vulnerabilities.
+ */
 export function verifyPassword(password: string, hash: string): boolean {
-  if (!hash.startsWith('$2')) {
-    return password === hash;
+  if (!hash || typeof hash !== 'string') return false;
+  if (!hash.startsWith('$2a$') && !hash.startsWith('$2b$') && !hash.startsWith('$2y$') && !hash.startsWith('$2$')) {
+    return false;
   }
   return bcrypt.compareSync(password, hash);
+}
+
+/**
+ * Validates a user password during login and determines whether a legacy non-bcrypt password
+ * needs a one-time migration to bcrypt.
+ */
+export function verifyAndMigratePassword(password: string, hash: string): { isValid: boolean; needsMigration: boolean } {
+  if (!hash || typeof hash !== 'string') return { isValid: false, needsMigration: false };
+  if (hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$') || hash.startsWith('$2$')) {
+    return { isValid: bcrypt.compareSync(password, hash), needsMigration: false };
+  }
+  // One-time legacy plaintext verification for auto-migration to bcrypt
+  const isValid = password === hash;
+  return { isValid, needsMigration: isValid };
 }
 
 // ============================================================================
