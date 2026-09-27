@@ -676,16 +676,33 @@ export class SystemSecretsService {
   }
 
   public async setCustomSecret(input: CustomSecretInput, updatedBy?: string): Promise<void> {
-    if (!input.key || !input.key.trim()) {
+    const rawKey = (input.key || '').trim();
+    if (!rawKey) {
       throw new Error('Secret anahtarı (key) zorunludur.');
     }
-    const cleanKey = input.key.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '_');
+
+    if (!/^[a-zA-Z0-9_.-]{2,64}$/.test(rawKey) || rawKey.includes('..') || rawKey.startsWith('.') || rawKey.endsWith('.')) {
+      throw new Error('Geçersiz secret anahtarı. Anahtar yalnızca 2-64 karakter uzunluğunda harf, rakam, alt çizgi, tire ve nokta içerebilir.');
+    }
+
+    const lowerKey = rawKey.toLowerCase();
+    if (
+      lowerKey === 'encryption_key' ||
+      lowerKey === 'encryptionkey' ||
+      lowerKey.includes('master_key') ||
+      lowerKey.includes('vault_key') ||
+      lowerKey.includes('root_key')
+    ) {
+      throw new Error('Şifreleme anahtarları kasa içine kaydedilemez. Şifreleme anahtarı ve şifreli veri ayrı güvenlik sınırlarında bulunmalıdır.');
+    }
+
     if (isMaskedSecret(input.value)) {
       return; // Do not overwrite if masked
     }
-    await this.setSecret(cleanKey, input.value, {
+
+    await this.setSecret(lowerKey, input.value, {
       category: input.category || 'custom',
-      label: input.label || cleanKey,
+      label: input.label || lowerKey,
       description: input.description,
       isSensitive: true,
       updatedBy,
