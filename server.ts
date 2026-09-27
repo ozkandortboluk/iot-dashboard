@@ -285,11 +285,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
   if (req.path.startsWith('/api/')) {
     console.error('[API Error]:', err);
-    res.status(statusCode).json({
+    const isProd = process.env.NODE_ENV === 'production';
+    const errorResponse: Record<string, any> = {
       success: false,
       error: isDbErr ? 'Veritabanı Hizmet Dışı' : 'Sunucu hatası',
-      details: errMsg,
-    });
+    };
+    if (!isProd) {
+      errorResponse.details = errMsg;
+    }
+    res.status(statusCode).json(errorResponse);
   } else {
     next(err);
   }

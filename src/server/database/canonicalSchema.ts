@@ -1078,6 +1078,32 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       indexes: [
         { name: 'idx_schema_migrations_applied_at', columns: ['applied_at DESC'] }
       ]
+    },
+
+    // 18. SERVICE TOKENS TABLE
+    service_tokens: {
+      name: 'service_tokens',
+      description: 'Server-to-server AI Studio service tokens and API credentials',
+      primaryKey: ['id'],
+      columns: [
+        { name: 'id', type: 'VARCHAR(64)', nullable: false, primaryKey: true },
+        { name: 'name', type: 'VARCHAR(128)', nullable: false },
+        { name: 'token_prefix', type: 'VARCHAR(32)', nullable: false },
+        { name: 'token_hash', type: 'VARCHAR(128)', nullable: false, unique: true },
+        { name: 'user_id', type: 'VARCHAR(64)', nullable: false },
+        { name: 'tenant_id', type: 'VARCHAR(64)', nullable: false },
+        { name: 'scopes', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
+        { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
+        { name: 'expires_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'last_used_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'revoked_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'is_revoked', type: 'BOOLEAN', nullable: false, defaultValue: 'FALSE' }
+      ],
+      indexes: [
+        { name: 'idx_service_tokens_token_hash', columns: ['token_hash'] },
+        { name: 'idx_service_tokens_tenant_id', columns: ['tenant_id'] },
+        { name: 'idx_service_tokens_user_id', columns: ['user_id'] }
+      ]
     }
   }
 };

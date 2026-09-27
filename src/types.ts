@@ -86,6 +86,7 @@ export interface DeviceHealthSummary {
 
 export interface User {
   id: string;
+  tenantId?: string;
   name: string;
   email: string;
   phone?: string;
@@ -145,6 +146,21 @@ export interface UserSession {
   userName: string;
   createdAt: string;
   expiresAt: string;
+}
+
+export interface ServiceToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  tokenHash: string;
+  userId: string;
+  tenantId: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+  isRevoked: boolean;
 }
 
 export type DeviceStatus = 'online' | 'offline' | 'warning' | 'maintenance';

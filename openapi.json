@@ -17,17 +17,23 @@
   ],
   "components": {
     "securitySchemes": {
-      "BearerAuth": {
+      "CookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "nexus_session_token",
+        "description": "Tarayıcı HttpOnly oturum çerezi."
+      },
+      "ServiceBearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT / Token",
-        "description": "Kullanıcı oturum token'ı. Örn: 'token_usr_admin'"
+        "bearerFormat": "Service Token (nxs_srv_...)",
+        "description": "AI Studio veya sunucular arası erişim için Servis Token'ı (nxs_srv_...)"
       },
       "ApiKeyAuth": {
         "type": "apiKey",
         "in": "header",
         "name": "X-API-Key",
-        "description": "Cihaz kimlik doğrulama anahtarı. Örn: 'dev_key_ist_98234710'"
+        "description": "Cihaz kimlik doğrulama anahtarı."
       }
     },
     "schemas": {
@@ -139,7 +145,7 @@
     "/api/auth/login": {
       "post": {
         "summary": "Kullanıcı Girişi",
-        "description": "Email ve şifre ile giriş yaparak kimlik doğrulama token'ı ve kullanıcı profili döner.",
+        "description": "Email ve şifre ile giriş yapılarak HttpOnly oturum çerezi (nexus_session_token) ayarlanır ve kullanıcı profili dönülür.",
         "requestBody": {
           "required": true,
           "content": {
@@ -163,7 +169,6 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "token": { "type": "string" },
                     "user": { "$ref": "#/components/schemas/User" }
                   }
                 }
@@ -177,7 +182,7 @@
     "/api/auth/me": {
       "get": {
         "summary": "Geçerli Oturum Bilgisi",
-        "security": [{ "BearerAuth": [] }],
+        "security": [{ "CookieAuth": [] }],
         "responses": {
           "200": {
             "description": "Kullanıcı profili",

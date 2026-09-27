@@ -1,4 +1,5 @@
 import { UserRepository } from "./repositories/user.repository.js";
+import { ServiceTokenRepository } from "./repositories/serviceToken.repository.js";
 import { hashPassword, verifyPassword, encryptSecret, decryptSecret, isMaskedSecret, maskSecret } from "./utils/crypto.js";
 import { DeviceRepository } from "./repositories/device.repository.js";
 import { TelemetryRepository } from "./repositories/telemetry.repository.js";
@@ -78,6 +79,7 @@ interface DatabaseSchema {
   users: User[];
   passwords: Record<string, string>; // userId -> hash
   sessions?: UserSession[];
+  serviceTokens?: import('../types.js').ServiceToken[];
   tenants?: import('../types.js').Tenant[];
   tenantMemberships?: import('../types.js').TenantMembership[];
   sites?: import('../types.js').Site[];
@@ -254,6 +256,7 @@ class LocalDatabase {
 
   public postgresRepo = new PostgresRepository();
   public userRepository = new UserRepository(this);
+  public serviceTokenRepository = new ServiceTokenRepository(this);
   public deviceRepository = new DeviceRepository(this);
   public telemetryRepository = new TelemetryRepository(this);
   public alarmRepository = new AlarmRepository(this);
@@ -1408,6 +1411,10 @@ class LocalDatabase {
   public async deleteSession(token: string): Promise<boolean> { return await this.userRepository.deleteSession(token); }
   public verifySession(token: string): { user: User; session?: UserSession } | null { return this.userRepository.verifySession(token); }
   public async verifySessionAsync(token: string): Promise<{ user: User; session?: UserSession } | null> { return await this.userRepository.verifySessionAsync(token); }
+  public async createServiceTokenAsync(options: { name: string; userId: string; tenantId: string; scopes: string[]; expiresInDays?: number }) { return await this.serviceTokenRepository.createServiceTokenAsync(options); }
+  public async verifyServiceTokenAsync(plaintextToken: string) { return await this.serviceTokenRepository.verifyServiceTokenAsync(plaintextToken); }
+  public async listServiceTokensAsync(tenantId?: string) { return await this.serviceTokenRepository.listServiceTokensAsync(tenantId); }
+  public async revokeServiceTokenAsync(tokenId: string) { return await this.serviceTokenRepository.revokeServiceTokenAsync(tokenId); }
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> { return await this.userRepository.authenticate(email, pass); }
   public async registerUser(name: string, email: string, pass: string, role: User['role'] = 'customer', companyName?: string): Promise<User> { return this.userRepository.registerUser(name, email, pass, role, companyName); }
   public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> { return this.userRepository.changePassword(userId, oldPass, newPass); }

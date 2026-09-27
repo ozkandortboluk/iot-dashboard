@@ -312,8 +312,9 @@ export function sanitizeLogString(str?: string): string {
   return str
     // 1. Mask postgresql://user:password@host (handles passwords with @ or special characters)
     .replace(/(postgres(?:ql)?:\/\/[^:\/\s"']+?:)(.+)(@[a-zA-Z0-9_.-]+(?::\d+)?(?:\/[^\s?]*)?(?:\?[^\s]*)?)/gi, '$1••••••••$3')
-    // 2. Mask Resend API keys
+    // 2. Mask Resend API keys & Service Tokens
     .replace(/re_[a-zA-Z0-9_-]{10,}/g, 're_••••••••')
+    .replace(/nxs_srv_[a-zA-Z0-9_-]{10,}/g, 'nxs_srv_••••••••')
     // 3. Mask Telegram & WhatsApp bot tokens
     .replace(/\b\d{6,12}:[a-zA-Z0-9_-]{20,}\b/g, '••••••••:••••••••')
     // 4. Mask Authorization & Bearer / Basic headers

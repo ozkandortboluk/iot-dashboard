@@ -338,6 +338,68 @@ adminRouter.post('/test-firestore-quota', authenticateUser, requireAdmin, async 
   res.json(result);
 });
 
+// Service Token Management (Admin Only)
+adminRouter.post('/service-tokens', authenticateUser, requireAdmin, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
+  const { name, userId, tenantId, scopes, expiresInDays } = req.body;
+
+  const targetUserId = userId || user.id;
+  const targetTenantId = tenantId || user.tenantId || user.id;
+
+  const created = await db.createServiceTokenAsync({
+    name: name || 'AI Studio Integration Token',
+    userId: targetUserId,
+    tenantId: targetTenantId,
+    scopes: Array.isArray(scopes) && scopes.length > 0 ? scopes : ['devices:read', 'telemetry:read'],
+    expiresInDays: typeof expiresInDays === 'number' ? expiresInDays : 365,
+  });
+
+  res.json({
+    success: true,
+    token: created.token, // Plaintext returned ONLY ONCE upon creation
+    metadata: created.metadata,
+    message: 'Servis jetonu başarıyla oluşturuldu. Bu jeton yalnızca bir kez gösterilmektedir.',
+  });
+});
+
+adminRouter.get('/service-tokens', authenticateUser, requireAdmin, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user!;
+  const tenantIdQuery = (req.query.tenantId as string) || (user.role === 'admin' ? undefined : user.tenantId || user.id);
+
+  const tokens = await db.listServiceTokensAsync(tenantIdQuery);
+  res.json({ success: true, serviceTokens: tokens });
+});
+
+adminRouter.delete('/service-tokens/:id', authenticateUser, requireAdmin, async (req, res) => {
+  const tokenId = req.params.id;
+  if (!tokenId) {
+    return res.status(400).json({ error: 'Jeton ID gereklidir.' });
+  }
+
+  const success = await db.revokeServiceTokenAsync(tokenId);
+  if (!success) {
+    return res.status(404).json({ error: 'Servis jetonu bulunamadı veya iptal edilemedi.' });
+  }
+
+  res.json({ success: true, message: 'Servis jetonu başarıyla iptal edildi.' });
+});
+
+adminRouter.post('/service-tokens/:id/revoke', authenticateUser, requireAdmin, async (req, res) => {
+  const tokenId = req.params.id;
+  if (!tokenId) {
+    return res.status(400).json({ error: 'Jeton ID gereklidir.' });
+  }
+
+  const success = await db.revokeServiceTokenAsync(tokenId);
+  if (!success) {
+    return res.status(404).json({ error: 'Servis jetonu bulunamadı veya iptal edilemedi.' });
+  }
+
+  res.json({ success: true, message: 'Servis jetonu başarıyla iptal edildi.' });
+});
+
 // Database Management Router
 const databaseRouter = Router();
 

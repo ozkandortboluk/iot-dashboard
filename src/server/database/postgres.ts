@@ -18,6 +18,7 @@ import type {
   DeviceCommand,
   DeviceCommandStatus,
   UserSession,
+  ServiceToken,
   DispatchLogItem,
   Firmware,
   OtaDeploymentJob,
@@ -4343,5 +4344,134 @@ export class PostgresRepository {
       console.warn(`[PostgresRepository] getSystemSetting error (${key}):`, err?.message || err);
     }
     return null;
+  }
+
+  /**
+   * Save a Service Token
+   */
+  public async saveServiceToken(token: ServiceToken): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    try {
+      await this.query(
+        `INSERT INTO service_tokens (
+          id, name, token_prefix, token_hash, user_id, tenant_id, scopes, created_at, expires_at, is_revoked
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          scopes = EXCLUDED.scopes,
+          expires_at = EXCLUDED.expires_at,
+          is_revoked = EXCLUDED.is_revoked;`,
+        [
+          token.id,
+          token.name,
+          token.tokenPrefix,
+          token.tokenHash,
+          token.userId,
+          token.tenantId,
+          JSON.stringify(token.scopes || []),
+          token.createdAt || new Date().toISOString(),
+          token.expiresAt || null,
+          token.isRevoked || false,
+        ]
+      );
+      return true;
+    } catch (err: any) {
+      console.warn('[PostgresRepository] saveServiceToken error:', err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * Get a Service Token by Hash
+   */
+  public async getServiceTokenByHash(tokenHash: string): Promise<ServiceToken | null> {
+    if (!this.pool || !this.isConnected) return null;
+    try {
+      const res = await this.query(`SELECT * FROM service_tokens WHERE token_hash = $1 LIMIT 1;`, [tokenHash]);
+      if (res?.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        return {
+          id: row.id,
+          name: row.name,
+          tokenPrefix: row.token_prefix,
+          tokenHash: row.token_hash,
+          userId: row.user_id,
+          tenantId: row.tenant_id,
+          scopes: typeof row.scopes === 'string' ? JSON.parse(row.scopes) : row.scopes || [],
+          createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+          expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
+          lastUsedAt: row.last_used_at ? new Date(row.last_used_at).toISOString() : undefined,
+          revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : undefined,
+          isRevoked: Boolean(row.is_revoked),
+        };
+      }
+    } catch (err: any) {
+      console.warn('[PostgresRepository] getServiceTokenByHash error:', err?.message || err);
+    }
+    return null;
+  }
+
+  /**
+   * Update Service Token lastUsedAt timestamp
+   */
+  public async updateServiceTokenLastUsed(tokenId: string): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    try {
+      await this.query(`UPDATE service_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1;`, [tokenId]);
+      return true;
+    } catch (err: any) {
+      console.warn('[PostgresRepository] updateServiceTokenLastUsed error:', err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * Revoke a Service Token
+   */
+  public async revokeServiceToken(tokenId: string): Promise<boolean> {
+    if (!this.pool || !this.isConnected) return false;
+    try {
+      await this.query(
+        `UPDATE service_tokens SET is_revoked = TRUE, revoked_at = CURRENT_TIMESTAMP WHERE id = $1;`,
+        [tokenId]
+      );
+      return true;
+    } catch (err: any) {
+      console.warn('[PostgresRepository] revokeServiceToken error:', err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * List Service Tokens (optionally filtered by tenant_id)
+   */
+  public async listServiceTokens(tenantId?: string): Promise<ServiceToken[]> {
+    if (!this.pool || !this.isConnected) return [];
+    try {
+      const sql = tenantId
+        ? `SELECT * FROM service_tokens WHERE tenant_id = $1 ORDER BY created_at DESC;`
+        : `SELECT * FROM service_tokens ORDER BY created_at DESC;`;
+      const params = tenantId ? [tenantId] : [];
+      const res = await this.query(sql, params);
+      if (res?.rows) {
+        return res.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          tokenPrefix: row.token_prefix,
+          tokenHash: row.token_hash,
+          userId: row.user_id,
+          tenantId: row.tenant_id,
+          scopes: typeof row.scopes === 'string' ? JSON.parse(row.scopes) : row.scopes || [],
+          createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+          expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : undefined,
+          lastUsedAt: row.last_used_at ? new Date(row.last_used_at).toISOString() : undefined,
+          revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : undefined,
+          isRevoked: Boolean(row.is_revoked),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('[PostgresRepository] listServiceTokens error:', err?.message || err);
+    }
+    return [];
   }
 }
