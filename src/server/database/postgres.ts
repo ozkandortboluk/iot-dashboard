@@ -382,7 +382,8 @@ export class PostgresRepository {
   }
 
   public async checkIfAdminExists(includeTestUsers: boolean = false): Promise<boolean> {
-    if (!this.pool) return false;
+    const pool = this.getPool();
+    if (!pool) return false;
     try {
       const sql = includeTestUsers
         ? "SELECT 1 FROM users WHERE role = 'admin' AND (deleted_at IS NULL) LIMIT 1;"
@@ -395,7 +396,7 @@ export class PostgresRepository {
              AND id NOT LIKE 'test_%'
              AND LOWER(email) NOT LIKE 'test_%'
            LIMIT 1;`;
-      const res = await this.pool.query(sql);
+      const res = await pool.query(sql);
       return (res.rowCount || 0) > 0;
     } catch {
       return false;
@@ -406,7 +407,8 @@ export class PostgresRepository {
    * Performs complete live PostgreSQL Schema Audit against Canonical Schema.
    */
   public async auditSchema(clientInstance?: any): Promise<SchemaAuditReport> {
-    if (!this.pool) {
+    const pool = this.getPool();
+    if (!clientInstance && !pool) {
       return {
         timestamp: new Date().toISOString(),
         isHealthy: false,
@@ -434,7 +436,7 @@ export class PostgresRepository {
         humanReadableMessages: ['PostgreSQL bağlantı havuzu henüz başlatılmadı.'],
       };
     }
-    const client = clientInstance || this.pool;
+    const client = clientInstance || pool;
     return await SchemaAuditor.auditSchema(client);
   }
 
@@ -442,10 +444,11 @@ export class PostgresRepository {
    * Performs migration-independent Auto-Healing against Canonical Schema.
    */
   public async autoHealSchema(clientInstance?: any): Promise<SchemaHealingResult> {
-    if (!this.pool) {
+    const pool = this.getPool();
+    if (!clientInstance && !pool) {
       throw new Error('PostgreSQL havuzu bağlı değil.');
     }
-    const client = clientInstance || this.pool;
+    const client = clientInstance || pool;
     return await SchemaAuditor.autoHeal(client);
   }
 
@@ -453,12 +456,13 @@ export class PostgresRepository {
    * Verifies that the database schema satisfies all critical production contracts (P0.14, P0.16, P0.17)
    */
   public async verifySchemaContract(clientInstance?: any): Promise<boolean> {
-    if (!this.pool) return false;
+    const pool = this.getPool();
+    if (!clientInstance && !pool) return false;
     let client = clientInstance;
     let shouldRelease = false;
     if (!client) {
       try {
-        client = await this.pool.connect();
+        client = await pool!.connect();
         shouldRelease = true;
       } catch (connErr) {
         console.error('[Schema Contract Check] DB connection failed:', connErr);
@@ -649,7 +653,7 @@ export class PostgresRepository {
         if (totalUsers === 0 && isTestEnv) {
           // Strictly in test environments, populate initial database test paths
           try {
-            await InitialDataSeeder.populateInitialDatabase(this.pool);
+            await InitialDataSeeder.populateInitialDatabase(p2);
           } catch (seedErr: any) {
             console.error('[PostgreSQL ensureTelemetrySchema] InitialDataSeeder notice:', seedErr?.message || seedErr);
           }
@@ -914,10 +918,11 @@ export class PostgresRepository {
   }
 
   public async deleteUser(userId: string): Promise<void> {
-    if (!this.pool || !this.isConnected) {
+    const pool = this.getPool();
+    if (!pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
-    const client = await this.pool.connect();
+    const client = await pool.connect();
     try {
       await client.query('BEGIN');
       // 1. Cihaz Sahipliğini Koruma & Kanonik Sistem Yöneticisine Aktarım:
@@ -957,8 +962,9 @@ export class PostgresRepository {
     deleteAlarms?: boolean;
     deleteTelemetry?: boolean;
   }): Promise<void> {
-    if (!this.pool) return;
-    const client = await this.pool.connect();
+    const pool = this.getPool();
+    if (!pool) return;
+    const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
@@ -1032,8 +1038,9 @@ export class PostgresRepository {
   }
 
   public async softDeleteUser(userId: string): Promise<void> {
-    if (!this.pool) return;
-    const client = await this.pool.connect();
+    const pool = this.getPool();
+    if (!pool) return;
+    const client = await pool.connect();
     try {
       await client.query('BEGIN');
       await client.query(`UPDATE users SET status = 'suspended', deleted_at = NOW() WHERE id = $1;`, [userId]);
@@ -1503,7 +1510,8 @@ export class PostgresRepository {
   }
 
   public async saveTelemetryBatchInTransaction(readings: TelemetryReading[]): Promise<{ success: boolean; rowCount: number; duplicateSkipped?: boolean }> {
-    if (!this.pool || !this.isConnected) {
+    const pool = this.getPool();
+    if (!pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı aktif değil');
     }
     if (!readings || readings.length === 0) return { success: true, rowCount: 0 };
@@ -1525,7 +1533,7 @@ export class PostgresRepository {
 
     while (attempt < maxRetries) {
       attempt++;
-      const client = await this.pool.connect();
+      const client = await pool.connect();
       try {
         await client.query('BEGIN');
 
@@ -3939,10 +3947,11 @@ export class PostgresRepository {
   }
 
   public async queryWithTenant(tenantId: string, isAdmin: boolean, text: string, params: any[] = []): Promise<any> {
-    if (!this.pool || !this.isConnected) {
+    const pool = this.getPool();
+    if (!pool || !this.isConnected) {
       throw new Error('PostgreSQL veritabanı bağlantısı hazır veya aktif değil');
     }
-    const client = await this.pool.connect();
+    const client = await pool.connect();
     try {
       await client.query('BEGIN');
       await client.query(`SET LOCAL app.current_tenant_id = $1`, [tenantId]);
