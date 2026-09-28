@@ -14,18 +14,27 @@ export type PgPoolType = pg.Pool;
 declare global {
   var _unifiedPostgresPool: pg.Pool | undefined;
   var _unifiedPostgresPoolUrl: string | undefined;
+  var _poolRecycleListeners: Set<PgPoolRecycleListener> | undefined;
 }
 
 export type PgPoolRecycleListener = (newPool: pg.Pool | null) => void;
-const poolRecycleListeners: Set<PgPoolRecycleListener> = new Set();
+
+function getPoolRecycleListeners(): Set<PgPoolRecycleListener> {
+  if (!globalThis._poolRecycleListeners) {
+    globalThis._poolRecycleListeners = new Set<PgPoolRecycleListener>();
+  }
+  return globalThis._poolRecycleListeners;
+}
 
 export function onPgPoolRecycled(listener: PgPoolRecycleListener): () => void {
-  poolRecycleListeners.add(listener);
-  return () => poolRecycleListeners.delete(listener);
+  const listeners = getPoolRecycleListeners();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 function notifyPoolRecycled(newPool: pg.Pool | null): void {
-  for (const listener of poolRecycleListeners) {
+  const listeners = getPoolRecycleListeners();
+  for (const listener of listeners) {
     try {
       listener(newPool);
     } catch {}

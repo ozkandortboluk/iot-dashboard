@@ -847,6 +847,7 @@ class LocalDatabase {
     const fallbackDbUrl = defaultEnvDbUrl || 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
     const isProdVps = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     const envHost = (process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST || '').trim();
+    const envPort = (process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432').trim();
 
     if (!parsed.databaseSettings) {
       parsed.databaseSettings = {
@@ -858,7 +859,7 @@ class LocalDatabase {
       parsed.databaseSettings.postgresUrl = fallbackDbUrl;
     } else if (isProdVps && (parsed.databaseSettings.postgresUrl.includes('@localhost') || parsed.databaseSettings.postgresUrl.includes('@127.0.0.1'))) {
       if (envHost) {
-        parsed.databaseSettings.postgresUrl = parsed.databaseSettings.postgresUrl.replace(/@([^:/]+)(?::\d+)?/, `@${envHost}:5432`);
+        parsed.databaseSettings.postgresUrl = parsed.databaseSettings.postgresUrl.replace(/@([^:/]+)(?::\d+)?/, `@${envHost}:${envPort}`);
       } else {
         parsed.databaseSettings.postgresUrl = fallbackDbUrl;
       }

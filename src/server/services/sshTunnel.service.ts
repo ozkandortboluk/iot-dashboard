@@ -3,7 +3,6 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { systemLogger } from './systemLogger.service.js';
-import { db } from '../db.js';
 
 export interface SSHTunnelConfig {
   sshHost: string;
@@ -276,6 +275,7 @@ class SSHTunnelService {
               try {
                 const { recycleSharedPgPool } = await import('../database/connection.js');
                 await recycleSharedPgPool();
+                const { db } = await import('../db.js');
                 if (db && typeof db.initPostgresRepository === 'function') {
                   await db.initPostgresRepository();
                 }
@@ -357,6 +357,7 @@ class SSHTunnelService {
     try {
       const { recycleSharedPgPool } = await import('../database/connection.js');
       await recycleSharedPgPool();
+      const { db } = await import('../db.js');
       if (db && typeof db.initPostgresRepository === 'function') {
         db.initPostgresRepository().catch(() => {});
       }
