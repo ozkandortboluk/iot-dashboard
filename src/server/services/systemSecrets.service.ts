@@ -138,7 +138,11 @@ export interface CustomSecretInput {
 }
 
 const VAULT_DIR = path.resolve(process.cwd(), 'data');
-const VAULT_FILE = path.join(VAULT_DIR, '.system_secrets.json');
+
+export function getVaultFilePath(): string {
+  const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+  return path.join(VAULT_DIR, isTest ? '.system_secrets.test.json' : '.system_secrets.json');
+}
 
 export class SystemSecretsService {
   private static instance: SystemSecretsService;
@@ -161,8 +165,9 @@ export class SystemSecretsService {
    */
   public loadFromLocalVault(): void {
     try {
-      if (fs.existsSync(VAULT_FILE)) {
-        const raw = fs.readFileSync(VAULT_FILE, 'utf8');
+      const vaultPath = getVaultFilePath();
+      if (fs.existsSync(vaultPath)) {
+        const raw = fs.readFileSync(vaultPath, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
           const records: Record<string, StoredSecretRecord> = parsed.secrets || {};
@@ -262,13 +267,14 @@ export class SystemSecretsService {
         secrets: obj,
       };
 
-      fs.writeFileSync(VAULT_FILE, JSON.stringify(payload, null, 2), {
+      const vaultPath = getVaultFilePath();
+      fs.writeFileSync(vaultPath, JSON.stringify(payload, null, 2), {
         encoding: 'utf8',
         mode: 0o600,
       });
 
       try {
-        fs.chmodSync(VAULT_FILE, 0o600);
+        fs.chmodSync(vaultPath, 0o600);
       } catch {}
     } catch (err: any) {
       systemLogger.error('security', `Lokal secret kasası kaydedilemedi: ${err?.message || err}`);

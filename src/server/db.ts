@@ -482,8 +482,11 @@ class LocalDatabase {
       return false;
     }
 
+    const wasAlreadyReady = this.dbState === DatabaseState.READY;
     this.postgresRepo.setPool(pool);
-    this.setDatabaseState(DatabaseState.DB_CONNECTING);
+    if (!wasAlreadyReady) {
+      this.setDatabaseState(DatabaseState.DB_CONNECTING);
+    }
 
     let client: any = null;
     try {
@@ -494,12 +497,14 @@ class LocalDatabase {
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
       }
-      if (process.env.NODE_ENV === 'production') {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.warn(`[PostgreSQL Üretim Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-        console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
+      if (!wasAlreadyReady) {
+        if (process.env.NODE_ENV === 'production' && process.env.STRICT_MAINTENANCE_LOCK === 'true') {
+          this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+          console.warn(`[PostgreSQL Üretim Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
+        } else {
+          this.setDatabaseState(DatabaseState.READY);
+          console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
+        }
       }
       return false;
     } finally {

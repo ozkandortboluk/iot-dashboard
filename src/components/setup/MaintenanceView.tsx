@@ -21,6 +21,8 @@ interface MaintenanceViewProps {
 export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => {
   const [retrying, setRetrying] = useState(false);
   const [dbConfig, setDbConfig] = useState<{ host?: string; port?: number; database?: string }>({});
+  const [dbErrorMessage, setDbErrorMessage] = useState<string | null>(null);
+  const [hasAdmin, setHasAdmin] = useState<boolean>(false);
   const [lastCheckTime, setLastCheckTime] = useState<string>(new Date().toLocaleTimeString('tr-TR'));
   const [retryCount, setRetryCount] = useState<number>(0);
 
@@ -57,6 +59,12 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
         const data = await res.json();
         if (data.dbConfig) {
           setDbConfig(data.dbConfig);
+        }
+        if (data.dbErrorMessage) {
+          setDbErrorMessage(data.dbErrorMessage);
+        }
+        if (data.hasAdmin !== undefined) {
+          setHasAdmin(Boolean(data.hasAdmin));
         }
         if (data.systemMode === 'READY' || data.isDbConnected) {
           onRetry();
@@ -159,6 +167,33 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
             </div>
           </div>
 
+          {/* Diagnostic & Troubleshooting Advice */}
+          {dbErrorMessage && (
+            <div className="p-4 bg-slate-950/80 rounded-xl border border-amber-900/40 text-xs space-y-2.5">
+              <div className="flex items-center gap-2 text-amber-400 font-semibold">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Hata & Bağlantı Teşhisi</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed font-mono text-[11px] bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                {dbErrorMessage}
+              </p>
+              <div className="text-[11px] text-slate-400 space-y-1.5 pt-1">
+                <span className="font-semibold text-slate-300 block">PostgreSQL Sunucusunu Dışa Açma Rehberi:</span>
+                <ul className="list-disc list-inside space-y-1 pl-1 text-slate-400">
+                  <li>
+                    <strong className="text-slate-300">Güvenlik Duvarı:</strong> VPS üzerinde portu açın: <code className="text-indigo-300 font-mono">sudo ufw allow 5432/tcp</code>
+                  </li>
+                  <li>
+                    <strong className="text-slate-300">Dış Bağlantı İzni:</strong> <code className="text-indigo-300 font-mono">/etc/postgresql/.../main/postgresql.conf</code> dosyasında <code className="text-emerald-400 font-mono">listen_addresses = '*'</code> yapın.
+                  </li>
+                  <li>
+                    <strong className="text-slate-300">Erişim İzni (pg_hba.conf):</strong> <code className="text-indigo-300 font-mono">host all all 0.0.0.0/0 scram-sha-256</code> ekleyin ve servisi yeniden başlatın (<code className="text-indigo-300 font-mono">sudo systemctl restart postgresql</code>).
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Polling & Actions Footer */}
           <div className="flex flex-col gap-3 pt-4 border-t border-slate-800/80">
             <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
@@ -191,8 +226,21 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
                 className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition cursor-pointer flex items-center justify-center gap-2"
               >
                 <HardDrive className="w-3.5 h-3.5 text-slate-400" />
-                <span>Kurulum Sihirbazına Dön / Ayarları Düzenle</span>
+                <span>Ayarları Düzenle</span>
               </button>
+
+              {hasAdmin && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={retrying}
+                  className="w-full sm:w-auto px-4 py-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-200 rounded-xl text-xs font-medium transition cursor-pointer flex items-center justify-center gap-2"
+                  title="Yönetici hesabınızla doğrudan panele giriş yapın (Veriler yerel dayanıklı WAL motorunda tutulur)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Panele Devam Et (Yerel Mod)</span>
+                </button>
+              )}
 
               <button
                 id="maintenance-retry-btn"

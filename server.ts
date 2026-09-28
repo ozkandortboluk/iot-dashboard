@@ -14,9 +14,6 @@ import { startNoDataWorker } from './src/server/services/noDataWorker.js';
 import { startCommandExpiryWorker } from './src/server/services/command.service.js';
 
 
-// Default configuration flags
-process.env.DISABLE_SETUP_TOKEN = process.env.DISABLE_SETUP_TOKEN ?? 'true';
-
 // Route Handlers
 import { authRouter, profileRouter } from './src/server/routes/auth.js';
 import { adminTenantsRouter } from './src/server/routes/admin/tenants.js';
@@ -150,6 +147,8 @@ app.use(systemRouter);
 // If PostgreSQL is not connected or in READY state, block non-setup API calls with 503.
 import { db } from './src/server/db.js';
 import { DatabaseState } from './src/types.js';
+import { isRealAdminUser } from './src/server/database/postgres.js';
+import { setupService } from './src/server/services/setup.service.js';
 
 app.use('/api', (req, res, next) => {
   // Allow OPTIONS preflight
@@ -173,12 +172,15 @@ app.use('/api', (req, res, next) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const dbState = db.getDatabaseState();
   const isPgReady = Boolean(db.postgresRepo?.isReady());
-  
-  // In production, system readiness strictly requires working PostgreSQL connection AND READY state.
-  // Neither dbState === READY without PostgreSQL nor isPgReady alone is sufficient.
-  const isSystemReady = isProduction 
+  const hasRealAdmin = db.getUsers().some(isRealAdminUser);
+  const isSetupDone = setupService.isSetupCompleted() || hasRealAdmin;
+  const isStrictMaintenance = process.env.STRICT_MAINTENANCE_LOCK === 'true';
+
+  // System readiness: if strict maintenance lock is enabled, strictly require PostgreSQL.
+  // Otherwise, if setup is completed and admin exists, the high-performance local resilient WAL engine serves traffic.
+  const isSystemReady = isStrictMaintenance
     ? (isPgReady && dbState === DatabaseState.READY)
-    : (isPgReady || dbState === DatabaseState.READY);
+    : (isPgReady || dbState === DatabaseState.READY || isSetupDone);
 
   if (!isSystemReady) {
     const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;

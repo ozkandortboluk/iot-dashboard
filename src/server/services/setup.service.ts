@@ -38,6 +38,7 @@ export interface SetupStatusResponse {
   setupToken?: string;
   currentStep: number;
   isDbConnected: boolean;
+  dbErrorMessage?: string;
   isTimescaleAvailable: boolean;
   hasAdmin: boolean;
   dbConfig?: {
@@ -92,6 +93,7 @@ export class SetupService {
   private isCompletedState: boolean = false;
   private completedAtDate: string | null = null;
   private setupToken: string | null = null;
+  private lastDbError: string | null = null;
 
   private constructor() {
     this.loadRuntimeSecretConfig();
@@ -225,6 +227,28 @@ export class SetupService {
         };
         return this.runtimeConfig;
       }
+
+      // 5. Fallback to db.data.databaseSettings.postgresUrl (persisted in db.json)
+      try {
+        const storedUrl = db.data?.databaseSettings?.postgresUrl;
+        if (storedUrl && (storedUrl.startsWith('postgres://') || storedUrl.startsWith('postgresql://'))) {
+          const parsed = new URL(storedUrl.replace(/^postgres(ql)?:\/\//i, 'http://'));
+          const isDisable = storedUrl.includes('sslmode=disable');
+          const pass = decodeURIComponent(parsed.password || '') || process.env.POSTGRES_PASSWORD || '';
+          this.runtimeConfig = {
+            host: parsed.hostname || 'timescaledb',
+            port: parseInt(parsed.port || '5432', 10),
+            database: parsed.pathname.replace(/^\//, '') || 'iot_dashboard',
+            user: decodeURIComponent(parsed.username || '') || 'iot_user',
+            password: pass,
+            sslMode: isDisable ? 'disable' : 'require',
+          };
+          if (db.getUsers().some(isRealAdminUser)) {
+            this.isCompletedState = true;
+          }
+          return this.runtimeConfig;
+        }
+      } catch {}
     } catch (err: any) {
       systemLogger.warn('database', `Runtime secret konfigürasyonu okunamadı: ${err?.message || err}`);
     }
@@ -294,6 +318,15 @@ export class SetupService {
         password: config.password,
         sslMode: config.sslMode,
       }, 'setup_wizard').catch(() => {});
+
+      // Synchronize databaseSettings into persistent db.json store
+      try {
+        if (!db.data.databaseSettings) {
+          db.data.databaseSettings = { activeEngine: 'postgres' };
+        }
+        db.data.databaseSettings.postgresUrl = this.buildConnectionString(config);
+        db.saveData(db.data, true);
+      } catch {}
     } catch (err: any) {
       systemLogger.error('database', `Runtime secret konfigürasyonu kaydedilemedi: ${err?.message || err}`);
       throw new Error(`Konfigürasyon dosyası yazılamadı: ${err?.message || err}`, { cause: err });
@@ -650,12 +683,13 @@ export class SetupService {
       try {
         const connectPromise = pool.connect();
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timeout')), 2500)
+          setTimeout(() => reject(new Error('PostgreSQL bağlantısı zaman aşımına uğradı (7000ms).')), 7000)
         );
         client = await Promise.race([connectPromise, timeoutPromise]);
         // Connection test
         await client.query('SELECT 1;');
         isDbConnected = true;
+        this.lastDbError = null;
 
         // Admin check in PostgreSQL:
         // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
@@ -699,8 +733,18 @@ export class SetupService {
         if (tblRes.rows.length >= 3) {
           schemaVerified = true;
         }
-      } catch {
+      } catch (connErr: any) {
         isDbConnected = false;
+        const msg = connErr?.message || String(connErr);
+        if (msg.includes('ENOTFOUND') || msg.includes('EAI_AGAIN')) {
+          this.lastDbError = `Sunucu adresi ("${this.runtimeConfig?.host || 'timescaledb'}") DNS/Host olarak çözümlenemedi.`;
+        } else if (msg.includes('ECONNREFUSED')) {
+          this.lastDbError = `Bağlantı reddedildi (${this.runtimeConfig?.host || 'timescaledb'}:${this.runtimeConfig?.port || 5432}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında uzak IP bağlantılarına izin verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
+        } else if (msg.includes('password authentication failed')) {
+          this.lastDbError = 'Kimlik doğrulama başarısız: Veritabanı şifresi veya kullanıcı adı hatalı.';
+        } else {
+          this.lastDbError = msg;
+        }
       } finally {
         if (client && typeof client.release === 'function') {
           try { client.release(); } catch {}
@@ -720,10 +764,11 @@ export class SetupService {
         this.getOrInitSetupToken();
       } else if (!isDbConnected) {
         // PostgreSQL is temporarily unreachable after setup was completed.
-        // In development/preview or standalone WAL mode, if admin user is present in local DB,
-        // operate in READY state with local WAL persistence.
-        const isDevOrStandalone = process.env.NODE_ENV !== 'production' || process.env.ALLOW_LOCAL_DB === 'true';
-        if (isDevOrStandalone && hasAdmin) {
+        // In NexusNode IoT architecture, when an admin is created and setup is marked completed,
+        // operate in READY state with local WAL persistence so operator is NEVER locked out.
+        // Only if STRICT_MAINTENANCE_LOCK=true, force MAINTENANCE.
+        const enforceStrictLock = process.env.STRICT_MAINTENANCE_LOCK === 'true';
+        if (!enforceStrictLock && hasAdmin) {
           systemMode = 'READY';
         } else {
           systemMode = 'MAINTENANCE';
@@ -737,6 +782,10 @@ export class SetupService {
     } else {
       // First-time setup: check if all criteria are newly met
       if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
+        this.markSetupCompleted();
+        systemMode = 'READY';
+      } else if (hasAdmin && !isTestEnv) {
+        // Administrator already exists in persistent storage: keep system in READY mode
         this.markSetupCompleted();
         systemMode = 'READY';
       } else {
@@ -787,6 +836,7 @@ export class SetupService {
       setupToken: isAuth ? activeSetupToken : undefined,
       currentStep,
       isDbConnected,
+      dbErrorMessage: this.lastDbError || undefined,
       isTimescaleAvailable,
       hasAdmin,
       dbConfig: this.runtimeConfig
@@ -906,7 +956,7 @@ export class SetupService {
         sanitizedMessage = `Belirtilen veritabanı ("${config.database}") mevcut değil. Lütfen veritabanı adını kontrol edin.`;
         errorCode = 'DB_NOT_FOUND';
       } else if (rawMsg.includes('ECONNREFUSED')) {
-        sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). Sunucu kapalı olabilir veya port erişilebilir değil.`;
+        sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında dış IP'lere izin verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
         errorCode = 'CONN_REFUSED';
       } else if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('EAI_AGAIN')) {
         sanitizedMessage = `Veritabanı sunucu adresi bulunamadı ("${config.host}"). Hostname veya DNS ayarlarınızı kontrol edin.`;

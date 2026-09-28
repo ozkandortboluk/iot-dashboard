@@ -316,29 +316,34 @@ function SystemStateGuard() {
           setSystemMode(data.systemMode);
         } else if (data.setupRequired) {
           setSystemMode('SETUP');
-        } else if (!data.isDbConnected && data.isCompleted) {
-          setSystemMode('MAINTENANCE');
-        } else if (!data.hasAdmin && data.isCompleted) {
-          setSystemMode('RECOVERY');
-        } else if (data.isCompleted && data.isDbConnected && data.hasAdmin) {
+        } else if (data.isCompleted) {
           setSystemMode('READY');
         } else {
           setSystemMode('MAINTENANCE');
         }
       } else {
-        // HTTP / API error -> MAINTENANCE (Safe fail-closed behavior)
-        setSystemMode('MAINTENANCE');
+        // HTTP / API error -> only enter MAINTENANCE if server explicitly returns 503 maintenance code
+        try {
+          const errData = await res.json();
+          if (errData?.code === 'SETUP_REQUIRED') {
+            setSystemMode('SETUP');
+          } else {
+            setSystemMode('MAINTENANCE');
+          }
+        } catch {
+          setSystemMode('MAINTENANCE');
+        }
       }
     } catch {
-      // Network / connection error -> MAINTENANCE
-      setSystemMode('MAINTENANCE');
+      // Network / connection error -> keep current or safe fallback
+      setSystemMode((prev) => (prev === 'LOADING' ? 'MAINTENANCE' : prev));
     }
   }, []);
 
   useEffect(() => {
     checkStatus();
 
-    // Global maintenance event listener (e.g. dispatched on 503 or DB connection drops)
+    // Global maintenance event listener (e.g. dispatched on 503 with explicit maintenance payload)
     const handleGlobalMaintenance = () => {
       setSystemMode('MAINTENANCE');
     };
@@ -356,22 +361,18 @@ function SystemStateGuard() {
     const intervalId = setInterval(() => {
       fetch('/api/setup/status', { credentials: 'include' })
         .then((res) => {
-          if (!res.ok) {
-            setSystemMode('MAINTENANCE');
-            return null;
-          }
+          if (!res.ok) return null;
           return res.json();
         })
         .then((data) => {
           if (!data) return;
+          // Authoritative server-side system mode: only transition away from READY if server explicitly dictates
           if (data.systemMode && data.systemMode !== 'READY') {
             setSystemMode(data.systemMode);
-          } else if (data.isCompleted && !data.isDbConnected) {
-            setSystemMode('MAINTENANCE');
           }
         })
         .catch(() => {
-          setSystemMode('MAINTENANCE');
+          // Network hiccup does not kick active operator out of dashboard
         });
     }, 25000); // Check every 25s
 
