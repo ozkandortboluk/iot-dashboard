@@ -720,8 +720,14 @@ export class SetupService {
         this.getOrInitSetupToken();
       } else if (!isDbConnected) {
         // PostgreSQL is temporarily unreachable after setup was completed.
-        // DO NOT wipe setup completion status!
-        systemMode = 'MAINTENANCE';
+        // In development/preview or standalone WAL mode, if admin user is present in local DB,
+        // operate in READY state with local WAL persistence.
+        const isDevOrStandalone = process.env.NODE_ENV !== 'production' || process.env.ALLOW_LOCAL_DB === 'true';
+        if (isDevOrStandalone && hasAdmin) {
+          systemMode = 'READY';
+        } else {
+          systemMode = 'MAINTENANCE';
+        }
       } else if (!hasAdmin) {
         // PostgreSQL is connected, setup was completed, but admin user is missing.
         systemMode = 'RECOVERY';
@@ -765,9 +771,8 @@ export class SetupService {
     }
 
     const isDev = process.env.NODE_ENV === 'development';
-    const isTokenBypassed = process.env.DISABLE_SETUP_TOKEN === 'true' || process.env.ENABLE_SETUP_TOKEN_PROMPT !== 'true';
-    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev || isTokenBypassed);
-    const setupTokenRequired = systemMode === 'SETUP' && !isDev && !isTokenBypassed;
+    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev);
+    const setupTokenRequired = systemMode === 'SETUP' && !isDev;
     const activeSetupToken = systemMode === 'SETUP' ? this.getOrInitSetupToken(true) : undefined;
 
     return {

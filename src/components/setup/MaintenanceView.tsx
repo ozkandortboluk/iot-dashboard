@@ -159,26 +159,55 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
             </div>
           </div>
 
-          {/* Polling & Retry Footer */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-800/80">
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span>Son kontrol: <strong className="text-slate-300">{lastCheckTime}</strong> (Sorgu #{retryCount})</span>
+          {/* Polling & Actions Footer */}
+          <div className="flex flex-col gap-3 pt-4 border-t border-slate-800/80">
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span>Son kontrol: <strong className="text-slate-300">{lastCheckTime}</strong> (Sorgu #{retryCount})</span>
+              </div>
             </div>
 
-            <button
-              id="maintenance-retry-btn"
-              type="button"
-              onClick={() => {
-                failureCountRef.current = 0;
-                checkStatus(true);
-              }}
-              disabled={retrying}
-              className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition cursor-pointer flex items-center justify-center gap-2"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
-              <span>{retrying ? 'Yeniden Bağlanılıyor...' : 'Bağlantıyı Yeniden Dene'}</span>
-            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={async () => {
+                  setRetrying(true);
+                  try {
+                    await fetch('/api/setup/reset', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ preserveConfig: true }),
+                      credentials: 'include',
+                    });
+                    window.location.reload();
+                  } catch {
+                    onRetry();
+                  } finally {
+                    setRetrying(false);
+                  }
+                }}
+                disabled={retrying}
+                className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <HardDrive className="w-3.5 h-3.5 text-slate-400" />
+                <span>Kurulum Sihirbazına Dön / Ayarları Düzenle</span>
+              </button>
+
+              <button
+                id="maintenance-retry-btn"
+                type="button"
+                onClick={() => {
+                  failureCountRef.current = 0;
+                  checkStatus(true);
+                }}
+                disabled={retrying}
+                className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
+                <span>{retrying ? 'Yeniden Bağlanılıyor...' : 'Bağlantıyı Yeniden Dene'}</span>
+              </button>
+            </div>
           </div>
         </motion.div>
       </main>
