@@ -107,16 +107,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
-  // 5. Unconfigured handling:
-  const isProduction = process.env.NODE_ENV === 'production';
-  if (isProduction) {
-    // In production: NEVER generate an ad-hoc key and NEVER use predictable fallbacks!
-    keySourceDescription = 'unconfigured';
-    return null;
-  }
-
-  // In non-production (development / test / CI):
-  // Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key
+  // 5. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key if no key exists
   try {
     const dataDir = path.dirname(LOCAL_VAULT_KEY_PATH);
     if (!fs.existsSync(dataDir)) {

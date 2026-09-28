@@ -20,7 +20,15 @@ const ALLOWED_ORIGIN_PATTERNS = [
 
 function getRequiredScopeForRoute(method: string, path: string): string | null {
   const isRead = method === 'GET' || method === 'HEAD';
-  if (path.startsWith('/api/devices')) return isRead ? 'devices:read' : 'devices:write';
+  if (
+    path.startsWith('/api/devices') ||
+    path.startsWith('/api/commands') ||
+    path.startsWith('/api/ota') ||
+    path.startsWith('/api/firmware') ||
+    path.startsWith('/api/network')
+  ) {
+    return isRead ? 'devices:read' : 'devices:write';
+  }
   if (path.startsWith('/api/telemetry') || path.startsWith('/api/timescale')) return isRead ? 'telemetry:read' : 'telemetry:write';
   if (path.startsWith('/api/alarms')) return isRead ? 'alarms:read' : 'alarms:write';
   if (path.startsWith('/api/rules')) return isRead ? 'rules:read' : 'rules:write';

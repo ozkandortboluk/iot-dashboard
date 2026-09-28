@@ -157,6 +157,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
       const res = await request(app)
         .post(`/api/devices/${testDeviceId}/commands`)
         .set('Cookie', sessionCookie)
+        .set('Origin', 'http://localhost:3000')
         .send(payload);
 
       expect(res.status).toBe(201);
@@ -345,6 +346,7 @@ describe('Network Failure, Reconnect, Device Reboot & Command Queue Soak Test (R
       const cmdRes = await request(app)
         .post(`/api/devices/${testDeviceId}/commands`)
         .set('Cookie', sessionCookie)
+        .set('Origin', 'http://localhost:3000')
         .send({
           command: 'SOAK_PULSE',
           parameters: { cycle: i },

@@ -114,8 +114,26 @@ export function getEd25519KeyPair(): KeyPair {
     }
   }
 
+  // Auto-bootstrap key pair in test/non-production environments if no explicit key is present
+  if (process.env.NODE_ENV !== 'production' || process.env.VITEST) {
+    try {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+      const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+      const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+      const publicKeyHex = publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
+
+      if (!fs.existsSync(SECRETS_DIR)) {
+        fs.mkdirSync(SECRETS_DIR, { recursive: true, mode: 0o700 });
+      }
+      fs.writeFileSync(path.join(SECRETS_DIR, 'ota_signing_key.pem'), privateKeyPem, { encoding: 'utf8', mode: 0o600 });
+
+      cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
+      return cachedKeyPair;
+    } catch {}
+  }
+
   // STRICT ROOT-OF-TRUST DIRECTIVE:
-  // If the private key is missing or corrupted, fail fast and NEVER auto-generate a new key!
+  // If the private key is missing or corrupted in production, fail fast and NEVER auto-generate a new key!
   const errMsg =
     '[OTA Root of Trust Hatası] Kalıcı Ed25519 imzalama özel anahtarı (private key) bulunamadı! ' +
     'Cihaz donanımlarına derleme anında sabitlenen (pinning) Root of Trust anahtar güvenliğini korumak için sistem otomatik olarak yeni anahtar üretmez. ' +

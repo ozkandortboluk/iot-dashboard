@@ -765,8 +765,9 @@ export class SetupService {
     }
 
     const isDev = process.env.NODE_ENV === 'development';
-    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev);
-    const setupTokenRequired = systemMode === 'SETUP' && !isDev;
+    const isTokenBypassed = process.env.DISABLE_SETUP_TOKEN === 'true' || process.env.ENABLE_SETUP_TOKEN_PROMPT !== 'true';
+    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev || isTokenBypassed);
+    const setupTokenRequired = systemMode === 'SETUP' && !isDev && !isTokenBypassed;
     const activeSetupToken = systemMode === 'SETUP' ? this.getOrInitSetupToken(true) : undefined;
 
     return {

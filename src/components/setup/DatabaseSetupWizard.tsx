@@ -605,6 +605,12 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');
       }
 
+      // Save admin session token & user details to localStorage for instant AuthContext hydration
+      if (data.token && data.user) {
+        localStorage.setItem('dashboard_token', data.token);
+        localStorage.setItem('dashboard_user', JSON.stringify(data.user));
+      }
+
       // Clean up setup token from session storage now that setup is complete
       try {
         sessionStorage.removeItem('nexus_setup_token');
@@ -614,6 +620,34 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       setCurrentStep(7);
     } catch (err: any) {
       setError(err?.message || 'Yönetici hesabı oluşturulurken bir hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinishSetup = async () => {
+    setLoading(true);
+    try {
+      sessionStorage.removeItem('nexus_setup_token');
+
+      // Verify profile if user state is not in localStorage
+      if (!localStorage.getItem('dashboard_user')) {
+        try {
+          const profileRes = await fetch('/api/auth/me', { credentials: 'include' });
+          if (profileRes.ok) {
+            const profileData = await profileRes.json();
+            if (profileData.user) {
+              localStorage.setItem('dashboard_user', JSON.stringify(profileData.user));
+            }
+          }
+        } catch {}
+      }
+
+      onComplete();
+      window.location.href = '/';
+    } catch {
+      onComplete();
+      window.location.href = '/';
     } finally {
       setLoading(false);
     }
@@ -1653,11 +1687,21 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                   <button
                     id="wizard-finish-btn"
                     type="button"
-                    onClick={onComplete}
-                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-sm font-semibold shadow-xl shadow-indigo-600/30 transition cursor-pointer inline-flex items-center gap-2"
+                    disabled={loading}
+                    onClick={handleFinishSetup}
+                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-sm font-semibold shadow-xl shadow-indigo-600/30 transition cursor-pointer inline-flex items-center gap-2 disabled:opacity-50"
                   >
-                    <span>Yönetim Paneline Geç</span>
-                    <ArrowRight className="w-4 h-4" />
+                    {loading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Yönlendiriliyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Yönetim Paneline Geç</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </div>
               </motion.div>

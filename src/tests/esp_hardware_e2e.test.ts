@@ -164,6 +164,7 @@ describe('ESP8266 & ESP32 Hardware E2E Pipeline (Roadmap P0 - Item 1)', () => {
     const res = await request(app)
       .post(`/api/devices/${testDeviceId}/commands`)
       .set('Cookie', sessionCookie || '')
+      .set('Origin', 'http://localhost:3000')
       .send(commandPayload);
 
     expect(res.status).toBe(201);
@@ -237,6 +238,7 @@ describe('ESP8266 & ESP32 Hardware E2E Pipeline (Roadmap P0 - Item 1)', () => {
     const cmdRes = await request(app)
       .post(`/api/devices/${testDeviceId}/commands`)
       .set('Cookie', sessionCookie || '')
+      .set('Origin', 'http://localhost:3000')
       .send({
         command: 'PWM_SET',
         params: { channel: 1, duty: 75 },
