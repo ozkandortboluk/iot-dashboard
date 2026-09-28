@@ -60,6 +60,55 @@ export function isSshTunnelAllowed(): boolean {
 }
 
 /**
+ * Safely parses and URL-encodes special or non-ASCII characters in PostgreSQL connection strings
+ * (e.g. unencoded 'ş', 'ğ', 'ü', '@', etc. in passwords)
+ */
+export function sanitizeAndEncodePostgresUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('postgres://') && !trimmed.startsWith('postgresql://')) {
+    return trimmed;
+  }
+
+  try {
+    const match = trimmed.match(/^(postgres(?:ql)?:\/\/)(?:([^:]+)(?::([^@]*))?@)?([^:/]+)(?::(\d+))?(\/.*)?$/);
+    if (!match) return trimmed;
+
+    const scheme = match[1];
+    const rawUser = match[2];
+    const rawPass = match[3];
+    const host = match[4];
+    const port = match[5] ? `:${match[5]}` : '';
+    const rest = match[6] || '';
+
+    if (rawUser === undefined) {
+      return trimmed;
+    }
+
+    let encUser = rawUser;
+    try {
+      encUser = encodeURIComponent(decodeURIComponent(rawUser));
+    } catch {
+      encUser = encodeURIComponent(rawUser);
+    }
+
+    let encPass = '';
+    if (rawPass !== undefined) {
+      try {
+        encPass = encodeURIComponent(decodeURIComponent(rawPass));
+      } catch {
+        encPass = encodeURIComponent(rawPass);
+      }
+    }
+
+    const auth = encPass ? `${encUser}:${encPass}` : encUser;
+    return `${scheme}${auth}@${host}${port}${rest}`;
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
  * Resolves PostgreSQL connection URL from all possible environment variable conventions
  * and structured fallback configurations with clear, deterministic precedence.
  */
@@ -196,6 +245,9 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
       }
     } catch {}
   }
+
+  // Ensure user and password in candidateUrl are properly URL encoded
+  candidateUrl = sanitizeAndEncodePostgresUrl(candidateUrl);
 
   // 7. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort ONLY if SSH Tunnel is explicitly allowed AND active
   if (candidateUrl && isSshTunnelAllowed() && sshTunnelService.isConnected()) {

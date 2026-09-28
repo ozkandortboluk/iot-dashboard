@@ -269,9 +269,8 @@ class LocalDatabase {
   private stateChangeListeners: Array<(newState: DatabaseState, oldState: DatabaseState) => void> = [];
 
   public getDatabaseState(): DatabaseState {
-    if (process.env.NODE_ENV === 'production') {
-      // In production, READY state is strictly coupled to an active, working PostgreSQL connection.
-      // If the connection was dropped or postgresRepo is not ready, downgrade from READY to DB_UNAVAILABLE.
+    const isPgConfigured = !!this.getPostgresUrl().trim();
+    if (isPgConfigured || process.env.NODE_ENV === 'production') {
       if (this.dbState === DatabaseState.READY && !this.postgresRepo?.isReady()) {
         this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
       }
@@ -287,9 +286,10 @@ class LocalDatabase {
   }
 
   public setDatabaseState(newState: DatabaseState): void {
-    if (newState === DatabaseState.READY && process.env.NODE_ENV === 'production') {
+    const isPgConfigured = !!this.getPostgresUrl().trim();
+    if (newState === DatabaseState.READY && (isPgConfigured || process.env.NODE_ENV === 'production')) {
       if (!this.postgresRepo?.isReady()) {
-        console.warn('[Database State Machine] Üretim modunda çalışan PostgreSQL bağlantısı olmadan READY durumuna geçilemez. DB_UNAVAILABLE atanıyor.');
+        console.warn('[Database State Machine] PostgreSQL yapılandırılmış ancak bağlantı hazır değil. READY yerine DB_UNAVAILABLE atanıyor.');
         newState = DatabaseState.DB_UNAVAILABLE;
       }
     }
@@ -327,9 +327,10 @@ class LocalDatabase {
     this.startQueueWorker();
     this.startAutoRetentionWorker();
     
-    // In production, READY state MUST be coupled to an active, working PostgreSQL connection.
-    // In development or test environments, default to READY for local WAL / in-memory development.
-    if (process.env.NODE_ENV === 'production') {
+    // In production or when PostgreSQL is configured, start in DB_CONNECTING.
+    // In development without PostgreSQL configured, default to READY for local WAL / in-memory development.
+    const initialPgConfigured = !!this.getPostgresUrl().trim();
+    if (process.env.NODE_ENV === 'production' || initialPgConfigured) {
       this.setDatabaseState(DatabaseState.DB_CONNECTING);
     } else {
       this.setDatabaseState(DatabaseState.READY);
@@ -337,10 +338,11 @@ class LocalDatabase {
 
     // Bind repository connection changes to update DB state accordingly
     this.postgresRepo.onConnectionChange((connected, isReady) => {
-      if (process.env.NODE_ENV === 'production') {
+      const isPgConfiguredNow = !!this.getPostgresUrl().trim();
+      if (process.env.NODE_ENV === 'production' || isPgConfiguredNow) {
         if (!connected || !isReady) {
           if (this.dbState === DatabaseState.READY) {
-            console.warn('[Database State Machine] Üretim ortamında PostgreSQL bağlantısı kesildi. Durum DB_UNAVAILABLE olarak güncelleniyor.');
+            console.warn('[Database State Machine] PostgreSQL bağlantısı kesildi. Durum DB_UNAVAILABLE olarak güncelleniyor.');
             this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
           }
         } else if (connected && isReady) {
@@ -349,7 +351,7 @@ class LocalDatabase {
             this.dbState === DatabaseState.DB_CONNECTING ||
             this.dbState === DatabaseState.DB_INITIALIZING
           ) {
-            console.log('[Database State Machine] Üretim ortamında PostgreSQL bağlantısı sağlandı. Durum READY yapılıyor.');
+            console.log('[Database State Machine] PostgreSQL bağlantısı sağlandı. Durum READY yapılıyor.');
             this.setDatabaseState(DatabaseState.READY);
           }
         }
@@ -457,12 +459,13 @@ class LocalDatabase {
 
   public async initPostgresRepository(): Promise<boolean> {
     const url = this.getPostgresUrl().trim();
+    const isPgExplicitlyConfigured = !!url || this.data?.databaseSettings?.activeEngine === 'postgres' || !!(process.env.POSTGRES_HOST || process.env.DB_HOST);
     if (!url) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production') {
+      if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
         this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Üretim Hatası]: DATABASE_URL yapılandırılmamış. Üretim ortamında PostgreSQL zorunludur.');
+        console.error('[PostgreSQL Hatası]: DATABASE_URL / PostgreSQL yapılandırması eksik veya boş.');
       } else {
         this.setDatabaseState(DatabaseState.READY);
       }
@@ -473,9 +476,9 @@ class LocalDatabase {
     if (!pool) {
       this.postgresRepo.setPool(null);
       this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production') {
+      if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
         this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Üretim Hatası]: PostgreSQL bağlantı havuzu oluşturulamadı.');
+        console.error('[PostgreSQL Hatası]: PostgreSQL bağlantı havuzu oluşturulamadı.');
       } else {
         this.setDatabaseState(DatabaseState.READY);
       }
@@ -498,15 +501,8 @@ class LocalDatabase {
       if (this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
       }
-      if (!wasAlreadyReady) {
-        if (process.env.NODE_ENV === 'production' && process.env.STRICT_MAINTENANCE_LOCK === 'true') {
-          this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-          console.warn(`[PostgreSQL Üretim Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
-        } else {
-          this.setDatabaseState(DatabaseState.READY);
-          console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Yerel veritabanı (WAL) aktif tutuluyor.`);
-        }
-      }
+      this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
       return false;
     } finally {
       if (client) {
@@ -623,9 +619,10 @@ class LocalDatabase {
       }
     }
 
+    const isPgConfiguredAtEnd = !!this.getPostgresUrl().trim() || this.data?.databaseSettings?.activeEngine === 'postgres' || !!(process.env.POSTGRES_HOST || process.env.DB_HOST);
     if (this.postgresRepo.isReady()) {
       this.setDatabaseState(DatabaseState.READY);
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (process.env.NODE_ENV === 'production' || isPgConfiguredAtEnd) {
       this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
     } else {
       this.setDatabaseState(DatabaseState.READY);

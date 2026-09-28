@@ -178,7 +178,7 @@ systemRouter.get(['/system/status', '/system-status'], (req, res) => {
     status: isReady ? 'healthy' : (dbState === DatabaseState.SETUP ? 'setup_required' : 'maintenance'),
     databaseState: dbState,
     isReady: isReady,
-    activeEngine: isPostgresReady ? 'postgres' : 'local',
+    activeEngine: isPostgresReady ? (db.getActiveEngine() || 'postgres') : (isPgConfigured ? 'postgres' : 'local'),
     dbEngine,
     dbEngineLabel,
     dbStatus,

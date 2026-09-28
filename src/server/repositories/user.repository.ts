@@ -88,7 +88,22 @@ export class UserRepository {
       return null;
     }
 
-    const user = (this.db.data.users || []).find((u: any) => u.id === session.userId);
+    let user = (this.db.data.users || []).find(
+      (u: any) =>
+        u.id === session.userId ||
+        (session.userEmail && u.email && u.email.toLowerCase() === session.userEmail.toLowerCase())
+    );
+
+    if (!user && session.userEmail) {
+      user = {
+        id: session.userId || `usr_${Date.now()}`,
+        name: session.userName || 'Yönetici',
+        email: session.userEmail,
+        role: session.userRole || 'admin',
+        createdAt: session.createdAt || new Date().toISOString(),
+      } as unknown as User;
+    }
+
     if (!user) {
       return null;
     }
@@ -107,7 +122,13 @@ export class UserRepository {
       }
     }
 
-    return this.verifySession(cleanToken);
+    const localResult = this.verifySession(cleanToken);
+    if (localResult && this.isPgReady()) {
+      // Sync local valid session to PostgreSQL for seamless DB continuity
+      this.db.postgresRepo.saveSession(localResult.session).catch(() => {});
+    }
+
+    return localResult;
   }
 
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> {
