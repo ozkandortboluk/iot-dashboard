@@ -29,7 +29,7 @@ export interface SSHTunnelState {
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
-export const DEFAULT_SSH_LOCAL_PORT = 15432;
+export const DEFAULT_SSH_LOCAL_PORT = 5432;
 
 class SSHTunnelService {
   private sshClient: Client | null = null;
@@ -322,9 +322,23 @@ class SSHTunnelService {
         });
 
         netServer.on('error', (netErr: any) => {
-          this.addLog(`Yerel port dinleme hatası (${localPort}): ${netErr.message}`);
+          const errMsg = netErr?.message || 'Yerel port dinleme hatası';
+          this.addLog(`Yerel port dinleme hatası (${localPort}): ${errMsg}`);
           if (netErr.code === 'EADDRINUSE') {
-            this.addLog(`UYARI: Yerel port ${localPort} kullanımda. Lütfen başka bir port seçin veya mevcut servisi durdurun.`);
+            this.addLog(`HATA: Yerel port ${localPort} zaten kullanımda.`);
+          }
+          this.status = 'error';
+          this.lastError = `Yerel port ${localPort} hatası: ${errMsg}`;
+          if (!isResolved) {
+            isResolved = true;
+            clearTimeout(connectTimeout);
+            this.cleanup();
+            resolve({
+              success: false,
+              message: netErr.code === 'EADDRINUSE'
+                ? `Yerel ${localPort} portu şu anda kullanımda (EADDRINUSE). Lütfen Yerel Port alanına farklı bir port (örneğin 15432 veya 5433) yazarak tekrar deneyin.`
+                : `Yerel port dinlenemedi (${localPort}): ${errMsg}`,
+            });
           }
         });
 

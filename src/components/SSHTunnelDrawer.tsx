@@ -40,7 +40,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const [remoteDbHost, setRemoteDbHost] = useState('127.0.0.1');
   const [remoteDbPort, setRemoteDbPort] = useState('5432');
-  const [localPort, setLocalPort] = useState('15432');
+  const [localPort, setLocalPort] = useState('5432');
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [connectedAt, setConnectedAt] = useState<string | null>(null);
@@ -56,10 +56,27 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const logContainerRef = useRef<HTMLDivElement>(null);
 
+  const getAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = localStorage.getItem('dashboard_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['x-auth-token'] = token;
+    }
+    const setupToken = sessionStorage.getItem('nexus_setup_token');
+    if (setupToken) {
+      headers['X-Setup-Token'] = setupToken;
+    }
+    return headers;
+  };
+
   // Poll status from server
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/system/ssh-tunnel/status');
+      const res = await fetch('/api/system/ssh-tunnel/status', {
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -110,7 +127,8 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     try {
       const res = await fetch('/api/system/ssh-tunnel/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           sshHost,
           sshPort: Number(sshPort) || 22,
@@ -150,7 +168,8 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     try {
       const res = await fetch('/api/system/ssh-tunnel/connect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           sshHost,
           sshPort: Number(sshPort) || 22,
@@ -186,7 +205,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     setActionMessage({ type: 'info', text: 'SSH Tüneli kapatılıyor...' });
 
     try {
-      const res = await fetch('/api/system/ssh-tunnel/disconnect', { method: 'POST' });
+      const res = await fetch('/api/system/ssh-tunnel/disconnect', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
       const data = await res.json();
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
@@ -479,11 +502,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     type="number"
                     value={localPort}
                     onChange={(e) => setLocalPort(e.target.value)}
-                    placeholder="15432"
+                    placeholder="5432"
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                   />
                   <p className="text-[10px] text-slate-500">
-                    Uygulama tünel üzerinden 127.0.0.1:{localPort || '15432'} adresi ile PostgreSQL veritabanına bağlanır (Önerilen: 15432).
+                    Uygulama tünel üzerinden 127.0.0.1:{localPort || '5432'} adresi ile PostgreSQL veritabanına bağlanır (Standart: 5432).
                   </p>
                 </div>
               </div>

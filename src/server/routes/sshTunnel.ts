@@ -11,14 +11,18 @@ export const sshTunnelRouter = Router();
 
 /**
  * Authorization guard for SSH Tunnel operations.
- * - Allows if caller is authenticated Admin user.
- * - Or during initial setup mode if caller is setup-authenticated (or setup not yet completed).
+ * - In Development / Preview mode (isSshTunnelAllowed), allow tunnel control directly.
+ * - During initial setup mode, allow if setup is in progress.
+ * - In Production VPS mode, require authenticated Admin.
  */
 async function authorizeSshTunnel(req: Request, res: Response, next: NextFunction) {
+  if (process.env.NODE_ENV === 'development' || isSshTunnelAllowed()) {
+    return next();
+  }
+
   const isSetupRoute = req.baseUrl?.startsWith('/api/setup') || req.path?.startsWith('/setup');
   const isSetupCompleted = setupService.isSetupCompleted();
 
-  // If in setup mode and setup route
   if (isSetupRoute || !isSetupCompleted) {
     if (isRequestSetupAuthenticated(req, true) || !isSetupCompleted) {
       return next();

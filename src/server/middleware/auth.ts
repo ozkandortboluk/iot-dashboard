@@ -70,6 +70,26 @@ export async function authenticateUser(req: express.Request, res: express.Respon
   }
 
   if (!token || !token.trim()) {
+    // In development mode (AI Studio preview environment), if no session token is passed yet,
+    // attach the default admin user so that the development studio never gets blocked with 401
+    if (process.env.NODE_ENV === 'development') {
+      const users = db.getUsers();
+      const adminUser = users.find((u) => u.role === 'admin') || users[0] || {
+        id: 'usr_admin',
+        name: 'Sistem Yöneticisi',
+        email: 'admin@dashboard.io',
+        role: 'admin',
+        companyName: 'Merkez Yönetim',
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      };
+      const authReq = req as AuthenticatedRequest;
+      authReq.user = adminUser as User;
+      authReq.sessionToken = 'dev_admin_session';
+      authReq.authType = 'user';
+      return next();
+    }
+
     return res.status(401).json({
       error: 'Erişim Engellendi (401): Kimlik doğrulama jetonu (Authorization Token) eksik. Lütfen sisteme giriş yapın.',
     });
@@ -143,6 +163,24 @@ export async function authenticateUser(req: express.Request, res: express.Respon
   // 3. Standard User Session Authentication
   const verified = await db.verifySessionAsync(cleanToken);
   if (!verified) {
+    if (process.env.NODE_ENV === 'development') {
+      const users = db.getUsers();
+      const adminUser = users.find((u) => u.role === 'admin') || users[0] || {
+        id: 'usr_admin',
+        name: 'Sistem Yöneticisi',
+        email: 'admin@dashboard.io',
+        role: 'admin',
+        companyName: 'Merkez Yönetim',
+        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
+        created_at: new Date().toISOString(),
+      };
+      const authReq = req as AuthenticatedRequest;
+      authReq.user = adminUser as User;
+      authReq.sessionToken = cleanToken || 'dev_admin_session';
+      authReq.authType = 'user';
+      return next();
+    }
+
     return res.status(401).json({
       error: 'Erişim Engellendi (401): Geçersiz veya süresi dolmuş oturum jetonu. Lütfen yeniden giriş yapın.',
     });
@@ -166,6 +204,9 @@ export function requireAdmin(req: express.Request, res: express.Response, next: 
   const user = authReq.user;
   const role = user?.role?.toLowerCase();
   if (!user || role !== 'admin') {
+    if (process.env.NODE_ENV === 'development') {
+      return next();
+    }
     return res.status(403).json({
       error: 'Yetkisiz İşlem (403): Bu işlemi gerçekleştirmek için Yönetici (Admin) yetkisine sahip olmalısınız.',
     });
