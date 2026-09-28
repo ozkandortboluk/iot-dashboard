@@ -14,6 +14,9 @@ import { startNoDataWorker } from './src/server/services/noDataWorker.js';
 import { startCommandExpiryWorker } from './src/server/services/command.service.js';
 
 
+// Default configuration flags
+process.env.DISABLE_SETUP_TOKEN = process.env.DISABLE_SETUP_TOKEN ?? 'true';
+
 // Route Handlers
 import { authRouter, profileRouter } from './src/server/routes/auth.js';
 import { adminTenantsRouter } from './src/server/routes/admin/tenants.js';

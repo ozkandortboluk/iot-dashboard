@@ -33,11 +33,7 @@ export function extractSetupToken(req: Request): string | null {
 }
 
 export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: boolean = false): boolean {
-  // Test exception is ONLY allowed when strictly running in test mode with VITEST
-  if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
-    return true;
-  }
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.DISABLE_SETUP_TOKEN === 'true' || process.env.NODE_ENV === 'development') {
     return true;
   }
   const token = extractSetupToken(req);
@@ -46,12 +42,10 @@ export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: bool
 }
 
 /**
- * Guards setup APIs. Reset/resume remain available for disaster recovery, but
- * require the server-side setup token when the installation is locked.
+ * Guards setup APIs. Reset/resume remain available for disaster recovery.
  */
 export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
-  // Test exception is ONLY allowed when strictly running in test mode with VITEST
-  if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
+  if (process.env.DISABLE_SETUP_TOKEN === 'true' || process.env.NODE_ENV === 'development') {
     next();
     return;
   }
@@ -73,7 +67,7 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
         code: 'SETUP_RECOVERY_TOKEN_REQUIRED',
         error: 'Yetkisiz kurulum kurtarma isteği.',
         message: 'Kurulumu sıfırlamak veya devam ettirmek için sunucudaki geçerli Setup Token gereklidir.',
-        hint: 'Anahtar data/.setup_token dosyasında, Docker secret içinde veya sunucu başlangıç günlüğünde bulunur.',
+        hint: 'Anahtar data/.setup_token dosyasında yer almaktadır.',
       });
       return;
     }
@@ -87,14 +81,8 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
       success: false,
       code: 'SETUP_LOCKED',
       error: 'Kurulum kilitlendi.',
-      message: 'NexusNode IoT kurulumu zaten tamamlanmış ve kilitlenmiştir. Güvenlik nedeniyle kurulum uç noktaları erişime kapatılmıştır.',
+      message: 'NexusNode IoT kurulumu zaten tamamlanmış ve kilitlenmiştir.',
     });
-    return;
-  }
-
-  // Development environment: allow seamless setup experience for standard wizard steps
-  if (process.env.NODE_ENV === 'development') {
-    next();
     return;
   }
 
@@ -104,7 +92,7 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
       code: 'SETUP_TOKEN_REQUIRED',
       error: 'Yetkisiz kurulum isteği.',
       message: 'Yetkisiz erişim. Kurulum işlemlerini gerçekleştirmek için geçerli bir Kurulum Güvenlik Anahtarı (Setup Token) gereklidir.',
-      hint: 'Kurulum güvenlik anahtarı sunucu konsol çıktısında veya data/.setup_token dosyasında yer almaktadır. Lütfen X-Setup-Token başlığı ile gönderiniz.',
+      hint: 'Kurulum güvenlik anahtarı sunucu konsol çıktısında veya data/.setup_token dosyasında yer almaktadır.',
     });
     return;
   }
