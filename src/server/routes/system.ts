@@ -118,7 +118,15 @@ systemRouter.get('/health', (req, res) => {
 // System Status Endpoint for Frontend / Diagnostics
 systemRouter.get(['/system/status', '/system-status'], (req, res) => {
   const dbState = db.getDatabaseState();
-  const isPgConfigured = !!process.env.DATABASE_URL;
+  const isPgConfigured = !!(
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRESQL_URL ||
+    process.env.PG_URL ||
+    process.env.DB_HOST ||
+    process.env.POSTGRES_HOST ||
+    db.getPostgresUrl()
+  );
   const isPostgresReady = !!db.postgresRepo?.isReady() && dbState === DatabaseState.READY;
   const isPostgresConnected = !!db.postgresRepo?.getIsConnected();
   const isSchemaEnsured = !!db.postgresRepo?.getIsSchemaEnsured();
