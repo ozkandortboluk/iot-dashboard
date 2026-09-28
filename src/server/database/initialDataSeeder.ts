@@ -48,6 +48,7 @@ export class InitialDataSeeder {
     };
 
     const client = await pool.connect();
+    if (client) client.on('error', () => {});
 
     try {
       // NOTE: Security Hardening: NO hardcoded admin accounts or default passwords (admin1234, test1234)

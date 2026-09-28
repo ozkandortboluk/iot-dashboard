@@ -491,6 +491,7 @@ class LocalDatabase {
     let client: any = null;
     try {
       client = await pool.connect();
+      if (client) client.on('error', () => {});
       await client.query('SELECT 1;');
     } catch (connErr: any) {
       this.postgresRepo.setConnected(false);
@@ -599,6 +600,7 @@ class LocalDatabase {
       const currentPool = this.getPgPool();
       if (currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
         verifyClient = await currentPool.connect();
+        if (verifyClient) verifyClient.on('error', () => {});
         const adminCheck = await verifyClient.query(`
           SELECT id FROM users 
           WHERE role = 'admin' 
@@ -843,6 +845,8 @@ class LocalDatabase {
     // Ensure default databaseSettings with user-defined TimescaleDB URL or environment DATABASE_URL
     const defaultEnvDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
     const fallbackDbUrl = defaultEnvDbUrl || 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
+    const isProdVps = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    const envHost = (process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST || '').trim();
 
     if (!parsed.databaseSettings) {
       parsed.databaseSettings = {
@@ -852,6 +856,12 @@ class LocalDatabase {
       };
     } else if (!parsed.databaseSettings.postgresUrl || (parsed.databaseSettings.postgresUrl.includes('@timescaledb:5432') && defaultEnvDbUrl)) {
       parsed.databaseSettings.postgresUrl = fallbackDbUrl;
+    } else if (isProdVps && (parsed.databaseSettings.postgresUrl.includes('@localhost') || parsed.databaseSettings.postgresUrl.includes('@127.0.0.1'))) {
+      if (envHost) {
+        parsed.databaseSettings.postgresUrl = parsed.databaseSettings.postgresUrl.replace(/@([^:/]+)(?::\d+)?/, `@${envHost}:5432`);
+      } else {
+        parsed.databaseSettings.postgresUrl = fallbackDbUrl;
+      }
     }
 
     // Ensure the primary canonical admin user always exists as the first administrator
@@ -2911,6 +2921,7 @@ class LocalDatabase {
       });
 
       client = await pool.connect();
+      if (client) client.on('error', () => {});
       const latencyMs = Date.now() - startTime;
 
       // Check PostgreSQL Version
@@ -3119,6 +3130,7 @@ class LocalDatabase {
       });
 
       client = await pool.connect();
+      if (client) client.on('error', () => {});
       const sql = this.getPostgresSchemaSQL();
 
       await client.query(sql);

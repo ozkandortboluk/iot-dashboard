@@ -681,7 +681,10 @@ export class SetupService {
     if (pool) {
       let client: any = null;
       try {
-        const connectPromise = pool.connect();
+        const connectPromise = pool.connect().then((c) => {
+          c.on('error', () => {});
+          return c;
+        });
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('PostgreSQL bağlantısı zaman aşımına uğradı (7000ms).')), 7000)
         );
@@ -894,8 +897,12 @@ export class SetupService {
         idleTimeoutMillis: 2000,
         ssl: config.sslMode === 'disable' ? undefined : (getPostgresSslOption(connStr) || { rejectUnauthorized: false }),
       });
+      pool.on('error', (err: any) => {
+        console.warn('[Setup Test Pool Error]:', err?.message);
+      });
 
       client = await pool.connect();
+      client.on('error', () => {});
       const latencyMs = Date.now() - startTime;
 
       let pgVersion = 'PostgreSQL';
@@ -1060,6 +1067,7 @@ export class SetupService {
 
     const steps: { name: string; status: 'done' | 'failed' | 'skipped'; details?: string }[] = [];
     const client = await pool.connect();
+    client.on('error', () => {});
 
     try {
       this.logAudit({
@@ -1245,6 +1253,7 @@ export class SetupService {
     let placeholderExists = false;
 
     const client = await pool.connect();
+    client.on('error', () => {});
     try {
       const adminCheck = await client.query(`
         SELECT id, email FROM users 
@@ -1295,6 +1304,7 @@ export class SetupService {
     // Save user to PostgreSQL repository if pool is available
     if (pool) {
       const userClient = await pool.connect();
+      userClient.on('error', () => {});
       try {
         await userClient.query('BEGIN');
 

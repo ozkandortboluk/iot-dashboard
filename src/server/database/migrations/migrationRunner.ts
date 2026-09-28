@@ -96,6 +96,7 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
   let client: any = null;
   try {
     client = await pool.connect();
+    if (client) client.on('error', () => {});
   } catch (connErr: any) {
     return { success: false, appliedCount: 0, error: connErr?.message || 'Veritabanı bağlantı havuzuna erişilemedi.' };
   }
@@ -309,6 +310,7 @@ export async function getMigrationStatus(pool: pg.Pool): Promise<MigrationStatus
   let client: any = null;
   try {
     client = await pool.connect();
+    if (client) client.on('error', () => {});
   } catch {
     return {
       isLocked: false,

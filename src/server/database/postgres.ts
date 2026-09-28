@@ -463,6 +463,7 @@ export class PostgresRepository {
     if (!client) {
       try {
         client = await pool!.connect();
+        if (client) client.on('error', () => {});
         shouldRelease = true;
       } catch (connErr) {
         console.error('[Schema Contract Check] DB connection failed:', connErr);
@@ -553,6 +554,7 @@ export class PostgresRepository {
         const p2 = this.getPool();
         if (!p2) return;
         client = await p2.connect();
+        if (client) client.on('error', () => {});
         
         // Use a distributed advisory lock to prevent multiple cloud instances from running DDL simultaneously
         const lockRes = await client.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEMA_LOCK_ID]);

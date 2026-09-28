@@ -52,12 +52,41 @@ export function isSshTunnelAllowed(): boolean {
 
 /**
  * Resolves PostgreSQL connection URL from all possible environment variable conventions
- * and structured fallback configurations.
+ * and structured fallback configurations with clear, deterministic precedence.
  */
 export function resolvePostgresConnectionString(customUrl?: string): string {
   let candidateUrl = '';
 
-  // 1. Explicitly supplied URL (e.g. from UI settings modal or direct argument)
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  const envHost = (process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST || '').trim();
+
+  // Helper to build connection string from structured environment variables
+  const buildFromEnvStructured = (): string => {
+    if (!envHost) return '';
+    const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER || 'postgres';
+    let password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
+
+    if (password === undefined || password === '') {
+      try {
+        password = systemSecretsService.getDatabasePassword();
+      } catch {}
+    }
+    if ((password === undefined || password === '') && fs.existsSync('/run/secrets/db_password')) {
+      try {
+        password = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
+      } catch {}
+    }
+
+    const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME || 'postgres';
+    const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+
+    const encUser = encodeURIComponent(user);
+    const encPass = password !== undefined && password !== '' ? encodeURIComponent(password) : '';
+    const auth = encPass ? `${encUser}:${encPass}` : encUser;
+    return `postgresql://${auth}@${envHost}:${port}/${dbName}`;
+  };
+
+  // 1. Explicit connection string environment variable (e.g. DATABASE_URL)
   const envUrl = (
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
@@ -66,39 +95,45 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     ''
   ).trim();
 
-  if (customUrl && typeof customUrl === 'string') {
+  if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
+    candidateUrl = envUrl;
+  }
+
+  // 2. Production Docker environment precedence: deployment env DB host takes precedence over stale stored customUrl
+  if (!candidateUrl && isProduction && envHost) {
+    candidateUrl = buildFromEnvStructured();
+  }
+
+  // 3. Custom / stored URL (e.g. from db.json or UI settings)
+  if (!candidateUrl && customUrl && typeof customUrl === 'string') {
     const trimmed = customUrl.trim();
     if ((trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://')) && !trimmed.includes('••••••••')) {
-      const isDockerPlaceholder = trimmed.includes('@timescaledb:5432') || trimmed.includes('@postgres:5432') || trimmed.includes('@db:5432');
-      if (!isDockerPlaceholder || !envUrl) {
+      const isLoopbackInProd = isProduction && (trimmed.includes('@localhost') || trimmed.includes('@127.0.0.1'));
+      if (isLoopbackInProd && envHost) {
+        // Stale localhost/127.0.0.1 in production VPS -> override host with deployment DB_HOST (e.g. timescaledb)
+        try {
+          const match = trimmed.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
+          if (match) {
+            const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+            candidateUrl = `${match[1]}${envHost}:${port}${match[3]}`;
+          } else {
+            candidateUrl = buildFromEnvStructured() || trimmed;
+          }
+        } catch {
+          candidateUrl = buildFromEnvStructured() || trimmed;
+        }
+      } else {
         candidateUrl = trimmed;
       }
     }
   }
 
-  // 2. Standard Connection String Environment Variables
-  if (!candidateUrl && envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
-    candidateUrl = envUrl;
+  // 4. Structured environment variables in non-production environments
+  if (!candidateUrl && envHost) {
+    candidateUrl = buildFromEnvStructured();
   }
 
-  // 3. Structured / Deconstructed Environment Variables (Cloud SQL, Docker, standard Postgres conventions)
-  if (!candidateUrl) {
-    const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
-    const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
-    const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
-    const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME;
-    const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
-
-    if (host && host.trim() !== '') {
-      const encUser = encodeURIComponent(user || 'postgres');
-      const encPass = password !== undefined ? encodeURIComponent(password) : '';
-      const auth = encPass ? `${encUser}:${encPass}` : encUser;
-      const db = dbName || 'postgres';
-      candidateUrl = `postgresql://${auth}@${host}:${port}/${db}`;
-    }
-  }
-
-  // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret or Vault)
+  // 5. Runtime Secret Store (.db_config.json)
   if (!candidateUrl) {
     try {
       const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
@@ -108,40 +143,52 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         if (cfg && cfg.host && cfg.database) {
           let resolvedPass = cfg.password;
           if (!resolvedPass) {
-            resolvedPass = systemSecretsService.getDatabasePassword();
+            try {
+              resolvedPass = systemSecretsService.getDatabasePassword();
+            } catch {}
           }
           if (!resolvedPass && fs.existsSync('/run/secrets/db_password')) {
             try {
               resolvedPass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
             } catch {}
           }
+          let targetHost = cfg.host;
+          let targetPort: string | number = cfg.port || 5432;
+          if (isProduction && (targetHost === 'localhost' || targetHost === '127.0.0.1') && envHost) {
+            targetHost = envHost;
+            targetPort = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || targetPort;
+          }
           const encUser = encodeURIComponent(cfg.user || 'postgres');
           const encPass = resolvedPass !== undefined && resolvedPass !== '' ? encodeURIComponent(resolvedPass) : '';
           const auth = encPass ? `${encUser}:${encPass}` : encUser;
-          const p = cfg.port || 5432;
           const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
-          candidateUrl = `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
+          candidateUrl = `postgresql://${auth}@${targetHost}:${targetPort}/${cfg.database}${sslParam}`;
         }
       }
     } catch {}
   }
 
-  // 5. System Secrets Vault database configuration (AES-256-GCM encrypted)
+  // 6. System Secrets Vault database configuration
   if (!candidateUrl) {
     try {
       const vaultDb = systemSecretsService.getDatabaseConfig();
       if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
+        let targetHost = vaultDb.host;
+        let targetPort: string | number = vaultDb.port || 5432;
+        if (isProduction && (targetHost === 'localhost' || targetHost === '127.0.0.1') && envHost) {
+          targetHost = envHost;
+          targetPort = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || targetPort;
+        }
         const encUser = encodeURIComponent(vaultDb.user || 'postgres');
         const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
         const auth = encPass ? `${encUser}:${encPass}` : encUser;
-        const p = vaultDb.port || 5432;
         const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
-        candidateUrl = `postgresql://${auth}@${vaultDb.host}:${p}/${vaultDb.database}${sslParam}`;
+        candidateUrl = `postgresql://${auth}@${targetHost}:${targetPort}/${vaultDb.database}${sslParam}`;
       }
     } catch {}
   }
 
-  // 6. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort ONLY if SSH Tunnel is explicitly allowed AND active
+  // 7. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort ONLY if SSH Tunnel is explicitly allowed AND active
   if (candidateUrl && isSshTunnelAllowed() && sshTunnelService.isConnected()) {
     const localPort = sshTunnelService.getLocalPort();
     try {
@@ -159,11 +206,10 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     }
   }
 
-  // 7. Same-VPS / Local Loopback Auto-Fallback:
-  // If the app is running on the VPS itself where PostgreSQL is running locally on 127.0.0.1:5432 or localhost:5432,
-  // or if PGHOST / PREFER_LOCAL_DB / USE_LOCAL_POSTGRES is set, convert public domain/IP URLs to local loopback to bypass firewall blocks.
+  // 8. Same-VPS / Local Loopback Auto-Fallback (non-production dev mode only)
   if (
     candidateUrl &&
+    !isProduction &&
     !sshTunnelService.isConnected() &&
     (process.env.PGHOST === '127.0.0.1' ||
       process.env.PGHOST === 'localhost' ||
@@ -190,7 +236,7 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
  */
 export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean } | undefined {
   if (!url) return undefined;
-  if (url.includes('sslmode=disable')) {
+  if (url.includes('sslmode=disable') || url.includes('sslmode=off') || url.includes('ssl=false') || url.includes('ssl=0')) {
     return undefined;
   }
   const hasSslParam =
@@ -208,11 +254,22 @@ export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean
     url.includes('cockroachlabs.cloud') ||
     url.includes('cloudsql');
 
+  // Parse hostname from connection URL to determine internal Docker / loopback status
+  const hostMatch = url.match(/@([^:/]+)(?::\d+)?/);
+  const host = hostMatch ? hostMatch[1] : '';
+  const isInternalDockerOrLoopback =
+    !host ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === 'timescaledb' ||
+    host === 'nexus_timescaledb' ||
+    host === 'postgres' ||
+    host === 'db' ||
+    !host.includes('.'); // hostnames without a domain dot are internal docker container names
+
   const isProductionRemote =
     process.env.NODE_ENV === 'production' &&
-    !url.includes('localhost') &&
-    !url.includes('127.0.0.1') &&
-    !url.includes('postgres:5432');
+    !isInternalDockerOrLoopback;
 
   if (hasSslParam || isCloudHost || isProductionRemote) {
     return { rejectUnauthorized: false };
