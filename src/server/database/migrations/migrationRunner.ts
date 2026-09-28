@@ -89,7 +89,16 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
   error?: string;
 }> {
   console.log('[Migration Runner] Starting database migration check...');
-  const client = await pool.connect();
+  if (!pool || typeof pool.connect !== 'function' || (pool as any).ending || (pool as any).ended) {
+    return { success: false, appliedCount: 0, error: 'No active database connection pool available' };
+  }
+
+  let client: any = null;
+  try {
+    client = await pool.connect();
+  } catch (connErr: any) {
+    return { success: false, appliedCount: 0, error: connErr?.message || 'Veritabanı bağlantı havuzuna erişilemedi.' };
+  }
   // Ensure migration DDL queries do not timeout prematurely
   await client.query('SET statement_timeout = 300000;').catch(() => {});
 
@@ -285,7 +294,32 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
  * Retrieves current migration status for system diagnostics & readiness
  */
 export async function getMigrationStatus(pool: pg.Pool): Promise<MigrationStatus> {
-  const client = await pool.connect();
+  if (!pool || typeof pool.connect !== 'function' || (pool as any).ending || (pool as any).ended) {
+    return {
+      isLocked: false,
+      appliedCount: 0,
+      pendingCount: ALL_MIGRATIONS.length,
+      latestVersion: null,
+      migrations: ALL_MIGRATIONS.map((m) => ({ version: m.version, name: m.name, applied: false })),
+      hasFailed: false,
+      lastError: undefined,
+    };
+  }
+
+  let client: any = null;
+  try {
+    client = await pool.connect();
+  } catch {
+    return {
+      isLocked: false,
+      appliedCount: 0,
+      pendingCount: ALL_MIGRATIONS.length,
+      latestVersion: null,
+      migrations: ALL_MIGRATIONS.map((m) => ({ version: m.version, name: m.name, applied: false })),
+      hasFailed: false,
+      lastError: undefined,
+    };
+  }
   try {
     await ensureMigrationsTable(client);
     const appliedRes = await client.query('SELECT version, name, applied_at FROM schema_migrations ORDER BY version ASC;');

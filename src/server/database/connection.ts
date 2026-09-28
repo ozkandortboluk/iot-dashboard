@@ -4,6 +4,7 @@ import pg from 'pg';
 const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
+import { sshTunnelService } from '../services/sshTunnel.service.js';
 
 import { DatabaseState } from '../../types.js';
 export { DatabaseState };
@@ -36,6 +37,8 @@ function notifyPoolRecycled(newPool: pg.Pool | null): void {
  * and structured fallback configurations.
  */
 export function resolvePostgresConnectionString(customUrl?: string): string {
+  let candidateUrl = '';
+
   // 1. Explicitly supplied URL (e.g. from UI settings modal or direct argument)
   const envUrl = (
     process.env.DATABASE_URL ||
@@ -50,74 +53,95 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     if ((trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://')) && !trimmed.includes('••••••••')) {
       const isDockerPlaceholder = trimmed.includes('@timescaledb:5432') || trimmed.includes('@postgres:5432') || trimmed.includes('@db:5432');
       if (!isDockerPlaceholder || !envUrl) {
-        return trimmed;
+        candidateUrl = trimmed;
       }
     }
   }
 
   // 2. Standard Connection String Environment Variables
-  if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
-    return envUrl;
+  if (!candidateUrl && envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
+    candidateUrl = envUrl;
   }
 
   // 3. Structured / Deconstructed Environment Variables (Cloud SQL, Docker, standard Postgres conventions)
-  const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
-  const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
-  const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
-  const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME;
-  const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+  if (!candidateUrl) {
+    const host = process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
+    const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
+    const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
+    const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME;
+    const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
 
-  // If host is explicitly configured, construct standard PostgreSQL URL
-  if (host && host.trim() !== '') {
-    const encUser = encodeURIComponent(user || 'postgres');
-    const encPass = password !== undefined ? encodeURIComponent(password) : '';
-    const auth = encPass ? `${encUser}:${encPass}` : encUser;
-    const db = dbName || 'postgres';
-    const candidate = `postgresql://${auth}@${host}:${port}/${db}`;
-    return candidate;
+    if (host && host.trim() !== '') {
+      const encUser = encodeURIComponent(user || 'postgres');
+      const encPass = password !== undefined ? encodeURIComponent(password) : '';
+      const auth = encPass ? `${encUser}:${encPass}` : encUser;
+      const db = dbName || 'postgres';
+      candidateUrl = `postgresql://${auth}@${host}:${port}/${db}`;
+    }
   }
 
   // 4. Runtime Secret Store (from First Run Setup Wizard or Docker Secret or Vault)
-  try {
-    const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
-    if (fs.existsSync(secretPath)) {
-      const raw = fs.readFileSync(secretPath, 'utf8');
-      const cfg = JSON.parse(raw);
-      if (cfg && cfg.host && cfg.database) {
-        // Resolve password from Vault if not present in config file
-        let resolvedPass = cfg.password;
-        if (!resolvedPass) {
-          resolvedPass = systemSecretsService.getDatabasePassword();
+  if (!candidateUrl) {
+    try {
+      const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+      if (fs.existsSync(secretPath)) {
+        const raw = fs.readFileSync(secretPath, 'utf8');
+        const cfg = JSON.parse(raw);
+        if (cfg && cfg.host && cfg.database) {
+          let resolvedPass = cfg.password;
+          if (!resolvedPass) {
+            resolvedPass = systemSecretsService.getDatabasePassword();
+          }
+          if (!resolvedPass && fs.existsSync('/run/secrets/db_password')) {
+            try {
+              resolvedPass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
+            } catch {}
+          }
+          const encUser = encodeURIComponent(cfg.user || 'postgres');
+          const encPass = resolvedPass !== undefined && resolvedPass !== '' ? encodeURIComponent(resolvedPass) : '';
+          const auth = encPass ? `${encUser}:${encPass}` : encUser;
+          const p = cfg.port || 5432;
+          const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
+          candidateUrl = `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
         }
-        if (!resolvedPass && fs.existsSync('/run/secrets/db_password')) {
-          try {
-            resolvedPass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
-          } catch {}
-        }
-        const encUser = encodeURIComponent(cfg.user || 'postgres');
-        const encPass = resolvedPass !== undefined && resolvedPass !== '' ? encodeURIComponent(resolvedPass) : '';
-        const auth = encPass ? `${encUser}:${encPass}` : encUser;
-        const p = cfg.port || 5432;
-        const sslParam = cfg.sslMode && cfg.sslMode !== 'disable' ? `?sslmode=${cfg.sslMode}` : '';
-        return `postgresql://${auth}@${cfg.host}:${p}/${cfg.database}${sslParam}`;
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // 5. System Secrets Vault database configuration (AES-256-GCM encrypted)
-  try {
-    const vaultDb = systemSecretsService.getDatabaseConfig();
-    if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
-      const encUser = encodeURIComponent(vaultDb.user || 'postgres');
-      const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
-      const auth = encPass ? `${encUser}:${encPass}` : encUser;
-      const p = vaultDb.port || 5432;
-      const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
-      return `postgresql://${auth}@${vaultDb.host}:${p}/${vaultDb.database}${sslParam}`;
-    }
-  } catch {}
+  if (!candidateUrl) {
+    try {
+      const vaultDb = systemSecretsService.getDatabaseConfig();
+      if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
+        const encUser = encodeURIComponent(vaultDb.user || 'postgres');
+        const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
+        const auth = encPass ? `${encUser}:${encPass}` : encUser;
+        const p = vaultDb.port || 5432;
+        const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
+        candidateUrl = `postgresql://${auth}@${vaultDb.host}:${p}/${vaultDb.database}${sslParam}`;
+      }
+    } catch {}
+  }
 
-  return '';
+  // 6. Dynamic SSH Tunnel Routing: If an SSH Tunnel is currently active, reroute DB connections to 127.0.0.1:localPort
+  if (candidateUrl && sshTunnelService.isConnected()) {
+    const localPort = sshTunnelService.getLocalPort();
+    try {
+      const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
+      if (match) {
+        let rest = match[3];
+        rest = rest.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+        candidateUrl = `${match[1]}127.0.0.1:${localPort}${rest}`;
+      } else {
+        candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
+      }
+      systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
+    } catch {
+      candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
+    }
+  }
+
+  return candidateUrl;
 }
 
 /**

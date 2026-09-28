@@ -596,19 +596,22 @@ class LocalDatabase {
     let hasAdmin = false;
     let verifyClient: any = null;
     try {
-      verifyClient = await pool.connect();
-      const adminCheck = await verifyClient.query(`
-        SELECT id FROM users 
-        WHERE role = 'admin' 
-          AND status != 'deleted' 
-          AND (deleted_at IS NULL)
-          AND id != 'usr_test_admin'
-          AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-        LIMIT 1;
-      `).catch(() => ({ rows: [] }));
+      const currentPool = this.getPgPool();
+      if (currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
+        verifyClient = await currentPool.connect();
+        const adminCheck = await verifyClient.query(`
+          SELECT id FROM users 
+          WHERE role = 'admin' 
+            AND status != 'deleted' 
+            AND (deleted_at IS NULL)
+            AND id != 'usr_test_admin'
+            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+          LIMIT 1;
+        `).catch(() => ({ rows: [] }));
 
-      if (adminCheck.rows.length > 0) {
-        hasAdmin = true;
+        if (adminCheck.rows.length > 0) {
+          hasAdmin = true;
+        }
       }
     } catch (vErr: any) {
       console.warn('[Admin check error]:', vErr?.message || vErr);

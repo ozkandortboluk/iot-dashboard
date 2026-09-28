@@ -196,6 +196,12 @@ export class PostgresRepository {
       this.pool = null;
       this.isConnected = false;
     }
+    if (!this.pool) {
+      const liveShared = getSharedPgPool();
+      if (liveShared && !(liveShared as any).ending && !(liveShared as any).ended) {
+        this.pool = liveShared;
+      }
+    }
     return this.pool;
   }
 
@@ -508,7 +514,8 @@ export class PostgresRepository {
     }
     
     const now = Date.now();
-    if (!this.pool) return;
+    const activePool = this.getPool();
+    if (!activePool) return;
     if (this.isSchemaEnsured && !force) return;
     if (!force && now - this.lastSchemaEnsureTime < 60000) return; // Debounce to prevent cascading checks
 
@@ -518,9 +525,12 @@ export class PostgresRepository {
 
     this.lastSchemaEnsureTime = now;
     this.schemaEnsuringPromise = (async () => {
+      const p1 = this.getPool();
+      if (!p1) return;
+
       // 1. Run versioned migrations
       try {
-        const migRes = await runAllMigrations(this.pool!);
+        const migRes = await runAllMigrations(p1);
         if (!migRes.success) {
           this.isSchemaEnsured = false;
           systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi başarısız: ${migRes.error}`);
@@ -536,7 +546,9 @@ export class PostgresRepository {
       let hasLock = false;
       const SCHEMA_LOCK_ID = 13374242; // Distributed lock ID for schema migration
       try {
-        client = await this.pool!.connect();
+        const p2 = this.getPool();
+        if (!p2) return;
+        client = await p2.connect();
         
         // Use a distributed advisory lock to prevent multiple cloud instances from running DDL simultaneously
         const lockRes = await client.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEMA_LOCK_ID]);

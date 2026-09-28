@@ -26,6 +26,7 @@ import { ServerStatusView } from './components/system/ServerStatusView';
 import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
 import { MaintenanceView } from './components/setup/MaintenanceView';
 import { RecoveryView } from './components/setup/RecoveryView';
+import { SSHTunnelDrawer } from './components/SSHTunnelDrawer';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
@@ -43,6 +44,7 @@ import {
   Database,
   CheckCircle2,
   Server,
+  Terminal,
 } from 'lucide-react';
 
 function DashboardContent() {
@@ -306,6 +308,7 @@ function DashboardContent() {
 
 function SystemStateGuard() {
   const [systemMode, setSystemMode] = useState<'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' | 'LOADING'>('LOADING');
+  const [isSSHDrawerOpen, setIsSSHDrawerOpen] = useState(false);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -347,10 +350,16 @@ function SystemStateGuard() {
     const handleGlobalMaintenance = () => {
       setSystemMode('MAINTENANCE');
     };
+    const handleOpenSSH = () => {
+      setIsSSHDrawerOpen(true);
+    };
+
     window.addEventListener('nexus_system_maintenance', handleGlobalMaintenance);
+    window.addEventListener('nexus_open_ssh_drawer', handleOpenSSH);
 
     return () => {
       window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
+      window.removeEventListener('nexus_open_ssh_drawer', handleOpenSSH);
     };
   }, [checkStatus]);
 
@@ -379,33 +388,59 @@ function SystemStateGuard() {
     return () => clearInterval(intervalId);
   }, [systemMode]);
 
-  if (systemMode === 'LOADING') {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-          <p className="text-xs font-medium text-slate-400">Sistem Durumu Kontrol Ediliyor...</p>
+  const renderActiveView = () => {
+    if (systemMode === 'LOADING') {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+            <p className="text-xs font-medium text-slate-400">Sistem Durumu Kontrol Ediliyor...</p>
+          </div>
         </div>
-      </div>
+      );
+    }
+
+    if (systemMode === 'SETUP') {
+      return <DatabaseSetupWizard onComplete={checkStatus} />;
+    }
+
+    if (systemMode === 'MAINTENANCE') {
+      return <MaintenanceView onRetry={checkStatus} />;
+    }
+
+    if (systemMode === 'RECOVERY') {
+      return <RecoveryView onRecovered={checkStatus} />;
+    }
+
+    return (
+      <RealtimeProvider>
+        <DashboardContent />
+      </RealtimeProvider>
     );
-  }
-
-  if (systemMode === 'SETUP') {
-    return <DatabaseSetupWizard onComplete={checkStatus} />;
-  }
-
-  if (systemMode === 'MAINTENANCE') {
-    return <MaintenanceView onRetry={checkStatus} />;
-  }
-
-  if (systemMode === 'RECOVERY') {
-    return <RecoveryView onRecovered={checkStatus} />;
-  }
+  };
 
   return (
-    <RealtimeProvider>
-      <DashboardContent />
-    </RealtimeProvider>
+    <>
+      {renderActiveView()}
+
+      {/* Persistent Left Edge Floating Handle for SSH Tunnel */}
+      <button
+        type="button"
+        onClick={() => setIsSSHDrawerOpen(true)}
+        title="SSH Bağlantı Tüneli (Sol Ekran)"
+        className="fixed bottom-6 left-0 z-40 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-2.5 px-3 rounded-r-xl shadow-xl shadow-cyan-950/50 flex items-center gap-2 transition-transform hover:translate-x-1 group border-y border-r border-cyan-400/30 cursor-pointer"
+      >
+        <Terminal className="w-4 h-4 text-white group-hover:rotate-12 transition-transform shrink-0" />
+        <span className="text-xs font-bold hidden sm:inline pr-1">SSH Tüneli</span>
+      </button>
+
+      {/* Global Left-Side SSH Tunnel Drawer */}
+      <SSHTunnelDrawer
+        isOpen={isSSHDrawerOpen}
+        onClose={() => setIsSSHDrawerOpen(false)}
+        onConnectedSuccess={checkStatus}
+      />
+    </>
   );
 }
 

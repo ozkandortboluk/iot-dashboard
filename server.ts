@@ -44,6 +44,7 @@ import { otaRouter } from './src/server/routes/ota.js';
 import { compilerRouter } from './src/server/routes/compiler.js';
 import { systemLogsRouter } from './src/server/routes/systemLogs.js';
 import { setupRouter } from './src/server/routes/setup.js';
+import { sshTunnelRouter } from './src/server/routes/sshTunnel.js';
 import { serverStatusRouter } from './src/server/routes/serverStatus.js';
 import { secretsRouter } from './src/server/routes/secrets.js';
 
@@ -160,6 +161,8 @@ app.use('/api', (req, res, next) => {
   if (
     req.path.startsWith('/setup') ||
     req.path.startsWith('/auth') ||
+    req.path.startsWith('/system/ssh-tunnel') ||
+    req.path.startsWith('/ssh-tunnel') ||
     req.path === '/system/status' ||
     req.path.startsWith('/server') ||
     req.path.startsWith('/health') ||
@@ -198,6 +201,8 @@ app.use('/api', (req, res, next) => {
 });
 
 // Mount Modular API Routes
+app.use('/api/setup/ssh-tunnel', sshTunnelRouter);
+app.use('/api/system/ssh-tunnel', sshTunnelRouter);
 app.use('/api/setup', setupRouter);
 app.use('/api', systemRouter);
 app.use('/api/auth', authRouter);

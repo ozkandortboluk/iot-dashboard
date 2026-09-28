@@ -11,6 +11,7 @@ import {
   Clock,
   KeyRound,
   ExternalLink,
+  Terminal,
 } from 'lucide-react';
 import { APP_NAME, APP_VERSION } from '../../config/version';
 
@@ -204,6 +205,15 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('nexus_open_ssh_drawer'))}
+                className="w-full sm:w-auto px-4 py-2 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-200 border border-cyan-700/60 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-cyan-950/40"
+              >
+                <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                <span>SSH Tüneli İle Bağlan (Sol Panel)</span>
+              </button>
+
               <button
                 type="button"
                 onClick={async () => {
