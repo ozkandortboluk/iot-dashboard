@@ -71,7 +71,21 @@ process.on('uncaughtException', (err: any) => {
       code: err?.code,
     });
   } catch {}
-  gracefulCrashExit('uncaughtException', err);
+
+  const isTransientDbOrSocketError =
+    errMsg.includes('Connection terminated unexpectedly') ||
+    errMsg.includes('ECONNREFUSED') ||
+    errMsg.includes('ECONNRESET') ||
+    errMsg.includes('ETIMEDOUT') ||
+    errMsg.includes('socket hang up') ||
+    err?.code === 'ECONNREFUSED' ||
+    err?.code === 'ECONNRESET';
+
+  if (!isTransientDbOrSocketError) {
+    gracefulCrashExit('uncaughtException', err);
+  } else {
+    console.warn('[Process Shield] Anlık veritabanı/ağ soketi kesintisi yutuldu, sunucu çalışmaya devam ediyor.');
+  }
 });
 
 process.on('unhandledRejection', (reason: any) => {

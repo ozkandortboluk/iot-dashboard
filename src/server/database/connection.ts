@@ -33,6 +33,24 @@ function notifyPoolRecycled(newPool: pg.Pool | null): void {
 }
 
 /**
+ * Determines whether SSH Tunnel DB rerouting is allowed for database connections.
+ * Can be explicitly controlled via DB_SSH_TUNNEL_ENABLED or ENABLE_SSH_TUNNEL environment variables.
+ * Defaults to:
+ * - FALSE in Production VPS mode (NODE_ENV=production or VPS_PRODUCTION=true)
+ * - TRUE in Development / AI Studio Preview mode
+ */
+export function isSshTunnelAllowed(): boolean {
+  if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
+    return true;
+  }
+  if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
+    return false;
+  }
+  const isProductionVps = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  return !isProductionVps;
+}
+
+/**
  * Resolves PostgreSQL connection URL from all possible environment variable conventions
  * and structured fallback configurations.
  */
@@ -123,8 +141,8 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     } catch {}
   }
 
-  // 6. Dynamic SSH Tunnel Routing: If an SSH Tunnel is currently active, reroute DB connections to 127.0.0.1:localPort
-  if (candidateUrl && sshTunnelService.isConnected()) {
+  // 6. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort ONLY if SSH Tunnel is explicitly allowed AND active
+  if (candidateUrl && isSshTunnelAllowed() && sshTunnelService.isConnected()) {
     const localPort = sshTunnelService.getLocalPort();
     try {
       const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
@@ -139,6 +157,29 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     } catch {
       candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
     }
+  }
+
+  // 7. Same-VPS / Local Loopback Auto-Fallback:
+  // If the app is running on the VPS itself where PostgreSQL is running locally on 127.0.0.1:5432 or localhost:5432,
+  // or if PGHOST / PREFER_LOCAL_DB / USE_LOCAL_POSTGRES is set, convert public domain/IP URLs to local loopback to bypass firewall blocks.
+  if (
+    candidateUrl &&
+    !sshTunnelService.isConnected() &&
+    (process.env.PGHOST === '127.0.0.1' ||
+      process.env.PGHOST === 'localhost' ||
+      process.env.PREFER_LOCAL_DB === 'true' ||
+      process.env.USE_LOCAL_POSTGRES === 'true')
+  ) {
+    try {
+      const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
+      if (match) {
+        let rest = match[3];
+        rest = rest.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+        const targetHost = process.env.PGHOST || '127.0.0.1';
+        const targetPort = process.env.PGPORT || '5432';
+        candidateUrl = `${match[1]}${targetHost}:${targetPort}${rest}`;
+      }
+    } catch {}
   }
 
   return candidateUrl;

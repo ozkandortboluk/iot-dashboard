@@ -956,7 +956,12 @@ export class SetupService {
         sanitizedMessage = `Belirtilen veritabanı ("${config.database}") mevcut değil. Lütfen veritabanı adını kontrol edin.`;
         errorCode = 'DB_NOT_FOUND';
       } else if (rawMsg.includes('ECONNREFUSED')) {
-        sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında dış IP'lere izin verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
+        const isLocalHost = config.host === 'localhost' || config.host === '127.0.0.1' || config.host === '::1';
+        if (isLocalHost) {
+          sanitizedMessage = `Yerel bağlantı reddedildi (${config.host}:${config.port}). AI Studio Önizleme ortamındaysanız "localhost" Cloud Run konteynerini temsil eder (VPS veritabanınız için sol menüden "SSH Tüneli" başlatmalısınız). VPS sunucunuzda Docker içinde çalışıyorsanız "host.docker.internal" veya "172.17.0.1" adresini kullanın. IPv6 çakışmasını önlemek için "localhost" yerine "127.0.0.1" yazın.`;
+        } else {
+          sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında erişim izni verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
+        }
         errorCode = 'CONN_REFUSED';
       } else if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('EAI_AGAIN')) {
         sanitizedMessage = `Veritabanı sunucu adresi bulunamadı ("${config.host}"). Hostname veya DNS ayarlarınızı kontrol edin.`;

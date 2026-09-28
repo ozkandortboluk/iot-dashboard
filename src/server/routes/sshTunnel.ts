@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { sshTunnelService, type SSHTunnelConfig } from '../services/sshTunnel.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { isSshTunnelAllowed } from '../database/connection.js';
 
 export const sshTunnelRouter = Router();
 
@@ -13,6 +14,7 @@ sshTunnelRouter.get('/status', (_req: Request, res: Response) => {
     const state = sshTunnelService.getState();
     return res.json({
       success: true,
+      isTunnelAllowed: isSshTunnelAllowed(),
       ...state,
     });
   } catch (err: any) {

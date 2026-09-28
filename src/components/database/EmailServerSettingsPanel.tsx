@@ -91,6 +91,12 @@ export const EmailServerSettingsPanel: React.FC = () => {
     try {
       const res = await fetch('/api/system/email-config');
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('Oturum süresi dolmuş veya giriş yapılmamış (401). Lütfen yönetici hesabınızla yeniden giriş yapın.');
+        }
+        if (res.status === 403) {
+          throw new Error('E-posta sunucu ayarlarını görüntülemek için Yönetici (Admin) yetkisine sahip olmalısınız (403).');
+        }
         throw new Error(`HTTP ${res.status}: Ayarlar yüklenemedi`);
       }
       const data: EmailConfigState = await res.json();
