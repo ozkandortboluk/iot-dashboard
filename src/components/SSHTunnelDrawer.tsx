@@ -40,7 +40,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const [remoteDbHost, setRemoteDbHost] = useState('127.0.0.1');
   const [remoteDbPort, setRemoteDbPort] = useState('5432');
-  const [localPort, setLocalPort] = useState('5432');
+  const [localPort, setLocalPort] = useState('15432');
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [connectedAt, setConnectedAt] = useState<string | null>(null);
@@ -479,11 +479,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     type="number"
                     value={localPort}
                     onChange={(e) => setLocalPort(e.target.value)}
-                    placeholder="5432"
+                    placeholder="15432"
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                   />
                   <p className="text-[10px] text-slate-500">
-                    Uygulama tünel üzerinden 127.0.0.1:{localPort} adresi ile veritabanına bağlanır.
+                    Uygulama tünel üzerinden 127.0.0.1:{localPort || '15432'} adresi ile PostgreSQL veritabanına bağlanır (Önerilen: 15432).
                   </p>
                 </div>
               </div>

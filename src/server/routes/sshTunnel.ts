@@ -1,20 +1,53 @@
-import { Router, type Request, type Response } from 'express';
-import { sshTunnelService, type SSHTunnelConfig } from '../services/sshTunnel.service.js';
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import { sshTunnelService, type SSHTunnelConfig, DEFAULT_SSH_LOCAL_PORT } from '../services/sshTunnel.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
+import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
+import { setupService } from '../services/setup.service.js';
+import { db } from '../db.js';
 
 export const sshTunnelRouter = Router();
 
 /**
- * GET /api/system/ssh-tunnel/status
- * Public/Authenticated status endpoint for SSH Tunnel
+ * Authorization guard for SSH Tunnel operations.
+ * - Allows if caller is authenticated Admin user.
+ * - Or during initial setup mode if caller is setup-authenticated (or setup not yet completed).
  */
-sshTunnelRouter.get('/status', (_req: Request, res: Response) => {
+async function authorizeSshTunnel(req: Request, res: Response, next: NextFunction) {
+  const isSetupRoute = req.baseUrl?.startsWith('/api/setup') || req.path?.startsWith('/setup');
+  const isSetupCompleted = setupService.isSetupCompleted();
+
+  // If in setup mode and setup route
+  if (isSetupRoute || !isSetupCompleted) {
+    if (isRequestSetupAuthenticated(req, true) || !isSetupCompleted) {
+      return next();
+    }
+  }
+
+  // Otherwise, require standard Admin Authentication
+  return authenticateUser(req, res, () => {
+    return requireAdmin(req, res, next);
+  });
+}
+
+/**
+ * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
+ * Status endpoint for SSH Tunnel
+ */
+sshTunnelRouter.get('/status', (req: Request, res: Response) => {
   try {
     const state = sshTunnelService.getState();
+    const isDbConnected = Boolean(db.postgresRepo?.isReady());
+    const databaseState = db.getDatabaseState();
+    const activeEngine = db.getActiveEngine();
+
     return res.json({
       success: true,
       isTunnelAllowed: isSshTunnelAllowed(),
+      isDbConnected,
+      databaseState,
+      activeEngine,
       ...state,
     });
   } catch (err: any) {
@@ -27,10 +60,10 @@ sshTunnelRouter.get('/status', (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/system/ssh-tunnel/test
- * Test SSH Credentials without keeping tunnel active
+ * POST /api/system/ssh-tunnel/test & POST /api/setup/ssh-tunnel/test
+ * Test SSH Credentials without keeping tunnel active (Protected)
  */
-sshTunnelRouter.post('/test', async (req: Request, res: Response) => {
+sshTunnelRouter.post('/test', authorizeSshTunnel, async (req: Request, res: Response) => {
   try {
     const { sshHost, sshPort, sshUser, authType, password, privateKey, remoteDbHost, remoteDbPort, localPort } = req.body || {};
 
@@ -50,7 +83,7 @@ sshTunnelRouter.post('/test', async (req: Request, res: Response) => {
       privateKey: privateKey ? String(privateKey) : undefined,
       remoteDbHost: remoteDbHost ? String(remoteDbHost).trim() : '127.0.0.1',
       remoteDbPort: Number(remoteDbPort) || 5432,
-      localPort: Number(localPort) || 5432,
+      localPort: Number(localPort) || DEFAULT_SSH_LOCAL_PORT,
     };
 
     const result = await sshTunnelService.testConnection(config);
@@ -65,10 +98,10 @@ sshTunnelRouter.post('/test', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/system/ssh-tunnel/connect
- * Connect and establish SSH Tunnel
+ * POST /api/system/ssh-tunnel/connect & POST /api/setup/ssh-tunnel/connect
+ * Connect and establish SSH Tunnel with synchronous PostgreSQL verification (Protected)
  */
-sshTunnelRouter.post('/connect', async (req: Request, res: Response) => {
+sshTunnelRouter.post('/connect', authorizeSshTunnel, async (req: Request, res: Response) => {
   try {
     const { sshHost, sshPort, sshUser, authType, password, privateKey, remoteDbHost, remoteDbPort, localPort } = req.body || {};
 
@@ -88,7 +121,7 @@ sshTunnelRouter.post('/connect', async (req: Request, res: Response) => {
       privateKey: privateKey ? String(privateKey) : undefined,
       remoteDbHost: remoteDbHost ? String(remoteDbHost).trim() : '127.0.0.1',
       remoteDbPort: Number(remoteDbPort) || 5432,
-      localPort: Number(localPort) || 5432,
+      localPort: Number(localPort) || DEFAULT_SSH_LOCAL_PORT,
     };
 
     const result = await sshTunnelService.connectTunnel(config);
@@ -103,10 +136,10 @@ sshTunnelRouter.post('/connect', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/system/ssh-tunnel/disconnect
- * Disconnect active SSH Tunnel
+ * POST /api/system/ssh-tunnel/disconnect & POST /api/setup/ssh-tunnel/disconnect
+ * Disconnect active SSH Tunnel (Protected)
  */
-sshTunnelRouter.post('/disconnect', async (_req: Request, res: Response) => {
+sshTunnelRouter.post('/disconnect', authorizeSshTunnel, async (_req: Request, res: Response) => {
   try {
     const result = await sshTunnelService.disconnectTunnel();
     return res.json(result);

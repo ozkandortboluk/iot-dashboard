@@ -2644,18 +2644,32 @@ class LocalDatabase {
   }
 
   // Database Engine & PostgreSQL / TimescaleDB Management Methods
-  public getActiveEngine(): DatabaseEngineType {
-    if (this.postgresRepo?.isReady()) {
-      return 'postgres';
-    }
-    if (this.data?.databaseSettings?.activeEngine && this.data.databaseSettings.activeEngine !== 'postgres') {
+  public getConfiguredEngine(): DatabaseEngineType {
+    if (this.data?.databaseSettings?.activeEngine) {
       return this.data.databaseSettings.activeEngine;
     }
     const envEngine = process.env.DB_ENGINE as DatabaseEngineType;
-    if (envEngine === 'timescaledb' || envEngine === 'local') {
+    if (envEngine && ['postgres', 'timescaledb', 'local'].includes(envEngine)) {
       return envEngine;
     }
-    return 'local'; // If PostgreSQL is not connected, local database remains active
+    if (process.env.NODE_ENV === 'production' || !!this.getPostgresUrl().trim()) {
+      return 'postgres';
+    }
+    return 'local';
+  }
+
+  public getActiveEngine(): DatabaseEngineType {
+    if (this.postgresRepo?.isReady()) {
+      const configured = this.getConfiguredEngine();
+      return configured === 'timescaledb' ? 'timescaledb' : 'postgres';
+    }
+    // If PostgreSQL is intentionally configured (e.g. databaseSettings or DB_ENGINE or production),
+    // report that configured engine so the UI does NOT falsely display "Local In-Memory" as active engine.
+    const configured = this.getConfiguredEngine();
+    if (configured === 'postgres' || configured === 'timescaledb') {
+      return configured;
+    }
+    return 'local';
   }
 
   public savePostgresUrl(url: string): void {
@@ -2864,6 +2878,8 @@ class LocalDatabase {
 
     return {
       activeEngine: this.getActiveEngine(),
+      configuredEngine: this.getConfiguredEngine(),
+      databaseState: this.getDatabaseState(),
       postgresUrl: maskedUrl,
       rawPostgresUrl: maskedUrl, // Strictly masked to prevent leaking raw passwords to frontend
       isPostgresConnected: this.postgresRepo.isReady(),

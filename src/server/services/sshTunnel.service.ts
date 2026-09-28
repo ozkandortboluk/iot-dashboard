@@ -3,6 +3,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { systemLogger } from './systemLogger.service.js';
+import { systemSecretsService } from './systemSecrets.service.js';
 
 export interface SSHTunnelConfig {
   sshHost: string;
@@ -28,6 +29,7 @@ export interface SSHTunnelState {
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
+export const DEFAULT_SSH_LOCAL_PORT = 15432;
 
 class SSHTunnelService {
   private sshClient: Client | null = null;
@@ -58,8 +60,17 @@ class SSHTunnelService {
         const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
         const parsed = JSON.parse(data);
         if (parsed && parsed.sshHost) {
-          this.activeConfig = parsed;
-          this.addLog(`Kaydedilmiş SSH tünel yapılandırması yüklendi: ${parsed.sshUser}@${parsed.sshHost}`);
+          // Retrieve sensitive credentials from Vault
+          const vaultPassword = systemSecretsService.getSecret('ssh_tunnel_password');
+          const vaultPrivateKey = systemSecretsService.getSecret('ssh_tunnel_private_key');
+
+          this.activeConfig = {
+            ...parsed,
+            localPort: Number(parsed.localPort) || DEFAULT_SSH_LOCAL_PORT,
+            password: vaultPassword || parsed.password || undefined,
+            privateKey: vaultPrivateKey || parsed.privateKey || undefined,
+          };
+          this.addLog(`Kaydedilmiş SSH tünel yapılandırması yüklendi: ${parsed.sshUser}@${parsed.sshHost} (Local Port: ${this.activeConfig?.localPort})`);
         }
       }
     } catch (err: any) {
@@ -73,8 +84,41 @@ class SSHTunnelService {
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
-      this.activeConfig = { ...config };
-      fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+
+      // 1. Secure sensitive password & privateKey in System Secrets Vault
+      if (config.password && !config.password.includes('••••••••')) {
+        systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
+          category: 'custom',
+          label: 'SSH Tüneli Parolası',
+          isSensitive: true,
+        }).catch(() => {});
+      }
+      if (config.privateKey && !config.privateKey.includes('••••••••')) {
+        systemSecretsService.setSecret('ssh_tunnel_private_key', config.privateKey, {
+          category: 'custom',
+          label: 'SSH Tüneli Özel Anahtarı (Private Key)',
+          isSensitive: true,
+        }).catch(() => {});
+      }
+
+      // 2. Persist ONLY non-sensitive settings to disk
+      const sanitizedConfigForDisk: Partial<SSHTunnelConfig> = {
+        sshHost: config.sshHost,
+        sshPort: config.sshPort || 22,
+        sshUser: config.sshUser,
+        authType: config.authType,
+        remoteDbHost: config.remoteDbHost || '127.0.0.1',
+        remoteDbPort: config.remoteDbPort || 5432,
+        localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
+        autoConnect: config.autoConnect,
+      };
+
+      this.activeConfig = {
+        ...config,
+        localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
+      };
+
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfigForDisk, null, 2), 'utf-8');
     } catch (err: any) {
       systemLogger.error('database', `SSH yapılandırması kaydedilemedi: ${err?.message}`);
     }
@@ -85,7 +129,7 @@ class SSHTunnelService {
   }
 
   public getLocalPort(): number {
-    return this.activeConfig?.localPort || 5432;
+    return this.activeConfig?.localPort || DEFAULT_SSH_LOCAL_PORT;
   }
 
   public getState(): SSHTunnelState {
@@ -94,8 +138,8 @@ class SSHTunnelService {
       config: this.activeConfig
         ? {
             ...this.activeConfig,
-            password: this.activeConfig.password ? '••••••••' : undefined,
-            privateKey: this.activeConfig.privateKey ? '••••••••' : undefined,
+            password: (this.activeConfig.password || systemSecretsService.getSecret('ssh_tunnel_password')) ? '••••••••' : undefined,
+            privateKey: (this.activeConfig.privateKey || systemSecretsService.getSecret('ssh_tunnel_private_key')) ? '••••••••' : undefined,
           }
         : null,
       lastError: this.lastError,
@@ -131,7 +175,7 @@ class SSHTunnelService {
           client.end();
           resolve({
             success: true,
-            message: `SSH Bağlantısı Başarılı! Sunucu (${config.sshUser}@${config.sshHost}:${config.sshPort}) ile el sıkışma sağlandı.`,
+            message: `SSH Bağlantısı Başarılı! Sunucu (${config.sshUser}@${config.sshHost}:${config.sshPort || 22}) ile el sıkışma sağlandı.`,
           });
         }
       });
@@ -142,7 +186,7 @@ class SSHTunnelService {
           clearTimeout(timeout);
           let errMsg = err?.message || 'SSH Bağlantı hatası';
           if (err?.code === 'ECONNREFUSED') {
-            errMsg = `SSH sunucusu bağlantıyı reddetti (${config.sshHost}:${config.sshPort}). SSH servisinin açık olduğunu doğrulayın.`;
+            errMsg = `SSH sunucusu bağlantıyı reddetti (${config.sshHost}:${config.sshPort || 22}). SSH servisinin açık olduğunu doğrulayın.`;
           } else if (err?.level === 'client-authentication') {
             errMsg = 'SSH kimlik doğrulama başarısız! Kullanıcı adı, şifre veya SSH Key bilgisini kontrol edin.';
           }
@@ -153,6 +197,16 @@ class SSHTunnelService {
         }
       });
 
+      // Resolve effective password / privateKey from config or Vault
+      let effectivePassword = config.password;
+      if (!effectivePassword || effectivePassword.includes('••••••••')) {
+        effectivePassword = systemSecretsService.getSecret('ssh_tunnel_password') || '';
+      }
+      let effectivePrivateKey = config.privateKey;
+      if (!effectivePrivateKey || effectivePrivateKey.includes('••••••••')) {
+        effectivePrivateKey = systemSecretsService.getSecret('ssh_tunnel_private_key') || undefined;
+      }
+
       const sshConnConfig: ConnectConfig = {
         host: config.sshHost,
         port: config.sshPort || 22,
@@ -160,10 +214,10 @@ class SSHTunnelService {
         readyTimeout: 10000,
       };
 
-      if (config.authType === 'privateKey' && config.privateKey) {
-        sshConnConfig.privateKey = config.privateKey;
+      if (config.authType === 'privateKey' && effectivePrivateKey) {
+        sshConnConfig.privateKey = effectivePrivateKey;
       } else {
-        sshConnConfig.password = config.password || '';
+        sshConnConfig.password = effectivePassword || '';
       }
 
       try {
@@ -181,17 +235,41 @@ class SSHTunnelService {
     });
   }
 
-  public async connectTunnel(config: SSHTunnelConfig): Promise<{ success: boolean; message: string }> {
+  public async connectTunnel(config: SSHTunnelConfig): Promise<{
+    success: boolean;
+    message: string;
+    localPort?: number;
+    isPgConnected?: boolean;
+    databaseState?: string;
+  }> {
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }
 
     this.status = 'connecting';
     this.lastError = null;
-    this.activeConfig = { ...config };
-    this.saveConfig(config);
 
-    this.addLog(`SSH Tüneli başlatılıyor: ${config.sshUser}@${config.sshHost}:${config.sshPort}...`);
+    // Resolve effective password / privateKey from config or Vault if masked
+    let effectivePassword = config.password;
+    if (!effectivePassword || effectivePassword.includes('••••••••')) {
+      effectivePassword = systemSecretsService.getSecret('ssh_tunnel_password') || '';
+    }
+    let effectivePrivateKey = config.privateKey;
+    if (!effectivePrivateKey || effectivePrivateKey.includes('••••••••')) {
+      effectivePrivateKey = systemSecretsService.getSecret('ssh_tunnel_private_key') || undefined;
+    }
+
+    const fullConfig: SSHTunnelConfig = {
+      ...config,
+      localPort: Number(config.localPort) || DEFAULT_SSH_LOCAL_PORT,
+      password: effectivePassword,
+      privateKey: effectivePrivateKey,
+    };
+
+    this.activeConfig = fullConfig;
+    this.saveConfig(fullConfig);
+
+    this.addLog(`SSH Tüneli başlatılıyor: ${fullConfig.sshUser}@${fullConfig.sshHost}:${fullConfig.sshPort || 22} -> Local :${fullConfig.localPort}...`);
 
     return new Promise((resolve) => {
       let isResolved = false;
@@ -213,15 +291,13 @@ class SSHTunnelService {
       }, 15000);
 
       sshClient.on('ready', () => {
-        this.addLog(`SSH El sıkışması başarılı (${config.sshUser}@${config.sshHost})! Yerel port yönlendirme oluşturuluyor...`);
+        this.addLog(`SSH El sıkışması başarılı (${fullConfig.sshUser}@${fullConfig.sshHost})! Yerel port dinleyici oluşturuluyor...`);
 
-        const localPort = config.localPort || 5432;
-        const remoteHost = config.remoteDbHost || '127.0.0.1';
-        const remotePort = config.remoteDbPort || 5432;
+        const localPort = fullConfig.localPort || DEFAULT_SSH_LOCAL_PORT;
+        const remoteHost = fullConfig.remoteDbHost || '127.0.0.1';
+        const remotePort = fullConfig.remoteDbPort || 5432;
 
         const netServer = net.createServer((socket) => {
-          this.addLog(`Yerel tünel istemcisi bağlandı (${socket.remoteAddress}:${socket.remotePort}) -> Uzak ${remoteHost}:${remotePort}`);
-
           if (!this.sshClient) {
             socket.destroy();
             return;
@@ -234,7 +310,7 @@ class SSHTunnelService {
             remotePort,
             (err, stream) => {
               if (err) {
-                this.addLog(`Port yönlendirme hatası: ${err.message}`);
+                this.addLog(`Port yönlendirme hatası (${remoteHost}:${remotePort}): ${err.message}`);
                 socket.destroy();
                 return;
               }
@@ -248,7 +324,7 @@ class SSHTunnelService {
         netServer.on('error', (netErr: any) => {
           this.addLog(`Yerel port dinleme hatası (${localPort}): ${netErr.message}`);
           if (netErr.code === 'EADDRINUSE') {
-            this.addLog(`DİKKAT: Local port ${localPort} kullanımda. Tünel yine de hazır ancak yerel servis çakışıyor olabilir.`);
+            this.addLog(`UYARI: Yerel port ${localPort} kullanımda. Lütfen başka bir port seçin veya mevcut servisi durdurun.`);
           }
         });
 
@@ -260,8 +336,8 @@ class SSHTunnelService {
           }
         }
 
-        netServer.listen(localPort, '127.0.0.1', () => {
-          this.addLog(`AKTİF: SSH Tüneli kuruldu! Local http://127.0.0.1:${localPort} -> Remote ${remoteHost}:${remotePort}`);
+        netServer.listen(localPort, '127.0.0.1', async () => {
+          this.addLog(`AKTİF: SSH Tüneli kuruldu! Yerel 127.0.0.1:${localPort} -> Uzak ${remoteHost}:${remotePort}`);
           this.status = 'connected';
           this.connectedAt = new Date().toISOString();
           this.netServer = netServer;
@@ -270,23 +346,32 @@ class SSHTunnelService {
             isResolved = true;
             clearTimeout(connectTimeout);
 
-            setTimeout(async () => {
-              this.addLog('Veritabanı bağlantısı tünel üzerinden yeniden başlatılıyor...');
-              try {
-                const { recycleSharedPgPool } = await import('../database/connection.js');
-                await recycleSharedPgPool();
-                const { db } = await import('../db.js');
-                if (db && typeof db.initPostgresRepository === 'function') {
-                  await db.initPostgresRepository();
-                }
-              } catch (e: any) {
-                this.addLog(`Veritabanı yenileme uyarısı: ${e?.message}`);
+            // Synchronously recycle PostgreSQL pool and test the database connection
+            let isPgConnected = false;
+            let dbState = 'DB_UNAVAILABLE';
+            try {
+              this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
+              const { recycleSharedPgPool } = await import('../database/connection.js');
+              await recycleSharedPgPool();
+              const { db } = await import('../db.js');
+              if (db && typeof db.initPostgresRepository === 'function') {
+                isPgConnected = await db.initPostgresRepository();
+                dbState = db.getDatabaseState();
               }
-            }, 1000);
+            } catch (pgErr: any) {
+              this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${pgErr?.message || pgErr}`);
+            }
+
+            const successMsg = isPgConnected
+              ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
+              : `SSH Tüneli başarıyla kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL henüz el sıkışmadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
 
             resolve({
               success: true,
-              message: `SSH Tüneli başarıyla kuruldu! Local 127.0.0.1:${localPort} -> Uzak ${remoteHost}:${remotePort}`,
+              message: successMsg,
+              localPort,
+              isPgConnected,
+              databaseState: dbState,
             });
           }
         });
@@ -318,18 +403,18 @@ class SSHTunnelService {
       });
 
       const sshConnConfig: ConnectConfig = {
-        host: config.sshHost,
-        port: config.sshPort || 22,
-        username: config.sshUser,
+        host: fullConfig.sshHost,
+        port: fullConfig.sshPort || 22,
+        username: fullConfig.sshUser,
         readyTimeout: 15000,
         keepaliveInterval: 10000,
         keepaliveCountMax: 3,
       };
 
-      if (config.authType === 'privateKey' && config.privateKey) {
-        sshConnConfig.privateKey = config.privateKey;
+      if (fullConfig.authType === 'privateKey' && effectivePrivateKey) {
+        sshConnConfig.privateKey = effectivePrivateKey;
       } else {
-        sshConnConfig.password = config.password || '';
+        sshConnConfig.password = effectivePassword || '';
       }
 
       try {
