@@ -2,7 +2,7 @@
 
 > **Tek çalışma dosyası:** `docs/PROJECT_ROADMAP.md` (büyük/küçük harf korunur). Google AI Studio uygular; Codex inceler ve kanıta göre durum günceller.
 >
-> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen uygulama kod SHA:** `d639f3ba8fe9ff635a616d98852104969eb7fecf`.
+> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen uygulama kod SHA:** `2bbdea601bd327f5a2328a2c285c8badd4aabef7`.
 > Roadmap dokümanı sonrasında gelen kod değişiklikleri ayrıca incelenmiş; `d639f3b` bu turun güncel uygulama kanıtıdır. **Uygulama sürümü:** 1.46.2.
 > Bu dokümanı kaydeden commit yalnız roadmap değişikliğidir; yukarıdaki SHA denetlenen uygulama kodunu belirtir.
 
@@ -110,9 +110,22 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Tek yetkilendirme fonksiyonu kullan; rol, aktif hesap ve aktif tenant üyeliğini denetle. Kimlik sabitlerini yalnız veri geçiş eşlemesi için kullan.
   - **Kabul:** Aynı ID admin/customer/askıya alınmış rollerinde test edilmeli; rol düşürülünce ayrıcalık kalmamalı.
 
-- ☑ ☐ ☐ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **AI Studio uyguladı.**
+- ☑ ☐ ☑ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **Kod düzeltmesi mevcut; kabul testi başarısız.**
   - **Uygulama Kanıtı (2026-09-29):** `scripts/smoke-test.mjs` içindeki `getSampleDeviceApiKey()` varsayılan sabit `nex_...` key fallback'i kaldırıldı; yerine çalışma zamanında izole dinamik test fixture key'i (`nex_smk_...`) üretilmesi sağlandı.
   - **Kabul:** Temiz CI ortamında smoke test deterministik çalışır; kaynak kodda sabit cihaz API key bulunmaz.
+  - **Codex düzeltme talimatı (2026-09-29):** Dinamik `nex_smk_...` değerini yalnız üretmek yeterli değil; CI DB'sinde fixture cihazı oluşturup anahtarı ona bağla veya mevcut gerçek fixture anahtarını kullan. Query-string `?apiKey=` auth açılmamalı; IOT-02'nin header handshake'i kullanılmalı.
+  - **Kanıt:** CI run `36606832826`, Node 22 smoke authenticated WebSocket adımında 401.
+
+- ☐ ☐ ☐ **SEC-12 | P1 | Production DB parolası eksikse güvenlik kapısını fail-closed yap** — **Yeni Codex bulgusu.**
+  - **Kanıt:** `validateProductionSecurityPolicy()` DB parolası mevcutsa default/weak kontrolü yapıyor; parola hiç bulunmazsa hata eklemiyor. Son commit yalnız bypass env'sini kaldırdı.
+  - **Etki:** Production güvenlik politikası eksik DB credential durumunu tek başına reddetmiyor.
+  - **Codex talimatı:** Production DB bağlantısı gereken profilde missing password → fail-closed. Setup/recovery gibi parola gerektirmeyen bootstrap yolları ayrı ve açık tanımlanmalı.
+  - **Kabul:** missing → startup/security gate non-zero; valid secret → geçer; setup erişimi korunur; parola loglanmaz.
+
+- ☐ ☐ ☐ **SEC-13 | P1 | Production secret policy negatif test kapısını tamamla** — **Yeni Codex bulgusu.**
+  - **Kanıt:** Production startup policy default JWT/ENCRYPTION_KEY değerlerini kontrol ediyor; ancak missing/weak/bypass matrisi CI'da zorunlu bir negatif test kapısı olarak çalışmıyor.
+  - **Codex talimatı:** default, weak, missing ve eski bypass env'leri için negatif testler ekle; CI startup policy gate'i zorunlu yap.
+  - **Kabul:** insecure/missing → non-zero; secure random → geçer; eski bypass env'leri hiçbir kontrolü gevşetmez; secret değerleri loglanmaz.
 
 - ☑ ☑ ☐ **SEC-10 | P1 | Anahtar için ayrı salt okunur secrets yolu mevcut.** `docker-compose.yml` ./secrets:/app/secrets:ro bağlar; crypto.ts secrets/encryption_key okur. .gitignore ve .dockerignore secrets/ dizinini dışlar. Kod incelemesiyle doğrulandı; canlı izin testi değildir.
 
@@ -121,9 +134,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 2. Uygulamanın çalışması — kurulum, bağlantı ve dağıtım
 
-- ☑ ☐ ☐ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **AI Studio uyguladı.**
+- ☑ ☐ ☑ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **Dinamik anahtar düzeltmesi mevcut; kabul testi tamamlanmadı.**
   - **Uygulama Kanıtı (2026-09-29):** `.github/workflows/ci.yml` iş akışına `Generate Dynamic Runtime Test Vault Key` adımı eklendi (`openssl rand -hex 32`). Sabit 64-hex string kaldırıldı. `scripts/smoke-test.mjs` içerisinde de dinamik runtime test key üretimi devrededir.
   - **Kabul:** Node 20/22 smoke+E2E geçer; kaynakta sabit encryption key kalmaz; anahtar job başına değişir; gerçek secret loglanmaz.
+  - **Codex düzeltme talimatı (2026-09-29):** Son run'da Node 20 unit test ve Node 22 smoke başarısız. İki Node sürümünde test → build → smoke → E2E zinciri tamamen yeşil olmadan ikinci kutu işaretlenemez.
 
 - ☐ ☐ ☐ **RUN-02 | P1 | Kurulum rehberini güvenli ve çalışır Compose ile eşitle** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/components/DeploymentView.tsx` üretilen örnekte `postgres:16-alpine`, public 5432/app portu, farklı DB adı ve eksik ENCRYPTION_KEY var. Asıl Compose Timescale 2.30.1-pg16 ve loopback kullanıyor.
@@ -143,9 +157,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Demo/local profilini açık seçim yap. Uzak DB seçilmişse development dahil kesintide 503 ve yazmayı durdur. transportConnected/dbAuthenticated/schemaReady/setupComplete/wsAuthenticated alanlarını ayrı göster; loading/error için local varsayma.
   - **Kabul:** SSH 127.0.0.1:15432 → VPS loopback 5432 ve VPS app→timescaledb:5432 akışları; yanlış DB parolası, tünel kopması, sayfa yenileme ve recovery testleri; yerel veri oluşmamalı.
 
-- ☑ ☐ ☐ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **AI Studio uyguladı.**
+- ☑ ☐ ☑ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **Crash-exit düzeltmesi mevcut; kontrollü kapanış kabulü eksik.**
   - **Uygulama Kanıtı (2026-09-29):** `server.ts` içinde `DISABLE_CRASH_EXIT` bypass'ı tümüyle kaldırıldı. `uncaughtException` ve `unhandledRejection` yakalandığında `gracefulCrashExit` çağrılarak HTTP sunucusu kapatılır ve kesin non-zero exit (`process.exit(1)`) uygulanır.
   - **Kabul:** Beklenen DB reconnect ayakta kalır; sentetik uncaughtException ve unhandledRejection production'da bypass olmadan non-zero exit üretir; Docker restart gerçekleşir.
+  - **Codex düzeltme talimatı (2026-09-29):** HTTP'nin yanında WebSocket, worker/timer ve PostgreSQL pool kapanışını aynı graceful-shutdown zincirinde kanıtla; Docker restart ve shutdown sonrası yeni istek reddi testi ekle.
 
 - ☐ ☐ ☐ **RUN-06 | P1 | Secrets mount bootstrap ve izinlerini doğrula.** Docker USER node ile çalışır; hostta root:root 0600 dosya okunamazsa anahtar yok kabul edilip süreç kapanır. Hedef UID/GID ile güvenli okunabilirlik, eksik dosyada açıklayıcı hata ve doğru anahtarla restart testi gerekir. Mevcut şifreli Vault için yeni rastgele anahtar üretme; önce mevcut anahtarı güvenli taşı/backup al. `.env.example` içindeki production için data/.vault_key alternatifini öneren eski açıklama güncellenmeli. Bu commit CI’ya anahtar sağlamadığı için RUN-01 açık kalır.
 
@@ -165,6 +180,12 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Etki:** DB’de bütün kayıtlar silinmiş veya farklı DB’ye geçilmişse eski cihaz/kural/kullanıcı RAM’de kalabilir.
   - **Yapılacak:** Başarılı boş sonuç ile sorgu hatasını ayır; başarılı snapshot’ı boş olsa da atomik uygula. Cache kimliğini DB/tenant ile ilişkilendir; eski credential cache’ini temizle.
   - **Kabul:** Önce dolu DB, sonra boş authoritative snapshot ve DB değişimi testinde hayalet kayıt kalmamalı; sorgu hatası boş başarı sayılmamalı.
+- ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Yeni Codex bulgusu.**
+  - **Kanıt:** CI run `36606832826` sırasında Migration 012 `column "event_key" does not exist` hatası verdi; `system_settings` relation da yoktu. Buna rağmen `/api/health/ready` 200, `ready:true` ve `database.ready:true` döndü. `src/server/routes/system.ts` readiness yalnız PG pool + `DatabaseState.READY` kontrol ediyor.
+  - **Etki:** Eksik/uyumsuz şema ile uygulama trafik almaya devam edebilir.
+  - **Codex talimatı:** transportConnected, migrationSuccessful, schemaEnsured ve setupComplete durumlarını ayır. Migration failure/pending/checksum drift → production ready 503; DB state READY olmamalı.
+  - **Kabul:** Migration failure/pending/drift → live 200, ready 503; migration+schema doğrulaması tam → ready 200; Docker healthcheck bu sözleşmeyi kullanır.
+
 
 
 ---
@@ -220,9 +241,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Sunucu alma zamanı, son heartbeat/telemetry, effective interval, grace süresi ve incident ID’yi ilişkilendir. Gönderim öncesi güncel incident durumunu kontrol et; bakım/uyku/recovery senaryolarını kaydet.
   - **Kabul:** Sanal saatle jitter/sleep/reboot/geç paket testleri ve gerçek cihaz soak kaydı: tek offline + tek recovery; çevrimiçi olaydan sonra eski offline gönderilmez.
 
-- ☑ ☐ ☐ **ALM-02 | P2 | Resend ve bildirim tesliminde zaman aşımı/tekrar politikasını tamamla** — **AI Studio uyguladı.**
+- ☑ ☐ ☑ **ALM-02 | P2 | Resend ve bildirim tesliminde zaman aşımı/tekrar politikasını tamamla** — **Kod mevcut; CI kabul testi başarısız.**
   - **Uygulama Kanıtı (2026-09-29):** `src/server/services/email.service.ts` içerisinde Resend API çağrıları için 10s `AbortController` zaman aşımı korundu. Geçici 429 (Rate Limit) ve 5xx sunucu hatalarında katlanarak artan (1s, 2s) 2 kademeli tekrar deneme (retry with exponential backoff) eklendi. `dedupKey` kullanımı ile 30 saniye içinde yinelenen mail fırtınaları engellendi. `getAppBaseUrl()` metodu harici alan adları için HTTPS protokolünü zorunlu kıldı. `src/tests/email_resend_retry_dedup.test.ts` ile doğrulandı.
   - **Kabul:** Timeout/429/5xx/başarı testleri; aynı bildirim için tekrar mail fırtınası yok; başarısız teslim görünür; reset bağlantısı doğru HTTPS domaine gider.
+  - **Codex düzeltme talimatı (2026-09-29):** `dedupKey` cache'i simulated/SMTP/Resend tüm başarılı sonuç yollarında yazılmalı. CI Node 20 testi aynı `dedupKey` için farklı simulated `messageId` gördü; iki ardışık ve paralel çağrı ile doğrula.
 
 
 ---
@@ -251,6 +273,12 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Etki:** AI Studio yanlış kopyayı düzenleyebilir; kurulum/dokümantasyon davranışı ayrışır.
   - **Yapılacak:** Aktif kaynak yolunu belirt; kullanılmayan kopyaları kontrollü temizle veya üretim kaynağına bağla. CI/Docker aynı kilitli kurulum politikasını kullansın. API ve schema doğrulamasını tek otoriteden üret.
   - **Kabul:** Temiz checkout + CI + Docker aynı bağımlılık ağacı; örnek endpoint/protokol sözleşme testi; tek aktif SSH uygulaması.
+
+- ☑ ☐ ☑ **QA-04 | P1 | Son CI kırılmalarını gider ve release gate'i gerçekten yeşil yap** — **Yeni Codex bulgusu.**
+  - **Kanıt:** CI run `36606832826`: Node 20 `npm test` 34/35 dosya, 289/290 test; e-posta dedup testi failed. Node 22 unit/build geçti, smoke WS 401 ile failed, E2E skipped. `npm ci` 10 vulnerability (9 moderate, 1 high) uyarısı verdi.
+  - **Etki:** Main release/test kapısından geçmiyor.
+  - **Codex talimatı:** ALM-02, IOT-02/SEC-11 ve DB-03 kök nedenlerini düzelt; Node 20/22 tam pipeline'ı tekrar çalıştır. High dependency vulnerability için paket bazında çözüm/istisna kaydı ekle.
+  - **Kabul:** Node 20/22 npm ci → type-check → lint → unit/integration → build → smoke → E2E tamamı başarılı; readiness negatif testleri geçer; high vulnerability çözülür veya gerekçeli istisna kaydedilir.
 
 - ☐ ☐ ☐ **QA-03 | P3 | Her doğrudan push için otomatik denetim kapsamını tamamla** — Platform kapsam sınırı.
   - **Kanıt:** 29.09.2026 tarihinde mevcut ChatGPT GitHub event desteği PR açılışı/commit güncellemesi/kapanışı ile sınırlı; repo-wide push webhook sunulmuyor. PR denetim otomasyonu kuruldu.
