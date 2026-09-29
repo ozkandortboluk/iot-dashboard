@@ -219,3 +219,10 @@ export function startCommandExpiryWorker(intervalMs = 30000) {
     });
   }, intervalMs);
 }
+
+export function stopCommandExpiryWorker() {
+  if (expiryWorkerTimer) {
+    clearInterval(expiryWorkerTimer);
+    expiryWorkerTimer = null;
+  }
+}

@@ -402,6 +402,7 @@ class SSHTunnelService {
     success: boolean;
     message: string;
     localPort?: number;
+    transportConnected?: boolean;
     isPgConnected?: boolean;
     databaseState?: string;
     hostFingerprint?: string | null;
@@ -547,14 +548,15 @@ class SSHTunnelService {
 
               const successMsg = isPgConnected
                 ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
-                : `SSH Tüneli başarıyla kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL henüz el sıkışmadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
+                : `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL veritabanı bağlantısı kurulamadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
 
               resolve({
-                success: true,
-                message: successMsg,
-                localPort,
+                success: isPgConnected,
+                transportConnected: true,
                 isPgConnected,
                 databaseState: dbState,
+                message: successMsg,
+                localPort,
               });
             }
           });

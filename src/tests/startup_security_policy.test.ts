@@ -79,4 +79,63 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
+
+  it('7. Rejects startup in production when DB password is missing (SEC-12)', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.POSTGRES_PASSWORD;
+    delete process.env.SQL_ADMIN_PASSWORD;
+    delete process.env.SQL_PASSWORD;
+    delete process.env.PGPASSWORD;
+    delete process.env.DB_PASSWORD;
+    process.env.DATABASE_URL = 'postgresql://iot_user@localhost:5432/iot_db';
+    process.env.JWT_SECRET = 'StrongUniqueJwtSecret_1234567890!';
+    process.env.ENCRYPTION_KEY = 'e8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
+
+    const result = validateProductionSecurityPolicy();
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toContain('SEC-12');
+  });
+
+  it('8. Rejects startup in production when JWT secret is missing or too short (SEC-13)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.POSTGRES_PASSWORD = 'StrongUniquePass_987654321!';
+    delete process.env.JWT_SECRET;
+    delete process.env.SESSION_SECRET;
+    process.env.ENCRYPTION_KEY = 'e8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
+
+    const result = validateProductionSecurityPolicy();
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toContain('SEC-13');
+
+    // Too short (< 16 chars)
+    process.env.JWT_SECRET = 'short_secret';
+    const shortResult = validateProductionSecurityPolicy();
+    expect(shortResult.valid).toBe(false);
+    expect(shortResult.errors.join(' ')).toContain('SEC-13');
+  });
+
+  it('9. Rejects startup in production when ENCRYPTION_KEY is missing or too short (SEC-13)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.POSTGRES_PASSWORD = 'StrongUniquePass_987654321!';
+    process.env.JWT_SECRET = 'StrongUniqueJwtSecret_1234567890!';
+    delete process.env.ENCRYPTION_KEY;
+
+    const result = validateProductionSecurityPolicy();
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toContain('SEC-13');
+  });
+
+  it('10. Ensures former bypass envs fail to bypass security policy checks (SEC-13)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.POSTGRES_PASSWORD = 'postgres'; // weak
+    process.env.JWT_SECRET = 'jwt_secret'; // weak
+    process.env.ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'; // default
+    process.env.BYPASS_SECURITY_POLICY = 'true';
+    process.env.ALLOW_INSECURE_SECRETS = 'true';
+    process.env.SKIP_SECURITY_CHECK = 'true';
+
+    const result = validateProductionSecurityPolicy();
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
 });

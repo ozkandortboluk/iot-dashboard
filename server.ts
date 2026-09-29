@@ -10,11 +10,17 @@ import { createServer as createViteServer } from 'vite';
 import { systemLogger } from './src/server/services/systemLogger.service.js';
 import { initWebSocketServer } from './src/server/services/websocket.js';
 import { initSimulator } from './src/server/services/simulator.js';
-import { startOtaWorker } from './src/server/services/otaWorker.js';
-import { startNoDataWorker } from './src/server/services/noDataWorker.js';
-import { startCommandExpiryWorker } from './src/server/services/command.service.js';
+import { stopWebSocketServer } from './src/server/services/websocket.js';
+import { setSimulatorActive } from './src/server/services/simulator.js';
+import { startOtaWorker, stopOtaWorker } from './src/server/services/otaWorker.js';
+import { startNoDataWorker, stopNoDataWorker } from './src/server/services/noDataWorker.js';
+import { startCommandExpiryWorker, stopCommandExpiryWorker } from './src/server/services/command.service.js';
+import { recycleSharedPgPool } from './src/server/database/connection.js';
 import { getVaultStatus } from './src/server/utils/crypto.js';
-import { validateProductionSecurityPolicy } from './src/server/utils/startupSecurityPolicy.js';
+import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from './src/server/utils/startupSecurityPolicy.js';
+
+// Bootstrap runtime security secrets early before any secret-dependent modules run
+ensureRuntimeSecuritySecrets();
 
 
 // Route Handlers
@@ -53,16 +59,44 @@ import { secretsRouter } from './src/server/routes/secrets.js';
 
 // Global Process Crash Shields
 let isShuttingDown = false;
-function gracefulCrashExit(errType: string, err: any) {
+
+export async function performGracefulShutdown(reason: string, exitCode = 0) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.error(`[CRITICAL PROCESS CRASH] ${errType} encountered. Initiating graceful shutdown (non-zero exit)...`);
+  console.log(`[Graceful Shutdown] ${reason} - Sunucu güvenli şekilde durduruluyor...`);
+
+  // 1. Stop background workers & timers
+  try { stopNoDataWorker(); } catch {}
+  try { stopCommandExpiryWorker(); } catch {}
+  try { stopOtaWorker(); } catch {}
+  try { setSimulatorActive(false); } catch {}
+  try { (db as any).autoRepairService?.stopWatchdog(); } catch {}
+
+  // 2. Close WebSocket server & disconnect all client sockets
+  try { stopWebSocketServer(); } catch {}
+
+  // 3. Close HTTP server so it stops listening
+  const serverClosePromise = new Promise((resolve) => {
+    server.close(() => {
+      console.log('[Graceful Shutdown] HTTP dinleyici kapatıldı.');
+      resolve(true);
+    });
+  });
+
+  // 4. Close PostgreSQL pool
   try {
-    server.close();
+    await recycleSharedPgPool();
+    console.log('[Graceful Shutdown] PostgreSQL bağlantı havuzu kapatıldı.');
   } catch {}
-  setTimeout(() => {
-    process.exit(1);
-  }, 300);
+
+  await Promise.race([serverClosePromise, new Promise((r) => setTimeout(r, 2000))]);
+
+  console.log(`[Graceful Shutdown] Kapanış zinciri tamamlandı. Çıkış kodu: ${exitCode}`);
+  process.exit(exitCode);
+}
+
+function gracefulCrashExit(errType: string, err: any) {
+  performGracefulShutdown(`CRITICAL PROCESS CRASH (${errType})`, 1);
 }
 
 process.on('uncaughtException', (err: any) => {
@@ -96,6 +130,19 @@ const app = express();
 // Configure Trust Proxy: Trust loopback/reverse proxy by default or TRUST_PROXY env setting
 const trustProxyConfig = process.env.TRUST_PROXY || 'loopback';
 app.set('trust proxy', trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : trustProxyConfig);
+
+// Fast 503 Service Unavailable rejection for new incoming requests when shutting down
+app.use((_req, res, next) => {
+  if (isShuttingDown) {
+    res.setHeader('Connection', 'close');
+    return res.status(503).json({
+      success: false,
+      error: 'Sunucu kapanıyor (503 Service Unavailable)',
+      message: 'Sunucu durdurma sürecindedir, yeni istek kabul edilmiyor.',
+    });
+  }
+  next();
+});
 
 // Security Headers Middleware (OLD-219: CSP, HSTS, X-Content-Type-Options, etc.)
 app.use((_req, res, next) => {
@@ -399,6 +446,7 @@ if (db.getDatabaseState() === DatabaseState.READY) {
 async function setupViteOrStatic() {
   const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
   if (isProd) {
+    ensureRuntimeSecuritySecrets();
     const vaultStatus = getVaultStatus();
     if (!vaultStatus.configured) {
       console.error(`====================================================`);
@@ -479,19 +527,7 @@ setupViteOrStatic();
 
 // Graceful Shutdown Handler
 const gracefulShutdown = (signal: string) => {
-  console.log(`\n[${signal}] Kapatma sinyali alındı. Sunucu güvenli şekilde durduruluyor...`);
-  
-  // Close the HTTP server so it stops accepting new connections
-  server.close(() => {
-    console.log('HTTP sunucusu kapatıldı.');
-    process.exit(0);
-  });
-  
-  // Force shutdown after 10 seconds if graceful shutdown hangs
-  setTimeout(() => {
-    console.error('Kapatma işlemi zaman aşımına uğradı, süreç zorla sonlandırılıyor.');
-    process.exit(1);
-  }, 10000).unref();
+  performGracefulShutdown(`Sinyal alındı (${signal})`, 0);
 };
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

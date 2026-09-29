@@ -52,4 +52,23 @@ describe('ALM-02: Email Service Retry, Backoff, Deduplication & HTTPS URL Policy
     expect(res2.success).toBe(true);
     expect(res2.messageId).toBe(res1.messageId);
   });
+
+  it('4. Deduplicates simulated email mode calls with same dedupKey', async () => {
+    emailService.updateEmailConfig({ provider: 'simulated' });
+
+    const simOptions = {
+      to: 'sim_test@example.com',
+      subject: 'Simulated Notification',
+      html: '<p>Simulated Body</p>',
+      dedupKey: 'dedup_sim_1002',
+    };
+
+    const sim1 = await emailService.sendEmail(simOptions);
+    expect(sim1.success).toBe(true);
+    expect(sim1.provider).toBe('simulated');
+
+    const sim2 = await emailService.sendEmail(simOptions);
+    expect(sim2.success).toBe(true);
+    expect(sim2.messageId).toBe(sim1.messageId);
+  });
 });

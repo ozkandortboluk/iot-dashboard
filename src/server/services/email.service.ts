@@ -275,12 +275,16 @@ export class EmailService {
       }
       console.log('================================================================\n');
 
-      return {
+      const simResult: SendEmailResult = {
         success: true,
         provider: 'simulated',
         messageId: simMessageId,
         simulated: true,
       };
+      if (dedupKey) {
+        this.dedupCache.set(dedupKey, { timestamp: Date.now(), result: simResult });
+      }
+      return simResult;
     }
 
     // 2. SMTP Provider
@@ -311,11 +315,15 @@ export class EmailService {
         });
 
         console.log(`[EmailService] SMTP ile e-posta başarıyla iletildi (${to}): Message ID ${info.messageId}`);
-        return {
+        const smtpResult: SendEmailResult = {
           success: true,
           provider: 'smtp',
           messageId: info.messageId,
         };
+        if (dedupKey) {
+          this.dedupCache.set(dedupKey, { timestamp: Date.now(), result: smtpResult });
+        }
+        return smtpResult;
       } catch (smtpErr: any) {
         console.error(`[EmailService] SMTP Hatası (${to}):`, smtpErr?.message || smtpErr);
         return {

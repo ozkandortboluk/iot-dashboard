@@ -81,6 +81,10 @@ sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Respons
     return res.json({
       success: true,
       isTunnelAllowed: isSshTunnelAllowed(),
+      transportConnected: state.status === 'connected',
+      dbAuthenticated: isDbConnected,
+      schemaReady: isDbConnected && databaseState === 'READY',
+      setupComplete: databaseState !== 'SETUP',
       isDbConnected,
       databaseState,
       activeEngine,

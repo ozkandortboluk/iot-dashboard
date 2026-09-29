@@ -64,55 +64,105 @@ export const DeploymentView: React.FC = () => {
   }
 
   // Dynamic Docker Compose Yaml based on user configuration
-  const dockerComposeYaml = `version: '3.8'
-
-services:
-  # IoT Dashboard & REST/WebSocket Uygulama Sunucusu
-  app:
-    build: .
-    container_name: nexus_app
-    ports:
-      - "${customAppPort}:3000"
+  const dockerComposeYaml = `services:
+  # TimescaleDB / PostgreSQL Ana Veritabanı (Görünürlük: Yalnızca Docker İç Ağı ve Loopback)
+  timescaledb:
+    image: timescale/timescaledb:2.30.1-pg16
+    container_name: nexus_timescaledb
+    restart: unless-stopped
+    shm_size: 256mb
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DATABASE_URL=postgres://nexus_user:${customDbPassword}@postgres:5432/nexus_dashboard
-      - GEMINI_API_KEY=${customApiKey}
-      - ENABLE_SIMULATOR="true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: always
-
-  # PostgreSQL İlişkisel Veritabanı
-  postgres:
-    image: postgres:16-alpine
-    container_name: nexus_postgres
-    environment:
-      POSTGRES_USER: nexus_user
+      POSTGRES_USER: iot_user
       POSTGRES_PASSWORD: ${customDbPassword}
-      POSTGRES_DB: nexus_dashboard
+      POSTGRES_DB: iot_dashboard
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432" # Dış ağa kapalı, yalnız sunucu içi (loopback) erişim
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nexus_user -d nexus_dashboard"]
+      test: ["CMD-SHELL", "pg_isready -U iot_user -d iot_dashboard"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    networks:
+      - nexus_net
+
+  # IoT Telemetri, REST & WebSocket Uygulama Sunucusu
+  app:
+    build: .
+    container_name: nexus_app
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${customAppPort}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      ENCRYPTION_KEY: \${ENCRYPTION_KEY}
+      JWT_SECRET: \${JWT_SECRET}
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: iot_dashboard
+      DB_USER: iot_user
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: iot_user
+      POSTGRES_DB: iot_dashboard
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
-    restart: always
+      - app_data:/app/data
+      - ./secrets:/app/secrets:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - nexus_net
+
+  # Nginx Ters Proxy & TLS Katmanı
+  proxy:
+    image: nginx:alpine
+    container_name: nexus_proxy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - nexus_net
 
 volumes:
-  pgdata:`;
+  timescaledb_data:
+  app_data:
 
-  const envFileContent = `# Environment Config File (.env)
+networks:
+  nexus_net:
+    driver: bridge`;
+
+  const envFileContent = `# Güvenli Üretim Ortam Değişkenleri (.env)
 NODE_ENV=production
-PORT=3000
-DATABASE_URL=postgres://nexus_user:${customDbPassword}@localhost:5432/nexus_dashboard
-GEMINI_API_KEY=${customApiKey}
-ENABLE_SIMULATOR=true`;
+PORT=${customAppPort}
+POSTGRES_USER=iot_user
+POSTGRES_PASSWORD=${customDbPassword}
+POSTGRES_DB=iot_dashboard
+ENCRYPTION_KEY= # 64-karakter rastgele hex anahtar
+JWT_SECRET= # 64-karakter rastgele hex secret
+DATABASE_URL=postgresql://iot_user:${customDbPassword}@timescaledb:5432/iot_dashboard
+TRUST_PROXY=loopback`;
 
   const nginxConfig = `# Nginx Proxy ve SSL Yapılandırması (/etc/nginx/sites-available/dashboard)
 server {
