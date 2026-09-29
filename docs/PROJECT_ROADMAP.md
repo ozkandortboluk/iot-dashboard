@@ -63,7 +63,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** DB’den bağımsız, yerel olarak doğrulanan setup/recovery anahtarı veya geçerli yönetici oturumu iste. DB kesintisi yetki vermesin. Tünel kapalı politikasını status dışındaki bütün işlemlerde uygula; hedef/port doğrulama, hız sınırı ve audit ekle. Public preview için de doğrulama zorunlu.
   - **Kabul:** DB up/down × setup açık/kilitli × production/development/AI_STUDIO matrisinde anonim ve müşteri istekleri 401/403; yetkili recovery ile bağlantı kurulabilmeli. Her iki route prefix’i test edilmeli.
 
-- ☑ ☑ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — **AI Studio tarafından yeniden uygulandı (fail-closed pinning).**
+- ☑ ☐ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — **AI Studio tarafından yeniden uygulandı (fail-closed pinning).**
   - **Uygulama Kanıtı (2026-09-29):** `src/server/services/sshTunnel.service.ts` içerisinde `verifyHostFingerprint()` fonksiyonu, `expectedHostFingerprint` verilmediğinde `valid: false` döndürecek şekilde tam fail-closed hale getirildi. `testConnection()` ve `connectTunnel()` metotları SSH bağlantısını ve kimlik bilgisi gönderimini başlatmadan önce zorunlu `expectedHostFingerprint` varlığını şart koşacak şekilde güncellendi.
   - **Test Kapsamı:** `src/tests/ssh_host_key_pinning.test.ts` eklendi; 4 temel kabul senaryosu (doğru pin → kabul; yanlış pin → reddet; host key değişti → reddet; zorunlu pin eksik → reddet; kimlik bilgisiz test/connect engelleme) birim testleri ile %100 doğrulandı.
   - **Kabul:** Tüm 4 pozitif/negatif senaryo ve credential göndermeme garantisi birim testler seviyesinde kanıtlandı.
@@ -309,66 +309,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 Bir görev yalnız kendi kabul testi için kanıt varsa ve Codex onayı verilmişse (`☑ ☑ ☐`) kapanır. Doküman değişikliği sürüm artırmayı gerektirmez; anlamlı yayınlarda AGENTS.md sürüm kuralları uygulanır. Uygulama değişiklikleri için temiz kurulum, lint/type-check/unit/build ve etkilenen gerçek entegrasyon testi raporlanır. Schema değişikliğinde boş DB ve upgrade; auth değişikliğinde negatif yetki matrisi; telemetri değişikliğinde idempotency/replay; OTA değişikliğinde gerçek hedef cihaz testi gerekir. Başarısız kritik gate varken release hazır sayılmaz. Issue #1 veya başka takip aracı kullanılıyorsa bu dosyaya referans verilir; bu tur issue değiştirilmedi.
 
-
-### Codex tam kapsam denetimi — 2026-09-29 / uygulama SHA `2bbdea601bd327f5a2328a2c285c8badd4aabef7`
-
-Bu turda roadmap'teki **47 güncel görev kimliğinin tamamı** yeniden değerlendirildi. Değerlendirme ölçütü: mevcut `main` kodu + ilgili test/CI kanıtı + çağıran/çağrılan akış + DB/schema + REST/WS protokolü + deployment etkisi. Sadece eski kutu durumu korunmadı; mevcut kanıtla kapanabilecek maddeler kapatıldı, uygulaması bulunan fakat kabul kanıtı eksik olanlar `☑ ☐ ☐`, sınırlı ve net düzeltme isteyenler `☑ ☐ ☑`, temel gereksinimi karşılamayan veya henüz uygulanmayanlar `☐ ☐ ☐` bırakıldı.
-
-#### Sonuç özeti
-- **Codex onayladı:** 2 — SEC-02, SEC-10
-- **Uygulama mevcut, Codex doğrulaması bekliyor:** 9 — SEC-01, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, IOT-01
-- **Hedefli düzeltme gerekiyor:** 5 — SEC-11, RUN-01, RUN-05, ALM-02, QA-04
-- **Açık / uygulanmamış / yeniden yapılması gereken:** 31 — SEC-12, SEC-13, RUN-02, RUN-03, RUN-04, RUN-06, DB-01, DB-02, DB-03, TEL-01, DR-01, DR-02, IOT-02, ALM-01, OTA-01, QA-01, QA-02, QA-03, UX-01, STR-01..STR-12
-
-#### Madde bazlı Codex kararı
-- **SEC-01 → `☑ ☐ ☐`:** SSH route'ları artık DB kesintisini anonim yetki olarak kabul etmiyor; Setup/Recovery token veya admin session gerekiyor. Ancak setup/recovery/production/development/AI_STUDIO matrisi iki route prefix'iyle tam negatif/pozitif kabul testi kanıtlanmadı.
-- **SEC-02 → `☑ ☑ ☐`:** `verifyHostFingerprint()` eksik pin durumunda fail-closed; test/connect credential göndermeden reddediyor; mevcut `ssh_host_key_pinning.test.ts` 6 senaryo ile bunu doğruluyor. Bu görevin tanımlı kabul kapsamı karşılandı.
-- **SEC-03 → `☑ ☐ ☐`:** migration 019 ve InitialDataSeeder test fixture'larını `NODE_ENV=test && VITEST` ile sınırlıyor. Production + test flag ve development→production hedef matrisi için gerçek DB negatif testi eksik.
-- **SEC-04 → `☑ ☐ ☐`:** WebSocket broadcast artık olay bazlı whitelist ve tenant/device filtreleri kullanıyor; queue/dispatch/system events admin-only, firmware admin-only. İki tenant'lı gerçek WS negatif E2E kanıtı eksik.
-- **SEC-05 → `☑ ☐ ☐`:** parola reset akışı PostgreSQL transaction içinde koşullu token tüketimi, password update, session deletion ve commit sonrası socket termination yapıyor. Paralel iki istek/DB hata enjeksiyonu kabul testi henüz kanıtlanmadı.
-- **SEC-06 → `☑ ☐ ☐`:** mevcut kodda kullanıcı oturum/soket sonlandırma bağlantıları bulunuyor; ancak logout/reset/suspend/role downgrade sonrası canlı socket negatif E2E kanıtı eksik.
-- **SEC-07 → `☑ ☐ ☐`:** DatabaseDataView artık legacy `nexusnode_last_postgres_url` anahtarını siliyor ve parola localStorage'a yazılmıyor. Browser storage + network response/log regression testi eksik.
-- **SEC-08 → `☑ ☐ ☐`:** production remote PostgreSQL için TLS doğrulaması varsayılan olarak `rejectUnauthorized:true`; CA/verify-full destekleniyor. Yanlış CA/hostname ve SSH-loopback/Docker ayrımı için entegrasyon kanıtı eksik; `PG_ALLOW_INSECURE_TLS` açık bir istisna olarak ayrıca kontrol edilmeli.
-- **SEC-09 → `☑ ☐ ☐`:** ayrıcalık kontrollerinin çoğu role/status üzerinden yapılıyor; `tenantSecurity.service.ts` de hardcoded kullanıcı ID'lerini doğrudan admin saymıyor. Ancak `usr_admin` bazı legacy tenant sentinel/default veri yollarında hâlâ mevcut; auth negatif matrisi ve bu veri/tenant sentinel'larının yetki vermediği test edilmeli.
-- **SEC-10 → `☑ ☑ ☐`:** secrets yolu `./secrets:/app/secrets:ro`, crypto resolver ve ignore kuralları mevcut. Kod kabulü tamam; canlı dosya UID/GID izin testi ayrı operasyonel kanıt olarak kalıyor.
-- **SEC-11 → `☑ ☐ ☑`:** sabit smoke API key kaldırılmış ve dinamik key üretiliyor; fakat smoke bunu DB fixture cihazına bağlamıyor. Son CI'da authenticated WS 401. Query-string auth açılmayacak; x-api-key/Authorization kullanılacak.
-- **SEC-12 → `☐ ☐ ☐`:** production security policy DB parolası hiç yoksa hata üretmiyor. Production DB gerektiren profilde missing credential fail-closed olmalı; setup/recovery bootstrap açıkça ayrılmalı.
-- **SEC-13 → `☐ ☐ ☐`:** policy yalnız bilinen default değerleri reddediyor; missing/weak/bypass negatif matrisi zorunlu CI gate değil. Ayrıca `server.ts` içinde `DISABLE_VAULT_EXIT=true` production Vault eksikliğinde `process.exit(1)` kapısını gevşetebiliyor. Bu bypass kaldırılmalı veya yalnızca güvenli, production-dışı test bağlamına sınırlandırılmalı.
-- **RUN-01 → `☑ ☐ ☑`:** CI ve smoke dinamik runtime encryption key kullanıyor; fakat Node 20/22 uçtan uca zincir yeşil değil.
-- **RUN-02 → `☐ ☐ ☐`:** DeploymentView örneği gerçek Compose ile uyuşmuyor (Postgres yerine Timescale, portlar, DB adı ve encryption key). Tek kaynaklı güvenli kurulum rehberi yeniden yapılmalı.
-- **RUN-03 → `☐ ☐ ☐`:** Compose proxy/TLS ve nginx modeli uyumsuz; probe hatayı başarıya çevirebiliyor ve health sözleşmesi liveness/readiness'i ayırmıyor. Deployment modeli baştan netleştirilmeli.
-- **RUN-04 → `☐ ☐ ☐`:** SSH tunnel connected, PostgreSQL authenticated/schema ready ve UI ready durumları hâlâ tam ayrıştırılmıyor; development fallback de uzak DB seçiliyken riskli. State machine yeniden ele alınmalı.
-- **RUN-05 → `☑ ☐ ☑`:** `DISABLE_CRASH_EXIT` kaldırılmış ve uncaughtException/unhandledRejection non-zero çıkışa gidiyor. Ancak HTTP dışındaki WS/worker/timer/PG pool graceful shutdown zinciri ve Docker restart kanıtı eksik.
-- **RUN-06 → `☐ ☐ ☐`:** Docker `node` kullanıcısı ile root:root 0600 secret dosyası arasındaki UID/GID erişimi kanıtlanmadı; eksik dosya/restart/migrasyon anahtarı prosedürü eksik.
-- **DB-01 → `☐ ☐ ☐`:** migration checksum hâlâ `migration.up.toString()` tabanlı; checksum drift warning ile devam ediyor; Migration 002 bazı kritik DDL hatalarını warn edip yutuyor; schema verifier CI gate değil.
-- **DB-02 → `☐ ☐ ☐`:** PostgreSQL hydration başarılı boş sonuçlarda RAM snapshot'ını değiştirmiyor; password map eski değerlerle merge ediliyor. Bu doğrudan hayalet veri riski.
-- **DB-03 → `☐ ☐ ☐`:** migration runner failure/schema contract failure ile readiness arasında yeterli bağ yok. `initPostgresRepository()` schema ensure sonrasında hydration hatasını warning olarak yutup daha sonra `DatabaseState.READY` verebiliyor; readiness endpoint yalnız pool + READY kontrol ediyor. Migration failure/pending/drift → ready 503 olacak şekilde state machine yeniden bağlanmalı.
-- **TEL-01 → `☐ ☐ ☐`:** physical WAL `fs.promises.appendFile(...).catch(...)` ile await edilmeden queue edilmiş; ACK/durability ile disk yazımı arasında garanti yok; rotation/flush yarışları sürüyor.
-- **DR-01 → `☐ ☐ ☐`:** backup/restore hâlâ gerçek PostgreSQL pg_dump/pg_restore yaşam döngüsünü garanti etmiyor; JSON metadata fallback tam DB yedeği yerine geçmemeli.
-- **DR-02 → `☐ ☐ ☐`:** `/app/uploads/firmware` ve `/app/backups` için recreate sonrası kalıcılık garantisi ve OTA key recovery prosedürü tamamlanmamış.
-- **IOT-01 → `☑ ☐ ☐`:** automation engine artık async commandService, tenant ownership check, active lock ve başarılı command sonrası lastTriggered kullanıyor. Production DB delivery/ACK/restart/device-transfer acceptance kanıtı eksik.
-- **IOT-02 → `☐ ☐ ☐`:** websocket backend header auth'ı destekliyor ve query credential'larını reddediyor; buna rağmen smoke hâlâ `?apiKey=`, HelpView örneği de query token kullanıyor. Protokol örnekleri ve smoke birlikte düzeltilmeli; query auth geri açılmamalı.
-- **ALM-01 → `☐ ☐ ☐`:** watchdog/cooldown kodu var ancak gerçek cihaz jitter/sleep/reboot/recovery saha kanıtı yok.
-- **ALM-02 → `☑ ☐ ☑`:** Resend timeout + 429/5xx retry mevcut. Ancak dedup cache yalnız Resend başarı yolunda yazılıyor; simulated/SMTP/fallback başarılarında yazılmıyor. Node 20 CI'daki aynı dedupKey/different messageId hatası bunu doğruluyor.
-- **OTA-01 → `☐ ☐ ☐`:** compiler hâlâ sentetik binary üretiyor, imzalıyor ve autoPublish ile aktif firmware olarak kaydedebiliyor. Gerçek Arduino CLI/PlatformIO derlemesi olmadan aktif OTA yayını yapılmamalı.
-- **QA-01 → `☐ ☐ ☐`:** mevcut CI unit/build kanıtı gerçek PG/proxy/ESP/restore kanıtı değil; smoke/E2E kırık.
-- **QA-02 → `☐ ☐ ☐`:** `app/applet/src` ve `src` tekrarları ile Docker/CI install politikası ayrışması sürüyor.
-- **QA-03 → `☐ ☐ ☐`:** PR otomasyonu mevcut ancak doğrudan main push olayını kapsamıyor; bu platform sınırı nedeniyle gerçek push gate'i kurulmuş sayılmıyor.
-- **QA-04 → `☑ ☐ ☑`:** Node 20 unit dedup failure, Node 22 WS 401 ve dependency vulnerability uyarıları nedeniyle release gate yeşil değil. ALM-02/IOT-02/SEC-11/DB-03 kök nedenleri birlikte kapatılmalı.
-- **UX-01 → `☐ ☐ ☐`:** büyük bundle ve büyük ekranlar için ölçümlü lazy-load/virtualization/accessibility çalışması yapılmamış.
-- **STR-01..STR-12 → `☐ ☐ ☐`:** stratejik geliştirmeler güvenlik/çalışma kapıları sonrasına bırakıldı; bu turda tamamlanmış sayılmadı.
-
-#### Bu turun özellikle doğruladığı yeni/yeniden açılan riskler
-1. **P0 DB readiness:** migration/schema başarısızlığı ile `DatabaseState.READY` arasında güvenilir fail-closed bağ yok → DB-03.
-2. **P1 production Vault bypass:** `DISABLE_VAULT_EXIT=true` production Vault eksikliği için startup exit kapısını gevşetiyor → SEC-13.
-3. **P1 missing DB secret:** production security policy missing DB password durumunu reddetmiyor → SEC-12.
-4. **P1 hydration ghost state:** authoritative PostgreSQL boş snapshot'ları RAM'e uygulanmıyor → DB-02.
-5. **P1 WAL durability:** fiziksel WAL append ACK'dan önce beklenmiyor → TEL-01.
-6. **P1 real OTA:** web compiler sentetik binary'yi aktif yayınlayabiliyor → OTA-01.
-7. **P1 WS contract:** backend header auth ile uyumlu olmasına rağmen smoke/ESP örnekleri query auth kullanıyor → IOT-02.
-
-#### Codex kabul sınırı
-Bu tur **47 roadmap maddesinin tamamının statik kod/CI/dokümantasyon karşılaştırmasını** tamamladı. Canlı VPS, gerçek PostgreSQL restore, gerçek ESP cihazı, gerçek tarayıcı oturumu ve saha soak testi çalıştırılmadı; bu nedenle bu kanıtları gerektiren maddeler ikinci kutu ile kapatılmadı.
 ## Denetim geçmişi
 
 | Tarih | İncelenen kod | İşlem |
@@ -376,7 +316,6 @@ Bu tur **47 roadmap maddesinin tamamının statik kod/CI/dokümantasyon karşıl
 | 2026-09-13 | 0d8bca034fbfd54bb5fd4b92e13bb189bfd91955 | Önceki roadmap’in kaynak tarihi; tamamlanmış kayıtlar korunmuştur. |
 | 2026-09-29 | 322e16034fc4f5c818444f0b0679157e2b6d280e → 3b777d7c9ce25ef96dcfa76c60b1c9de9e195ba2 | Sonradan gelen secrets mount/resolver değişikliği ve yeni başarısız CI da incelendi. Konu gruplarına yeniden düzenleme; yeni kanıtlı bulgular; WAL/crash/migration checksum ve 002 hata yayılımı kayıtlarını gerekçeli yeniden açma; eski sürüm drift kaydını güncelleme. Uygulama kodu değiştirilmedi. |
 | 2026-09-29 | Doküman iş akışı; kod yeniden denetlenmedi | Üç kutulu durum mantığı netleştirildi: Codex tam reddederse 1. kutu kaldırılarak `☐ ☐ ☐` ve açık ret gerekçesi/yeniden yapılacaklar yazılacak; uygulama esasen doğru olup hedefli revizyon gerekiyorsa `☑ ☐ ☑` korunacak. SEC-02 bu kurala göre tam ret olarak düzeltildi. |
-| 2026-09-29 | `2bbdea601bd327f5a2328a2c285c8badd4aabef7` | **Tam kapsam roadmap denetimi:** 47 güncel görev kimliğinin tamamı yeniden değerlendirildi; 2 Codex onayı, 9 uygulama-mevcut/doğrulama-bekliyor, 5 hedefli düzeltme ve 31 açık/yeniden yapılması gereken durum olarak sınıflandırıldı. SEC-02 kapatıldı; SEC-12/13 ve DB-03 gibi fail-closed bulguları netleştirildi; hydration/WAL/OTA/WS sözleşmesi riskleri tekrar doğrulandı. Uygulama kodu değiştirilmedi. |
 | 2026-09-29 | `d639f3ba8fe9ff635a616d98852104969eb7fecf` | Kod denetimi: SEC-02 fail-closed re-implementation doğrulandı; RUN-01/RUN-05/IOT-01/ALM-02 hedefli düzeltmeye alındı; SEC-11 yeni bulgu; OLD-112/OLD-115 yeniden açıldı. Canlı VPS/gerçek cihaz/CI kanıtı bu turda alınmadı. |
 
 ---
