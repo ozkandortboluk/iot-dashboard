@@ -12,12 +12,14 @@
 - **P2:** güvenilirlik, performans, kullanılabilirlik ve mevcut özelliklerin tamamlanması.
 - **P3:** teknik borç ve stratejik genişleme. Güvenlik/çalışma engelinin önüne geçmez.
 - **Her görev başında üç kutu bulunur; sıra değişmez: 1. AI Studio uygulama durumu, 2. Codex denetim/onay durumu, 3. Codex düzeltme/revizyon talebi.** Dosyada üç kutunun da görünür olması için `☐` (boş) ve `☑` (işaretli) kullanılır.
-- `☐ ☐ ☐` → Henüz yapılmadı (Açık iş kalemi).
+- `☐ ☐ ☐` → Henüz yapılmadı **veya Codex uygulamayı tamamen reddetti**. Tam ret halinde 1. kutu özellikle kaldırılır; görev açık iş olarak yeniden ele alınır.
 - `☑ ☐ ☐` → AI Studio uyguladı, Codex incelemesi bekleniyor.
-- `☑ ☐ ☑` → Codex düzeltme istedi (3. kutu denetçinin düzeltme beklediğini ve AI Studio'nun bu maddeye tekrar bakması gerektiğini belirtir).
+- `☑ ☐ ☑` → Codex uygulamayı kabul edilebilir buldu ancak **belirli düzeltme/revizyon istedi**. 1. kutu korunur; 3. kutu işaretlenir ve istenen düzeltme açıkça yazılır.
 - `☑ ☑ ☐` → Codex onayladı (Kabul kriterleri başarıyla karşılandı).
-- **Düzeltme ve Tarihçe Koruma Kuralı:** Codex düzeltme istediğinde AI Studio'nun ilk işareti artık silinmez. Üçüncü kutu işaretlenir (`☑ ☐ ☑`). Böylece hem “AI Studio bunu yaptı” geçmişi korunur hem de “Codex düzeltme istiyor” durumu açıkça görülür.
+- **Tam ret kuralı:** Kod/uygulama temel gereksinimi karşılamıyorsa, güvenlik politikasını ihlal ediyorsa, yanlış/eksik bir mimariyle çözmeye çalışıyorsa veya mevcut uygulama fiilen gereksinimi yerine getirmiyorsa Codex `☐ ☐ ☐` durumuna döner. 1. kutunun kaldırılmasının hemen altında/ilgili görevde **neden reddedildiği ve yeniden yapılması gerekenler** yazılır. Böylece AI Studio maddeyi “zaten uygulandı” kabul edip atlayamaz.
+- **Hedefli düzeltme kuralı:** Uygulama esasen doğruysa ve sorun belirli, sınırlı değişikliklerle giderilebiliyorsa `☑ ☐ ☑` kullanılır. 1. kutu korunur; 3. kutu altında istenen düzenleme ve kabul testi açıkça belirtilir.
 - AI Studio düzeltmeyi yaptıktan sonra durum: `☑ ☐ ☑` → `☑ ☐ ☐` (3. kutu kaldırılır) → Codex yeniden kontrol eder → `☑ ☑ ☐`.
+- **Kritik ayrım:** Codex'in her düzeltme talebi tam ret değildir. Temel/başarısız uygulama = `☐ ☐ ☐`; mevcut ve büyük ölçüde doğru uygulamada hedefli revizyon = `☑ ☐ ☑`.
 - AI Studio yaptığı işi ve kanıtını yazdıktan sonra **yalnız ilk kutuyu** işaretler (`☑ ☐ ☐`); ikinci kutuyu kendi kendine işaretlemez. Codex denetleyip onaylarsa ikinci kutuyu işaretler (`☑ ☑ ☐`).
 - Henüz denetlenmemiş bir `☑ ☐ ☐` madde sırf bekliyor diye sıfırlanmaz. Önceden onaylı iş bozulmuşsa kutular yeniden açılır. Her ret/regresyon için SHA, gerekçe, istenen düzeltme ve tekrar kabul testi yaz-boz alanına ve ilgili göreve yazılır.
 - İkinci kutu yalnız belirtilen kabul kapsamının onayıdır. Kod varlığı, birim test, gerçek DB testi ve saha kanıtı ayrı belirtilir; yapılmayan test yapılmış sayılmaz.
@@ -60,11 +62,12 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** DB’den bağımsız, yerel olarak doğrulanan setup/recovery anahtarı veya geçerli yönetici oturumu iste. DB kesintisi yetki vermesin. Tünel kapalı politikasını status dışındaki bütün işlemlerde uygula; hedef/port doğrulama, hız sınırı ve audit ekle. Public preview için de doğrulama zorunlu.
   - **Kabul:** DB up/down × setup açık/kilitli × production/development/AI_STUDIO matrisinde anonim ve müşteri istekleri 401/403; yetkili recovery ile bağlantı kurulabilmeli. Her iki route prefix’i test edilmeli.
 
-- ☑ ☐ ☑ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `src/server/services/sshTunnel.service.ts` → `verifyHostFingerprint` her zaman `valid: true` döndürüyor. `322e160` commit’i eşleşmeme reddini kaldırdı; `pinned` alanı doğrulama yapılmadan true olabiliyor.
-  - **Etki:** Yanlış sunucu/MITM bağlantısı engellenmiyor; SSH parolası karşı tarafa gönderilebilir.
-  - **Yapılacak:** Güvenilir kanaldan alınmış SHA256 parmak izini tam karşılaştır; uyuşmazlıkta kimlik bilgisi göndermeden bağlantıyı kes. Base64 kısmını küçük harfe dönüştürme. İlk güven kararı açık olmalı; UI gerçek doğrulama sonucunu göstermeli.
-  - **Kabul:** Doğru pin kabul; yanlış pin, değiştirilmiş host key ve zorunlu pinin eksikliği reddedilmeli. Test ve connect aynı doğrulayıcıyı kullanmalı.
+- ☐ ☐ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — **Codex tam ret / yeniden uygulanmalı.**
+  - **Codex ret gerekçesi (2026-09-29, 9165ce4):** Mevcut `verifyHostFingerprint` uygulaması temel host-key pinning gereksinimini karşılamıyor. Güvenilir fingerprint verilmediğinde `valid: true` döndürülmesi fail-closed değildir. Bu nedenle uygulama “host key doğrulaması geri getirildi” kabul edilemez; 1. kutu kaldırılmıştır. Bu, hedefli küçük bir düzeltme değil, güvenlik gereksiniminin yeniden doğru şekilde uygulanmasını gerektiren tam rettir.
+  - **Kanıt:** `src/server/services/sshTunnel.service.ts` → `verifyHostFingerprint()` beklenen fingerprint boş/missing olduğunda doğrulamayı başarılı kabul ediyor: `valid: true`, `pinned: false`. Yanlış/mismatched fingerprint reddedilse bile zorunlu pin yokluğu kabul edildiği için fail-closed politika sağlanmıyor.
+  - **Etki:** Uygulama güvenilir sunucu kimliğini doğrulamadan SSH bağlantısına izin verebilir; bu akışta kimlik bilgilerinin yanlış hedefe gönderilmesi/MITM riski devam eder.
+  - **Yeniden yapılacak:** Güvenilir SHA256 fingerprint olmadan SSH bağlantısını kesinlikle başlatma. Doğru pin kabul edilmeli; yanlış, değiştirilmiş veya eksik pin reddedilmeli. Fingerprint doğrulaması tamamlanmadan SSH credential gönderilmemeli. Connect ve test/probe akışları aynı doğrulayıcıyı kullanmalı; “pin yoksa devam et” fallback'i kaldırılmalı.
+  - **Kabul:** 4 negatif/pozitif senaryo ayrı test edilmeli: doğru pin → kabul; yanlış pin → reddet; host key değişti → reddet; zorunlu pin eksik → reddet. Test ve gerçek connect aynı verifier'ı kullanmalı ve reddedilen senaryolarda credential gönderilmemeli.
 
 - ☑ ☐ ☐ **SEC-03 | P0 | Geliştirme bağlantısının canlı DB’ye test yöneticisi eklemesini engelle** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/database/migrations/019_restore_canonical_test_entities.ts`, `initialDataSeeder.ts` ve `postgres.ts`: geliştirme modu veya `ENABLE_TEST_ACCOUNT=true` koşulları test kayıtlarını açıyor; 019 sabit kimlikli yönetici ve cihaz ekliyor/güncelliyor.
@@ -547,7 +550,7 @@ Bir görev yalnız kendi kabul testi için kanıt varsa ve Codex onayı verilmi�
 |---|---|---|
 | 2026-09-13 | 0d8bca034fbfd54bb5fd4b92e13bb189bfd91955 | Önceki roadmap’in kaynak tarihi; tamamlanmış kayıtlar korunmuştur. |
 | 2026-09-29 | 322e16034fc4f5c818444f0b0679157e2b6d280e → 3b777d7c9ce25ef96dcfa76c60b1c9de9e195ba2 | Sonradan gelen secrets mount/resolver değişikliği ve yeni başarısız CI da incelendi. Konu gruplarına yeniden düzenleme; yeni kanıtlı bulgular; WAL/crash/migration checksum ve 002 hata yayılımı kayıtlarını gerekçeli yeniden açma; eski sürüm drift kaydını güncelleme. Uygulama kodu değiştirilmedi. |
-| 2026-09-29 | Doküman iş akışı; kod yeniden denetlenmedi | Kullanıcı talebiyle 268 görev iki kutuya geçirildi. Tarihsel uygulama işaretleri korundu; yalnız önceki açık güncel kanıtı olan 6 kayıtta iki kutu işaretli. Yaz-boz alanı ortak öneri/düzeltme iletişimi için genişletildi. |
+| 2026-09-29 | Doküman iş akışı; kod yeniden denetlenmedi | Üç kutulu durum mantığı netleştirildi: Codex tam reddederse 1. kutu kaldırılarak `☐ ☐ ☐` ve açık ret gerekçesi/yeniden yapılacaklar yazılacak; uygulama esasen doğru olup hedefli revizyon gerekiyorsa `☑ ☐ ☑` korunacak. SEC-02 bu kurala göre tam ret olarak düzeltildi. |
 
 ---
 
@@ -556,10 +559,12 @@ Bir görev yalnız kendi kabul testi için kanıt varsa ve Codex onayı verilmi�
 Bu alan geçici uygulama planı ve karşılıklı denetim notları içindir. Karara dönüşen bilgi yukarıdaki ilgili görev ve denetim geçmişine aktarılır; ondan sonra geçici ayrıntı sadeleştirilebilir. Görev durumlarının tek otoritesi üstteki üç kutulu maddelerdir. Bu alan Google AI Studio ile Codex’in ortak proje iletişim alanıdır: öneri, teknik tavsiye, soru, düzeltme talebi, uygulama yanıtı ve denetim sonucu burada paylaşılabilir. Her not tarih, yazar (AI Studio/Codex), görev kimliği, ilgili SHA ve beklenen sonraki adımı içermelidir. Karşı tarafın yanıtlanmamış notları silinmez; sonuçlar görev ve denetim geçmişine aktarılır. Dosyaya not eklemek karşı tarafa otomatik mesaj gönderildiği anlamına gelmez; her çalışma başında iki taraf da bu alanı okur. Parola, token, private key, tam credential URL veya kişisel müşteri verisi buraya yazılmaz.
 
 ### Codex denetim notu — 2026-09-29 / 9165ce4
-- **Düzeltme bekleyen:** SEC-02, OLD-112, OLD-115, RUN-07.
-- **Öncelik:** Önce 3. kutusu işaretli maddeler; ardından canlı/E2E kanıtı eksik P0/P1 maddeleri.
+- **Tam ret / yeniden ele alınmalı:** SEC-02. 1. kutu kaldırıldı (`☐ ☐ ☐`) çünkü eksik trusted fingerprint kabul ediliyor; host-key pinning fail-closed değil.
+- **Hedefli düzeltme bekleyen:** OLD-112, OLD-115, RUN-07. Bu maddelerde mevcut uygulama korunuyor; yalnız açıkça belirtilen güvenlik düzeltmeleri yapılmalı (`☑ ☐ ☑`).
+- **Öncelik:** Önce tam ret olan SEC-02; ardından 3. kutusu işaretli hedefli düzeltmeler; sonra canlı/E2E kanıtı eksik P0/P1 maddeleri.
 - **Güvenlik:** Production bypass değişkenleri varsayılan güvenlik kapısını gevşetmemeli; gerçek parola/secret loglanmamalı.
-- **AI Studio:** Düzeltme sonrası 3. kutuyu temizleyip `☑ ☐ ☐` yapmalı; Codex yeniden denetlemeden 2. kutuyu işaretlememeli.
+- **AI Studio:** Tam ret maddesinde 1. kutuyu yeniden işaretlemek için gereksinimi baştan uygula ve kanıt bırak. Hedefli düzeltme maddesinde 3. kutuyu temizleyip `☑ ☐ ☐` yapmalı; Codex yeniden denetlemeden 2. kutuyu işaretlememeli.
+- **Kalıcı durum kuralı:** Bundan sonraki tüm denetimlerde “tam ret” ile “hedefli düzeltme” ayrımı zorunludur; Codex her `☑ ☐ ☑` maddesini otomatik olarak tam ret saymayacak, fakat temel gereksinimi karşılamayan uygulamayı da 3. kutuda bırakmayacaktır.
 
 ### Codex ortak çalışma notu — 2026-09-29
 
