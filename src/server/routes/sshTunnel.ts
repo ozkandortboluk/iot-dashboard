@@ -11,43 +11,43 @@ export const sshTunnelRouter = Router();
 
 /**
  * Authorization guard for SSH Tunnel operations (/status, /test, /connect, /disconnect, /probe-fingerprint):
- * - If Setup Token is valid: Always allow access.
- * - If PostgreSQL is not connected / not ready: Always allow access so operator can bridge to remote DB.
- * - During initial setup (!isSetupCompleted): Allow access so AI Studio preview and wizard can configure tunnel.
- * - When Setup is completed AND DB is connected: Require authenticated Admin session.
+ * - If Setup/Recovery Token is valid: Allow access (for wizard, cloud preview setup, and disaster recovery).
+ * - Or if user has a valid authenticated Admin session: Allow access.
+ * - Otherwise: Reject with 401 Unauthorized. DB outage or setup status does NOT grant anonymous access.
  */
 async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunction) {
-  // 1. Valid Setup Token always grants access (setup, wizard, or disaster recovery)
+  // 1. Valid local Setup/Recovery Token grants access
   if (isRequestSetupAuthenticated(req, true)) {
     return next();
   }
 
-  // 2. If PostgreSQL database is not connected or not ready, allow SSH tunnel operations.
-  // The SSH tunnel is the physical transport required to reach PostgreSQL.
-  // Requiring DB-backed user authentication when the DB connection is down
-  // creates an impossible circular dependency (lockout).
-  const isDbReady = Boolean(db.postgresRepo?.isReady());
-  if (!isDbReady) {
-    return next();
-  }
-
-  // 3. During initial setup mode, allow SSH tunnel configuration to bridge to the database
-  const isCompleted = setupService.isSetupCompleted();
-  if (!isCompleted) {
-    return next();
-  }
-
-  // 4. If database is connected and setup is completed, require authenticated Admin user
+  // 2. Otherwise verify authenticated Admin session
   return authenticateUser(req, res, () => {
     return requireAdmin(req, res, next);
   });
 }
 
 /**
+ * Policy guard: verifies that SSH tunneling is enabled in this environment.
+ * Prevents unauthorized or disabled SSH tunnel operations across all modification routes.
+ */
+function guardSshTunnelPolicy(req: Request, res: Response, next: NextFunction) {
+  if (!isSshTunnelAllowed()) {
+    return res.status(403).json({
+      success: false,
+      code: 'SSH_TUNNEL_DISALLOWED',
+      error: 'SSH Tüneli bu ortamda devre dışı bırakılmıştır.',
+      message: 'ENABLE_SSH_TUNNEL=false veya sunucu politikası nedeniyle SSH tüneli kullanılamaz.',
+    });
+  }
+  return next();
+}
+
+/**
  * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
  * Safely inspects the remote SSH server's public key fingerprint WITHOUT sending any user credentials.
  */
-sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
   try {
     const { sshHost, sshPort } = req.body || {};
     if (!sshHost) {
@@ -99,7 +99,7 @@ sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Respons
  * POST /api/system/ssh-tunnel/test & POST /api/setup/ssh-tunnel/test
  * Test SSH Credentials & verify host fingerprint (Protected)
  */
-sshTunnelRouter.post('/test', requireSshTunnelAuth, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
   try {
     const {
       sshHost,
@@ -149,7 +149,7 @@ sshTunnelRouter.post('/test', requireSshTunnelAuth, async (req: Request, res: Re
  * POST /api/system/ssh-tunnel/connect & POST /api/setup/ssh-tunnel/connect
  * Connect and establish SSH Tunnel with host key pinning & verification (Protected)
  */
-sshTunnelRouter.post('/connect', requireSshTunnelAuth, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
   try {
     const {
       sshHost,
@@ -199,7 +199,7 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, async (req: Request, res:
  * POST /api/system/ssh-tunnel/disconnect & POST /api/setup/ssh-tunnel/disconnect
  * Disconnect active SSH Tunnel (Protected)
  */
-sshTunnelRouter.post('/disconnect', requireSshTunnelAuth, async (_req: Request, res: Response) => {
+sshTunnelRouter.post('/disconnect', requireSshTunnelAuth, guardSshTunnelPolicy, async (_req: Request, res: Response) => {
   try {
     const result = await sshTunnelService.disconnectTunnel();
     return res.json(result);

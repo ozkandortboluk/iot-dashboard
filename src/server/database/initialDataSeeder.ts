@@ -56,12 +56,12 @@ export class InitialDataSeeder {
       // of the Setup Wizard (/api/setup/create-admin). Test accounts are restricted strictly to
       // test runners when ENABLE_TEST_ACCOUNT=true.
 
-      // 1. CANONICAL TEST DEVICE (dev_test_01) - Only in test/development environments
-      const isTestOrDev = process.env.NODE_ENV !== 'production' || process.env.ENABLE_TEST_ACCOUNT === 'true';
+      // 1. CANONICAL TEST DEVICE (dev_test_01) - Strictly in isolated unit test runners only
+      const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && Boolean(process.env.VITEST);
       const testApiKey = 'dev_key_test_0000000000000000';
       const testApiKeyHash = crypto.createHash('sha256').update(testApiKey).digest('hex');
 
-      if (isTestOrDev) {
+      if (isIsolatedTestRunner) {
         const supportedOutputs = [
           { id: 'relay_1', name: 'Ana Güç Rölesi (Relay 1)', type: 'relay', pin: 18, status: false },
           { id: 'relay_2', name: 'Soğutma Fanı (Relay 2)', type: 'relay', pin: 19, status: true },
@@ -178,8 +178,8 @@ export class InitialDataSeeder {
       `, [JSON.stringify({ version: APP_VERSION, state: 'INITIALIZED', seededCounts: counts })]);
       counts.systemEvents++;
 
-      // 5. IN-MEMORY DB.DATA CACHE SYNCHRONIZATION (dev/test only)
-      if (isTestOrDev) {
+      // 5. IN-MEMORY DB.DATA CACHE SYNCHRONIZATION (isolated unit tests only)
+      if (isIsolatedTestRunner) {
         try {
           InitialDataSeeder.syncInMemoryCache(testApiKey, testApiKeyHash);
         } catch (cacheErr: any) {

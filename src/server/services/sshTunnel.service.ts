@@ -47,8 +47,9 @@ export function computeHostFingerprints(key: string | Buffer): { sha256: string;
 }
 
 /**
- * Checks server host key and returns fingerprints for display.
- * Fingerprint strict blocking is disabled to allow seamless VPS connection in development environments.
+ * Checks server host key against optional pinned fingerprint.
+ * Strictly verifies SHA-256 (case-sensitive Base64) and MD5 fingerprints.
+ * When a pinned fingerprint is provided and does not match, connection is rejected.
  */
 export function verifyHostFingerprint(
   serverKey: string | Buffer,
@@ -56,13 +57,33 @@ export function verifyHostFingerprint(
 ): { valid: boolean; actualSha256: string; actualMd5: string; pinned: boolean; error?: string } {
   const { sha256, md5 } = computeHostFingerprints(serverKey);
 
-  // Permissive mode: Fingerprints are computed and logged/displayed for reference,
-  // but fingerprint mismatch never blocks or aborts SSH tunnel creation.
+  if (!expectedFingerprint || !expectedFingerprint.trim()) {
+    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: false };
+  }
+
+  const cleanExpected = expectedFingerprint.trim();
+  const rawExpectedSha = cleanExpected.replace(/^SHA256:/i, '');
+  const rawActualSha = sha256.replace(/^SHA256:/i, '');
+
+  // Exact comparison (Base64 is case-sensitive for SHA256; MD5 is hex case-insensitive)
+  const isShaMatch =
+    cleanExpected === sha256 ||
+    rawExpectedSha === rawActualSha;
+
+  const isMd5Match =
+    cleanExpected.toLowerCase() === md5.toLowerCase() ||
+    cleanExpected.replace(/[:\s]/g, '').toLowerCase() === md5.replace(/[:\s]/g, '').toLowerCase();
+
+  if (isShaMatch || isMd5Match) {
+    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: true };
+  }
+
   return {
-    valid: true,
+    valid: false,
     actualSha256: sha256,
     actualMd5: md5,
-    pinned: Boolean(expectedFingerprint && expectedFingerprint.trim()),
+    pinned: true,
+    error: `SSH Host Key Fingerprint uyuşmazlığı tespit edildi! Beklenen: "${expectedFingerprint}", Sunucudan gelen: "${sha256}". Olası Ortadaki Adam (MITM) veya sahte sunucu bağlantı girişimi engellendi.`,
   };
 }
 

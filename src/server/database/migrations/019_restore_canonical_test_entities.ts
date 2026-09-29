@@ -13,14 +13,13 @@ export const migration019: Migration = {
   name: 'restore_canonical_test_entities',
   disableTransaction: true,
   up: async (client: pg.PoolClient) => {
-    const isTestOrDev =
-      process.env.NODE_ENV !== 'production' ||
-      Boolean(process.env.VITEST) ||
-      process.env.ENABLE_TEST_ACCOUNT === 'true';
+    // SEC-03: Test fixtures must NEVER be inserted into databases during migrations.
+    // Migration 019 is strictly isolated to Vitest test runners only.
+    const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && Boolean(process.env.VITEST);
 
-    if (!isTestOrDev) {
+    if (!isIsolatedTestRunner) {
       console.log(
-        '[Migration 019] Production environment detected (NODE_ENV=production). Skipping canonical test entities restoration.'
+        '[Migration 019] Real environment detected (non-isolated runner). Skipping canonical test entities restoration.'
       );
       return;
     }

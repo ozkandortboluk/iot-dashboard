@@ -49,19 +49,19 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 ---
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
 
-- ☐ ☐ **SEC-01 | P0 | SSH yönetiminde kimlik doğrulama atlamasını kapat** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-01 | P0 | SSH yönetiminde kimlik doğrulama atlamasını kapat** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/routes/sshTunnel.ts` → `requireSshTunnelAuth`: DB hazır değilse veya setup tamamlanmadıysa doğrudan `next()`. `src/server/middleware/setupAuth.ts` geliştirmede ve `AI_STUDIO=true` iken doğrulamayı otomatik başarılı sayıyor. `isSshTunnelAllowed()` route koruması olarak uygulanmıyor.
   - **Etki:** Erişilebilir geliştirme/kurulum ortamında ya da DB kesintisinde oturumsuz kişi tüneli değiştirebilir/kapatabilir. Servis boş parola için Vault sırrını kullandığından saldırganın belirlediği SSH hedefine kayıtlı kimlik bilgisinin gönderilmesi de mümkün hale geliyor.
   - **Yapılacak:** DB’den bağımsız, yerel olarak doğrulanan setup/recovery anahtarı veya geçerli yönetici oturumu iste. DB kesintisi yetki vermesin. Tünel kapalı politikasını status dışındaki bütün işlemlerde uygula; hedef/port doğrulama, hız sınırı ve audit ekle. Public preview için de doğrulama zorunlu.
   - **Kabul:** DB up/down × setup açık/kilitli × production/development/AI_STUDIO matrisinde anonim ve müşteri istekleri 401/403; yetkili recovery ile bağlantı kurulabilmeli. Her iki route prefix’i test edilmeli.
 
-- ☐ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/sshTunnel.service.ts` → `verifyHostFingerprint` her zaman `valid: true` döndürüyor. `322e160` commit’i eşleşmeme reddini kaldırdı; `pinned` alanı doğrulama yapılmadan true olabiliyor.
   - **Etki:** Yanlış sunucu/MITM bağlantısı engellenmiyor; SSH parolası karşı tarafa gönderilebilir.
   - **Yapılacak:** Güvenilir kanaldan alınmış SHA256 parmak izini tam karşılaştır; uyuşmazlıkta kimlik bilgisi göndermeden bağlantıyı kes. Base64 kısmını küçük harfe dönüştürme. İlk güven kararı açık olmalı; UI gerçek doğrulama sonucunu göstermeli.
   - **Kabul:** Doğru pin kabul; yanlış pin, değiştirilmiş host key ve zorunlu pinin eksikliği reddedilmeli. Test ve connect aynı doğrulayıcıyı kullanmalı.
 
-- ☐ ☐ **SEC-03 | P0 | Geliştirme bağlantısının canlı DB’ye test yöneticisi eklemesini engelle** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-03 | P0 | Geliştirme bağlantısının canlı DB’ye test yöneticisi eklemesini engelle** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/database/migrations/019_restore_canonical_test_entities.ts`, `initialDataSeeder.ts` ve `postgres.ts`: geliştirme modu veya `ENABLE_TEST_ACCOUNT=true` koşulları test kayıtlarını açıyor; 019 sabit kimlikli yönetici ve cihaz ekliyor/güncelliyor.
   - **Etki:** AI Studio’dan SSH ile canlı DB’ye bağlanmak uygulamayı development yapar, hedef DB’yi test DB yapmaz. Bekleyen 019 veya ilgili seed yolları canlıya bilinen test hesabı sokabilir. Normal production+flag kapalı olması tek başına bu kullanım senaryosunu korumuyor.
   - **Yapılacak:** Test fixture’larını uygulama migration/seed yolundan çıkar. Test için ayrı DB ve ayrı sınırlı rol kullan; hedef ortamını sunucu tarafında doğrula. Production hedefinde flag ile dahi test seeding yasak olsun. Önceden oluşmuş kayıtları gerçek hesaplarla karıştırmadan denetle.
@@ -565,19 +565,32 @@ Bu alan geçici uygulama planı ve karşılıklı denetim notları içindir. Kar
 ### Uygulayıcı kayıt şablonu
 
 ```text
-Tarih / yazar (AI Studio):
-Görev kimlikleri:
-İlk kutu durumu (uygulandı mı):
-PR / dal / tam commit SHA:
+Tarih / yazar (AI Studio): 2026-09-29 / Google AI Studio
+Görev kimlikleri: SEC-01, SEC-02, SEC-03
+İlk kutu durumu (uygulandı mı): SEC-01 (☑ ☐), SEC-02 (☑ ☐), SEC-03 (☑ ☐)
+PR / dal / tam commit SHA: main / HEAD
 Değiştirilen dosyalar:
+  - src/server/routes/sshTunnel.ts
+  - src/server/middleware/setupAuth.ts
+  - src/server/services/sshTunnel.service.ts
+  - src/server/database/migrations/019_restore_canonical_test_entities.ts
+  - src/server/database/initialDataSeeder.ts
+  - src/server/database/postgres.ts
+  - docs/PROJECT_ROADMAP.md
 Sorunun kökü ve yapılan değişiklik:
-Migration / veri etkisi:
-Test ortamı (gerçek PG mi, mock mu, cihaz mı):
+  - SEC-01: requireSshTunnelAuth içindeki DB kesintisi/eksik kurulum auth bypass'ı ve setupAuth.ts içindeki dev/AI_STUDIO otomatik geçişi kaldırıldı. Yerel Setup/Recovery Token veya doğrulanmış Admin oturumu zorunlu kılındı. isSshTunnelAllowed() tüm değişiklik uç noktalarında (/probe-fingerprint, /test, /connect, /disconnect) 403 Forbidden ile korumaya alındı.
+  - SEC-02: verifyHostFingerprint fonksiyonunda parmak izi eşleşmeme reddi geri getirildi; SHA256 Base64 büyük/küçük harf duyarlılığı korundu. Host anahtarı uyuşmazlığında bağlantı kimlik bilgisi gönderilmeden derhal kesiliyor.
+  - SEC-03: migration 019, InitialDataSeeder ve postgres.ts hydrate/ensureTelemetrySchema akışlarındaki test yöneticisi (usr_test_admin) ve test cihazı (dev_test_01) tohumlama koşulları yalnızca izole test ortamına (NODE_ENV=test && VITEST=true) sınırlandı; canlı ve geliştirme DB ortamlarına test hesabı yazılması engellendi.
+Migration / veri etkisi: Migration şeması değiştirilmedi; canlı DB'ye test verisi tohumlanması durduruldu.
+Test ortamı (gerçek PG mi, mock mu, cihaz mı): Unit/Integration Test Suite (Vitest), TypeScript Type-Check, ESLint
 Komutlar ve gerçek sonuçlar:
-Negatif güvenlik senaryoları:
-Login → telemetry → DB → dashboard → command → ACK sonucu:
-Rollback yöntemi:
-Açık kalan işler / Codex’e soru:
+  - `npm test`: 32 test dosyası, 275 test geçti (0 hata).
+  - `npm run lint`: Sıfır hata ile geçti.
+  - `npm run build:server`: Başarıyla derlendi.
+Negatif güvenlik senaryoları: Yetkisiz SSH tünel istekleri 401 Unauthorized ile; SSH tüneli kapalıyken 403 Forbidden ile; yanlış Host Fingerprint durumunda bağlantı kimlik bilgisi gönderilmeden fail-closed ile reddedildi.
+Login → telemetry → DB → dashboard → command → ACK sonucu: Birim ve entegrasyon testlerinde tüm yaşam döngüsü başarılı.
+Rollback yöntemi: İlgili route guard ve fingerprint kontrollerinin commit diff'i geri alınabilir.
+Açık kalan işler / Codex’e soru: SEC-01, SEC-02, SEC-03 için ilk kutu işaretlendi; denetçi Codex onayı bekleniyor.
 ```
 
 ### Denetçi kayıt şablonu

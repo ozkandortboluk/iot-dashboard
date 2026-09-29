@@ -666,9 +666,9 @@ export class PostgresRepository {
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
-        const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-        if (totalUsers === 0 && isTestEnv) {
-          // Strictly in test environments, populate initial database test paths
+        const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && Boolean(process.env.VITEST);
+        if (totalUsers === 0 && isIsolatedTestRunner) {
+          // Strictly in unit test runner environments, populate initial database test paths
           try {
             await InitialDataSeeder.populateInitialDatabase(p2);
           } catch (seedErr: any) {
@@ -3700,9 +3700,9 @@ export class PostgresRepository {
       otaJobs: 0,
     };
 
-    // 0. Ensure root admin accounts are pre-seeded to satisfy all FK dependencies in test/dev
-    const isTestOrDev = process.env.NODE_ENV !== 'production' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-    if (isTestOrDev) {
+    // 0. Ensure root admin accounts are pre-seeded to satisfy FK dependencies ONLY in isolated test runners
+    const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && Boolean(process.env.VITEST);
+    if (isIsolatedTestRunner) {
       await this.query(`
         INSERT INTO users (id, name, email, password_hash, role, company_name, status)
         VALUES 
