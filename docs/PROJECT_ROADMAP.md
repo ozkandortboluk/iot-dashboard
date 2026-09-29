@@ -3,7 +3,7 @@
 > **Tek çalışma dosyası:** `docs/PROJECT_ROADMAP.md` (büyük/küçük harf korunur). Google AI Studio uygular; Codex inceler ve kanıta göre durum günceller.
 >
 > **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen uygulama kod SHA:** `2bbdea601bd327f5a2328a2c285c8badd4aabef7`.
-> Roadmap dokümanı sonrasında gelen kod değişiklikleri ayrıca incelenmiş; `d639f3b` bu turun güncel uygulama kanıtıdır. **Uygulama sürümü:** 1.46.2.
+> Sonraki uygulama değişiklikleri de incelenmiş; `2bbdea6` bu turun güncel uygulama kanıtıdır. **Uygulama sürümü:** 1.46.2.
 > Bu dokümanı kaydeden commit yalnız roadmap değişikliğidir; yukarıdaki SHA denetlenen uygulama kodunu belirtir.
 
 ## Çalışma kuralları
