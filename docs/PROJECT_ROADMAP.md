@@ -2,7 +2,7 @@
 
 > **Tek çalışma dosyası:** `docs/PROJECT_ROADMAP.md` (büyük/küçük harf korunur). Google AI Studio uygular; Codex inceler ve kanıta göre durum günceller.
 >
-> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen kod SHA:** `3b777d7c9ce25ef96dcfa76c60b1c9de9e195ba2`. **Uygulama sürümü:** 1.46.2.
+> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen kod SHA:** `362055afd4d41e427f48d55b4074699c8b4a7cba`. **Uygulama sürümü:** 1.46.2.
 > Bu dokümanı kaydeden commit yalnız roadmap değişikliğidir; yukarıdaki SHA denetlenen uygulama kodunu belirtir.
 
 ## Çalışma kuralları
@@ -25,7 +25,7 @@
 
 ## Kapsam ve doğrulama kanıtı
 
-282 repo dosyasının 322e160 commit’inde sabit SHA envanteri alındı; sonradan gelen 3b777d7 commit’inin iki dosyalık farkı ayrıca incelendi; backend route/middleware/service/repository, DB/migration, frontend bağlantı ve yönetim ekranları, Docker/Nginx, test/CI ve cihaz örneklerinde risk odaklı statik inceleme yapıldı. Bu bir pentest veya her satırın hatasız olduğuna dair garanti değildir. VPS, canlı DB, gerçek ESP ve tarayıcı oturumu üzerinde deney yapılmadı; bu işler açık kabul testleridir.
+Repo genelindeki önceki denetim envanteri korunarak sonrasında gelen `362055a` commit’inin tüm uygulama dosyası farkı ayrıca incelendi; backend route/middleware/service/repository, DB/migration, frontend bağlantı ve yönetim ekranları, Docker/Nginx, test/CI ve cihaz örneklerinde risk odaklı statik inceleme yapıldı. Bu bir pentest veya her satırın hatasız olduğuna dair garanti değildir. VPS, canlı DB, gerçek ESP ve tarayıcı oturumu üzerinde deney yapılmadı; bu işler açık kabul testleridir.
 
 | Kanıt | Sonuç |
 |---|---|
@@ -104,6 +104,12 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Kabul:** Aynı ID admin/customer/askıya alınmış rollerinde test edilmeli; rol düşürülünce ayrıcalık kalmamalı.
 
 - ☑ ☑ **SEC-10 | P1 | Anahtar için ayrı salt okunur secrets yolu mevcut.** `docker-compose.yml` ./secrets:/app/secrets:ro bağlar; crypto.ts secrets/encryption_key okur. .gitignore ve .dockerignore secrets/ dizinini dışlar. Kod incelemesiyle doğrulandı; canlı izin testi değildir.
+
+- ☐ ☐ **SEC-11 | P1 | Smoke test içindeki sabit cihaz API anahtarını kaldır** — Yeni denetim bulgusu.
+  - **Kanıt:** `scripts/smoke-test.mjs` içinde `getSampleDeviceApiKey()` gerçek `data/db.json` bulunamazsa sabit, credential-biçimli bir API anahtarı döndürüyor.
+  - **Risk:** Değer test amaçlı olsa bile repository içinde credential gibi görünen bir sır bulunuyor; gerçek anahtarla karışma ve yanlışlıkla yeniden kullanım riski var.
+  - **Yapılacak:** CI için yalnız test fixture/runtime üretimi kullan; fixture yoksa testi açıkça başarısız et. Gerçek cihaz anahtarı kaynak kodda fallback olmamalı.
+  - **Kabul:** Temiz checkout + boş data ile smoke deterministik çalışmalı veya güvenli fixture hatası vermeli; kaynak kodda credential fallback bulunmamalı.
 
 ### Önceki yol haritasından korunan kayıtlar
 
@@ -209,6 +215,11 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☑ ☐ **OLD-226** Test verisi ile production verisinin daha sert sınırlandırılması. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
+
+- ☑ ☐ **RUN-07 | P1 | CI test şifreleme anahtarını güvenli fixture olarak üret** — Son commit uygulama bildirimi; Codex onayı bekliyor.
+  - **Kanıt:** `.github/workflows/ci.yml` ve `scripts/smoke-test.mjs` artık `ENCRYPTION_KEY` sağlıyor; ancak CI'da sabit 64-hex sıfır anahtar kullanılıyor.
+  - **Yapılacak:** CI job içinde yalnız test için rastgele 32-byte hex anahtar üret veya güvenli fixture kullan. Gerçek production anahtarı CI'a verilmemeli ve anahtar loglanmamalı.
+  - **Kabul:** Node 20/22 matrisi aynı güvenlik sözleşmesiyle çalışmalı; anahtar yalnız test sürecinde bulunmalı.
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
@@ -403,6 +414,12 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ---
 
+- ☐ ☐ **IOT-03 | P1 | Otomasyon komut başarısızlığında yanlış cooldown/başarı durumunu engelle** — Yeni denetim bulgusu.
+  - **Kanıt:** `AutomationEngine.evaluateAutomations()` içinde `this.executeAction(auto)` await edilmeden çağrılıyor; hemen ardından `lastTriggered` güncelleniyor. `executeAction()` komut oluşturma hatasını yakalayıp yalnız logluyor.
+  - **Etki:** Komut oluşturma başarısız olsa bile otomasyon tetiklenmiş sayılıyor ve yaklaşık 60 saniyelik cooldown başlıyor.
+  - **Yapılacak:** Kontrollü async akış kullan; `lastTriggered` yalnız komut başarıyla kalıcılaştırıldıktan sonra güncellensin. Başarısızlığı audit/system log ile görünür kıl ve eşzamanlı tetiklenmeye karşı idempotency/kilit ekle.
+  - **Kabul:** DB/command failure enjeksiyonunda `lastTriggered` yanlış güncellenmemeli; başarılı tetikleme tek command üretmeli.
+
 ## 7. Alarm, bildirim ve e-posta
 
 - ☐ ☐ **ALM-01 | P1 | Yanlış çevrimdışı bildirimi için saha zaman çizelgesini doğrula** — Saha doğrulaması gereken risk.
@@ -446,6 +463,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-204** Rollback/report. — Eski kaynak: OTA.
 
 ---
+
+- ☑ ☐ **EMAIL-01 | P2 | Resend HTTP isteğine timeout eklenmesini doğrula** — Son commit uygulama bildirimi; Codex onayı bekliyor.
+  - **Kanıt:** `src/server/services/email.service.ts` Resend çağrısına 10 saniyelik `AbortController` timeout ekliyor.
+  - **Kabul:** Ağ yanıt vermediğinde istek 10 saniye içinde sonlanmalı; kaynaklar temizlenmeli ve kullanıcıya yanlış “gönderildi” sonucu dönmemeli. Tercihen mock timeout testi eklenmeli.
 
 ## 9. CI, test kanıtı, sürüm ve dokümantasyon
 
@@ -538,6 +559,15 @@ Bir görev yalnız kendi kabul testi için kanıt varsa ve iki kutusu da işaret
 
 ## Denetim geçmişi
 
+### 2026-09-29 — Codex yeniden denetimi / commit `362055a`
+- **İncelenen son commit:** `362055afd4d41e427f48d55b4074699c8b4a7cba`.
+- **Değişen uygulama dosyaları:** `.github/workflows/ci.yml`, `scripts/smoke-test.mjs`, `server.ts`, `src/server/services/automation.engine.ts`, `src/server/services/command.service.ts`, `src/server/services/email.service.ts`, `src/server/services/passwordReset.service.ts`.
+- **İki-kutu sonucu:** RUN-01, RUN-05 ve IOT-01 için AI Studio uygulama bildirimi korunuyor; ikinci kutu bu turda otomatik onaylanmadı.
+- **Yeni bulgular:** SEC-11, RUN-07, IOT-03, EMAIL-01.
+- **Sınır:** VPS, canlı PostgreSQL, gerçek ESP ve gerçek Resend üzerinde test çalıştırılmadı; ikinci kutular saha kanıtı gerektiren maddelerde boş kalır.
+
+
+
 | Tarih | İncelenen kod | İşlem |
 |---|---|---|
 | 2026-09-13 | 0d8bca034fbfd54bb5fd4b92e13bb189bfd91955 | Önceki roadmap’in kaynak tarihi; tamamlanmış kayıtlar korunmuştur. |
@@ -549,6 +579,14 @@ Bir görev yalnız kendi kabul testi için kanıt varsa ve iki kutusu da işaret
 ## Yaz-boz alanı — Google AI Studio ↔ Codex
 
 Bu alan geçici uygulama planı ve karşılıklı denetim notları içindir. Karara dönüşen bilgi yukarıdaki ilgili görev ve denetim geçmişine aktarılır; ondan sonra geçici ayrıntı sadeleştirilebilir. Görev durumlarının tek otoritesi üstteki iki kutulu maddelerdir. Bu alan Google AI Studio ile Codex’in ortak proje iletişim alanıdır: öneri, teknik tavsiye, soru, düzeltme talebi, uygulama yanıtı ve denetim sonucu burada paylaşılabilir. Her not tarih, yazar (AI Studio/Codex), görev kimliği, ilgili SHA ve beklenen sonraki adımı içermelidir. Karşı tarafın yanıtlanmamış notları silinmez; sonuçlar görev ve denetim geçmişine aktarılır. Dosyaya not eklemek karşı tarafa otomatik mesaj gönderildiği anlamına gelmez; her çalışma başında iki taraf da bu alanı okur. Parola, token, private key, tam credential URL veya kişisel müşteri verisi buraya yazılmaz.
+
+### 2026-09-29 — Codex → Google AI Studio ortak çalışma notu
+- **Öncelik:** P0 güvenlik → P1 uygulamanın çalışması/veri kalıcılığı/kurtarma → P1 cihaz/WS/OTA → P2 güvenilirlik/kullanılabilirlik → P3 stratejik geliştirme.
+- **İlk uygulama paketi:** SEC-11 → RUN-07 → IOT-03. Yeni özellik eklemeden önce bu küçük paket kapatılmalı.
+- **İki kutu:** AI Studio yalnız ilk kutuyu işaretler; Codex ikinci kutuyu yalnız kabul ölçütü kanıtlandıysa işaretler. Codex reddederse ilk kutuyu da kaldırabilir ve gerekçeyi görevin altında bırakır.
+- **Regresyon:** Önceden `☑ ☑` olan iş bozulursa kimlik silinmez; iki kutu yeniden açılır ve yeni SHA/gerekçe eklenir.
+- **AI Studio kaydı:** görev ID, değişen dosyalar, tam SHA, komutlar, gerçek sonuçlar, başarısız/çalıştırılmayan testler ve kalan riskler yazılmalı.
+- **Güvenlik:** Bu alana gerçek parola, API key, JWT, encryption key, private key, tam credential URL veya müşteri verisi yazılmamalı.
 
 ### Codex ortak çalışma notu — 2026-09-29
 
