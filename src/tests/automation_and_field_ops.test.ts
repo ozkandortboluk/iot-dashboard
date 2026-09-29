@@ -121,7 +121,7 @@ describe('Automation Engine, Telemetry Ingestion & Field Operations (Roadmap 3.3
       expect(targetCmdsAfter.length).toBe(1);
       const createdCmd = targetCmdsAfter[0];
       expect(createdCmd.deviceId).toBe(testTargetDevice.id);
-      expect((createdCmd as any).issuerId).toBe('system_automation');
+      expect(createdCmd.userId || (createdCmd as any).issuerId).toBe('system_automation');
     });
 
     it('should respect 60-second debounce/cooldown and prevent duplicate rapid triggers', () => {

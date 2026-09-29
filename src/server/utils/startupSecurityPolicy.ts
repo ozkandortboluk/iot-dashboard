@@ -95,7 +95,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
 
   if (candidateDbPass && isDefaultPassword(candidateDbPass)) {
     errors.push(
-      `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası ('${candidateDbPass}') kullanımı engellenmiştir (OLD-112).`
+      `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası tespiti nedeniyle başlatma engellenmiştir (OLD-112).`
     );
   }
 
@@ -124,7 +124,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
       const extractedPass = decodeURIComponent(urlMatch[1]);
       if (isDefaultPassword(extractedPass)) {
         errors.push(
-          `[CRITICAL POLICY] DATABASE_URL içinde varsayılan/güvensiz parola ('${extractedPass}') tespit edildi (OLD-112).`
+          `[CRITICAL POLICY] DATABASE_URL içinde varsayılan/güvensiz parola tespit edildi (OLD-112).`
         );
       }
     }

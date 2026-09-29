@@ -38,11 +38,13 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/iot_test_db
       PORT: 3000
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
 
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v4
+
+      - name: Generate Dynamic Runtime Test Vault Key (RUN-01)
+        run: echo "ENCRYPTION_KEY=$(openssl rand -hex 32)" >> $GITHUB_ENV
 
       - name: Setup Node.js Environment (${{ matrix.node-version }})
         uses: actions/setup-node@v4

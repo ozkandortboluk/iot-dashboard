@@ -9,6 +9,8 @@ export interface SendEmailOptions {
   html: string;
   text?: string;
   from?: string;
+  dedupKey?: string;
+  tenantId?: string;
 }
 
 export interface SendEmailResult {
@@ -39,6 +41,7 @@ export interface EmailConfigPublic {
 
 export class EmailService {
   private static instance: EmailService;
+  private dedupCache = new Map<string, { timestamp: number; result: SendEmailResult }>();
 
   public static getInstance(): EmailService {
     if (!EmailService.instance) {
@@ -77,17 +80,27 @@ export class EmailService {
    * Resolves the public Base URL for system-generated links (e.g. password reset)
    */
   public getAppBaseUrl(): string {
-    const envUrl = process.env.APP_BASE_URL || process.env.APP_URL;
-    if (envUrl && envUrl.trim()) return envUrl.trim().replace(/\/$/, '');
-    try {
-      const config = db.getServiceConfig(true);
-      if ((config.email as any)?.appBaseUrl) {
-        return (config.email as any).appBaseUrl.trim().replace(/\/$/, '');
+    let rawUrl = (process.env.APP_BASE_URL || process.env.APP_URL || '').trim();
+    if (!rawUrl) {
+      try {
+        const config = db.getServiceConfig(true);
+        if ((config.email as any)?.appBaseUrl) {
+          rawUrl = (config.email as any).appBaseUrl.trim();
+        }
+      } catch {
+        // Fallback
       }
-    } catch {
-      // Fallback
     }
-    return 'https://nexusnodeiot.com.tr';
+    if (!rawUrl) {
+      rawUrl = 'https://nexusnodeiot.com.tr';
+    }
+
+    const clean = rawUrl.replace(/\/$/, '');
+    // HTTPS Enforcement for external production domains
+    if (process.env.NODE_ENV === 'production' && clean.startsWith('http://') && !clean.includes('localhost') && !clean.includes('127.0.0.1')) {
+      return clean.replace(/^http:\/\//i, 'https://');
+    }
+    return clean;
   }
 
   /**
@@ -228,9 +241,17 @@ export class EmailService {
    * Sends an email via Resend API, SMTP or safe simulation
    */
   public async sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
-    const { to, subject, html, text, from } = options;
+    const { to, subject, html, text, from, dedupKey } = options;
     const emailConfig = this.getEmailConfig();
     const fromAddress = from || this.getFromAddress();
+
+    if (dedupKey) {
+      const cached = this.dedupCache.get(dedupKey);
+      if (cached && Date.now() - cached.timestamp < 30000) {
+        console.log(`[EmailService] Yinelenen e-posta gönderim talebi engellendi (DedupKey: ${dedupKey})`);
+        return cached.result;
+      }
+    }
 
     if (!to || !to.includes('@')) {
       return {
@@ -316,79 +337,105 @@ export class EmailService {
         };
       }
 
-      try {
-        const payload: Record<string, any> = {
-          from: fromAddress,
-          to: [to.trim()],
-          subject: subject.trim(),
-          html,
-        };
-        if (text) {
-          payload.text = text;
+      const payload: Record<string, any> = {
+        from: fromAddress,
+        to: [to.trim()],
+        subject: subject.trim(),
+        html,
+      };
+      if (text) {
+        payload.text = text;
+      }
+
+      let lastResult: SendEmailResult | null = null;
+      const maxRetries = 2;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          const backoffMs = attempt * 1000;
+          console.log(`[EmailService] Resend API geçici hata nedeniyle ${backoffMs}ms sonra tekrar deneniyor (Deneme ${attempt + 1}/${maxRetries + 1})...`);
+          await new Promise(r => setTimeout(r, backoffMs));
         }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        const response = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId));
+          const response = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timeoutId));
 
-        const data: any = await response.json().catch(() => ({}));
+          const data: any = await response.json().catch(() => ({}));
 
-        if (!response.ok) {
-          const rawMessage = data?.message || data?.error?.message || (typeof data === 'string' ? data : `HTTP ${response.status} Resend Gönderim Hatası`);
-          console.error(`[EmailService] Resend API Hatası (${to}):`, rawMessage);
+          if (!response.ok) {
+            const rawMessage = data?.message || data?.error?.message || (typeof data === 'string' ? data : `HTTP ${response.status} Resend Gönderim Hatası`);
+            console.error(`[EmailService] Resend API Hatası (${to}, HTTP ${response.status}):`, rawMessage);
 
-          const lowerErr = rawMessage.toLowerCase();
-          const isDomainUnverified = lowerErr.includes('not verified') || 
-                                    (lowerErr.includes('domain') && lowerErr.includes('verify')) ||
-                                    lowerErr.includes('testing emails') ||
-                                    lowerErr.includes('own email address');
+            const isTransient = response.status === 429 || response.status >= 500;
+            const lowerErr = rawMessage.toLowerCase();
+            const isDomainUnverified = lowerErr.includes('not verified') || 
+                                      (lowerErr.includes('domain') && lowerErr.includes('verify')) ||
+                                      lowerErr.includes('testing emails') ||
+                                      lowerErr.includes('own email address');
 
-          let formattedError = rawMessage;
-          if (isDomainUnverified) {
-            const domainMatch = fromAddress.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-            const domainName = domainMatch ? domainMatch[1] : 'alan adınız';
-            if (lowerErr.includes('testing emails') || lowerErr.includes('own email address')) {
-              formattedError = `Resend Test Modu Kısıtlaması: Resend 'onboarding@resend.dev' adresini kullanırken yalnızca kendi Resend hesabınıza kayıtlı e-posta adresine mail gönderebilirsiniz (${to}). Farklı alıcılara mail gönderebilmek için Resend panelinden (https://resend.com/domains) kendi alan adınızı doğrulamanız gerekmektedir.`;
-            } else {
-              formattedError = `Resend Alan Adı Doğrulama Hatası: '${domainName}' alan adı Resend hesabınızda henüz doğrulanmamış. Lütfen Resend panelinden (https://resend.com/domains) alan adınızı doğrulayın veya test amaçlı 'onboarding@resend.dev' e-posta adresini kullanın.`;
+            let formattedError = rawMessage;
+            if (isDomainUnverified) {
+              const domainMatch = fromAddress.match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+              const domainName = domainMatch ? domainMatch[1] : 'alan adınız';
+              if (lowerErr.includes('testing emails') || lowerErr.includes('own email address')) {
+                formattedError = `Resend Test Modu Kısıtlaması: Resend 'onboarding@resend.dev' adresini kullanırken yalnızca kendi Resend hesabınıza kayıtlı e-posta adresine mail gönderebilirsiniz (${to}). Farklı alıcılara mail gönderebilmek için Resend panelinden (https://resend.com/domains) kendi alan adınızı doğrulamanız gerekmektedir.`;
+              } else {
+                formattedError = `Resend Alan Adı Doğrulama Hatası: '${domainName}' alan adı Resend hesabınızda henüz doğrulanmamış. Lütfen Resend panelinden (https://resend.com/domains) alan adınızı doğrulayın veya test amaçlı 'onboarding@resend.dev' e-posta adresini kullanın.`;
+              }
+            } else if (response.status === 401 || lowerErr.includes('invalid_api_key') || lowerErr.includes('api key') || lowerErr.includes('unauthorized')) {
+              formattedError = `Geçersiz Resend API Anahtarı: Girilen Resend API Anahtarı (re_...) geçersiz veya yetkisiz. Lütfen Resend panelinden (https://resend.com/api-keys) 're_' ile başlayan aktif bir API anahtarı alıp kaydediniz.`;
+            } else if (lowerErr.includes('from') && (lowerErr.includes('invalid') || lowerErr.includes('format'))) {
+              formattedError = `Geçersiz Gönderici E-posta Adresi: Gönderici e-posta adresi ('${fromAddress}') geçerli değil. Test için 'onboarding@resend.dev' veya kendi doğrulanmış alan adınızı kullanınız.`;
             }
-          } else if (response.status === 401 || lowerErr.includes('invalid_api_key') || lowerErr.includes('api key') || lowerErr.includes('unauthorized')) {
-            formattedError = `Geçersiz Resend API Anahtarı: Girilen Resend API Anahtarı (re_...) geçersiz veya yetkisiz. Lütfen Resend panelinden (https://resend.com/api-keys) 're_' ile başlayan aktif bir API anahtarı alıp kaydediniz.`;
-          } else if (lowerErr.includes('from') && (lowerErr.includes('invalid') || lowerErr.includes('format'))) {
-            formattedError = `Geçersiz Gönderici E-posta Adresi: Gönderici e-posta adresi ('${fromAddress}') geçerli değil. Test için 'onboarding@resend.dev' veya kendi doğrulanmış alan adınızı kullanınız.`;
+
+            lastResult = {
+              success: false,
+              provider: 'resend',
+              error: formattedError,
+              domainUnverified: isDomainUnverified,
+            };
+
+            // Retry ONLY on transient status (429 Rate Limit or 5xx Server Error)
+            if (isTransient && attempt < maxRetries) {
+              continue;
+            }
+            return lastResult;
           }
 
-          return {
+          console.log(`[EmailService] Resend ile e-posta başarıyla iletildi (${to}): Message ID ${data?.id}`);
+          const successResult: SendEmailResult = {
+            success: true,
+            provider: 'resend',
+            messageId: data?.id,
+          };
+          if (dedupKey) {
+            this.dedupCache.set(dedupKey, { timestamp: Date.now(), result: successResult });
+          }
+          return successResult;
+        } catch (networkErr: any) {
+          console.error(`[EmailService] Ağ bağlantı hatası (${to}):`, networkErr?.message || networkErr);
+          lastResult = {
             success: false,
             provider: 'resend',
-            error: formattedError,
-            domainUnverified: isDomainUnverified,
+            error: `Resend servisine ulaşılamadı: ${networkErr?.message || 'Ağ hatası'}`,
           };
+          if (attempt < maxRetries) {
+            continue;
+          }
         }
-
-        console.log(`[EmailService] Resend ile e-posta başarıyla iletildi (${to}): Message ID ${data?.id}`);
-        return {
-          success: true,
-          provider: 'resend',
-          messageId: data?.id,
-        };
-      } catch (networkErr: any) {
-        console.error(`[EmailService] Ağ bağlantı hatası (${to}):`, networkErr?.message || networkErr);
-        return {
-          success: false,
-          provider: 'resend',
-          error: `Resend servisine ulaşılamadı: ${networkErr?.message || 'Ağ hatası'}`,
-        };
       }
+      return lastResult || { success: false, provider: 'resend', error: 'Resend e-posta gönderimi başarısız.' };
     }
 
     // 4. Safe Simulated fallback (when credentials are not yet entered or provider is unconfigured)

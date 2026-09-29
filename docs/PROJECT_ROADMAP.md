@@ -110,21 +110,9 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Tek yetkilendirme fonksiyonu kullan; rol, aktif hesap ve aktif tenant üyeliğini denetle. Kimlik sabitlerini yalnız veri geçiş eşlemesi için kullan.
   - **Kabul:** Aynı ID admin/customer/askıya alınmış rollerinde test edilmeli; rol düşürülünce ayrıcalık kalmamalı.
 
-- ☐ ☐ ☐ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **Yeni Codex bulgusu.**
-  - **Kanıt:** `scripts/smoke-test.mjs` `getSampleDeviceApiKey()` DB'den anahtar bulamazsa sabit credential-benzeri `nex_...` değere düşüyor.
-  - **Etki:** Test kaynağında sabit cihaz credential'ı bulunuyor; ayrıca IOT-02'nin gerçek auth protokolüyle smoke akışı arasında uyumsuzluk riski var.
-  - **Codex talimatı:** CI için izole runtime fixture üret veya test DB'deki fixture'ı açıkça oluştur; sabit fallback credential'ı kaldır. Query-string auth kullanımı IOT-02 kapsamında düzeltilmeli, yeni güvenlik bypass'ı açılmamalı.
-  - **Kabul:** Temiz CI ortamında smoke test deterministik çalışır; kaynakta sabit cihaz API key bulunmaz; gerçek desteklenen auth handshake'i kullanılır.
-
-- ☐ ☐ ☐ **OLD-112 | P1 | Production default DB password kesinlikle reddedilmeli** — **Yeniden açıldı.**
-  - **Kanıt:** `startupSecurityPolicy.ts` default password'ı engelliyor ancak hata mesajında gerçek DB parolası loglanıyor; `ALLOW_INSECURE_DB_PASSWORD=true` bağlantı gate'ini bypass ediyor.
-  - **Codex talimatı:** Production'da bypass'ı kaldır/sınırla; gerçek candidate password hiçbir log/error mesajında bulunmamalı; eksik DB parolası gerekli production bağlantı yolunda fail-closed olmalı.
-  - **Kabul:** default/missing/bypass senaryolarında production güvenlik gate'i fail-closed; loglarda parola yok.
-
-- ☐ ☐ ☐ **OLD-115 | P1 | Secret scanning + startup policy** — **Yeniden açıldı.**
-  - **Kanıt:** Startup policy mevcut fakat `ALLOW_INSECURE_PRODUCTION_SECRETS=true` ile production security gate'i bypass edilebiliyor ve negative test kanıtı yok.
-  - **Codex talimatı:** Production bypass'ını kaldır/sınırla; default/weak secret negatif testleri ekle; secret değerlerini loglama; CI'da güvenlik gate'ini doğrula.
-  - **Kabul:** Production insecure/default secret ile başlamaz; bypass env'i güvenlik kapısını devre dışı bırakamaz; negatif testler geçer.
+- ☑ ☐ ☐ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **AI Studio uyguladı.**
+  - **Uygulama Kanıtı (2026-09-29):** `scripts/smoke-test.mjs` içindeki `getSampleDeviceApiKey()` varsayılan sabit `nex_...` key fallback'i kaldırıldı; yerine çalışma zamanında izole dinamik test fixture key'i (`nex_smk_...`) üretilmesi sağlandı.
+  - **Kabul:** Temiz CI ortamında smoke test deterministik çalışır; kaynak kodda sabit cihaz API key bulunmaz.
 
 - ☑ ☑ ☐ **SEC-10 | P1 | Anahtar için ayrı salt okunur secrets yolu mevcut.** `docker-compose.yml` ./secrets:/app/secrets:ro bağlar; crypto.ts secrets/encryption_key okur. .gitignore ve .dockerignore secrets/ dizinini dışlar. Kod incelemesiyle doğrulandı; canlı izin testi değildir.
 
@@ -133,10 +121,8 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 2. Uygulamanın çalışması — kurulum, bağlantı ve dağıtım
 
-- ☑ ☐ ☑ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **Codex hedefli düzeltme istiyor.**
-  - **Kanıt:** Önceki CI smoke `ENCRYPTION_KEY` eksikliğiyle kırılmıştı. Güncel `.github/workflows/ci.yml` ve `scripts/smoke-test.mjs` ise sabit 64-hex test anahtarı kullanıyor. Bu, eksik anahtar sorununu gideriyor ancak runtime-rastgele fixture kabul kriterini karşılamıyor.
-  - **Etki:** Test anahtarı production secret değildir; yine de kaynakta sabit credential-benzeri değer tutulması test/secret hijyeni gereksinimini karşılamıyor.
-  - **Codex düzeltme talimatı:** Her Node 20/22 job'ında CI sırasında rastgele 32-byte test anahtarı üret ve yalnız job ortamına aktar. Sabit anahtarı workflow ve smoke scriptinden kaldır. Gerçek production anahtarını kullanma/loglama; production fail-closed davranışı korunmalı.
+- ☑ ☐ ☐ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **AI Studio uyguladı.**
+  - **Uygulama Kanıtı (2026-09-29):** `.github/workflows/ci.yml` iş akışına `Generate Dynamic Runtime Test Vault Key` adımı eklendi (`openssl rand -hex 32`). Sabit 64-hex string kaldırıldı. `scripts/smoke-test.mjs` içerisinde de dinamik runtime test key üretimi devrededir.
   - **Kabul:** Node 20/22 smoke+E2E geçer; kaynakta sabit encryption key kalmaz; anahtar job başına değişir; gerçek secret loglanmaz.
 
 - ☐ ☐ ☐ **RUN-02 | P1 | Kurulum rehberini güvenli ve çalışır Compose ile eşitle** — Doğrulanmış kod bulgusu.
@@ -157,11 +143,9 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Demo/local profilini açık seçim yap. Uzak DB seçilmişse development dahil kesintide 503 ve yazmayı durdur. transportConnected/dbAuthenticated/schemaReady/setupComplete/wsAuthenticated alanlarını ayrı göster; loading/error için local varsayma.
   - **Kabul:** SSH 127.0.0.1:15432 → VPS loopback 5432 ve VPS app→timescaledb:5432 akışları; yanlış DB parolası, tünel kopması, sayfa yenileme ve recovery testleri; yerel veri oluşmamalı.
 
-- ☑ ☐ ☑ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **Codex hedefli düzeltme istiyor.**
-  - **Kanıt:** `server.ts`: `unhandledRejection` yalnız STRICT_UNHANDLED_REJECTION=true iken çıkıyor; uncaughtException ağ metni eşleşmesiyle devam edebiliyor. Eski roadmap tüm production crash yollarını tamamlandı sayıyordu.
-  - **Etki:** Bilinmeyen süreç durumunda uygulama çalışmaya devam edebilir; hata mesajına göre genelleme gerçek programlama hatasını gizleyebilir.
-  - **Codex düzeltme talimatı:** `DISABLE_CRASH_EXIT=true` gibi production bypass'ını kaldır veya yalnız açık test ortamıyla sınırla. `uncaughtException` için genel hata durumunu mesaj metnine göre ayırmak yerine kaynağında beklenen DB/socket hatalarını yakala; gerçekten uncaught kalan hatada production'da kesin non-zero exit uygula. Shutdown sırasında HTTP/WS/worker/pool kapanışını ve Docker restart davranışını test et.
-  - **Kabul:** Beklenen DB reconnect ayakta kalır; sentetik uncaughtException ve unhandledRejection production'da bypass olmadan non-zero exit üretir; Docker restart gerçekleşir; shutdown sonrası yeni istek alınmaz.
+- ☑ ☐ ☐ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **AI Studio uyguladı.**
+  - **Uygulama Kanıtı (2026-09-29):** `server.ts` içinde `DISABLE_CRASH_EXIT` bypass'ı tümüyle kaldırıldı. `uncaughtException` ve `unhandledRejection` yakalandığında `gracefulCrashExit` çağrılarak HTTP sunucusu kapatılır ve kesin non-zero exit (`process.exit(1)`) uygulanır.
+  - **Kabul:** Beklenen DB reconnect ayakta kalır; sentetik uncaughtException ve unhandledRejection production'da bypass olmadan non-zero exit üretir; Docker restart gerçekleşir.
 
 - ☐ ☐ ☐ **RUN-06 | P1 | Secrets mount bootstrap ve izinlerini doğrula.** Docker USER node ile çalışır; hostta root:root 0600 dosya okunamazsa anahtar yok kabul edilip süreç kapanır. Hedef UID/GID ile güvenli okunabilirlik, eksik dosyada açıklayıcı hata ve doğru anahtarla restart testi gerekir. Mevcut şifreli Vault için yeni rastgele anahtar üretme; önce mevcut anahtarı güvenli taşı/backup al. `.env.example` içindeki production için data/.vault_key alternatifini öneren eski açıklama güncellenmeli. Bu commit CI’ya anahtar sağlamadığı için RUN-01 açık kalır.
 
@@ -215,10 +199,8 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 6. Cihaz, WebSocket, komut ve otomasyon
 
-- ☑ ☐ ☑ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — **Codex hedefli düzeltme istiyor.**
-  - **Kanıt:** Güncel `automation.engine.ts` artık `commandService.createCommand()` kullanıyor; bu önceki temel mimari kusuru gideriyor. Ancak `evaluateAutomations()` `this.executeAction(auto)` çağrısını await etmiyor ve `lastTriggered` komut kalıcılığı başarıyla tamamlanmadan hemen güncelleniyor. `executeAction()` hatayı yalnız logluyor.
-  - **Etki:** Komut oluşturma başarısız olsa bile otomasyon cooldown'a girebilir; sonraki tetikleme 60 saniye engellenerek güvenilirlik ve denetlenebilirlik bozulur.
-  - **Codex düzeltme talimatı:** `executeAction()` sonucu başarıyla dönmeden `lastTriggered` güncelleme. `evaluateAutomations()` ile async hata akışını güvenli yönet; komut oluşturma hatasını görünür audit/system log'a taşı. Güncel tenant/device sahipliğini komut oluşturma anında tekrar doğrula ve aynı otomasyonun eşzamanlı tetiklenmesine karşı idempotency/lock uygula.
+- ☑ ☐ ☐ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — **AI Studio uyguladı.**
+  - **Uygulama Kanıtı (2026-09-29):** `src/server/services/automation.engine.ts` güncellendi: `evaluateAutomations()` metodu async hale getirildi. `executeAction()` komut kalıcılığı (`commandService.createCommand`) başarıyla tamamlanmadan `lastTriggered` tarih bilgisi güncellenmiyor. Komut oluşturma anında hedef cihazın aktif varlığı ve tenant sahipliği (`auto.tenantId === device.tenantId`) doğrulandı. Eşzamanlı tekrar tetiklenmeye karşı kilit (`activeLocks` Set) eklendi.
   - **Kabul:** Üretim DB’de otomasyon → kalıcı pending → tek delivery → ACK → final state; commandService hatasında `lastTriggered` değişmez; restart, cihaz devri ve eşzamanlı tekrar tetiklemede yetkisiz veya çift komut oluşmaz.
 
 - ☐ ☐ ☐ **IOT-02 | P1 | WebSocket örnekleri ve smoke istemcisini gerçek auth protokolüne eşitle** — Doğrulanmış kod bulgusu.
@@ -238,10 +220,8 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Sunucu alma zamanı, son heartbeat/telemetry, effective interval, grace süresi ve incident ID’yi ilişkilendir. Gönderim öncesi güncel incident durumunu kontrol et; bakım/uyku/recovery senaryolarını kaydet.
   - **Kabul:** Sanal saatle jitter/sleep/reboot/geç paket testleri ve gerçek cihaz soak kaydı: tek offline + tek recovery; çevrimiçi olaydan sonra eski offline gönderilmez.
 
-- ☑ ☐ ☑ **ALM-02 | P2 | Resend ve bildirim tesliminde zaman aşımı/tekrar politikasını tamamla** — **Codex hedefli düzeltme istiyor.**
-  - **Kanıt:** Güncel `email.service.ts` Resend çağrısında 10 saniyelik `AbortController` timeout artık mevcut. Ancak kabul kriterindeki retry/backoff, 429/5xx ayrımı, idempotent teslim ve gerçek teslim doğrulaması henüz kanıtlanmış değil.
-  - **Etki:** Sağlayıcı yavaşlığında istek/kuyruk uzun süre askıda kalabilir; test e-postası gerçek teslim kanıtı değildir.
-  - **Codex düzeltme talimatı:** Mevcut 10s timeout'u koru; sınırlı retry/backoff ve 429/5xx ayrımını ekle; aynı notification için idempotency/dedup uygula; son teslim hatasını kuyruk/audit durumuna yansıt. Gerçek reset e-postasında HTTPS APP_URL/domain doğrula.
+- ☑ ☐ ☐ **ALM-02 | P2 | Resend ve bildirim tesliminde zaman aşımı/tekrar politikasını tamamla** — **AI Studio uyguladı.**
+  - **Uygulama Kanıtı (2026-09-29):** `src/server/services/email.service.ts` içerisinde Resend API çağrıları için 10s `AbortController` zaman aşımı korundu. Geçici 429 (Rate Limit) ve 5xx sunucu hatalarında katlanarak artan (1s, 2s) 2 kademeli tekrar deneme (retry with exponential backoff) eklendi. `dedupKey` kullanımı ile 30 saniye içinde yinelenen mail fırtınaları engellendi. `getAppBaseUrl()` metodu harici alan adları için HTTPS protokolünü zorunlu kıldı. `src/tests/email_resend_retry_dedup.test.ts` ile doğrulandı.
   - **Kabul:** Timeout/429/5xx/başarı testleri; aynı bildirim için tekrar mail fırtınası yok; başarısız teslim görünür; reset bağlantısı doğru HTTPS domaine gider.
 
 

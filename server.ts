@@ -55,37 +55,18 @@ import { secretsRouter } from './src/server/routes/secrets.js';
 let isShuttingDown = false;
 function gracefulCrashExit(errType: string, err: any) {
   if (isShuttingDown) return;
-  if (process.env.NODE_ENV === 'production' && process.env.DISABLE_CRASH_EXIT !== 'true') {
-    isShuttingDown = true;
-    console.error(`[CRITICAL PROCESS CRASH] ${errType} encountered in production. Initiating graceful shutdown...`);
-    setTimeout(() => {
-      process.exit(1);
-    }, 1000);
-  }
+  isShuttingDown = true;
+  console.error(`[CRITICAL PROCESS CRASH] ${errType} encountered. Initiating graceful shutdown (non-zero exit)...`);
+  try {
+    server.close();
+  } catch {}
+  setTimeout(() => {
+    process.exit(1);
+  }, 300);
 }
 
 process.on('uncaughtException', (err: any) => {
   const errMsg = err?.message || String(err);
-  const isTransientDbOrSocketError =
-    errMsg.includes('Connection terminated unexpectedly') ||
-    errMsg.includes('ECONNREFUSED') ||
-    errMsg.includes('ECONNRESET') ||
-    errMsg.includes('ETIMEDOUT') ||
-    errMsg.includes('socket hang up') ||
-    err?.code === 'ECONNREFUSED' ||
-    err?.code === 'ECONNRESET' ||
-    err?.code === '57P01' ||
-    err?.code === '08006' ||
-    err?.code === '08001';
-
-  if (isTransientDbOrSocketError) {
-    console.warn('[Process Shield] Anlık veritabanı/ağ soketi kesintisi yakalandı (Node ayakta tutuluyor):', errMsg);
-    try {
-      systemLogger.warn('database', `Veritabanı soket kesintisi yakalandı (${errMsg}). Otomatik yeniden bağlanma devrede.`);
-    } catch {}
-    return;
-  }
-
   console.error('[CRITICAL][uncaughtException]:', errMsg, err?.stack || '');
   try {
     systemLogger.critical('server', `Yakalanmamış Sistem Hatası (uncaughtException): ${errMsg}`, {
@@ -107,9 +88,8 @@ process.on('unhandledRejection', (reason: any) => {
       name: reason?.name,
     });
   } catch {}
-  if (process.env.STRICT_UNHANDLED_REJECTION === 'true' || process.env.NODE_ENV === 'production') {
-    gracefulCrashExit('unhandledRejection', reason);
-  }
+
+  gracefulCrashExit('unhandledRejection', reason);
 });
 
 const app = express();
@@ -436,15 +416,13 @@ async function setupViteOrStatic() {
     }
 
     const policyResult = validateProductionSecurityPolicy();
-    if (!policyResult.valid && process.env.ALLOW_INSECURE_PRODUCTION_SECRETS !== 'true') {
+    if (!policyResult.valid) {
       console.error(`====================================================`);
       console.error(`[FATAL SECURITY POLICY ERROR] Startup Denied!`);
       policyResult.errors.forEach(e => console.error(e));
       console.error(`====================================================`);
       systemLogger.critical('security', `Üretim güvenlik politikası ihlali nedeniyle sunucu başlatılamadı: ${policyResult.errors.join('; ')}`);
-      if (process.env.DISABLE_VAULT_EXIT !== 'true') {
-        process.exit(1);
-      }
+      process.exit(1);
     }
   }
 

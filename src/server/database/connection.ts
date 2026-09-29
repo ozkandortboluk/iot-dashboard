@@ -432,14 +432,14 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
   }
 
   const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-  if (isProduction && process.env.ALLOW_INSECURE_DB_PASSWORD !== 'true') {
+  if (isProduction) {
     const urlMatch = url.match(/^(?:postgres(?:ql)?):\/\/[^:]+:([^@]+)@/);
     if (urlMatch && urlMatch[1]) {
       const extractedPass = decodeURIComponent(urlMatch[1]);
       if (isDefaultPassword(extractedPass)) {
         systemLogger.critical(
           'security',
-          `[CRITICAL POLICY] Üretim ortamında varsayılan / güvensiz veritabanı parolası ('${extractedPass}') ile bağlantı reddedildi (OLD-112).`
+          `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası tespiti nedeniyle bağlantı reddedildi (OLD-112).`
         );
         console.error(`[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolasıyla bağlantı reddedildi (OLD-112).`);
         return null;

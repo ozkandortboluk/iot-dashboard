@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { automationEngine } from '../services/automation.engine.js';
+import { systemLogger } from '../services/systemLogger.service.js';
 import type {
   TelemetryReading,
   ActiveAlarm,
@@ -1103,7 +1104,9 @@ export class TelemetryRepository {
         }
         
         // Evaluate Automations for both physical and simulated telemetry
-        automationEngine.evaluateAutomations(r);
+        automationEngine.evaluateAutomations(r).catch(err => {
+          systemLogger.error('system', 'Otomasyon değerlendirme hatası:', err?.message || err);
+        });
       }
 
       device.updatedAt = timestamp;
@@ -1178,7 +1181,9 @@ export class TelemetryRepository {
       this.evaluateSimulationRules(fullReading, device);
     }
 
-    automationEngine.evaluateAutomations(fullReading);
+    automationEngine.evaluateAutomations(fullReading).catch(err => {
+      systemLogger.error('system', 'Otomasyon değerlendirme hatası:', err?.message || err);
+    });
 
     if (!this.db.isPostgresProductionMode()) {
       if (!this.db.isPostgresProductionMode()) this.db.scheduleSave();

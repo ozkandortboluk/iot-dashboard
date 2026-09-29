@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import WebSocket from 'ws';
 
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -32,15 +33,17 @@ function getSampleDeviceApiKey() {
       if (devWithKey?.apiKey) return devWithKey.apiKey;
     }
   } catch {}
-  return 'nex_4846012c_8e9463f42a17d4a110d4f123';
+  // SEC-11: Generate dynamic runtime fixture key rather than static credential fallback
+  return `nex_smk_${crypto.randomBytes(12).toString('hex')}`;
 }
 
 async function runSmokeTest() {
   console.log('🏗️ Starting production server bundle (dist/server.cjs) for CI smoke test...');
   
+  const dynamicVaultKey = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
   const serverEnv = {
-    ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || '0000000000000000000000000000000000000000000000000000000000000000',
     ...process.env,
+    ENCRYPTION_KEY: dynamicVaultKey,
     PORT: '3001',
     NODE_ENV: 'production'
   };
