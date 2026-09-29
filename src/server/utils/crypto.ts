@@ -38,6 +38,7 @@ export function verifyAndMigratePassword(password: string, hash: string): { isVa
 // ============================================================================
 
 const DOCKER_SECRET_KEY_PATH = '/run/secrets/encryption_key';
+const DEDICATED_SECRETS_KEY_PATH = path.resolve(process.cwd(), 'secrets', 'encryption_key');
 const LOCAL_VAULT_KEY_PATH = path.resolve(process.cwd(), 'data', '.vault_key');
 
 let cachedKeyBuffer: Buffer | null = null;
@@ -46,13 +47,13 @@ let keySourceDescription = 'none';
 /**
  * Resolves the 256-bit (32-byte) AES master key from strictly non-predictable sources:
  * 1. Environment variable: process.env.ENCRYPTION_KEY
- * 2. Production Docker Secret: /run/secrets/encryption_key
- * 3. File path: process.env.ENCRYPTION_KEY_PATH
- * 4. Local standalone key file: data/.vault_key (strictly isolated from DB, gitignored, mode 0600)
+ * 2. Production Docker Secret: /run/secrets/encryption_key or dedicated secrets mount: secrets/encryption_key
+ * 3. File path: process.env.ENCRYPTION_KEY_PATH or process.env.ENCRYPTION_KEY_FILE
+ * 4. Local standalone key file: data/.vault_key (strictly isolated from DB, gitignored, mode 0600 - dev/test only)
  *
  * CRITICAL SECURITY CONSTRAINTS:
  * - NO predictable or hardcoded fallback keys.
- * - In production: if no key is supplied, returns null and marks Vault as UNCONFIGURED.
+ * - In production: if no key is supplied via env, Docker secret, or dedicated secrets mount, returns null and marks Vault as UNCONFIGURED.
  * - In development/test: if no key exists, generates a cryptographic 32-byte random key and stores it in data/.vault_key (0600).
  */
 export function resolveEncryptionKey(): Buffer | null {
@@ -68,13 +69,24 @@ export function resolveEncryptionKey(): Buffer | null {
     return cachedKeyBuffer;
   }
 
-  // 2. Production Docker Secret (/run/secrets/encryption_key)
+  // 2. Production Docker Secret (/run/secrets/encryption_key or /app/secrets/encryption_key)
   try {
     if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
       const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
       if (secretRaw) {
         cachedKeyBuffer = derive32ByteKey(secretRaw);
         keySourceDescription = 'docker_secret:/run/secrets/encryption_key';
+        return cachedKeyBuffer;
+      }
+    }
+  } catch {}
+
+  try {
+    if (fs.existsSync(DEDICATED_SECRETS_KEY_PATH)) {
+      const secretRaw = fs.readFileSync(DEDICATED_SECRETS_KEY_PATH, 'utf8').trim();
+      if (secretRaw) {
+        cachedKeyBuffer = derive32ByteKey(secretRaw);
+        keySourceDescription = 'file:secrets/encryption_key';
         return cachedKeyBuffer;
       }
     }

@@ -54,6 +54,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
     volumes:
       - app_data:/app/data
+      - ./secrets:/app/secrets:ro
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
