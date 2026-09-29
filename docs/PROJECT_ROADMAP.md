@@ -2,7 +2,7 @@
 
 > **Tek çalışma dosyası:** `docs/PROJECT_ROADMAP.md` (büyük/küçük harf korunur). Google AI Studio uygular; Codex inceler ve kanıta göre durum günceller.
 >
-> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen kod SHA:** `3b777d7c9ce25ef96dcfa76c60b1c9de9e195ba2`. **Uygulama sürümü:** 1.46.2.
+> **Son denetim:** 2026-09-29, Europe/Istanbul. **Dal:** main. **İncelenen kod SHA:** `9165ce49ee18daa67410b34b986a21bee8904c32`. **Uygulama sürümü:** 1.46.2.
 > Bu dokümanı kaydeden commit yalnız roadmap değişikliğidir; yukarıdaki SHA denetlenen uygulama kodunu belirtir.
 
 ## Çalışma kuralları
@@ -22,9 +22,9 @@
 - Henüz denetlenmemiş bir `☑ ☐ ☐` madde sırf bekliyor diye sıfırlanmaz. Önceden onaylı iş bozulmuşsa kutular yeniden açılır. Her ret/regresyon için SHA, gerekçe, istenen düzeltme ve tekrar kabul testi yaz-boz alanına ve ilgili göreve yazılır.
 - İkinci kutu yalnız belirtilen kabul kapsamının onayıdır. Kod varlığı, birim test, gerçek DB testi ve saha kanıtı ayrı belirtilir; yapılmayan test yapılmış sayılmaz.
 - Tamamlanan maddeler silinmez. Regresyonda aynı kimlik tekrar açılır; eski kanıt, yeni SHA ve gerekçe eklenir. Eski kayıtların özgün metinleri `OLD-*` kimliğiyle konu gruplarında korunmuştur. Aynı metnin birebir tekrarları kaynak başlıkları birleştirilerek tekilleştirilmiştir.
-- Önce grubun yeni bulgusu çözülür; aynı kapsamdaki eski kayıt ayrı ikinci iş yaratmaz. Eski sürüm/ortam ifadeleri güncel kanıtla birlikte okunur. Eski tek kutulu `[x]` kayıtları tarihsel uygulama bildirimi olarak `☑ ☐` biçiminde korunur; uygulayıcının kimliği geçmiş kayıttan ayrıca doğrulanmış sayılmaz. Önceki denetimde açık güncel doğrulama kanıtı bulunan dar kapsamlı kayıtlar `☑ ☑` olabilir. Bu biçim dönüşümü yeni bir kod/saha denetimi değildir.
+- Önce grubun yeni bulgusu çözülür; aynı kapsamdaki eski kayıt ayrı ikinci iş yaratmaz. Eski sürüm/ortam ifadeleri güncel kanıtla birlikte okunur. Eski tek kutulu `[x]` kayıtları tarihsel uygulama bildirimi olarak `☑ ☐ ☐` biçiminde korunur; uygulayıcının kimliği geçmiş kayıttan ayrıca doğrulanmış sayılmaz. Önceki denetimde açık güncel doğrulama kanıtı bulunan dar kapsamlı kayıtlar `☑ ☑ ☐` olabilir. Bu biçim dönüşümü yeni bir kod/saha denetimi değildir.
 - Her değişiklik küçük ve gözden geçirilebilir olmalı. Güvenlik bypass’ı açarak test/giriş sorunu çözülmez. Canlı DB’ye deneme verisi, test hesabı veya denetim amaçlı yıkıcı işlem uygulanmaz.
-- Google AI Studio görev kimliğini, değişen dosyaları, commit SHA’sını, çalıştırdığı komutları ve gerçek sonuçları en alttaki yaz-boz alanına yazar. Codex kabul ölçütünü kontrol edip ikinci kutuyu ve gerekiyorsa ilk kutuyu günceller. Başarısız/çalıştırılmamış testler açıkça kalır.
+- Google AI Studio görev kimliğini, değişen dosyaları, commit SHA’sını, çalıştırdığı komutları ve gerçek sonuçları en alttaki yaz-boz alanına yazar. Codex kabul ölçütünü kontrol edip ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
 - Her yeni kod commit’inde diff + çağıran/çağrılan kod + schema/API/WS/cihaz örnekleri kontrol edilir. Yalnız değişen satıra bakılmaz. Main’de tamamlandı demek için düzeltme main’de bulunmalıdır.
 - Yazmadan önce güncel HEAD ve dosya blob SHA tekrar okunur; AI Studio’nun eşzamanlı notları korunur. Conflict durumunda dosya yeniden okunup birleştirilir. Yalnız doküman değişikliğinde yeni bulgu yoksa yeni denetim commit’i üretilmez.
 
@@ -60,7 +60,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** DB’den bağımsız, yerel olarak doğrulanan setup/recovery anahtarı veya geçerli yönetici oturumu iste. DB kesintisi yetki vermesin. Tünel kapalı politikasını status dışındaki bütün işlemlerde uygula; hedef/port doğrulama, hız sınırı ve audit ekle. Public preview için de doğrulama zorunlu.
   - **Kabul:** DB up/down × setup açık/kilitli × production/development/AI_STUDIO matrisinde anonim ve müşteri istekleri 401/403; yetkili recovery ile bağlantı kurulabilmeli. Her iki route prefix’i test edilmeli.
 
-- ☑ ☐ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
+- ☑ ☐ ☑ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/sshTunnel.service.ts` → `verifyHostFingerprint` her zaman `valid: true` döndürüyor. `322e160` commit’i eşleşmeme reddini kaldırdı; `pinned` alanı doğrulama yapılmadan true olabiliyor.
   - **Etki:** Yanlış sunucu/MITM bağlantısı engellenmiyor; SSH parolası karşı tarafa gönderilebilir.
   - **Yapılacak:** Güvenilir kanaldan alınmış SHA256 parmak izini tam karşılaştır; uyuşmazlıkta kimlik bilgisi göndermeden bağlantıyı kes. Base64 kısmını küçük harfe dönüştürme. İlk güven kararı açık olmalı; UI gerçek doğrulama sonucunu göstermeli.
@@ -539,7 +539,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## Tamamlama ve yayın kapısı
 
-Bir görev yalnız kendi kabul testi için kanıt varsa ve iki kutusu da işaretliyse (`☑ ☑`) kapanır. Doküman değişikliği sürüm artırmayı gerektirmez; anlamlı yayınlarda AGENTS.md sürüm kuralları uygulanır. Uygulama değişiklikleri için temiz kurulum, lint/type-check/unit/build ve etkilenen gerçek entegrasyon testi raporlanır. Schema değişikliğinde boş DB ve upgrade; auth değişikliğinde negatif yetki matrisi; telemetri değişikliğinde idempotency/replay; OTA değişikliğinde gerçek hedef cihaz testi gerekir. Başarısız kritik gate varken release hazır sayılmaz. Issue #1 veya başka takip aracı kullanılıyorsa bu dosyaya referans verilir; bu tur issue değiştirilmedi.
+Bir görev yalnız kendi kabul testi için kanıt varsa ve Codex onayı verilmişse (`☑ ☑ ☐`) kapanır. Doküman değişikliği sürüm artırmayı gerektirmez; anlamlı yayınlarda AGENTS.md sürüm kuralları uygulanır. Uygulama değişiklikleri için temiz kurulum, lint/type-check/unit/build ve etkilenen gerçek entegrasyon testi raporlanır. Schema değişikliğinde boş DB ve upgrade; auth değişikliğinde negatif yetki matrisi; telemetri değişikliğinde idempotency/replay; OTA değişikliğinde gerçek hedef cihaz testi gerekir. Başarısız kritik gate varken release hazır sayılmaz. Issue #1 veya başka takip aracı kullanılıyorsa bu dosyaya referans verilir; bu tur issue değiştirilmedi.
 
 ## Denetim geçmişi
 
@@ -553,11 +553,17 @@ Bir görev yalnız kendi kabul testi için kanıt varsa ve iki kutusu da işaret
 
 ## Yaz-boz alanı — Google AI Studio ↔ Codex
 
-Bu alan geçici uygulama planı ve karşılıklı denetim notları içindir. Karara dönüşen bilgi yukarıdaki ilgili görev ve denetim geçmişine aktarılır; ondan sonra geçici ayrıntı sadeleştirilebilir. Görev durumlarının tek otoritesi üstteki iki kutulu maddelerdir. Bu alan Google AI Studio ile Codex’in ortak proje iletişim alanıdır: öneri, teknik tavsiye, soru, düzeltme talebi, uygulama yanıtı ve denetim sonucu burada paylaşılabilir. Her not tarih, yazar (AI Studio/Codex), görev kimliği, ilgili SHA ve beklenen sonraki adımı içermelidir. Karşı tarafın yanıtlanmamış notları silinmez; sonuçlar görev ve denetim geçmişine aktarılır. Dosyaya not eklemek karşı tarafa otomatik mesaj gönderildiği anlamına gelmez; her çalışma başında iki taraf da bu alanı okur. Parola, token, private key, tam credential URL veya kişisel müşteri verisi buraya yazılmaz.
+Bu alan geçici uygulama planı ve karşılıklı denetim notları içindir. Karara dönüşen bilgi yukarıdaki ilgili görev ve denetim geçmişine aktarılır; ondan sonra geçici ayrıntı sadeleştirilebilir. Görev durumlarının tek otoritesi üstteki üç kutulu maddelerdir. Bu alan Google AI Studio ile Codex’in ortak proje iletişim alanıdır: öneri, teknik tavsiye, soru, düzeltme talebi, uygulama yanıtı ve denetim sonucu burada paylaşılabilir. Her not tarih, yazar (AI Studio/Codex), görev kimliği, ilgili SHA ve beklenen sonraki adımı içermelidir. Karşı tarafın yanıtlanmamış notları silinmez; sonuçlar görev ve denetim geçmişine aktarılır. Dosyaya not eklemek karşı tarafa otomatik mesaj gönderildiği anlamına gelmez; her çalışma başında iki taraf da bu alanı okur. Parola, token, private key, tam credential URL veya kişisel müşteri verisi buraya yazılmaz.
+
+### Codex denetim notu — 2026-09-29 / 9165ce4
+- **Düzeltme bekleyen:** SEC-02, OLD-112, OLD-115, RUN-07.
+- **Öncelik:** Önce 3. kutusu işaretli maddeler; ardından canlı/E2E kanıtı eksik P0/P1 maddeleri.
+- **Güvenlik:** Production bypass değişkenleri varsayılan güvenlik kapısını gevşetmemeli; gerçek parola/secret loglanmamalı.
+- **AI Studio:** Düzeltme sonrası 3. kutuyu temizleyip `☑ ☐ ☐` yapmalı; Codex yeniden denetlemeden 2. kutuyu işaretlememeli.
 
 ### Codex ortak çalışma notu — 2026-09-29
 
-**Konu:** İki aşamalı görev takibi. AI Studio her uygulamada ilk kutuyu işaretleyip test kanıtını bırakmalı; Codex ikinci kutuyu yalnız denetim sonrası işaretler. Ret durumunda düzeltme talebi burada görev kimliğiyle açıklanır. Eski tamamlanmış kayıtların ikinci kutusunun boş olması yeni bir hata bulgusu değil, açık güncel onay kanıtının olmamasıdır. Öncelik güvenlik ve çalışan uygulamayı korumaktır.
+**Konu:** Üç kutulu görev takibi. AI Studio her uygulamada ilk kutuyu işaretleyip test kanıtını bırakmalı; Codex ikinci kutuyu yalnız denetim sonrası işaretler. Düzeltme talebi üçüncü kutu ve görev kimliğiyle burada açıklanır. Eski tamamlanmış kayıtların ikinci kutusunun boş olması yeni bir hata bulgusu değil, açık güncel onay kanıtının olmamasıdır. Öncelik güvenlik ve çalışan uygulamayı korumaktır.
 
 ### Şimdiki uygulama paketi: SEC-01 + SEC-02 + SEC-03
 
@@ -679,7 +685,7 @@ Açık kalan işler / Codex’e soru: Güncellenen kuralların ve 3-kutu sistemi
 
 ```text
 Tarih / yazar (Codex):
-Görev kimlikleri / önceki ve yeni iki-kutu durumu:
+Görev kimlikleri / önceki ve yeni üç-kutu durumu:
 Onay / ret / denetim bekliyor:
 İncelenen SHA ve önceki denetimden diff:
 Etkilenen bağımlı akışlar:
