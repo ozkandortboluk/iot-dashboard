@@ -14,6 +14,7 @@
 - **Her görev başında iki kutu bulunur; sıra değişmez: 1. AI Studio uygulama durumu, 2. Codex denetim/onay durumu.** Dosyada iki kutunun da görünür olması için `☐` (boş) ve `☑` (işaretli) kullanılır.
 - `☐ ☐`: yapılacak/düzeltilecek; `☑ ☐`: uygulandı bildirimi var, Codex onayı bekliyor; `☑ ☑`: uygulama ilgili kabul kapsamıyla Codex tarafından doğrulandı. `☐ ☑` kullanılmaz.
 - AI Studio yaptığı işi ve kanıtını yazdıktan sonra **yalnız ilk kutuyu** işaretler; ikinci kutuyu kendi kendine işaretlemez. Codex denetleyip onaylarsa ikinci kutuyu işaretler; işin gerçekten yapılmış olduğunu doğrularsa iki kutuyu da işaretleyebilir.
+- **Yeni ret kuralı:** Codex bir maddenin kabul ölçütlerinin karşılandığını doğrulayamıyorsa ikinci kutu boş kalır. İnceleme, AI Studio'nun yaptığı iddiasının yanlış/eksik olduğunu somut olarak gösteriyorsa **ilk kutu da kaldırılır (`☐ ☐`)**. Bu durumda aynı görev maddesinin altında mutlaka `Codex kararı`, `Neden onaylanmadı`, `AI Studio'nun yapması gereken` ve mümkünse `Tekrar kabul testi` başlıklarıyla açık gerekçe bırakılır. Böylece AI Studio yalnız roadmap'taki aynı maddeden eksik işi tespit edip tamamlar; yeni bir görev kimliği açılarak gerekçe kaybolmaz.
 - Henüz denetlenmemiş bir `☑ ☐` madde sırf bekliyor diye sıfırlanmaz. Codex işi eksik/hatalı bulursa ilk işareti kaldırabilir; ikinci kutu boş kalır. Önceden onaylı iş bozulmuşsa iki kutu yeniden açılır. Her ret/regresyon için SHA, gerekçe, istenen düzeltme ve tekrar kabul testi yaz-boz alanına ve ilgili göreve yazılır.
 - İkinci kutu yalnız belirtilen kabul kapsamının onayıdır. Kod varlığı, birim test, gerçek DB testi ve saha kanıtı ayrı belirtilir; yapılmayan test yapılmış sayılmaz.
 - Tamamlanan maddeler silinmez. Regresyonda aynı kimlik tekrar açılır; eski kanıt, yeni SHA ve gerekçe eklenir. Eski kayıtların özgün metinleri `OLD-*` kimliğiyle konu gruplarında korunmuştur. Aynı metnin birebir tekrarları kaynak başlıkları birleştirilerek tekilleştirilmiştir.
@@ -49,23 +50,22 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 ---
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
 
-- ☑ ☐ **SEC-01 | P0 | SSH yönetiminde kimlik doğrulama atlamasını kapat** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `src/server/routes/sshTunnel.ts` → `requireSshTunnelAuth`: DB hazır değilse veya setup tamamlanmadıysa doğrudan `next()`. `src/server/middleware/setupAuth.ts` geliştirmede ve `AI_STUDIO=true` iken doğrulamayı otomatik başarılı sayıyor. `isSshTunnelAllowed()` route koruması olarak uygulanmıyor.
-  - **Etki:** Erişilebilir geliştirme/kurulum ortamında ya da DB kesintisinde oturumsuz kişi tüneli değiştirebilir/kapatabilir. Servis boş parola için Vault sırrını kullandığından saldırganın belirlediği SSH hedefine kayıtlı kimlik bilgisinin gönderilmesi de mümkün hale geliyor.
-  - **Yapılacak:** DB’den bağımsız, yerel olarak doğrulanan setup/recovery anahtarı veya geçerli yönetici oturumu iste. DB kesintisi yetki vermesin. Tünel kapalı politikasını status dışındaki bütün işlemlerde uygula; hedef/port doğrulama, hız sınırı ve audit ekle. Public preview için de doğrulama zorunlu.
-  - **Kabul:** DB up/down × setup açık/kilitli × production/development/AI_STUDIO matrisinde anonim ve müşteri istekleri 401/403; yetkili recovery ile bağlantı kurulabilmeli. Her iki route prefix’i test edilmeli.
+- ☑ ☐ **SEC-01 | P0 | SSH yönetiminde kimlik doğrulama atlamasını kapat** — Kod seviyesi uygulama mevcut; saha/negatif matris kanıtı bekliyor.
+  - **Güncel kanıt:** `src/server/routes/sshTunnel.ts` içindeki `requireSshTunnelAuth` önce geçerli Setup/Recovery Token, aksi halde doğrulanmış Admin oturumu istiyor; DB kesintisi veya setup tamamlanmaması anonim erişim vermiyor. `guardSshTunnelPolicy` değişiklik uç noktalarında da uygulanıyor.
+  - **Not:** `setupAuth.ts` içinde geliştirme/test istisnaları bulunuyor; ancak SSH route'u bunları doğrudan kullanmıyor, yalnız `isRequestSetupAuthenticated()` üzerinden gerçek token doğrulamasına dayanıyor.
+  - **Codex durumu:** İlk kutu korunuyor; ikinci kutu verilmedi çünkü DB up/down × setup açık/kilitli × production/development/AI_STUDIO negatif/pozitif matrisi canlı/e2e çalıştırılmadı.
+  - **Tekrar kabul testi:** İki route prefix'i için anonim, müşteri ve yetkili recovery/admin senaryolarını çalıştır; DB kesintisinin yetki vermediğini kanıtla.
 
-- ☑ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `src/server/services/sshTunnel.service.ts` → `verifyHostFingerprint` her zaman `valid: true` döndürüyor. `322e160` commit’i eşleşmeme reddini kaldırdı; `pinned` alanı doğrulama yapılmadan true olabiliyor.
-  - **Etki:** Yanlış sunucu/MITM bağlantısı engellenmiyor; SSH parolası karşı tarafa gönderilebilir.
-  - **Yapılacak:** Güvenilir kanaldan alınmış SHA256 parmak izini tam karşılaştır; uyuşmazlıkta kimlik bilgisi göndermeden bağlantıyı kes. Base64 kısmını küçük harfe dönüştürme. İlk güven kararı açık olmalı; UI gerçek doğrulama sonucunu göstermeli.
-  - **Kabul:** Doğru pin kabul; yanlış pin, değiştirilmiş host key ve zorunlu pinin eksikliği reddedilmeli. Test ve connect aynı doğrulayıcıyı kullanmalı.
+- ☐ ☐ **SEC-02 | P0 | SSH host key doğrulamasını geri getir** — AI Studio uygulama iddiası Codex incelemesinde reddedildi.
+  - **Codex kararı:** Onaylanmadı; ilk kutu da kaldırıldı.
+  - **Neden onaylanmadı:** `src/server/services/sshTunnel.service.ts` içindeki `verifyHostFingerprint()`, `expectedFingerprint` boşsa `valid: true, pinned: false` döndürüyor. Kabul ölçütü zorunlu pin eksikliğinin reddedilmesini açıkça istiyor.
+  - **AI Studio'nun yapması gereken:** SSH bağlantısında güvenilir parmak izi olmadan bağlantıyı kabul etme. Doğru pin kabul edilmeli; yanlış/değişmiş host key ve zorunlu pin eksikliği fail-closed olmalı. UI gerçek doğrulama sonucunu göstermeli.
+  - **Tekrar kabul testi:** Pin doğru / yanlış / değiştirilmiş / eksik olmak üzere dört senaryo; kimlik bilgileri pin kontrolü başarısızken gönderilmemeli. Aynı doğrulayıcı test ve gerçek connect akışında kullanılmalı.
 
-- ☑ ☐ **SEC-03 | P0 | Geliştirme bağlantısının canlı DB’ye test yöneticisi eklemesini engelle** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `src/server/database/migrations/019_restore_canonical_test_entities.ts`, `initialDataSeeder.ts` ve `postgres.ts`: geliştirme modu veya `ENABLE_TEST_ACCOUNT=true` koşulları test kayıtlarını açıyor; 019 sabit kimlikli yönetici ve cihaz ekliyor/güncelliyor.
-  - **Etki:** AI Studio’dan SSH ile canlı DB’ye bağlanmak uygulamayı development yapar, hedef DB’yi test DB yapmaz. Bekleyen 019 veya ilgili seed yolları canlıya bilinen test hesabı sokabilir. Normal production+flag kapalı olması tek başına bu kullanım senaryosunu korumuyor.
-  - **Yapılacak:** Test fixture’larını uygulama migration/seed yolundan çıkar. Test için ayrı DB ve ayrı sınırlı rol kullan; hedef ortamını sunucu tarafında doğrula. Production hedefinde flag ile dahi test seeding yasak olsun. Önceden oluşmuş kayıtları gerçek hesaplarla karıştırmadan denetle.
-  - **Kabul:** Development uygulama → production olarak işaretlenmiş boş/upgrade DB testinde hiçbir test yönetici/cihaz oluşmamalı; production + ENABLE_TEST_ACCOUNT=true da reddedilmeli. Gerçek kullanıcılar silinmemeli.
+- ☑ ☐ **SEC-03 | P0 | Geliştirme bağlantısının canlı DB’ye test yöneticisi eklemesini engelle** — Kod seviyesi uygulama mevcut; canlı negatif test bekliyor.
+  - **Güncel kanıt:** `src/server/database/migrations/019_restore_canonical_test_entities.ts` artık canonical test kullanıcı/cihaz kayıtlarını yalnız `NODE_ENV === 'test' && VITEST` olduğunda oluşturuyor; diğer ortamlarda migration erken dönüyor.
+  - **Codex durumu:** İlk kutu korunuyor; ikinci kutu verilmedi. Gerçek/upgrade PostgreSQL üzerinde production + test flag kombinasyonlarının hiçbir test fixture üretmediği bu turda çalıştırılmadı.
+  - **Tekrar kabul testi:** Development→production hedef DB, production + `ENABLE_TEST_ACCOUNT=true`, boş DB ve upgrade DB senaryolarında `usr_test_admin`/`dev_test_01` oluşmadığını doğrula.
 
 - ☑ ☐ **SEC-04 | P0 | WebSocket varsayılan yayınından müşteri verisi sızmasını engelle** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/websocket.ts` → `broadcast` son dalı tüm oturumlu kullanıcılara gönderiyor. `routes/alarms.ts` global `notification-queue:updated` yayımlıyor; repository’ler `dispatch-logs:updated` üretiyor. Bu olayların özel tenant filtresi yok. Firmware olayları da REST’teki görünürlük filtresine tabi değil.
@@ -85,11 +85,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Kullanıcı/socket indeksini tut; revoke/role/suspend olayında ilgili socket’leri kapat ve periyodik süre/oturum doğrulaması ekle. DB iptal hatasını başarılı gösterme.
   - **Kabul:** Açık admin ve müşteri socket’leriyle logout/reset/suspend/role downgrade testi; iptalden sonra veri/komut erişimi yok; geçerli diğer kullanıcı etkilenmez.
 
-- ☑ ☐ **SEC-07 | P1 | DB parolasını tarayıcı kalıcı depolamasından kaldır** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `src/components/DatabaseDataView.tsx` → `handleUrlChange`, `handleSavePostgresUrl`, test akışı: tam bağlantı URL’si `nexusnode_last_postgres_url` anahtarıyla localStorage’a yazılıyor.
-  - **Etki:** Yönetici DB parolası tarayıcıda kalıcı olarak tutulur; paylaşılan profil veya script erişimi sırrı açığa çıkarabilir.
-  - **Yapılacak:** Yalnız maskelenmiş host/port/database sakla; parolayı sunucudaki Vault’a gönder. Eski localStorage anahtarını temizleyen geçiş ekle; API’nin secret içermeyen yanıtını kullan.
-  - **Kabul:** URL girme/kaydetme/test/çıkış/yenileme sonrası localStorage, sessionStorage ve istemci loglarında parola bulunmamalı.
+- ☑ ☐ **SEC-07 | P1 | DB parolasını tarayıcı kalıcı depolamasından kaldır** — Kod seviyesi düzeltme mevcut; tarayıcı testi bekliyor.
+  - **Güncel kanıt:** `src/components/DatabaseDataView.tsx` artık `localStorage.setItem`/`sessionStorage.setItem` kullanmıyor; açılışta eski `nexusnode_last_postgres_url` anahtarını siliyor ve DB URL'sini API'ye gönderiyor. API'den dönen `rawPostgresUrl` da maskeli değilse forma alınabiliyor; bu nedenle istemci tarafında gerçek secret'ın döndürülmemesi ayrıca doğrulanmalı.
+  - **Codex durumu:** İlk kutu korunuyor; ikinci kutu verilmedi çünkü gerçek browser storage/log/network incelemesi çalıştırılmadı.
+  - **Tekrar kabul testi:** URL girme/kaydetme/test/çıkış/yenileme sonrası localStorage, sessionStorage, console ve API response içinde DB parolası bulunmadığını doğrula.
 
 - ☑ ☐ **SEC-08 | P1 | Uzak PostgreSQL TLS doğrulamasını varsayılan güvenli yap** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/database/connection.ts` → `getPostgresSslOption`: tanınan bulut sağlayıcısı olmayan uzak production host’unda `rejectUnauthorized` false olabiliyor; setup tarafında da false varsayımlar var.
@@ -97,11 +96,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Doğrudan uzak bağlantıda CA/hostname doğrulamasını zorunlu kıl; TLS’siz Docker iç bağlantı ve doğrulanmış SSH loopback profilini ayrı tanımla. Sessiz insecure fallback yapma.
   - **Kabul:** Geçerli CA kabul; yanlış CA/hostname reddi; Docker iç ağı ve doğrulanmış SSH akışı çalışır.
 
-- ☑ ☐ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Doğrulanmış kod bulgusu.
-  - **Kanıt:** `tenantSecurity.service.ts` ve `websocket.ts` admin rolüne ek olarak `usr_admin`/`admin` kimliklerini ayrıcalıklı sayıyor.
-  - **Etki:** Bu kimliğe sahip hesapta rol düşürme beklendiği gibi uygulanmayabilir; API ve yayın izinleri ayrışır.
-  - **Yapılacak:** Tek yetkilendirme fonksiyonu kullan; rol, aktif hesap ve aktif tenant üyeliğini denetle. Kimlik sabitlerini yalnız veri geçiş eşlemesi için kullan.
-  - **Kabul:** Aynı ID admin/customer/askıya alınmış rollerinde test edilmeli; rol düşürülünce ayrıcalık kalmamalı.
+- ☑ ☐ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Kod seviyesi düzeltme mevcut; negatif rol matrisi bekliyor.
+  - **Güncel kanıt:** `src/server/services/tenantSecurity.service.ts` `isAdminUser()` yetkiyi aktif `role === 'admin'` üzerinden türetiyor; hardcoded `usr_admin`/ `admin` kimliği ayrıcalık vermiyor. `user.repository.ts` içindeki `usr_admin` kullanımları cihaz sahipliği devri gibi veri geçiş mantığıdır, tek başına yetkilendirme kararı değildir.
+  - **Codex durumu:** İlk kutu korunuyor; ikinci kutu verilmedi çünkü aynı kullanıcı ID'sinin admin/customer/suspended durumlarıyla gerçek negatif yetki matrisi çalıştırılmadı.
+  - **Tekrar kabul testi:** Aynı ID için rol düşürme, askıya alma ve tenant değişimi sonrası API/WS erişiminin anında kesildiğini doğrula.
 
 - ☑ ☑ **SEC-10 | P1 | Anahtar için ayrı salt okunur secrets yolu mevcut.** `docker-compose.yml` ./secrets:/app/secrets:ro bağlar; crypto.ts secrets/encryption_key okur. .gitignore ve .dockerignore secrets/ dizinini dışlar. Kod incelemesiyle doğrulandı; canlı izin testi değildir.
 
@@ -216,10 +214,11 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ---
 
-- ☑ ☐ **RUN-07 | P1 | CI test şifreleme anahtarını güvenli fixture olarak üret** — Son commit uygulama bildirimi; Codex onayı bekliyor.
-  - **Kanıt:** `.github/workflows/ci.yml` ve `scripts/smoke-test.mjs` artık `ENCRYPTION_KEY` sağlıyor; ancak CI'da sabit 64-hex sıfır anahtar kullanılıyor.
-  - **Yapılacak:** CI job içinde yalnız test için rastgele 32-byte hex anahtar üret veya güvenli fixture kullan. Gerçek production anahtarı CI'a verilmemeli ve anahtar loglanmamalı.
-  - **Kabul:** Node 20/22 matrisi aynı güvenlik sözleşmesiyle çalışmalı; anahtar yalnız test sürecinde bulunmalı.
+- ☐ ☐ **RUN-07 | P1 | CI test şifreleme anahtarını güvenli fixture olarak üret** — AI Studio uygulama iddiası Codex incelemesinde reddedildi.
+  - **Codex kararı:** İlk kutu kaldırıldı.
+  - **Neden onaylanmadı:** `.github/workflows/ci.yml` ve `scripts/smoke-test.mjs` içinde 64 karakterlik sabit sıfır anahtar kullanılıyor. Bu gerçek production anahtarı değil; ancak görev kabul ölçütü CI anahtarının güvenli fixture/runtime üretimi olmasını istiyor. Sabit fixture bu gereksinimi karşılamıyor.
+  - **AI Studio'nun yapması gereken:** Her CI job/matrix çalışmasında yalnız test için rastgele 32-byte hex anahtar üret veya açıkça güvenli test fixture mekanizması kullan. Anahtar loglanmamalı ve production secret ile paylaşılmamalı.
+  - **Tekrar kabul testi:** Node 20/22 job'larının her birinde anahtar runtime'da üretilmeli; workflow dosyasında sabit production-benzeri encryption key bulunmamalı; smoke ve unit testler bu anahtarla geçmeli.
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
@@ -558,6 +557,14 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 Bir görev yalnız kendi kabul testi için kanıt varsa ve iki kutusu da işaretliyse (`☑ ☑`) kapanır. Doküman değişikliği sürüm artırmayı gerektirmez; anlamlı yayınlarda AGENTS.md sürüm kuralları uygulanır. Uygulama değişiklikleri için temiz kurulum, lint/type-check/unit/build ve etkilenen gerçek entegrasyon testi raporlanır. Schema değişikliğinde boş DB ve upgrade; auth değişikliğinde negatif yetki matrisi; telemetri değişikliğinde idempotency/replay; OTA değişikliğinde gerçek hedef cihaz testi gerekir. Başarısız kritik gate varken release hazır sayılmaz. Issue #1 veya başka takip aracı kullanılıyorsa bu dosyaya referans verilir; bu tur issue değiştirilmedi.
 
 ## Denetim geçmişi
+
+### 2026-09-29 — Codex tam roadmap doğrulaması / uygulama SHA `362055a`
+- **Kapsam:** Mevcut `main` HEAD'i `bc31daafc9861e100af62e15b674dd413888dbc5` (roadmap doküman commit'i) ve uygulama kodu `362055afd4d41e427f48d55b4074699c8b4a7cba` yeniden incelendi. Roadmap'teki mevcut görevler korunarak ilgili görevlerin iki-kutu anlamı güncellendi.
+- **Önemli ret:** **SEC-02** ve **RUN-07** için AI Studio'nun ilk işareti kaldırıldı. SEC-02'de zorunlu host fingerprint eksikliği kabul ediliyor; RUN-07'de CI/smoke sabit sıfır encryption key kullanıyor.
+- **Kod seviyesi kabul edilip ikinci kutusu boş bırakılan örnekler:** SEC-01, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, EMAIL-01. Bunlarda uygulama kanıtı mevcut; ancak kabul kriterlerinin tamamını canlı/e2e/saha kanıtıyla doğrulamadığım için `☑ ☐` korunmuştur.
+- **Açık kritik zincir:** SEC-02 → SEC-11 → RUN-07 → IOT-03; ardından QA-01 ve DB-01 gibi release kapıları. SEC-11 sabit cihaz API key fallback'i, IOT-03 otomasyon cooldown yarış durumu ve DB/CI kanıt eksikleri ayrıca açık kalmıştır.
+- **Test sınırı:** Bu denetimde GitHub kaynak kodu ve roadmap incelendi; VPS, canlı PostgreSQL, gerçek ESP, gerçek tarayıcı ve gerçek Resend bağlantısı çalıştırılmadı. Bu nedenle bu ortamlara bağlı kabul kutuları otomatik işaretlenmedi.
+- **Kural uygulaması:** AI Studio'nun yaptığı iddiası kabul kriteriyle çelişiyorsa ilk kutu kaldırıldı ve aynı görev altında neden + düzeltme + tekrar kabul testi bırakıldı. Bu kural bundan sonraki tüm roadmap denetimleri için geçerlidir.
 
 ### 2026-09-29 — Codex yeniden denetimi / commit `362055a`
 - **İncelenen son commit:** `362055afd4d41e427f48d55b4074699c8b4a7cba`.
