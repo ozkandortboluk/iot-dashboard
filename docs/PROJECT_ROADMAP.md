@@ -111,51 +111,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 - ☑ ☑ ☐ **SEC-10 | P1 | Anahtar için ayrı salt okunur secrets yolu mevcut.** `docker-compose.yml` ./secrets:/app/secrets:ro bağlar; crypto.ts secrets/encryption_key okur. .gitignore ve .dockerignore secrets/ dizinini dışlar. Kod incelemesiyle doğrulandı; canlı izin testi değildir.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☑ ☐ ☐ **OLD-005** PostgreSQL tenant scope kontrolleri notifications/logs/alarms tarafında güçlendirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-016** Migration 004 tenant ALTER/FK hataları throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-023** Tenant scope/read-query regresyon testleri eklenmeli. — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-060** Critical column verification mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☑ ☐ ☐ **OLD-061** `tenant_id` migration mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☑ ☐ ☐ **OLD-062** DATABASE_URL CI/production gate mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☑ ☐ ☐ **OLD-063** Notifications, logs ve alarms için tenant scope filtreleri güçlendirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☑ ☐ ☐ **OLD-064** Legacy record tenant sync/migration iyileştirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☐ ☐ ☐ **OLD-065** Tenant backfill gerçek müşteri eşlemesine göre doğrulanmalı. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☐ ☐ ☐ **OLD-066** NULL/yanlış tenant reconciliation. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☐ ☐ ☐ **OLD-067** Tenant column type/default/index/FK tam doğrulanmalı. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☑ ☐ ☐ **OLD-068** Tenant isolation negatif testleri. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate; P0.15 — Multitenant migration safety.
-- ☑ ☐ ☐ **OLD-080** 004 tenant ALTER/FK errors throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.13 — Migration false-success.
-- ☑ ☐ ☐ **OLD-089** Yeni tenant kolonlarında kalıcı default eklenmiyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☑ ☐ ☐ **OLD-090** ALTER/FK hataları throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☑ ☐ ☐ **OLD-091** NULL tenant backfill ilişkisel sahiplik mantığına taşındı. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☑ ☐ ☐ **OLD-092** Tenant kapsamı notifications/logs/alarms için kod seviyesinde güçlendirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☐ ☐ ☐ **OLD-093** Yanlış tenant reconciliation. — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☐ ☐ ☐ **OLD-094** Gerçek çoklu müşteri verisiyle cross-tenant sızıntı testi. — Eski kaynak: P0.15 — Multitenant migration safety.
-- ☑ ☐ ☐ **OLD-112** Production'da default DB password kesinlikle reddedilmeli. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☑ ☐ ☐ **OLD-113** Default JWT/session secret kesinlikle reddedilmeli. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☑ ☐ ☐ **OLD-114** Host `5432` publish kaldırılmalı; DB yalnız private Docker network'ten erişilebilir olmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☑ ☐ ☐ **OLD-115** Secret scanning + startup policy. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☑ ☐ ☐ **OLD-130** Host `5432` publish kaldırılmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☑ ☐ ☐ **OLD-131** DB private Docker network'te kalmalı. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☐ ☐ ☐ **OLD-132** Firewall/allowlist doğrulanmalı. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☑ ☐ ☐ **OLD-133** Default PostgreSQL password production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
-- ☑ ☐ ☐ **OLD-134** Default JWT/session secret production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
-- ☐ ☐ ☐ **OLD-135** Secret rotation. — Eski kaynak: P1.2 — Default secret'lar.
-- ☐ ☐ ☐ **OLD-136** Secret scanning CI. — Eski kaynak: P1.2 — Default secret'lar.
-- ☑ ☐ ☐ **OLD-145** Tenant/device referans bütünlüğü. — Eski kaynak: P1.5 — Foreign key / referans bütünlüğü.
-- ☑ ☐ ☐ **OLD-158** Credential revoke → aktif socket termination. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☑ ☐ ☐ **OLD-162** Query-string credential kullanımının kaldırılması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☑ ☐ ☐ **OLD-171** Error → request → device → tenant zincirinin tek trace kimliğiyle izlenmesi. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☐ ☐ ☐ **OLD-177** Bugünkü localStorage state persistence davranışlarının tenant/device değişimlerinde regresyon testi. — Eski kaynak: Live Dashboard.
-- ☐ ☐ ☐ **OLD-205** Tenant overview. — Eski kaynak: Customer/Tenant.
-- ☐ ☐ ☐ **OLD-206** User/role management. — Eski kaynak: Customer/Tenant.
-- ☐ ☐ ☐ **OLD-207** Device online ratio. — Eski kaynak: Customer/Tenant.
-- ☐ ☐ ☐ **OLD-208** Usage quota. — Eski kaynak: Customer/Tenant.
-- ☐ ☐ ☐ **OLD-209** Credential management. — Eski kaynak: Customer/Tenant.
-- ☐ ☐ ☐ **OLD-210** Audit history. — Eski kaynak: Customer/Tenant.
-- ☑ ☐ ☐ **OLD-219** CSP/HSTS/security headers. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
-- ☐ ☐ ☐ **OLD-221** Secret scanning. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -193,26 +148,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 - ☐ ☐ ☐ **RUN-06 | P1 | Secrets mount bootstrap ve izinlerini doğrula.** Docker USER node ile çalışır; hostta root:root 0600 dosya okunamazsa anahtar yok kabul edilip süreç kapanır. Hedef UID/GID ile güvenli okunabilirlik, eksik dosyada açıklayıcı hata ve doğru anahtarla restart testi gerekir. Mevcut şifreli Vault için yeni rastgele anahtar üretme; önce mevcut anahtarı güvenli taşı/backup al. `.env.example` içindeki production için data/.vault_key alternatifini öneren eski açıklama güncellenmeli. Bu commit CI’ya anahtar sağlamadığı için RUN-01 açık kalır.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☑ ☐ ☐ **OLD-025** `/health/ready` DB hazır değilse 503. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☑ ☐ ☐ **OLD-102** `uncaughtException` sonrası kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
-- ☑ ☐ ☐ **OLD-103** `unhandledRejection` için kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
-- ☑ ☐ ☐ **OLD-104** Graceful shutdown loglama mekanizması. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.18 — Process crash handling.
-- ☐ ☐ ☐ **OLD-105** Docker restart policy ile E2E doğrulama. — Eski kaynak: P0.18 — Process crash handling.
-- ☐ ☐ ☐ **OLD-110** Image digest pinle. — Eski kaynak: P0.20 — Production Compose ile CI Timescale parity.
-- ☐ ☐ ☐ **OLD-117** App restart → proxy recovery. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi; 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-119** Host reboot → DB → app → proxy. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi.
-- ☐ ☐ ☐ **OLD-121** Host reboot → DB → app → proxy recovery. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-122** DB connection exhaustion. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-123** Disk full. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-124** Network interruption. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-129** Image digest pinleme. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☑ ☐ ☐ **OLD-137** DB healthcheck gerçek DB/user ile aynı kaynağı kontrol etmeli. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
-- ☐ ☐ ☐ **OLD-138** App healthcheck readiness'i kontrol etmeli; yalnız liveness olmamalı. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
-- ☐ ☐ ☐ **OLD-139** Proxy upstream healthcheck. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
-- ☐ ☐ ☐ **OLD-140** DB restart recovery testi. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
-- ☑ ☐ ☐ **OLD-226** Test verisi ile production verisinin daha sert sınırlandırılması. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -230,69 +165,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Başarılı boş sonuç ile sorgu hatasını ayır; başarılı snapshot’ı boş olsa da atomik uygula. Cache kimliğini DB/tenant ile ilişkilendir; eski credential cache’ini temizle.
   - **Kabul:** Önce dolu DB, sonra boş authoritative snapshot ve DB değişimi testinde hayalet kayıt kalmamalı; sorgu hatası boş başarı sayılmamalı.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☑ ☐ ☐ **OLD-001** Shared PostgreSQL pool ve production write guard mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-002** `/health` ve `/health/ready` PostgreSQL'i esas alıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-003** Production database config'te `local` engine seçimi engellendi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-004** `/system/stats` PostgreSQL/TimescaleDB veya disconnected durumunu raporluyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-006** Memory/PostgreSQL permission kontrolleri standardize edilmeye başlandı. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☐ ☐ ☐ **OLD-007** `LocalDatabase` / legacy `db.json` katmanının production source-of-truth olamayacağı runtime policy ile kesinleştirilmeli. — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☐ ☐ ☐ **OLD-009** Tüm DB write endpoint'lerinde PostgreSQL-only + 503 E2E testi. — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-010** Unified shared PostgreSQL pool. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.2 — Tek PostgreSQL connection pool.
-- ☑ ☐ ☐ **OLD-011** Production fallback pool yok. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.2 — Tek PostgreSQL connection pool.
-- ☑ ☐ ☐ **OLD-012** Merkezi connection string çözümleme. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.2 — Tek PostgreSQL connection pool.
-- ☑ ☐ ☐ **OLD-013** Split-brain local PostgreSQL pool engellenmiş. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.2 — Tek PostgreSQL connection pool.
-- ☑ ☐ ☐ **OLD-015** Migration 003 PK/unique hataları throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-018** Kritik API write yollarında 503/error propagation mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-019** Migration 002 Timescale extension enable hatası production'da fail ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-020** Hydration sırasında yakalanan DB hataları system logger'a kaydediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☐ ☐ ☐ **OLD-022** DB read error ile gerçek boş sonuç ayrımı tam taranmalı. — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-024** `isReady()` schema ensure koşulunu dikkate alıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☑ ☐ ☐ **OLD-026** Advisory lock sonrası schema verification zorunlu. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☑ ☐ ☐ **OLD-027** Startup timeout sonrası readiness yalnız gerçek DB/schema durumuna göre belirleniyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☑ ☐ ☐ **OLD-029** `001–004` sıralı migration yapısı. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-030** `schema_migrations`. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-031** Advisory lock. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-032** Pending migration transaction/rollback modeli. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-033** Timescale extension failure fail ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☐ ☐ ☐ **OLD-034** `down` migration'lar gerçek rollback veya açık irreversible politika sağlamalı. — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-035** Migration checksum SHA-256 yazılıyor ve drift kontrol ediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-036** Migration sonrası otomatik schema verification. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☐ ☐ ☐ **OLD-037** Runtime DDL ile migration DDL tek canonical kaynağa indirilmeli. — Eski kaynak: P0.5 — Versioned migration sistemi.
-- ☑ ☐ ☐ **OLD-056** `/health/ready` PostgreSQL hazır değilse 503. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.9 — PostgreSQL-only health/readiness.
-- ☑ ☐ ☐ **OLD-057** `/health` PostgreSQL hazır değilse 503. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.9 — PostgreSQL-only health/readiness.
-- ☑ ☐ ☐ **OLD-058** Health response PostgreSQL/TimescaleDB kullanıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.9 — PostgreSQL-only health/readiness.
-- ☐ ☐ ☐ **OLD-059** Docker healthcheck + Nginx zinciri gerçek DB failure injection ile doğrulanmalı. — Eski kaynak: P0.9 — PostgreSQL-only health/readiness.
-- ☑ ☐ ☐ **OLD-073** Production `local` engine seçimi engellendi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.12 — Production DB-only enforcement.
-- ☑ ☐ ☐ **OLD-074** `/system/stats` SQLite raporlamasından çıkarıldı. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.12 — Production DB-only enforcement.
-- ☑ ☐ ☐ **OLD-075** Production runtime PostgreSQL kullanımına zorlanıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.12 — Production DB-only enforcement.
-- ☐ ☐ ☐ **OLD-076** PostgreSQL-only regression test. — Eski kaynak: P0.12 — Production DB-only enforcement.
-- ☑ ☐ ☐ **OLD-079** 003 PK/unique errors throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.13 — Migration false-success.
-- ☑ ☐ ☐ **OLD-081** Timescale extension oluşturulamaması production migration'ı fail ettiriyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.13 — Migration false-success.
-- ☑ ☐ ☐ **OLD-082** Migration contract gate başarı kaydından önce/sonra çalışıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.13 — Migration false-success.
-- ☑ ☐ ☐ **OLD-083** Composite PK `(id, created_at)` sıkı kontrol ediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☑ ☐ ☐ **OLD-084** Unique constraint kolonları ordinal sırayla kontrol ediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☑ ☐ ☐ **OLD-087** Timescale extension version kontrolü var. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☐ ☐ ☐ **OLD-088** Migration checksum kontrolü var. **Yeniden açıldı 2026-09-29:** verifier checksum karşılaştırmıyor; DB-01. — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☑ ☐ ☐ **OLD-095** Lock alınamadığında diğer instance'ın migration sonucunu bekleme/polling var. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.16 — Schema readiness bypass.
-- ☑ ☐ ☐ **OLD-096** Başarı kanıtı olmadan `isSchemaEnsured=true` yapılmıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.16 — Schema readiness bypass.
-- ☑ ☐ ☐ **OLD-097** Timeout/schema hatasında readiness 503 kalıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.16 — Schema readiness bypass.
-- ☐ ☐ ☐ **OLD-098** Multi-instance migration/readiness testi. — Eski kaynak: P0.16 — Schema readiness bypass.
-- ☑ ☐ ☐ **OLD-099** Production'da `DISABLE_AUTO_MIGRATION=true` yalnız doğrulanmış schema contract ile çalışıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.17 — Migration bypass configuration.
-- ☑ ☐ ☐ **OLD-100** Flag readiness'i otomatik true yapmıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.17 — Migration bypass configuration.
-- ☐ ☐ ☐ **OLD-101** CI'da production environment policy testi. — Eski kaynak: P0.17 — Migration bypass configuration.
-- ☐ ☐ ☐ **OLD-116** PostgreSQL restart → app recovery. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi; 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-127** Multi-instance schema migration/readiness testi. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-141** Tek canonical schema/migration kaynağı. — Eski kaynak: P1.4 — Duplicate schema kaynakları.
-- ☐ ☐ ☐ **OLD-142** Runtime DDL ↔ migration DDL çakışması kaldırılmalı. — Eski kaynak: P1.4 — Duplicate schema kaynakları.
-- ☐ ☐ ☐ **OLD-143** Schema drift CI testi. — Eski kaynak: P1.4 — Duplicate schema kaynakları.
-- ☐ ☐ ☐ **OLD-146** `DROP CONSTRAINT ... CASCADE` yalnız migration içinde. — Eski kaynak: P1.5 — Foreign key / referans bütünlüğü.
-- ☐ ☐ ☐ **OLD-147** Bakım sorguları normal query trafiğinden ayrılmalı. — Eski kaynak: P1.6 — Auto-Healer sınırları.
-- ☐ ☐ ☐ **OLD-148** `pg_terminate_backend` güvenli koşullara bağlanmalı. — Eski kaynak: P1.6 — Auto-Healer sınırları.
-- ☐ ☐ ☐ **OLD-149** Connection recycle loop engellenmeli. — Eski kaynak: P1.6 — Auto-Healer sınırları.
-- ☐ ☐ ☐ **OLD-150** Audit log. — Eski kaynak: P1.6 — Auto-Healer sınırları.
-- ☐ ☐ ☐ **OLD-225** DB schema drift CI. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -304,39 +176,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Tek sıralı WAL writer ve append/rotation kilidi kullan; kalıcılık sözleşmesine göre await+fsync yap. Disk hatasında başarısız ACK döndür; yeni paketleri flush RAM güncellemesinde kaybetme; replay idempotent olsun.
   - **Kabul:** ENOSPC, append failure, append sırasında rotate, process kill, .processing recovery, duplicate ve out-of-order paket testleri; kabul edilmiş paketlerin hiçbiri kaybolmamalı.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-017** Migration 002 hypertable/compression hataları throw ediyor. **Yeniden açıldı 2026-09-29:** 002 bu hataları warn ile yutuyor; DB-01. — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☑ ☐ ☐ **OLD-038** `(device_id, boot_id, sequence)` unique constraint tanımlı. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.6 — Telemetry packet idempotency.
-- ☑ ☐ ☐ **OLD-039** Dedup modeli mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.6 — Telemetry packet idempotency.
-- ☑ ☐ ☐ **OLD-040** Verification gerçek constraint kolonlarını ordinal sırayla doğruluyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.6 — Telemetry packet idempotency.
-- ☑ ☐ ☐ **OLD-041** `ON CONFLICT (device_id, boot_id, sequence)` hedefi gerçek constraint ile birebir eşleşiyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.6 — Telemetry packet idempotency.
-- ☐ ☐ ☐ **OLD-042** Duplicate/retry/reboot/out-of-order/concurrent production-benzeri test kanıtı. — Eski kaynak: P0.6 — Telemetry packet idempotency.
-- ☑ ☐ ☐ **OLD-043** Verifier `telemetry_readings` hypertable olup olmadığını kontrol ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☑ ☐ ☐ **OLD-044** Composite PK `(id, created_at)` sırasını kontrol ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☑ ☐ ☐ **OLD-045** 7 günlük chunk interval katalogdan kesin kontrol ediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☑ ☐ ☐ **OLD-046** Compression ayarı ve compression policy katalogdan kontrol ediliyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☑ ☐ ☐ **OLD-047** Timescale extension/version production için zorunlu. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☑ ☐ ☐ **OLD-048** `simulation_telemetry_readings` hypertable doğrulaması var. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☐ ☐ ☐ **OLD-049** 50 müşteri × 5 cihaz × ~5 saniye load/soak kanıtı. — Eski kaynak: P0.7 — `telemetry_readings` TimescaleDB bütünlüğü.
-- ☐ ☐ ☐ **OLD-050** Durable telemetry WAL/retry altyapısı mevcut. **Yeniden açıldı 2026-09-29:** altyapı var fakat append beklenmiyor; TEL-01. — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☑ ☐ ☐ **OLD-051** `persisted/degraded` durumları için mekanizmalar mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☐ ☐ ☐ **OLD-052** DB down/recovery failure-injection. — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☐ ☐ ☐ **OLD-053** Partial commit / duplicate replay. — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☐ ☐ ☐ **OLD-054** Disk full / WAL overflow. — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☐ ☐ ☐ **OLD-055** DB geri dönüşünde idempotent replay. — Eski kaynak: P0.8 — Telemetry veri kaybı / replay.
-- ☐ ☐ ☐ **OLD-078** 002 hypertable/compression errors throw ediyor. **Yeniden açıldı 2026-09-29:** 002 bu hataları warn ile yutuyor; DB-01. — Eski kaynak: P0.13 — Migration false-success.
-- ☑ ☐ ☐ **OLD-085** Hypertable dimension/chunk interval kontrolü var. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☑ ☐ ☐ **OLD-086** Compression + policy kontrolü var. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.14 — Schema verification false-positive.
-- ☐ ☐ ☐ **OLD-126** Uzun telemetry soak/load. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-144** Orphan device/telemetry reconciliation. — Eski kaynak: P1.5 — Foreign key / referans bütünlüğü.
-- ☐ ☐ ☐ **OLD-183** Metric catalog + unit normalization. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-184** Aggregation/downsampling. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-185** Data quality indicators. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-186** Clock drift. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-187** Ingest latency/retry/drop metrikleri. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-188** Retention/compression yönetimi. — Eski kaynak: Telemetry.
-- ☐ ☐ ☐ **OLD-224** Load/soak/capacity plan. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -354,17 +193,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Firmware ve backup için kalıcı volume/harici hedef tanımla; anahtarı ayrı güvenli secret olarak yönet. Anahtar kurtarma ve firmware metadata/dosya tutarlılığı prosedürü ekle.
   - **Kabul:** Recreate sonrası eski firmware indirilebilir ve doğrulanabilir; yedek geri yüklenebilir; sabit public key kullanan cihaz OTA doğrulamasını sürdürebilir.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-008** Firestore legacy/stub/sync yolları production veri akışından tamamen ayrıştırılmalı veya kaldırılmalı. — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
-- ☑ ☐ ☐ **OLD-021** Backup catch yolları sessizce kaybolmak yerine loglanıyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☐ ☐ ☐ **OLD-077** Legacy local/Firestore yollarının production write path'inden kesin ayrıldığı otomatik test. — Eski kaynak: P0.12 — Production DB-only enforcement.
-- ☐ ☐ ☐ **OLD-111** Upgrade/restore testini CI'ya ekle. — Eski kaynak: P0.20 — Production Compose ile CI Timescale parity.
-- ☐ ☐ ☐ **OLD-151** Production `pg_dump` uyumluluğu. — Eski kaynak: P1.7 — Gerçek PostgreSQL backup / restore.
-- ☐ ☐ ☐ **OLD-152** Gerçek restore testi. — Eski kaynak: P1.7 — Gerçek PostgreSQL backup / restore.
-- ☐ ☐ ☐ **OLD-153** Backup retention + harici hedef. — Eski kaynak: P1.7 — Gerçek PostgreSQL backup / restore.
-- ☐ ☐ ☐ **OLD-154** Periyodik restore drill. — Eski kaynak: P1.7 — Gerçek PostgreSQL backup / restore.
-- ☐ ☐ ☐ **OLD-223** Backup restore drill otomasyonu. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -382,30 +210,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Cihazda x-api-key/Authorization desteklenen handshake’i, tarayıcıda HttpOnly cookie’yi kullan. Query token kabulünü geri açma. OpenAPI/HelpView/ESP örneğini birlikte güncelle.
   - **Kabul:** Gerçek ESP8266/ESP32 örneği derlenip WSS bağlanmalı; doğru header kabul, query-only token reddi; smoke hem boş setup hem hazır DB dalını çalıştırmalı.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-118** Proxy restart → HTTP + WebSocket recovery. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi; 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-120** Gerçek ESP8266/ESP32 `connect → telemetry → DB → dashboard → command → ACK → UI` E2E. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi; 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-125** WebSocket reconnect/backoff. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
-- ☐ ☐ ☐ **OLD-159** Reconnect/backoff. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☑ ☐ ☐ **OLD-160** Duplicate command/event koruması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ ☐ **OLD-161** Backpressure/max payload soak. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ ☐ **OLD-163** Command ID → ACK → final state DB tutarlılığı. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☑ ☐ ☐ **OLD-164** Tek command schema. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ ☐ **OLD-165** Manual/automation ayrımı. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ ☐ **OLD-166** Fail-safe/default state. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ ☐ **OLD-178** Toplu operasyonlar. — Eski kaynak: Device Management.
-- ☐ ☐ ☐ **OLD-179** Bakım planlama. — Eski kaynak: Device Management.
-- ☐ ☐ ☐ **OLD-180** Health timeline. — Eski kaynak: Device Management.
-- ☐ ☐ ☐ **OLD-181** Device replacement veri bütünlüğü. — Eski kaynak: Device Management.
-- ☐ ☐ ☐ **OLD-182** Customer selector UX'in admin/test hesapları dışındaki gerçek müşteri sıralama ve filtre davranışı. — Eski kaynak: Device Management.
-- ☐ ☐ ☐ **OLD-194** Visual builder. — Eski kaynak: Automation.
-- ☐ ☐ ☐ **OLD-195** Schedule/time windows. — Eski kaynak: Automation.
-- ☐ ☐ ☐ **OLD-196** Retry/fallback. — Eski kaynak: Automation.
-- ☐ ☐ ☐ **OLD-197** Dry-run. — Eski kaynak: Automation.
-- ☐ ☐ ☐ **OLD-198** Execution trace. — Eski kaynak: Automation.
-- ☐ ☐ ☐ **OLD-199** Circular trigger/max-depth protection. — Eski kaynak: Automation.
-- ☑ ☐ ☐ **OLD-218** Versioned WebSocket protocol. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -423,14 +227,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Timeout, sınırlı retry/backoff, 429/5xx ayrımı, idempotent teslim ve son hata görünürlüğü ekle. Resend domain/from ve APP_URL ayarlarını gerçek alınan reset e-postasıyla doğrula.
   - **Kabul:** Timeout/429/5xx/başarı testleri; aynı bildirim için tekrar mail fırtınası yok; reset bağlantısı doğru HTTPS domaine gider.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-173** Kritik P0 olaylarında alarm/notification entegrasyonu. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☑ ☐ ☐ **OLD-189** Triggered → Acknowledged → Resolved. — Eski kaynak: Alarm & Notification.
-- ☐ ☐ ☐ **OLD-190** Severity/hysteresis/debounce/cooldown. — Eski kaynak: Alarm & Notification.
-- ☐ ☐ ☐ **OLD-191** Escalation/flood protection. — Eski kaynak: Alarm & Notification.
-- ☑ ☐ ☐ **OLD-192** Offline alarm. — Eski kaynak: Alarm & Notification.
-- ☐ ☐ ☐ **OLD-193** Quiet hours / maintenance suppression. — Eski kaynak: Alarm & Notification.
 
 ---
 
@@ -442,14 +238,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Gerçek izole Arduino CLI/PlatformIO derlemesi gelene kadar build/publish işlevini açıkça kullanılamaz yap; sentetik çıktıları test fixture’ına sınırla. İmza, çalışabilirlik kanıtı değildir.
   - **Kabul:** Geçersiz C++ reddedilir; gerçek hedef board için derleme kanıtı ve donanım boot/telemetry/rollback testi olmadan OTA registry’ye aktif yayın yok.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-172** Log retention/rotation. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☑ ☐ ☐ **OLD-200** Firmware registry. — Eski kaynak: OTA.
-- ☐ ☐ ☐ **OLD-201** Deployment groups. — Eski kaynak: OTA.
-- ☐ ☐ ☐ **OLD-202** Canary/staged rollout. — Eski kaynak: OTA.
-- ☐ ☐ ☐ **OLD-203** Schedule/progress. — Eski kaynak: OTA.
-- ☐ ☐ ☐ **OLD-204** Rollback/report. — Eski kaynak: OTA.
 
 ---
 
@@ -473,29 +261,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** AI Studio değişikliklerini PR üzerinden gönder. Doğrudan push şartsa desteklenen push tetikleyicisi/ayrı entegrasyon seçilince ayrıca kur; kullanıcı istemeden periyodik polling ile ikame etme.
   - **Kabul:** PR’ye yeni commit olayında doğru SHA denetlenip yalnız roadmap güncellenir; kendi doküman commit’i sonsuz döngü oluşturmaz.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-014** `verify:schema` release CI gate'inin gerçek release koşulunda zorunlu çalıştığı kanıtlanmalı. — Eski kaynak: P0.2 — Tek PostgreSQL connection pool.
-- ☑ ☐ ☐ **OLD-069** `npm ci` modeli mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.11 — package/lock dependency drift.
-- ☑ ☐ ☐ **OLD-070** `verify:schema` scripti mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.11 — package/lock dependency drift.
-- ☑ ☑ ☐ **OLD-071** `package.json` sürümü `1.17.7` iken `package-lock.json` hâlâ `1.17.2`; senkronize edilmeli. **Güncel doğrulama:** 1.46.2 package/lock/version eşit; version_sync testleri son CI birim test adımında geçti. Eski sürüm ifadesi tarihçedir; tüm release güvenliği tamamlandı anlamına gelmez. — Eski kaynak: P0.11 — package/lock dependency drift.
-- ☑ ☑ ☐ **OLD-072** CI metadata drift fail etmeli. **Güncel doğrulama:** 1.46.2 package/lock/version eşit; version_sync testleri son CI birim test adımında geçti. Eski sürüm ifadesi tarihçedir; tüm release güvenliği tamamlandı anlamına gelmez. — Eski kaynak: P0.11 — package/lock dependency drift.
-- ☑ ☑ ☐ **OLD-106** `package-lock.json` kök ve workspace version alanlarını `1.17.7` ile eşitle. **Güncel doğrulama:** 1.46.2 package/lock/version eşit; version_sync testleri son CI birim test adımında geçti. Eski sürüm ifadesi tarihçedir; tüm release güvenliği tamamlandı anlamına gelmez. — Eski kaynak: P0.19 — Package-lock release parity.
-- ☑ ☑ ☐ **OLD-107** CI'da package/lock/version source parity gate zorunlu olsun. **Güncel doğrulama:** 1.46.2 package/lock/version eşit; version_sync testleri son CI birim test adımında geçti. Eski sürüm ifadesi tarihçedir; tüm release güvenliği tamamlandı anlamına gelmez. — Eski kaynak: P0.19 — Package-lock release parity.
-- ☐ ☐ ☐ **OLD-108** Release öncesi beklenmeyen lockfile drift kontrolü. — Eski kaynak: P0.19 — Package-lock release parity.
-- ☐ ☐ ☐ **OLD-109** Production ve CI PostgreSQL/Timescale majör sürümlerini tek sürüm politikasında birleştir. — Eski kaynak: P0.20 — Production Compose ile CI Timescale parity.
-- ☐ ☐ ☐ **OLD-128** `latest-pg15` / `latest-pg16` ayrımı kaldırılmalı; production ile CI aynı majör sürümde olmalı. **Güncel durum:** PG majör farkı giderilmiş, fakat CI Timescale 2.14.2 ve Compose 2.30.1 ayrışıyor; QA-01 açık. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☐ ☐ ☐ **OLD-155** `package.json`, `package-lock.json`, `version.ts`, CHANGELOG ve roadmap aynı release bilgisini göstermeli. — Eski kaynak: P1.8 — Release/version metadata parity.
-- ☑ ☑ ☐ **OLD-156** CI metadata drift'i fail ettirmeli. **Güncel doğrulama:** 1.46.2 package/lock/version eşit; version_sync testleri son CI birim test adımında geçti. Eski sürüm ifadesi tarihçedir; tüm release güvenliği tamamlandı anlamına gelmez. — Eski kaynak: P1.8 — Release/version metadata parity.
-- ☐ ☐ ☐ **OLD-157** Deployment öncesi commit SHA + uygulama sürümü görünür olmalı. — Eski kaynak: P1.8 — Release/version metadata parity.
-- ☑ ☐ ☐ **OLD-167** Persistent System Logs API/arayüzü mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☑ ☐ ☐ **OLD-168** HTTP 5xx observer eklendi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☑ ☐ ☐ **OLD-169** Dashboard/system state persistence geliştirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☐ ☐ ☐ **OLD-170** Log severity/source/correlation ID standardizasyonu. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☐ ☐ ☐ **OLD-216** package/version/CHANGELOG/README/roadmap parity. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
-- ☐ ☐ ☐ **OLD-217** OpenAPI ↔ gerçek API parity. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
-- ☐ ☐ ☐ **OLD-220** Dependency vulnerability scanning. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
-- ☐ ☐ ☐ **OLD-222** Structured audit logging. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -507,17 +272,6 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Ekran bazlı lazy-load, liste sanallaştırma, abonelik seçicileri ve ölçümlü render optimizasyonu yap; erişilebilir odak/klavye/touch hedefleri ve net loading/error/empty durumları kullan.
   - **Kabul:** Önce/sonra bundle ve mobil ölçüm; tenant değişimi/logout sonrası eski veri görünmez; klavye/ekran okuyucu kritik akışı tamamlar.
 
-### Önceki yol haritasından korunan kayıtlar
-
-- ☐ ☐ ☐ **OLD-028** Nginx → app → DB failure-injection testi. — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☐ ☐ ☐ **OLD-174** Render/memory optimizasyonu. — Eski kaynak: Live Dashboard.
-- ☐ ☐ ☐ **OLD-175** Stale/offline mesajları. — Eski kaynak: Live Dashboard.
-- ☐ ☐ ☐ **OLD-176** Persisted vs live data görünürlüğü. — Eski kaynak: Live Dashboard.
-- ☐ ☐ ☐ **OLD-211** Touch target standardı. — Eski kaynak: Mobile UX.
-- ☐ ☐ ☐ **OLD-212** Alarm quick access. — Eski kaynak: Mobile UX.
-- ☐ ☐ ☐ **OLD-213** Connection visibility. — Eski kaynak: Mobile UX.
-- ☐ ☐ ☐ **OLD-214** QR pairing. — Eski kaynak: Mobile UX.
-- ☐ ☐ ☐ **OLD-215** Accessibility. — Eski kaynak: Mobile UX.
 
 ---
 
@@ -700,6 +454,20 @@ Komutlar ve gerçek sonuçlar:
   - `npm run lint`: Sıfır hata ile geçti.
   - `npm run type-check`: Sıfır hata.
 Açık kalan işler / Codex’e soru: SEC-02 için yapılan fail-closed re-implementation kanıtının Codex tarafından denetimi ve onayı bekleniyor.
+```
+
+```text
+Tarih / yazar (AI Studio): 2026-09-29 / Google AI Studio
+Görev kimlikleri: ROADMAP-CLEANUP
+PR / dal / tam commit SHA: main / HEAD
+Değiştirilen dosyalar:
+  - docs/PROJECT_ROADMAP.md
+Sorunun kökü ve yapılan değişiklik:
+  - Kullanıcı talebi doğrultusunda `docs/PROJECT_ROADMAP.md` dosyasındaki tüm "OLD-" etiketli tarihsel kayıt maddeleri (toplam 226 madde) temizlendi ve içi boşalan bölüm başlıkları sadeleştirildi.
+Test ortamı: Dokümantasyon güncellemesi
+Komutlar ve gerçek sonuçlar:
+  - `npm run lint`: Sıfır hata.
+Açık kalan işler / Codex’e soru: Yol haritası temizliği tamamlandı.
 ```
 
 ### Denetçi kayıt şablonu
