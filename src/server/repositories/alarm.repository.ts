@@ -378,7 +378,7 @@ export class AlarmRepository {
   }
 
   public async deleteAlarm(alarmId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -414,7 +414,7 @@ export class AlarmRepository {
 
   public async bulkDeleteAlarms(alarmIds: string[], currentUser: any): Promise<number> {
     if (!alarmIds || !alarmIds.length) return 0;
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
     let pgDeletedCount = 0;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -566,7 +566,7 @@ export class AlarmRepository {
   }
 
   public async deleteNotification(notificationId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -602,7 +602,7 @@ export class AlarmRepository {
 
   public async bulkDeleteNotifications(notificationIds: string[], currentUser: any): Promise<number> {
     if (!notificationIds || !notificationIds.length) return 0;
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
     let pgDeletedCount = 0;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -640,7 +640,7 @@ export class AlarmRepository {
 
   public async deleteAllNotifications(requestingUserId: string, currentUser?: any): Promise<number> {
     const reqUser = currentUser || (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
-    const isPrivileged = reqUser?.role === 'admin' || reqUser?.role === 'operator' || requestingUserId === 'usr_admin';
+    const isPrivileged = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'operator') && reqUser.status !== 'suspended');
 
     let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
@@ -676,7 +676,7 @@ export class AlarmRepository {
   }
 
   public async deleteDispatchLog(logId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -712,7 +712,7 @@ export class AlarmRepository {
 
   public async bulkDeleteDispatchLogs(logIds: string[], currentUser: any): Promise<number> {
     if (!logIds || !logIds.length) return 0;
-    const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'operator' || currentUser.id === 'usr_admin';
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
 
     let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
@@ -750,7 +750,7 @@ export class AlarmRepository {
 
   public async clearDispatchLogs(requestingUserId: string): Promise<number> {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
-    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     const pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {

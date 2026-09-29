@@ -2,19 +2,29 @@ import type { Device } from '../../types.js';
 
 export class TenantSecurityService {
   /**
+   * Helper: Checks if the user is an active administrator based on role.
+   * Hardcoded user IDs (usr_admin, admin) are NOT treated as inherently privileged.
+   */
+  public isAdminUser(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
+    if (!user) return false;
+    if (user.status === 'suspended' || user.deletedAt) return false;
+    return user.role === 'admin';
+  }
+
+  /**
    * Kural 1: Müşteriler diğer müşterilerin verilerine ve cihazlarına erişemezler,
    * verilerini okuyamazlar ya da değiştiremezler. Sadece yönetici tüm müşteri cihazlarına
    * ve verilerine ulaşabilir.
    */
   public canUserAccessDevice(
-    user: { id: string; role?: string } | undefined | null,
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
     dev: Device | undefined | null,
     tenantMemberships: any[] = []
   ): boolean {
     if (!user || !dev) return false;
 
     // 1. Sistem yöneticisi (admin) tüm müşteri cihazlarına ve verilerine tam erişim yetkisine sahiptir
-    if (user.role === 'admin' || user.id === 'usr_admin' || user.id === 'admin') {
+    if (this.isAdminUser(user)) {
       return true;
     }
 
@@ -47,12 +57,12 @@ export class TenantSecurityService {
    * Cihaz listesini kullanıcının yetkisine göre filtreler.
    */
   public filterDevicesForUser(
-    user: { id: string; role?: string } | undefined | null,
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
     devices: Device[],
     tenantMemberships: any[] = []
   ): Device[] {
     if (!user) return [];
-    if (user.role === 'admin' || user.id === 'usr_admin' || user.id === 'admin') {
+    if (this.isAdminUser(user)) {
       return devices;
     }
     return devices.filter((dev) => this.canUserAccessDevice(user, dev, tenantMemberships));
@@ -62,16 +72,16 @@ export class TenantSecurityService {
    * Kural 1: Sanal cihaz ve veri işleme işi SADECE YÖNETİCİYE aittir.
    * Müşteriler sanal simülatör cihazı oluşturamaz, çalıştıramaz veya düzenleyemez.
    */
-  public isSimulatorAllowed(user: { id: string; role?: string } | undefined | null): boolean {
-    return Boolean(user && (user.role === 'admin' || user.id === 'usr_admin' || user.id === 'admin'));
+  public isSimulatorAllowed(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
+    return this.isAdminUser(user);
   }
 
-  public canUserPerformSimulation(user: { id: string; role?: string } | undefined | null): boolean {
+  public canUserPerformSimulation(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
     return this.isSimulatorAllowed(user);
   }
 
   public filterAccessibleDevices(
-    user: { id: string; role?: string } | undefined | null,
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
     devices: Device[],
     tenantMemberships: any[] = []
   ): Device[] {
@@ -86,13 +96,13 @@ export class TenantSecurityService {
    */
   public validateAndResolveDeviceOwnership(
     targetTenantId: string | undefined | null,
-    requestingUser?: { id: string; role?: string } | null,
+    requestingUser?: { id: string; role?: string; status?: string; deletedAt?: string | null } | null,
     existingUsers: { id: string }[] = []
   ): { canonicalTenantId: string; error?: string } {
     const rawTenant = (targetTenantId || '').trim();
 
     // 1. Yetkisiz müşteri kontrolü (Kural 1)
-    if (requestingUser && requestingUser.role !== 'admin' && requestingUser.id !== 'usr_admin') {
+    if (requestingUser && !this.isAdminUser(requestingUser)) {
       // Normal müşteri yalnızca kendi adına cihaz oluşturabilir veya yönetebilir
       return { canonicalTenantId: requestingUser.id };
     }

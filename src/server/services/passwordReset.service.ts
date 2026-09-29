@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { emailService } from './email.service.js';
 import { rateLimiterService } from './rateLimiter.service.js';
 import { validatePassword } from '../utils/validation.js';
+import { hashPassword } from '../utils/crypto.js';
 import { User } from '../../types.js';
 
 export interface ResetTokenRecord {
@@ -109,11 +110,16 @@ export class PasswordResetService {
           return;
         }
       } catch (dbErr: any) {
-        console.error('[PasswordResetService] DB error while saving token, falling back to memory:', dbErr?.message || dbErr);
+        console.error('[PasswordResetService] DB error while saving token:', dbErr?.message || dbErr);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('Veritabanı hatası: Şifre sıfırlama kaydı oluşturulamadı.');
+        }
       }
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error('Veritabanı bağlantısı hazır değil. Şifre sıfırlama kaydı oluşturulamadı.');
     }
 
-    // In-memory fallback
+    // In-memory fallback for local development and tests
     for (const [key, t] of inMemoryResetTokens.entries()) {
       if (t.userId === record.userId && !t.used) {
         t.used = true;
@@ -152,11 +158,16 @@ export class PasswordResetService {
           return null;
         }
       } catch (err: any) {
-        console.error('[PasswordResetService] DB find error, checking memory:', err?.message || err);
+        console.error('[PasswordResetService] DB find error:', err?.message || err);
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('Veritabanı hatası: Şifre sıfırlama tokenı doğrulanamadı.');
+        }
       }
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error('Veritabanı bağlantısı hazır değil.');
     }
 
-    // Fallback in-memory
+    // Fallback in-memory for local dev / tests
     const memoryRecord = inMemoryResetTokens.get(tokenHash);
     return memoryRecord || null;
   }
@@ -377,13 +388,14 @@ export class PasswordResetService {
    * Consumes a single-use token and updates the user's password,
    * then terminates all active user sessions (OWASP requirement).
    */
+  /**
+   * Consumes a single-use token and updates the user's password inside an atomic transaction,
+   * then terminates all active user sessions and WebSockets (OWASP requirement).
+   */
   public async resetPassword(rawToken: string, newPass: string): Promise<{ success: boolean; message: string }> {
-    const verification = await this.verifyToken(rawToken);
-    if (!verification.valid || !verification.user) {
-      throw new Error(verification.error || 'Şifre sıfırlama bağlantısı geçersiz.');
+    if (!rawToken || typeof rawToken !== 'string' || rawToken.trim().length < 16) {
+      throw new Error('Geçersiz şifre sıfırlama bağlantısı.');
     }
-
-    const user = verification.user;
 
     // Validate new password rules
     const passValidation = validatePassword(newPass);
@@ -391,27 +403,93 @@ export class PasswordResetService {
       throw new Error(passValidation.error || 'Yeni şifre güvenlik kriterlerini karşılamıyor.');
     }
 
-    // Look up token record to mark it used
     const tokenHash = this.hashToken(rawToken.trim());
-    const record = await this.findTokenRecord(rawToken);
-    if (record) {
-      await this.markTokenAsUsed(record.id, tokenHash);
+    const newHash = hashPassword(newPass);
+    const pg = db.postgresRepo;
+
+    if (pg && pg.isReady && pg.isReady()) {
+      const pool = pg.getPool();
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+
+          // Atomic conditional token consumption with row locking
+          const consumeRes = await client.query(
+            `UPDATE password_reset_tokens 
+             SET used = TRUE 
+             WHERE token_hash = $1 AND used = FALSE AND expires_at > CURRENT_TIMESTAMP 
+             RETURNING user_id as "userId"`,
+            [tokenHash]
+          );
+
+          if (!consumeRes.rows || consumeRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            throw new Error('Şifre sıfırlama bağlantısı geçersiz, daha önce kullanılmış veya süresi dolmuş.');
+          }
+
+          const targetUserId = consumeRes.rows[0].userId;
+
+          // Update user password hash
+          const userUpdateRes = await client.query(
+            `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, name, email`,
+            [newHash, targetUserId]
+          );
+
+          if (!userUpdateRes.rows || userUpdateRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            throw new Error('Bağlantılı kullanıcı hesabı bulunamadı.');
+          }
+
+          const user = userUpdateRes.rows[0];
+
+          // Invalidate all active sessions in DB
+          await client.query(`DELETE FROM user_sessions WHERE user_id = $1`, [targetUserId]);
+
+          await client.query('COMMIT');
+
+          // Invalidate cache and terminate all active WebSockets immediately
+          await db.terminateUserSessions(targetUserId).catch(() => {});
+
+          db.addAuditLog(
+            user.id,
+            user.name || 'User',
+            'Kullanıcı Şifresini E-posta Bağlantısı İle Başarıyla Sıfırladı (Tüm Eski Oturumlar Kapatıldı)',
+            'high'
+          );
+
+          return {
+            success: true,
+            message: 'Şifreniz başarıyla yenilendi. Tüm eski oturumlarınız kapatıldı. Şimdi yeni şifrenizle giriş yapabilirsiniz.',
+          };
+        } catch (txErr: any) {
+          try { await client.query('ROLLBACK'); } catch {}
+          throw txErr;
+        } finally {
+          client.release();
+        }
+      }
     }
 
-    // Update password in DB
-    await db.userRepository.resetPasswordDirect(user.id, newPass);
+    // Fail-closed for production if PG is down
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Veritabanı bağlantısı hazır değil. Şifre sıfırlama işlemi gerçekleştirilemedi.');
+    }
 
-    // OWASP Requirement: Terminate all active sessions upon password reset
-    await db.terminateUserSessions(user.id).catch((termErr: any) => {
-      console.warn('[PasswordResetService] Oturum sonlandırma uyarısı:', termErr?.message || termErr);
-    });
-
-    db.addAuditLog(
-      user.id,
-      user.name,
-      'Kullanıcı Şifresini E-posta Bağlantısı İle Başarıyla Sıfırladı (Tüm Eski Oturumlar Kapatıldı)',
-      'high'
-    );
+    // In-memory fallback for local dev/testing
+    const memRecord = inMemoryResetTokens.get(tokenHash);
+    if (!memRecord || memRecord.used || new Date() > memRecord.expiresAt) {
+      if (memRecord?.used) {
+        throw new Error('Bu sıfırlama bağlantısı daha önce kullanılmış. Lütfen yeni bir bağlantı talep edin.');
+      }
+      if (memRecord && new Date() > memRecord.expiresAt) {
+        throw new Error('Şifre sıfırlama bağlantısının geçerlilik süresi dolmuş. Lütfen yeniden talep edin.');
+      }
+      throw new Error('Şifre sıfırlama bağlantısı geçersiz veya daha önce kullanılmış.');
+    }
+    memRecord.used = true;
+    await db.userRepository.resetPasswordDirect(memRecord.userId, newPass);
+    await db.terminateUserSessions(memRecord.userId).catch(() => {});
 
     return {
       success: true,

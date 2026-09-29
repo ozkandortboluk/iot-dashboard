@@ -176,7 +176,7 @@ export class SetupService {
             user: parsed.user || 'iot_user',
             password: pass,
             sslMode: parsed.sslMode || 'disable',
-            rejectUnauthorized: parsed.rejectUnauthorized ?? false,
+            rejectUnauthorized: parsed.rejectUnauthorized ?? (parsed.sslMode && parsed.sslMode !== 'disable'),
           };
           return this.runtimeConfig;
         }
@@ -280,7 +280,7 @@ export class SetupService {
         hasPassword: Boolean(config.password),
         passwordRef: config.password ? 'vault:database.password' : undefined,
         sslMode: config.sslMode || 'disable',
-        rejectUnauthorized: config.rejectUnauthorized ?? false,
+        rejectUnauthorized: config.rejectUnauthorized ?? (config.sslMode && config.sslMode !== 'disable'),
         isCompleted: Boolean(isCompleted),
         completedAt: isCompleted ? (this.completedAtDate || new Date().toISOString()) : undefined,
         updatedAt: new Date().toISOString(),
@@ -904,7 +904,7 @@ export class SetupService {
         idleTimeoutMillis: 2000,
         ssl: config.sslMode === 'disable'
           ? undefined
-          : (getPostgresSslOption(connStr) || (config.rejectUnauthorized !== undefined ? { rejectUnauthorized: config.rejectUnauthorized } : { rejectUnauthorized: false })),
+          : (getPostgresSslOption(connStr) || (config.rejectUnauthorized !== undefined ? { rejectUnauthorized: config.rejectUnauthorized } : { rejectUnauthorized: true })),
       });
       pool.on('error', (err: any) => {
         console.warn('[Setup Test Pool Error]:', err?.message);

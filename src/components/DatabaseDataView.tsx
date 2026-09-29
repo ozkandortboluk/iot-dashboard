@@ -351,10 +351,8 @@ export const DatabaseDataView: React.FC = () => {
   const [engineConfig, setEngineConfig] = useState<DatabaseEngineConfig | null>(null);
   const [setupGuide, setSetupGuide] = useState<PostgresSetupGuide | null>(null);
   const [inputPostgresUrl, setInputPostgresUrl] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('nexusnode_last_postgres_url');
-      if (saved && saved.trim()) return saved.trim();
-    } catch {}
+    // SEC-07: Passwords must NEVER be stored in localStorage. Purge any legacy stored URL.
+    try { localStorage.removeItem('nexusnode_last_postgres_url'); } catch {}
     return 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
   });
   const [savingPostgresUrl, setSavingPostgresUrl] = useState(false);
@@ -422,13 +420,9 @@ export const DatabaseDataView: React.FC = () => {
         const engData = await resEngine.json();
         setEngineConfig(engData);
         setPendingEngine(engData.activeEngine || 'local');
-        try {
-          const savedLocal = localStorage.getItem('nexusnode_last_postgres_url');
-          if (!savedLocal && engData.rawPostgresUrl && !engData.rawPostgresUrl.includes('••••••••')) {
-            setInputPostgresUrl(engData.rawPostgresUrl);
-            localStorage.setItem('nexusnode_last_postgres_url', engData.rawPostgresUrl);
-          }
-        } catch {}
+        if (engData.rawPostgresUrl && !engData.rawPostgresUrl.includes('••••••••')) {
+          setInputPostgresUrl(engData.rawPostgresUrl);
+        }
       }
       if (resGuide.ok) {
         const guideData = await resGuide.json();
@@ -565,11 +559,6 @@ export const DatabaseDataView: React.FC = () => {
 
   const handleUrlChange = (val: string) => {
     setInputPostgresUrl(val);
-    try {
-      if (val && !val.includes('••••••••')) {
-        localStorage.setItem('nexusnode_last_postgres_url', val);
-      }
-    } catch {}
   };
 
   const handleSavePostgresUrl = async () => {
@@ -578,9 +567,6 @@ export const DatabaseDataView: React.FC = () => {
     setSaveUrlSuccess(false);
     try {
       const urlToSave = inputPostgresUrl.trim();
-      try {
-        localStorage.setItem('nexusnode_last_postgres_url', urlToSave);
-      } catch {}
 
       const res = await fetch('/api/database/postgres/save-url', {
         method: 'POST',
@@ -607,17 +593,9 @@ export const DatabaseDataView: React.FC = () => {
   const handleResetDefaultUrl = () => {
     const defaultUrl = 'postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable';
     setInputPostgresUrl(defaultUrl);
-    try {
-      localStorage.setItem('nexusnode_last_postgres_url', defaultUrl);
-    } catch {}
   };
 
   const handleTestPostgres = async () => {
-    try {
-      if (inputPostgresUrl && !inputPostgresUrl.includes('••••••••')) {
-        localStorage.setItem('nexusnode_last_postgres_url', inputPostgresUrl.trim());
-      }
-    } catch {}
     setTestingPostgres(true);
     setPostgresTestResult(null);
     setPostgresMigrateResult(null);

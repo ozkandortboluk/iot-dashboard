@@ -4,6 +4,16 @@ import { normalizeEmail, validateEmail, validatePassword } from '../utils/valida
 import { defaultWidgets } from '../initialData.js';
 import type { User, UserSession } from '../../types.js';
 
+function safeTerminateUserSockets(userId: string, code = 1008, reason = 'Session terminated') {
+  try {
+    import('../services/websocket.js').then((wsMod) => {
+      if (typeof wsMod.terminateUserSockets === 'function') {
+        wsMod.terminateUserSockets(userId, code, reason);
+      }
+    }).catch(() => {});
+  } catch {}
+}
+
 export class UserRepository {
   constructor(private db: any) {}
 
@@ -414,6 +424,7 @@ export class UserRepository {
   }
 
   public async updateUserRole(userId: string, newRole: User['role']): Promise<User> {
+    safeTerminateUserSockets(userId, 1008, 'User role updated');
     if (this.isPgReady()) {
       const user = await this.db.postgresRepo.getUserById(userId);
       if (!user) throw new Error('Kullanıcı bulunamadı.');
@@ -435,6 +446,7 @@ export class UserRepository {
   }
 
   public deleteUser(userId: string, adminId = 'system', adminName = 'Admin') {
+    safeTerminateUserSockets(userId, 1008, 'User deleted');
     if (this.isPgReady()) {
       this.db.postgresRepo.deleteUser(userId).catch((err: any) => {
         console.warn('[Postgres deleteUser Error]:', err?.message || err);
@@ -493,6 +505,7 @@ export class UserRepository {
       deleteTelemetry?: boolean;
     }
   ) {
+    safeTerminateUserSockets(userId, 1008, 'User deleted');
     if (this.isPgReady()) {
       await this.db.postgresRepo.advancedDeleteUser(userId, options).catch((err: any) => {
         console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
@@ -588,6 +601,7 @@ export class UserRepository {
   }
 
   public async terminateUserSessions(userId: string) {
+    safeTerminateUserSockets(userId, 1008, 'Session terminated');
     if (this.isPgReady()) {
       await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
       return;

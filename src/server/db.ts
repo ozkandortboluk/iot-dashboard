@@ -1410,7 +1410,7 @@ class LocalDatabase {
     if (!requestingUserId) return [];
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
@@ -1428,7 +1428,7 @@ class LocalDatabase {
     if (!requestingUserId) return { data: [], total: 0 };
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
@@ -1489,7 +1489,7 @@ class LocalDatabase {
     if (!requestingUserId) return [];
     
     const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
     const effectiveTenant = isAdmin 
         ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
         : requestingUserId;
@@ -2284,7 +2284,7 @@ class LocalDatabase {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     let list = this.data.notificationQueue;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       list = list.filter((q) => q.tenantId === requestingUserId);
@@ -2368,7 +2368,7 @@ class LocalDatabase {
     if (!requestingUserId) return;
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.tenantId !== requestingUserId);
@@ -2384,7 +2384,7 @@ class LocalDatabase {
     if (!requestingUserId) return options ? { data: [], total: 0, limit: options.limit || 50, hasMore: false } : { data: [], total: 0 };
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
@@ -2397,7 +2397,7 @@ class LocalDatabase {
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     let list = this.data.dispatchLogs;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = reqUser?.role === 'admin' || requestingUserId === 'usr_admin';
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       list = list.filter((l) => l.tenantId === requestingUserId);

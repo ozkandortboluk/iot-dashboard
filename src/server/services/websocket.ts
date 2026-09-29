@@ -123,6 +123,25 @@ async function resolveDevice(token?: string | null): Promise<Device | null> {
 }
 
 /**
+ * Actively disconnects any open WebSocket connections associated with a specific user.
+ * Used during user session termination, password reset, role downgrade, suspension, or deletion.
+ */
+export function terminateUserSockets(userId: string, codeOrReason: number | string = 1008, maybeReason?: string): void {
+  if (!wss) return;
+  const code = typeof codeOrReason === 'number' ? codeOrReason : 1008;
+  const reason = typeof codeOrReason === 'string' ? codeOrReason : (maybeReason || 'Session terminated');
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((ws) => {
+    if (ws.user?.id === userId) {
+      try {
+        ws.close(code, reason);
+      } catch {
+        ws.terminate();
+      }
+    }
+  });
+}
+
+/**
  * Actively disconnects any open WebSocket connections associated with a specific device.
  * Used during API key revocation, rotation, or security lockouts.
  */
@@ -222,7 +241,7 @@ export function broadcast(event: string, payload: unknown) {
     }
 
     const clientUser = client.user!;
-    const isAdmin = clientUser.role === 'admin' || clientUser.id === 'usr_admin' || clientUser.id === 'admin';
+    const isAdmin = tenantSecurityService.isAdminUser(clientUser);
     const subChannels = client.subscribedChannels || new Set(['physical']);
 
     // 1. Telemetry broadcasts (Strict Physical vs Simulation Channel Isolation + Canonical Tenant Isolation)
@@ -519,8 +538,30 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // Default broadcast for general system/simulator events
-    safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+    // 11. Notification queue & dispatch logs (Strict Admin only / Tenant isolation)
+    if (event === 'notification-queue:updated' || event === 'dispatch-logs:updated' || event === 'system:events:updated' || event === 'system:event') {
+      if (isAdmin) {
+        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
+
+    // 12. Firmware events (Admin only for management, filtered for devices/customers)
+    if (event.startsWith('firmware:') || event === 'firmwares:updated') {
+      if (isAdmin) {
+        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
+
+    // Explicitly whitelisted general events only (simulator:status, system:health)
+    if (event === 'simulator:status' || event === 'system:health') {
+      safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      return;
+    }
+
+    // SEC-04: Drop unwhitelisted or unknown broadcast events to prevent accidental cross-tenant data leaks
+    return;
   });
 }
 
@@ -668,15 +709,31 @@ export function initWebSocketServer(server: http.Server) {
     }
   });
 
-  // Server-side heartbeat to terminate dead connections
+  // Server-side heartbeat to terminate dead connections and revoke invalidated sessions
   if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(() => {
+  heartbeatInterval = setInterval(async () => {
     if (!wss) return;
     (wss.clients as Set<AuthenticatedWebSocket>).forEach((ws) => {
       if (ws.isAlive === false) {
         return ws.terminate();
       }
       ws.isAlive = false;
+
+      // Periodic security validation of active sessions and accounts
+      if (ws.user) {
+        const currentUser = db.getUsers().find((u) => u.id === ws.user!.id);
+        if (currentUser) {
+          if (currentUser.status === 'suspended' || currentUser.deletedAt) {
+            try { ws.close(1008, 'Account suspended or deleted'); } catch { ws.terminate(); }
+            return;
+          }
+          // Dynamic role synchronization
+          if (ws.user.role !== currentUser.role) {
+            ws.user = { ...currentUser };
+          }
+        }
+      }
+
       try {
         ws.ping();
       } catch {

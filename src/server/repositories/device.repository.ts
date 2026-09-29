@@ -188,18 +188,18 @@ export class DeviceRepository {
     const users = this.db.data.users || [];
     const reqUser = users.find((u: any) => u.id === requestingUserId);
 
-    if (reqUser && (reqUser.role === 'admin' || reqUser.id === 'usr_admin' || reqUser.id === 'admin')) {
+    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+
+    if (isAdmin) {
       if (targetCustomerId && targetCustomerId !== 'all') {
         const targetUser = users.find((u: any) => u.id === targetCustomerId);
-        const isTargetAdmin = targetCustomerId === 'usr_admin' || targetCustomerId === 'admin' || (targetUser && targetUser.role === 'admin') || targetCustomerId === reqUser.id;
+        const isTargetAdmin = targetUser?.role === 'admin' || targetCustomerId === reqUser?.id;
         
         if (isTargetAdmin) {
           const adminIds = new Set(
-            users.filter((u: any) => u.role === 'admin' || u.id === 'usr_admin' || u.id === 'admin').map((u: any) => u.id)
+            users.filter((u: any) => u.role === 'admin' && u.status !== 'suspended').map((u: any) => u.id)
           );
-          adminIds.add('usr_admin');
-          adminIds.add('admin');
-          adminIds.add(reqUser.id);
+          if (reqUser) adminIds.add(reqUser.id);
           if (targetCustomerId) adminIds.add(targetCustomerId);
 
           list = list.filter((d) => !d.tenantId || adminIds.has(d.tenantId));
@@ -1128,11 +1128,8 @@ export class DeviceRepository {
       };
     });
 
-    let isAdmin = !requestingUserId || requestingUserId === 'usr_admin';
-    if (requestingUserId) {
-      const user = this.db.data.users?.find((u: any) => u.id === requestingUserId);
-      if (user?.role === 'admin') isAdmin = true;
-    }
+    const reqUser = requestingUserId ? this.db.data.users?.find((u: any) => u.id === requestingUserId) : null;
+    const isAdmin = !requestingUserId || Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     let filtered = normalized;
     if (!isAdmin) {
@@ -1534,13 +1531,8 @@ export class DeviceRepository {
     const allDevices: Device[] = this.db.data.devices || [];
 
     // Determine admin privilege (fail-closed for specified non-admin users, allow system when undefined)
-    let isAdmin = !requestingUserId || requestingUserId === 'usr_admin';
-    if (requestingUserId) {
-      const user = this.db.data.users?.find((u: any) => u.id === requestingUserId);
-      if (user?.role === 'admin') {
-        isAdmin = true;
-      }
-    }
+    const reqUser = requestingUserId ? this.db.data.users?.find((u: any) => u.id === requestingUserId) : null;
+    const isAdmin = !requestingUserId || Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
     // Filter devices based on tenant permission, excluding simulated virtual generators from physical discovery
     let allowedDevices = allDevices.filter((d: Device) => !d.isSimulated);
@@ -2237,9 +2229,9 @@ export class DeviceRepository {
 
   public async pairDevice(
     request: PairDeviceRequest,
-    actor: { id: string; name: string; role: string }
+    actor: { id: string; name: string; role: string; status?: string }
   ): Promise<{ success: boolean; device?: Device; message: string; auditRecord: PairingAuditRecord }> {
-    const isActorAdmin = actor.role === 'admin' || actor.id === 'usr_admin' || actor.id === 'admin';
+    const isActorAdmin = Boolean(actor && actor.role === 'admin' && actor.status !== 'suspended');
     const targetTenantId = isActorAdmin ? (request.tenantId || actor.id) : actor.id;
     const targetTenant = (this.db.data.users || []).find((u: any) => u.id === targetTenantId);
     const tenantName = targetTenant ? targetTenant.name : (targetTenantId === 'usr_admin' ? 'Merkez Yönetim' : targetTenantId);

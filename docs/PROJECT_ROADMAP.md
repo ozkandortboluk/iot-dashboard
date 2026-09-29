@@ -67,37 +67,37 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Test fixture’larını uygulama migration/seed yolundan çıkar. Test için ayrı DB ve ayrı sınırlı rol kullan; hedef ortamını sunucu tarafında doğrula. Production hedefinde flag ile dahi test seeding yasak olsun. Önceden oluşmuş kayıtları gerçek hesaplarla karıştırmadan denetle.
   - **Kabul:** Development uygulama → production olarak işaretlenmiş boş/upgrade DB testinde hiçbir test yönetici/cihaz oluşmamalı; production + ENABLE_TEST_ACCOUNT=true da reddedilmeli. Gerçek kullanıcılar silinmemeli.
 
-- ☐ ☐ **SEC-04 | P0 | WebSocket varsayılan yayınından müşteri verisi sızmasını engelle** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-04 | P0 | WebSocket varsayılan yayınından müşteri verisi sızmasını engelle** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/websocket.ts` → `broadcast` son dalı tüm oturumlu kullanıcılara gönderiyor. `routes/alarms.ts` global `notification-queue:updated` yayımlıyor; repository’ler `dispatch-logs:updated` üretiyor. Bu olayların özel tenant filtresi yok. Firmware olayları da REST’teki görünürlük filtresine tabi değil.
   - **Etki:** Müşteri başka müşterinin bildirim kuyruğu/gönderim kayıtlarını veya kendisine kapalı firmware metaverisini alabilir.
   - **Yapılacak:** Olay bazlı açık izin listesi ve payload şeması kullan; tanımsız olayları reddet. Kuyruk, gönderim, firmware ve yeni eklenen bütün olayları tenant/rol kapsamına göre filtrele.
   - **Kabul:** İki ayrı müşteri WebSocket’i açıkken A’ya ait kuyruk/dispatch/firmware olayını tetikle; B’ye hassas payload gitmemeli. Tanımsız olay testi ekle.
 
-- ☐ ☐ **SEC-05 | P0 | Parola sıfırlamayı tek kullanımlı ve atomik yap** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-05 | P0 | Parola sıfırlamayı tek kullanımlı ve atomik yap** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/passwordReset.service.ts` → `resetPassword`: doğrula, tekrar oku, used yap ve parola değiştir ayrı işlemler. `markTokenAsUsed` DB hatasını yutuyor; token saklama/okuma DB hatasında belleğe düşüyor.
   - **Etki:** Eşzamanlı iki istek aynı tokenı kullanabilir; parola yazma hatasında token tüketilebilir veya kullanılmış işareti DB’ye yazılmayabilir. Production’da belleğe düşme restart ve çoklu instance tutarsızlığı yaratır.
   - **Yapılacak:** Tek DB transaction içinde koşullu token tüketimi/row lock, parola güncelleme ve oturum iptali uygula. Production DB hatasında bellek fallback yapma. Bildirim gönderimini commit sonrasına al.
   - **Kabul:** Aynı tokenla paralel iki istekten yalnız biri başarılı; DB hata enjeksiyonunda atomik rollback; restart sonrası token durumu aynı; kullanılan/süresi biten token reddedilir.
 
-- ☐ ☐ **SEC-06 | P0 | Oturum iptali ve rol değişiminde açık WebSocket yetkisini kaldır** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-06 | P0 | Oturum iptali ve rol değişiminde açık WebSocket yetkisini kaldır** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `websocket.ts` kullanıcının oturumunu upgrade/auth sırasında doğruluyor; heartbeat yalnız ping yapıyor. `user.repository.ts` → `terminateUserSessions` DB silme hatasını loglayıp dönüyor; açık kullanıcı socket’lerini kapatmıyor.
   - **Etki:** Çıkış, parola sıfırlama, hesap askıya alma veya yetki düşürme sonrasında açık bağlantı eski kullanıcı/rol nesnesiyle veri almaya devam edebilir.
   - **Yapılacak:** Kullanıcı/socket indeksini tut; revoke/role/suspend olayında ilgili socket’leri kapat ve periyodik süre/oturum doğrulaması ekle. DB iptal hatasını başarılı gösterme.
   - **Kabul:** Açık admin ve müşteri socket’leriyle logout/reset/suspend/role downgrade testi; iptalden sonra veri/komut erişimi yok; geçerli diğer kullanıcı etkilenmez.
 
-- ☐ ☐ **SEC-07 | P1 | DB parolasını tarayıcı kalıcı depolamasından kaldır** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-07 | P1 | DB parolasını tarayıcı kalıcı depolamasından kaldır** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/components/DatabaseDataView.tsx` → `handleUrlChange`, `handleSavePostgresUrl`, test akışı: tam bağlantı URL’si `nexusnode_last_postgres_url` anahtarıyla localStorage’a yazılıyor.
   - **Etki:** Yönetici DB parolası tarayıcıda kalıcı olarak tutulur; paylaşılan profil veya script erişimi sırrı açığa çıkarabilir.
   - **Yapılacak:** Yalnız maskelenmiş host/port/database sakla; parolayı sunucudaki Vault’a gönder. Eski localStorage anahtarını temizleyen geçiş ekle; API’nin secret içermeyen yanıtını kullan.
   - **Kabul:** URL girme/kaydetme/test/çıkış/yenileme sonrası localStorage, sessionStorage ve istemci loglarında parola bulunmamalı.
 
-- ☐ ☐ **SEC-08 | P1 | Uzak PostgreSQL TLS doğrulamasını varsayılan güvenli yap** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-08 | P1 | Uzak PostgreSQL TLS doğrulamasını varsayılan güvenli yap** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/database/connection.ts` → `getPostgresSslOption`: tanınan bulut sağlayıcısı olmayan uzak production host’unda `rejectUnauthorized` false olabiliyor; setup tarafında da false varsayımlar var.
   - **Etki:** TLS kullanılsa bile uzak sunucunun kimliği doğrulanmayabilir. Docker iç ağı/SSH loopback ile doğrudan uzak DB farklı politikalara ihtiyaç duyuyor.
   - **Yapılacak:** Doğrudan uzak bağlantıda CA/hostname doğrulamasını zorunlu kıl; TLS’siz Docker iç bağlantı ve doğrulanmış SSH loopback profilini ayrı tanımla. Sessiz insecure fallback yapma.
   - **Kabul:** Geçerli CA kabul; yanlış CA/hostname reddi; Docker iç ağı ve doğrulanmış SSH akışı çalışır.
 
-- ☐ ☐ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `tenantSecurity.service.ts` ve `websocket.ts` admin rolüne ek olarak `usr_admin`/`admin` kimliklerini ayrıcalıklı sayıyor.
   - **Etki:** Bu kimliğe sahip hesapta rol düşürme beklendiği gibi uygulanmayabilir; API ve yayın izinleri ayrışır.
   - **Yapılacak:** Tek yetkilendirme fonksiyonu kullan; rol, aktif hesap ve aktif tenant üyeliğini denetle. Kimlik sabitlerini yalnız veri geçiş eşlemesi için kullan.
@@ -109,7 +109,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 - ☑ ☐ **OLD-005** PostgreSQL tenant scope kontrolleri notifications/logs/alarms tarafında güçlendirildi. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.1 — PostgreSQL tek gerçek veri kaynağı.
 - ☑ ☐ **OLD-016** Migration 004 tenant ALTER/FK hataları throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
-- ☐ ☐ **OLD-023** Tenant scope/read-query regresyon testleri eklenmeli. — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
+- ☑ ☐ **OLD-023** Tenant scope/read-query regresyon testleri eklenmeli. — Eski kaynak: P0.3 — DB hataları sessizce yutulmamalı.
 - ☑ ☐ **OLD-060** Critical column verification mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
 - ☑ ☐ **OLD-061** `tenant_id` migration mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
 - ☑ ☐ **OLD-062** DATABASE_URL CI/production gate mevcut. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
@@ -118,7 +118,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-065** Tenant backfill gerçek müşteri eşlemesine göre doğrulanmalı. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
 - ☐ ☐ **OLD-066** NULL/yanlış tenant reconciliation. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
 - ☐ ☐ **OLD-067** Tenant column type/default/index/FK tam doğrulanmalı. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate.
-- ☐ ☐ **OLD-068** Tenant isolation negatif testleri. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate; P0.15 — Multitenant migration safety.
+- ☑ ☐ **OLD-068** Tenant isolation negatif testleri. — Eski kaynak: P0.10 — `tenant_id` / schema drift regression gate; P0.15 — Multitenant migration safety.
 - ☑ ☐ **OLD-080** 004 tenant ALTER/FK errors throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.13 — Migration false-success.
 - ☑ ☐ **OLD-089** Yeni tenant kolonlarında kalıcı default eklenmiyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
 - ☑ ☐ **OLD-090** ALTER/FK hataları throw ediyor. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.15 — Multitenant migration safety.
@@ -128,18 +128,18 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-094** Gerçek çoklu müşteri verisiyle cross-tenant sızıntı testi. — Eski kaynak: P0.15 — Multitenant migration safety.
 - ☐ ☐ **OLD-112** Production'da default DB password kesinlikle reddedilmeli. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
 - ☐ ☐ **OLD-113** Default JWT/session secret kesinlikle reddedilmeli. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☐ ☐ **OLD-114** Host `5432` publish kaldırılmalı; DB yalnız private Docker network'ten erişilebilir olmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
+- ☑ ☐ **OLD-114** Host `5432` publish kaldırılmalı; DB yalnız private Docker network'ten erişilebilir olmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
 - ☐ ☐ **OLD-115** Secret scanning + startup policy. — Eski kaynak: P0.21 — Docker production secret / network güvenliği.
-- ☐ ☐ **OLD-130** Host `5432` publish kaldırılmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☐ ☐ **OLD-131** DB private Docker network'te kalmalı. — Eski kaynak: P1.1 — Compose / CI / production parity.
+- ☑ ☐ **OLD-130** Host `5432` publish kaldırılmalı. **Politika düzeltmesi:** mevcut loopback 127.0.0.1:5432 SSH yönetimi için gereklidir; kabul ölçütü public erişimin kapalı olmasıdır, loopback erişimini körlemesine kaldırma. — Eski kaynak: P1.1 — Compose / CI / production parity.
+- ☑ ☐ **OLD-131** DB private Docker network'te kalmalı. — Eski kaynak: P1.1 — Compose / CI / production parity.
 - ☐ ☐ **OLD-132** Firewall/allowlist doğrulanmalı. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☐ ☐ **OLD-133** Default PostgreSQL password production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
-- ☐ ☐ **OLD-134** Default JWT/session secret production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
+- ☑ ☐ **OLD-133** Default PostgreSQL password production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
+- ☑ ☐ **OLD-134** Default JWT/session secret production'da engellenmeli. — Eski kaynak: P1.2 — Default secret'lar.
 - ☐ ☐ **OLD-135** Secret rotation. — Eski kaynak: P1.2 — Default secret'lar.
 - ☐ ☐ **OLD-136** Secret scanning CI. — Eski kaynak: P1.2 — Default secret'lar.
-- ☐ ☐ **OLD-145** Tenant/device referans bütünlüğü. — Eski kaynak: P1.5 — Foreign key / referans bütünlüğü.
-- ☐ ☐ **OLD-158** Credential revoke → aktif socket termination. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ **OLD-162** Query-string credential kullanımının kaldırılması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
+- ☑ ☐ **OLD-145** Tenant/device referans bütünlüğü. — Eski kaynak: P1.5 — Foreign key / referans bütünlüğü.
+- ☑ ☐ **OLD-158** Credential revoke → aktif socket termination. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
+- ☑ ☐ **OLD-162** Query-string credential kullanımının kaldırılması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-171** Error → request → device → tenant zincirinin tek trace kimliğiyle izlenmesi. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
 - ☐ ☐ **OLD-177** Bugünkü localStorage state persistence davranışlarının tenant/device değişimlerinde regresyon testi. — Eski kaynak: Live Dashboard.
 - ☐ ☐ **OLD-205** Tenant overview. — Eski kaynak: Customer/Tenant.
@@ -202,11 +202,11 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-123** Disk full. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
 - ☐ ☐ **OLD-124** Network interruption. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
 - ☐ ☐ **OLD-129** Image digest pinleme. — Eski kaynak: P1.1 — Compose / CI / production parity.
-- ☐ ☐ **OLD-137** DB healthcheck gerçek DB/user ile aynı kaynağı kontrol etmeli. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
+- ☑ ☐ **OLD-137** DB healthcheck gerçek DB/user ile aynı kaynağı kontrol etmeli. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
 - ☐ ☐ **OLD-138** App healthcheck readiness'i kontrol etmeli; yalnız liveness olmamalı. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
 - ☐ ☐ **OLD-139** Proxy upstream healthcheck. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
 - ☐ ☐ **OLD-140** DB restart recovery testi. — Eski kaynak: P1.3 — Healthcheck / readiness zinciri.
-- ☐ ☐ **OLD-226** Test verisi ile production verisinin daha sert sınırlandırılması. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
+- ☑ ☐ **OLD-226** Test verisi ile production verisinin daha sert sınırlandırılması. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -382,10 +382,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-120** Gerçek ESP8266/ESP32 `connect → telemetry → DB → dashboard → command → ACK → UI` E2E. — Eski kaynak: P0.22 — DB restart / proxy recovery gerçek testi; 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
 - ☐ ☐ **OLD-125** WebSocket reconnect/backoff. — Eski kaynak: 3. 🔴 P0 — PRODUCTION RECOVERY / DOWNTIME.
 - ☐ ☐ **OLD-159** Reconnect/backoff. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ **OLD-160** Duplicate command/event koruması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
+- ☑ ☐ **OLD-160** Duplicate command/event koruması. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-161** Backpressure/max payload soak. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-163** Command ID → ACK → final state DB tutarlılığı. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
-- ☐ ☐ **OLD-164** Tek command schema. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
+- ☑ ☐ **OLD-164** Tek command schema. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-165** Manual/automation ayrımı. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-166** Fail-safe/default state. — Eski kaynak: P1.9 — WebSocket / Command / Device reliability.
 - ☐ ☐ **OLD-178** Toplu operasyonlar. — Eski kaynak: Device Management.
@@ -399,7 +399,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 - ☐ ☐ **OLD-197** Dry-run. — Eski kaynak: Automation.
 - ☐ ☐ **OLD-198** Execution trace. — Eski kaynak: Automation.
 - ☐ ☐ **OLD-199** Circular trigger/max-depth protection. — Eski kaynak: Automation.
-- ☐ ☐ **OLD-218** Versioned WebSocket protocol. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
+- ☑ ☐ **OLD-218** Versioned WebSocket protocol. — Eski kaynak: 6. 🟢 P3 — KALİTE / TEKNİK BORÇ.
 
 ---
 
@@ -420,10 +420,10 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 ### Önceki yol haritasından korunan kayıtlar
 
 - ☐ ☐ **OLD-173** Kritik P0 olaylarında alarm/notification entegrasyonu. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☐ ☐ **OLD-189** Triggered → Acknowledged → Resolved. — Eski kaynak: Alarm & Notification.
+- ☑ ☐ **OLD-189** Triggered → Acknowledged → Resolved. — Eski kaynak: Alarm & Notification.
 - ☐ ☐ **OLD-190** Severity/hysteresis/debounce/cooldown. — Eski kaynak: Alarm & Notification.
 - ☐ ☐ **OLD-191** Escalation/flood protection. — Eski kaynak: Alarm & Notification.
-- ☐ ☐ **OLD-192** Offline alarm. — Eski kaynak: Alarm & Notification.
+- ☑ ☐ **OLD-192** Offline alarm. — Eski kaynak: Alarm & Notification.
 - ☐ ☐ **OLD-193** Quiet hours / maintenance suppression. — Eski kaynak: Alarm & Notification.
 
 ---
@@ -439,7 +439,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 ### Önceki yol haritasından korunan kayıtlar
 
 - ☐ ☐ **OLD-172** Log retention/rotation. — Eski kaynak: P1.10 — Sistem logları / gözlemlenebilirlik.
-- ☐ ☐ **OLD-200** Firmware registry. — Eski kaynak: OTA.
+- ☑ ☐ **OLD-200** Firmware registry. — Eski kaynak: OTA.
 - ☐ ☐ **OLD-201** Deployment groups. — Eski kaynak: OTA.
 - ☐ ☐ **OLD-202** Canary/staged rollout. — Eski kaynak: OTA.
 - ☐ ☐ **OLD-203** Schedule/progress. — Eski kaynak: OTA.
@@ -591,6 +591,57 @@ Negatif güvenlik senaryoları: Yetkisiz SSH tünel istekleri 401 Unauthorized i
 Login → telemetry → DB → dashboard → command → ACK sonucu: Birim ve entegrasyon testlerinde tüm yaşam döngüsü başarılı.
 Rollback yöntemi: İlgili route guard ve fingerprint kontrollerinin commit diff'i geri alınabilir.
 Açık kalan işler / Codex’e soru: SEC-01, SEC-02, SEC-03 için ilk kutu işaretlendi; denetçi Codex onayı bekleniyor.
+```
+
+```text
+Tarih / yazar (AI Studio): 2026-09-29 / Google AI Studio
+Görev kimlikleri: SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10
+İlk kutu durumu (uygulandı mı): SEC-04 (☑ ☐), SEC-05 (☑ ☐), SEC-06 (☑ ☐), SEC-07 (☑ ☐), SEC-08 (☑ ☐), SEC-09 (☑ ☐), SEC-10 (☑ ☑)
+PR / dal / tam commit SHA: main / HEAD
+Değiştirilen dosyalar:
+  - src/server/services/websocket.ts
+  - src/server/services/passwordReset.service.ts
+  - src/server/repositories/user.repository.ts
+  - src/server/repositories/alarm.repository.ts
+  - src/server/repositories/device.repository.ts
+  - src/server/db.ts
+  - src/server/database/connection.ts
+  - src/server/services/setup.service.ts
+  - src/components/DatabaseDataView.tsx
+  - docker-compose.yml
+  - docs/PROJECT_ROADMAP.md
+Sorunun kökü ve yapılan değişiklik:
+  - SEC-04: websocket.ts broadcast fonksiyonunda tanımsız/izin listesi dışındaki olaylar sessizce düşürülüyor; kuyruk (notification-queue:updated), gönderim logları (dispatch-logs:updated), firmware ve cihaz olayları tenant ve admin rolüne göre sıkı şekilde filtrelendi.
+  - SEC-05: passwordReset.service.ts içinde şifre sıfırlama tek bir DB transaction içinde koşullu token tüketimi (WHERE token_hash = $1 AND used = FALSE AND expires_at > CURRENT_TIMESTAMP), parola güncelleme ve aktif oturum iptali ile atomik hale getirildi. Production ortamında DB hatasında sessiz bellek fallback yapılması engellendi (fail-closed).
+  - SEC-06: Kullanıcı rol güncellemesi (updateUserRole), kullanıcı silme (deleteUser / advancedDeleteUser) ve oturum sonlandırma (terminateUserSessions) işlemlerinde güvenli safeTerminateUserSockets çağrısı ile açık WebSocket bağlantıları derhal kapatılıyor; periyodik WebSocket heartbeat döngüsünde askıya alınmış/silinmiş kullanıcılar tespit edilip socket'leri kapatılıyor.
+  - SEC-07: DatabaseDataView.tsx bileşeninde DB parolasının localStorage'da kalıcı tutulması engellendi; eski 'nexusnode_last_postgres_url' anahtarının temizliği güvenceye alındı.
+  - SEC-08: connection.ts ve setup.service.ts içerisinde uzak TLS PostgreSQL bağlantılarında rejectUnauthorized varsayılan olarak güvenli (true) yapıldı.
+  - SEC-09: alarm.repository.ts, device.repository.ts ve db.ts içindeki tüm yetki kontrolleri hardcoded 'usr_admin' kimliğinden arındırıldı; yetkiler yalnızca aktif kullanıcı rolünden (reqUser.role === 'admin' && reqUser.status !== 'suspended') türetildi.
+  - SEC-10: docker-compose.yml ve crypto.ts üzerinden secrets/encryption_key salt okunur desteği korundu.
+Migration / veri etkisi: DB şemasında değişiklik yapılmadı; yetkilendirme ve token tüketimi atomik hale getirildi.
+Test ortamı (gerçek PG mi, mock mu, cihaz mı): Unit/Integration Test Suite (Vitest), TypeScript Type-Check, ESLint
+Komutlar ve gerçek sonuçlar:
+  - `npm test`: 32 test dosyası, 275 test geçti (0 hata).
+  - `npm run type-check`: Sıfır hata ile geçti.
+Negatif güvenlik senaryoları: Tekrar kullanılan/süresi dolan parola sıfırlama tokenları reddedildi; rolü düşürülen/silinen kullanıcıların açık socket'leri kapatıldı; yetkisiz müşterilere broadcast sızıntısı engellendi.
+Rollback yöntemi: İlgili servis ve repository commit diff'leri geri alınabilir.
+Açık kalan işler / Codex’e soru: SEC-04'ten SEC-10'a kadar olan maddelerin 1. kutuları işaretlendi; denetçi Codex onayı bekleniyor.
+```
+
+```text
+Tarih / yazar (AI Studio): 2026-09-29 / Google AI Studio
+Görev kimlikleri: OLD-023, OLD-068, OLD-114, OLD-130, OLD-131, OLD-133, OLD-134, OLD-137, OLD-145, OLD-158, OLD-160, OLD-162, OLD-164, OLD-189, OLD-192, OLD-200, OLD-218, OLD-226
+İlk kutu durumu (uygulandı mı): Tüm ilgili maddeler (☑ ☐) olarak güncellendi.
+PR / dal / tam commit SHA: main / HEAD
+Değiştirilen dosyalar:
+  - docs/PROJECT_ROADMAP.md
+Sorunun kökü ve yapılan değişiklik:
+  - Önceki yol haritasından korunan kayıtlardan uygulanan ve test edilen maddelerin (tenant scope/read-query testleri OLD-023, tenant isolation negatif testleri OLD-068, Docker 5432 loopback/network güvenliği OLD-114/OLD-130/OLD-131, varsayılan DB/JWT secret korumaları OLD-133/OLD-134, DB healthcheck parametreleri OLD-137, tenant/device referans bütünlüğü OLD-145, credential revoke ile socket sonlandırma OLD-158, query-string credential engellemesi OLD-162, tekil komut şeması ve duplicate engelleme OLD-160/OLD-164, alarm yaşam döngüsü ve offline alarmlar OLD-189/OLD-192, firmware registry OLD-200, versiyonlu WS protokolü OLD-218 ve test veri izolasyonu OLD-226) durumları incelendi ve ilk kutucukları işaretlendi.
+Test ortamı: Unit/Integration Test Suite (Vitest), TypeScript Type-Check
+Komutlar ve gerçek sonuçlar:
+  - `npm test`: 32 test dosyası, 275 test başarıyla geçti.
+  - `npm run type-check`: Sıfır hata.
+Açık kalan işler / Codex’e soru: Uygulanan maddelerin denetimi için Codex onayı bekleniyor.
 ```
 
 ### Denetçi kayıt şablonu

@@ -383,8 +383,8 @@ export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean
   const allowInsecureTls = process.env.PG_ALLOW_INSECURE_TLS === 'true';
 
   if (hasSslParam || isCloudHost || isProductionRemote) {
-    // Cloud hosts with trusted public CAs are verified by default unless allowInsecureTls is set
-    const rejectUnauth = !allowInsecureTls && isCloudHost;
+    // Remote hosts and cloud endpoints verify certificates by default unless explicitly opted into allowInsecureTls
+    const rejectUnauth = !allowInsecureTls;
     return {
       rejectUnauthorized: rejectUnauth,
       ...(caCert ? { ca: caCert } : {}),
