@@ -359,10 +359,39 @@ class SystemLoggerService {
         if (stats.size > this.maxFileSizeBytes) {
           const backupFile = path.join(this.logDir, `system_events_${Date.now()}.log.bak`);
           fs.renameSync(this.logFilePath, backupFile);
+
+          // Retention policy: Keep max 5 backup files to prevent disk exhaustion
+          this.pruneOldLogBackups();
         }
       }
     } catch (err) {
       console.warn('[SystemLogger] Log rotasyon hatası:', err);
+    }
+  }
+
+  private pruneOldLogBackups(maxBackups = 5): void {
+    try {
+      if (!fs.existsSync(this.logDir)) return;
+      const files = fs.readdirSync(this.logDir);
+      const bakFiles = files
+        .filter((f) => f.startsWith('system_events_') && f.endsWith('.log.bak'))
+        .map((f) => ({
+          name: f,
+          fullPath: path.join(this.logDir, f),
+          time: fs.statSync(path.join(this.logDir, f)).mtimeMs,
+        }))
+        .sort((a, b) => b.time - a.time);
+
+      if (bakFiles.length > maxBackups) {
+        const toDelete = bakFiles.slice(maxBackups);
+        for (const file of toDelete) {
+          try {
+            fs.unlinkSync(file.fullPath);
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] Eski log yedekleri temizlenirken hata oluştu:', err);
     }
   }
 

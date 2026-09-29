@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Site, Zone, DeviceGroup } from '../../types';
 import { Building2, MapPin, FolderTree, Plus, Trash2, X, Check, AlertTriangle } from 'lucide-react';
-import { apiFetch as fetch } from '../../lib/apiFetch';
+import { apiFetch as fetch, safeJson } from '../../lib/apiFetch';
 
 interface HierarchyManagementModalProps {
   isOpen: boolean;
@@ -55,7 +55,7 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
         body: JSON.stringify({ name: siteName, address: siteAddress }),
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await safeJson<{ error?: string }>(res, {});
         throw new Error(data.error || 'Tesis eklenemedi.');
       }
       setSiteName('');
@@ -72,7 +72,10 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
     if (!confirm('Bu tesisi silmek istediğinize emin misiniz?')) return;
     try {
       const res = await fetch(`/api/devices/hierarchy/sites/${siteId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Tesis silinemedi.');
+      if (!res.ok) {
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || 'Tesis silinemedi.');
+      }
       await onRefreshHierarchy();
     } catch (err: any) {
       setError(err?.message || 'Hata oluştu.');
@@ -95,7 +98,7 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
         }),
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await safeJson<{ error?: string }>(res, {});
         throw new Error(data.error || 'Bölge eklenemedi.');
       }
       setZoneName('');
@@ -112,7 +115,10 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
     if (!confirm('Bu bölgeyi silmek istediğinize emin misiniz?')) return;
     try {
       const res = await fetch(`/api/devices/hierarchy/zones/${zoneId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Bölge silinemedi.');
+      if (!res.ok) {
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || 'Bölge silinemedi.');
+      }
       await onRefreshHierarchy();
     } catch (err: any) {
       setError(err?.message || 'Hata oluştu.');
@@ -137,7 +143,7 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
         }),
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await safeJson<{ error?: string }>(res, {});
         throw new Error(data.error || 'Grup eklenemedi.');
       }
       setGroupName('');
@@ -154,7 +160,10 @@ export const HierarchyManagementModal: React.FC<HierarchyManagementModalProps> =
     if (!confirm('Bu grubu silmek istediğinize emin misiniz?')) return;
     try {
       const res = await fetch(`/api/devices/hierarchy/groups/${groupId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Grup silinemedi.');
+      if (!res.ok) {
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || 'Grup silinemedi.');
+      }
       await onRefreshHierarchy();
     } catch (err: any) {
       setError(err?.message || 'Hata oluştu.');

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch as fetch } from '../lib/apiFetch';
+import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import {
   Radio,
   Search,
@@ -138,11 +138,16 @@ export const NetworkDiscoveryView: React.FC<{
         fetch('/api/devices/hierarchy/zones'),
         fetch('/api/devices/hierarchy/groups'),
       ]);
-      if (sRes.ok) setSites(await sRes.json());
-      if (zRes.ok) setZones(await zRes.json());
-      if (gRes.ok) setGroups(await gRes.json());
+      const sData = await safeJson(sRes, null);
+      if (Array.isArray(sData)) setSites(sData);
+
+      const zData = await safeJson(zRes, null);
+      if (Array.isArray(zData)) setZones(zData);
+
+      const gData = await safeJson(gRes, null);
+      if (Array.isArray(gData)) setGroups(gData);
     } catch (err) {
-      console.error('Hiyerarşi verileri yüklenemedi:', err);
+      console.warn('Hiyerarşi verileri yüklenemedi:', err);
     }
   };
 

@@ -605,9 +605,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');
       }
 
-      // Save admin session token & user details to localStorage for instant AuthContext hydration
-      if (data.token && data.user) {
-        localStorage.setItem('dashboard_token', data.token);
+      // Save user details to localStorage for instant AuthContext hydration (session token stored in HttpOnly cookie)
+      if (data.user) {
+        localStorage.removeItem('dashboard_token');
         localStorage.setItem('dashboard_user', JSON.stringify(data.user));
       }
 
@@ -1348,7 +1348,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                               <strong>Docker / VPS Servisi:</strong> Sunucunuzda TimescaleDB/PostgreSQL konteynerinin çalıştığından emin olun (<code className="text-slate-300 font-mono">docker compose ps</code>).
                             </li>
                             <li>
-                              <strong>Güvenlik Duvarı & Port:</strong> VPS üzerinde 5432 portunun dışarıya açık olduğunu doğrulayın (<code className="text-slate-300 font-mono">sudo ufw allow 5432/tcp</code>).
+                              <strong>Güvenli SSH Tüneli:</strong> Uzak VPS veritabanına bağlanmak için 5432 portunu internete açmak yerine yerleşik <strong className="text-cyan-400">SSH Tüneli</strong> özelliğini kullanın.
                             </li>
                             <li>
                               <strong>Docker Port Yönlendirme:</strong> Konteynerinizin <code className="text-slate-300 font-mono">-p 5432:5432</code> parametresiyle ana sunucu portuna bağlı olduğundan emin olun.

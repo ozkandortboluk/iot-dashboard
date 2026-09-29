@@ -141,10 +141,8 @@ export const DatabaseDataView: React.FC = () => {
   const { isConnected, wsLatency } = useRealtime();
 
   const getAuthHeaders = (extra: Record<string, string> = {}) => {
-    const t = token || localStorage.getItem('dashboard_token');
     return {
       'Content-Type': 'application/json',
-      ...(t ? { Authorization: `Bearer ${t}`, 'x-auth-token': t } : {}),
       ...extra,
     };
   };
@@ -1925,16 +1923,14 @@ GRANT ALL PRIVILEGES ON DATABASE iot_dashboard_db TO iot_admin;
                   </div>
 
                   <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">3. Uzaktan Erişimi Aç (Opsiyonel / Cloud Run veya Dışarıdan Bağlantı İçin):</span>
-                    <pre className="p-2 bg-slate-950 text-emerald-400 font-mono text-[11px] rounded-md overflow-x-auto">
-{`# /etc/postgresql/16/main/postgresql.conf dosyasına ekleyin:
-listen_addresses = '*'
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">3. Güvenli Uzak Erişim (SSH Tüneli & Yerel Ağ):</span>
+                    <pre className="p-2 bg-slate-950 text-cyan-400 font-mono text-[11px] rounded-md overflow-x-auto">
+{`# Güvenlik İlkesi: Veritabanı portunu (5432) genel internete (0.0.0.0/0) AÇMAYINIZ.
+# Platformun sol menüsündeki "SSH Tüneli" çekmecesini kullanarak Port 22 üzerinden
+# şifreli ve güvenli bir tünel kurunuz.
 
-# /etc/postgresql/16/main/pg_hba.conf dosyasına ekleyin:
-host    all             all             0.0.0.0/0               scram-sha-256
-
-# Servisi yeniden başlatın:
-sudo systemctl restart postgresql`}
+# Yerel PostgreSQL bağlantısı doğrulaması:
+sudo systemctl status postgresql`}
                     </pre>
                   </div>
                 </div>

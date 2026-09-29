@@ -179,16 +179,16 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry }) => 
                 {dbErrorMessage}
               </p>
               <div className="text-[11px] text-slate-400 space-y-1.5 pt-1">
-                <span className="font-semibold text-slate-300 block">PostgreSQL Sunucusunu Dışa Açma Rehberi:</span>
+                <span className="font-semibold text-slate-300 block">Güvenli Bağlantı & Teşhis Rehberi:</span>
                 <ul className="list-disc list-inside space-y-1 pl-1 text-slate-400">
                   <li>
-                    <strong className="text-slate-300">Güvenlik Duvarı:</strong> VPS üzerinde portu açın: <code className="text-indigo-300 font-mono">sudo ufw allow 5432/tcp</code>
+                    <strong className="text-slate-300">Güvenli SSH Tüneli:</strong> Port 5432'yi internete açmak yerine platformun yerleşik <strong className="text-cyan-400">SSH Tüneli</strong> özelliğini kullanın.
                   </li>
                   <li>
-                    <strong className="text-slate-300">Dış Bağlantı İzni:</strong> <code className="text-indigo-300 font-mono">/etc/postgresql/.../main/postgresql.conf</code> dosyasında <code className="text-emerald-400 font-mono">listen_addresses = '*'</code> yapın.
+                    <strong className="text-slate-300">Docker / Yerel Ağ:</strong> Konteyner ağında host olarak <code className="text-indigo-300 font-mono">timescaledb</code> veya <code className="text-emerald-400 font-mono">127.0.0.1</code> adresini kullanın.
                   </li>
                   <li>
-                    <strong className="text-slate-300">Erişim İzni (pg_hba.conf):</strong> <code className="text-indigo-300 font-mono">host all all 0.0.0.0/0 scram-sha-256</code> ekleyin ve servisi yeniden başlatın (<code className="text-indigo-300 font-mono">sudo systemctl restart postgresql</code>).
+                    <strong className="text-slate-300">Ağ İzolasyonu:</strong> Veritabanınızı asla <code className="text-amber-400 font-mono">0.0.0.0/0</code> olarak internete açmayınız; yerel ağ veya VPN/Tünel tercih ediniz.
                   </li>
                 </ul>
               </div>

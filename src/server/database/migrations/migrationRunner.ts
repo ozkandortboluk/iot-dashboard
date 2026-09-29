@@ -20,6 +20,7 @@ import { migration017 } from './017_simplify_telemetry_readings_table.js';
 import { migration018 } from './018_secure_production_seed_cleanup.js';
 import { migration019 } from './019_restore_canonical_test_entities.js';
 import { migration020 } from './020_add_service_tokens_table.js';
+import { migration021 } from './021_hash_device_and_session_tokens.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -50,6 +51,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration018,
   migration019,
   migration020,
+  migration021,
 ];
 
 let lastMigrationStatus: {

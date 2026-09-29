@@ -41,6 +41,8 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [remoteDbHost, setRemoteDbHost] = useState('127.0.0.1');
   const [remoteDbPort, setRemoteDbPort] = useState('5432');
   const [localPort, setLocalPort] = useState('5432');
+  const [expectedHostFingerprint, setExpectedHostFingerprint] = useState('');
+  const [discoveredFingerprint, setDiscoveredFingerprint] = useState<string | null>(null);
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [connectedAt, setConnectedAt] = useState<string | null>(null);
@@ -58,12 +60,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const getAuthHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = localStorage.getItem('dashboard_token');
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-      headers['x-auth-token'] = token;
-    }
-    const setupToken = sessionStorage.getItem('nexus_setup_token');
+    const setupToken = sessionStorage.getItem('nexus_setup_token') || localStorage.getItem('nexus_setup_token');
     if (setupToken) {
       headers['X-Setup-Token'] = setupToken;
     }
@@ -84,6 +81,9 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           setConnectedAt(data.connectedAt || null);
           setLogs(data.logs || []);
           setLastError(data.lastError || null);
+          if (data.hostFingerprint) {
+            setDiscoveredFingerprint(data.hostFingerprint);
+          }
           if (data.config && !isConfigLoaded) {
             if (data.config.sshHost) setSshHost(data.config.sshHost);
             if (data.config.sshPort) setSshPort(String(data.config.sshPort));
@@ -92,6 +92,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
             if (data.config.remoteDbHost) setRemoteDbHost(data.config.remoteDbHost);
             if (data.config.remoteDbPort) setRemoteDbPort(String(data.config.remoteDbPort));
             if (data.config.localPort) setLocalPort(String(data.config.localPort));
+            if (data.config.expectedHostFingerprint) setExpectedHostFingerprint(data.config.expectedHostFingerprint);
             setIsConfigLoaded(true);
           }
         }
@@ -139,14 +140,18 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           remoteDbHost,
           remoteDbPort: Number(remoteDbPort) || 5432,
           localPort: Number(localPort) || 5432,
+          expectedHostFingerprint: expectedHostFingerprint.trim() || undefined,
         }),
       });
 
       const data = await res.json();
+      if (data.hostFingerprint) {
+        setDiscoveredFingerprint(data.hostFingerprint);
+      }
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
       } else {
-        setActionMessage({ type: 'error', text: data.message || 'SSH bağlantı testi başarısız.' });
+        setActionMessage({ type: 'error', text: data.message || data.error || 'SSH bağlantı testi başarısız.' });
       }
     } catch (err: any) {
       setActionMessage({ type: 'error', text: `Bağlantı hatası: ${err?.message || err}` });
@@ -180,17 +185,21 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           remoteDbHost,
           remoteDbPort: Number(remoteDbPort) || 5432,
           localPort: Number(localPort) || 5432,
+          expectedHostFingerprint: expectedHostFingerprint.trim() || undefined,
         }),
       });
 
       const data = await res.json();
+      if (data.hostFingerprint) {
+        setDiscoveredFingerprint(data.hostFingerprint);
+      }
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
         if (onConnectedSuccess) {
           onConnectedSuccess();
         }
       } else {
-        setActionMessage({ type: 'error', text: data.message || 'SSH Tünel başlatılamadı.' });
+        setActionMessage({ type: 'error', text: data.message || data.error || 'SSH Tünel başlatılamadı.' });
       }
     } catch (err: any) {
       setActionMessage({ type: 'error', text: `Tünel hatası: ${err?.message || err}` });
@@ -214,7 +223,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
       } else {
-        setActionMessage({ type: 'error', text: data.message || 'Tünel kapatılamadı.' });
+        setActionMessage({ type: 'error', text: data.message || data.error || 'Tünel kapatılamadı.' });
       }
     } catch (err: any) {
       setActionMessage({ type: 'error', text: `Hata: ${err?.message || err}` });
@@ -509,6 +518,50 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     Uygulama tünel üzerinden 127.0.0.1:{localPort || '5432'} adresi ile PostgreSQL veritabanına bağlanır (Standart: 5432).
                   </p>
                 </div>
+              </div>
+
+              {/* Section 4: Security & Host Key Fingerprint Pinning */}
+              <div className="space-y-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-cyan-400" /> Host Key Fingerprint (Sabitleme / Pinning)
+                  </h4>
+                  <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                    MITM Koruması
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400">Beklenen Host Fingerprint (Opsiyonel / Pinned Key)</label>
+                  <input
+                    type="text"
+                    value={expectedHostFingerprint}
+                    onChange={(e) => setExpectedHostFingerprint(e.target.value)}
+                    placeholder="SHA256:abc123xyz... veya MD5:..."
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+                  />
+                </div>
+
+                {discoveredFingerprint && (
+                  <div className="p-2.5 rounded-lg bg-cyan-950/30 border border-cyan-500/30 flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Sunucudan Alınan Parmak İzi</div>
+                      <div className="text-[11px] font-mono text-slate-200 truncate select-all">{discoveredFingerprint}</div>
+                    </div>
+                    {expectedHostFingerprint !== discoveredFingerprint && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpectedHostFingerprint(discoveredFingerprint);
+                          setActionMessage({ type: 'success', text: 'Host Fingerprint başarıyla sabitlendi (Pinned).' });
+                        }}
+                        className="px-2 py-1 text-[11px] font-medium rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 transition-colors shrink-0 cursor-pointer"
+                      >
+                        Sabitle (Pin)
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons */}

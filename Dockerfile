@@ -34,8 +34,11 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/metadata.json ./metadata.json
 
-# Ensure clean runtime directories exist for volumes and local state
-RUN mkdir -p /app/data /app/secrets /app/uploads /app/logs /app/backups
+# Ensure clean runtime directories exist for volumes and local state, and transfer ownership to unprivileged node user
+RUN mkdir -p /app/data /app/secrets /app/uploads /app/logs /app/backups && \
+    chown -R node:node /app
+
+USER node
 
 EXPOSE 3000
 

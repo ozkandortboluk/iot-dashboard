@@ -3,7 +3,7 @@ import type { Device, TelemetryReading, Site, Zone, DeviceGroup, DeviceHealthSum
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
-import { apiFetch as fetch } from '../lib/apiFetch';
+import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import { DeviceHierarchyBar } from './devices/DeviceHierarchyBar';
 import { DeviceHealthBadge } from './devices/DeviceHealthBadge';
 import { DeviceTagsEditor } from './devices/DeviceTagsEditor';
@@ -182,13 +182,22 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         fetch('/api/devices/replacement-history'),
       ]);
 
-      if (sitesRes.ok) setSites(await sitesRes.json());
-      if (zonesRes.ok) setZones(await zonesRes.json());
-      if (groupsRes.ok) setGroups(await groupsRes.json());
-      if (healthRes.ok) setHealthSummaries(await healthRes.json());
-      if (historyRes.ok) setReplacementHistory(await historyRes.json());
+      const sitesData = await safeJson(sitesRes, null);
+      if (Array.isArray(sitesData)) setSites(sitesData);
+
+      const zonesData = await safeJson(zonesRes, null);
+      if (Array.isArray(zonesData)) setZones(zonesData);
+
+      const groupsData = await safeJson(groupsRes, null);
+      if (Array.isArray(groupsData)) setGroups(groupsData);
+
+      const healthData = await safeJson(healthRes, null);
+      if (healthData && typeof healthData === 'object') setHealthSummaries(healthData);
+
+      const historyData = await safeJson(historyRes, null);
+      if (Array.isArray(historyData)) setReplacementHistory(historyData);
     } catch (err) {
-      console.error('Hiyerarşi verileri yüklenemedi:', err);
+      console.warn('Hiyerarşi verileri yüklenemedi:', err);
     }
   }, []);
 

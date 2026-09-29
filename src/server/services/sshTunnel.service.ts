@@ -2,6 +2,7 @@ import { Client, type ConnectConfig } from 'ssh2';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
 
@@ -16,6 +17,7 @@ export interface SSHTunnelConfig {
   remoteDbPort: number;
   localPort: number;
   autoConnect?: boolean;
+  expectedHostFingerprint?: string; // e.g. SHA256:... or MD5:... for pinning
 }
 
 export type SSHTunnelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -26,10 +28,59 @@ export interface SSHTunnelState {
   lastError: string | null;
   connectedAt: string | null;
   logs: string[];
+  hostFingerprint: string | null;
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
 export const DEFAULT_SSH_LOCAL_PORT = 5432;
+
+/**
+ * Calculates SHA-256 and MD5 fingerprints of SSH Host Public Key
+ */
+export function computeHostFingerprints(key: string | Buffer): { sha256: string; md5: string } {
+  const buf = Buffer.isBuffer(key) ? key : Buffer.from(key, 'binary');
+  const sha256Base64 = crypto.createHash('sha256').update(buf).digest('base64').replace(/=+$/, '');
+  const sha256 = `SHA256:${sha256Base64}`;
+  const md5Hex = crypto.createHash('md5').update(buf).digest('hex');
+  const md5 = md5Hex.match(/.{2}/g)?.join(':') || md5Hex;
+  return { sha256, md5 };
+}
+
+/**
+ * Checks server host key against optional pinned fingerprint
+ */
+export function verifyHostFingerprint(
+  serverKey: string | Buffer,
+  expectedFingerprint?: string
+): { valid: boolean; actualSha256: string; actualMd5: string; error?: string } {
+  const { sha256, md5 } = computeHostFingerprints(serverKey);
+
+  if (!expectedFingerprint || !expectedFingerprint.trim()) {
+    return { valid: true, actualSha256: sha256, actualMd5: md5 };
+  }
+
+  const cleanExpected = expectedFingerprint.trim().toLowerCase();
+  const cleanSha256 = sha256.toLowerCase();
+  const cleanMd5 = md5.toLowerCase();
+  const rawSha256 = sha256.replace(/^sha256:/i, '').toLowerCase();
+
+  const isMatch =
+    cleanExpected === cleanSha256 ||
+    cleanExpected === cleanMd5 ||
+    cleanExpected === rawSha256 ||
+    cleanExpected.replace(/[:\s]/g, '') === cleanMd5.replace(/[:\s]/g, '');
+
+  if (isMatch) {
+    return { valid: true, actualSha256: sha256, actualMd5: md5 };
+  }
+
+  return {
+    valid: false,
+    actualSha256: sha256,
+    actualMd5: md5,
+    error: `SSH Host Key Fingerprint uyuşmazlığı tespit edildi! Beklenen: "${expectedFingerprint}", Sunucudan gelen: "${sha256}". Olası Ortadaki Adam (MITM) veya sahte sunucu bağlantı girişimi engellendi.`,
+  };
+}
 
 class SSHTunnelService {
   private sshClient: Client | null = null;
@@ -37,6 +88,7 @@ class SSHTunnelService {
   private status: SSHTunnelStatus = 'disconnected';
   private lastError: string | null = null;
   private connectedAt: string | null = null;
+  private activeHostFingerprint: string | null = null;
   private logs: string[] = [];
   private activeConfig: SSHTunnelConfig | null = null;
 
@@ -145,13 +197,16 @@ class SSHTunnelService {
       lastError: this.lastError,
       connectedAt: this.connectedAt,
       logs: this.logs,
+      hostFingerprint: this.activeHostFingerprint,
     };
   }
 
-  public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string }> {
+  public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
     return new Promise((resolve) => {
       const client = new Client();
       let isResolved = false;
+      let discoveredFingerprint: string | null = null;
+      let fingerprintError: string | null = null;
 
       const timeout = setTimeout(() => {
         if (!isResolved) {
@@ -164,6 +219,7 @@ class SSHTunnelService {
           resolve({
             success: false,
             message: 'SSH bağlantı zaman aşımına uğradı (10s). Lütfen IP ve port bilgilerini kontrol edin.',
+            hostFingerprint: discoveredFingerprint,
           });
         }
       }, 10000);
@@ -175,7 +231,8 @@ class SSHTunnelService {
           client.end();
           resolve({
             success: true,
-            message: `SSH Bağlantısı Başarılı! Sunucu (${config.sshUser}@${config.sshHost}:${config.sshPort || 22}) ile el sıkışma sağlandı.`,
+            message: `SSH Bağlantısı Başarılı! Sunucu (${config.sshUser}@${config.sshHost}:${config.sshPort || 22}) doğrulandı.${discoveredFingerprint ? ` [Host Key: ${discoveredFingerprint}]` : ''}`,
+            hostFingerprint: discoveredFingerprint,
           });
         }
       });
@@ -184,7 +241,7 @@ class SSHTunnelService {
         if (!isResolved) {
           isResolved = true;
           clearTimeout(timeout);
-          let errMsg = err?.message || 'SSH Bağlantı hatası';
+          let errMsg = fingerprintError || err?.message || 'SSH Bağlantı hatası';
           if (err?.code === 'ECONNREFUSED') {
             errMsg = `SSH sunucusu bağlantıyı reddetti (${config.sshHost}:${config.sshPort || 22}). SSH servisinin açık olduğunu doğrulayın.`;
           } else if (err?.level === 'client-authentication') {
@@ -193,6 +250,7 @@ class SSHTunnelService {
           resolve({
             success: false,
             message: errMsg,
+            hostFingerprint: discoveredFingerprint,
           });
         }
       });
@@ -212,6 +270,22 @@ class SSHTunnelService {
         port: config.sshPort || 22,
         username: config.sshUser,
         readyTimeout: 10000,
+        hostVerifier: (hashedKey: string | Buffer, verifyCallback?: (verified: boolean) => void) => {
+          const res = verifyHostFingerprint(hashedKey, config.expectedHostFingerprint);
+          discoveredFingerprint = res.actualSha256;
+          if (!res.valid) {
+            fingerprintError = res.error || 'Host fingerprint mismatch';
+            this.addLog(`GÜVENLİK UYARISI: ${res.error}`);
+            if (typeof verifyCallback === 'function') {
+              verifyCallback(false);
+            }
+            return false;
+          }
+          if (typeof verifyCallback === 'function') {
+            verifyCallback(true);
+          }
+          return true;
+        },
       };
 
       if (config.authType === 'privateKey' && effectivePrivateKey) {
@@ -229,6 +303,7 @@ class SSHTunnelService {
           resolve({
             success: false,
             message: `SSH bağlantı başlatılamadı: ${e?.message || e}`,
+            hostFingerprint: discoveredFingerprint,
           });
         }
       }
@@ -241,6 +316,7 @@ class SSHTunnelService {
     localPort?: number;
     isPgConnected?: boolean;
     databaseState?: string;
+    hostFingerprint?: string | null;
   }> {
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
@@ -342,57 +418,63 @@ class SSHTunnelService {
           }
         });
 
-        if (this.netServer) {
-          try {
-            this.netServer.close();
-          } catch {
-            // ignore
-          }
-        }
+        // Clean up previous netServer cleanly before listening
+        const startListening = () => {
+          netServer.listen(localPort, '127.0.0.1', async () => {
+            this.addLog(`AKTİF: SSH Tüneli kuruldu! Yerel 127.0.0.1:${localPort} -> Uzak ${remoteHost}:${remotePort}`);
+            this.status = 'connected';
+            this.connectedAt = new Date().toISOString();
+            this.netServer = netServer;
 
-        netServer.listen(localPort, '127.0.0.1', async () => {
-          this.addLog(`AKTİF: SSH Tüneli kuruldu! Yerel 127.0.0.1:${localPort} -> Uzak ${remoteHost}:${remotePort}`);
-          this.status = 'connected';
-          this.connectedAt = new Date().toISOString();
-          this.netServer = netServer;
+            if (!isResolved) {
+              isResolved = true;
+              clearTimeout(connectTimeout);
 
-          if (!isResolved) {
-            isResolved = true;
-            clearTimeout(connectTimeout);
-
-            // Synchronously recycle PostgreSQL pool and test the database connection
-            let isPgConnected = false;
-            let dbState = 'DB_UNAVAILABLE';
-            try {
-              this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
-              const { recycleSharedPgPool } = await import('../database/connection.js');
-              await recycleSharedPgPool();
-              const { db } = await import('../db.js');
-              if (db && typeof db.initPostgresRepository === 'function') {
-                isPgConnected = await db.initPostgresRepository();
-                dbState = db.getDatabaseState();
+              // Synchronously recycle PostgreSQL pool and test the database connection
+              let isPgConnected = false;
+              let dbState = 'DB_UNAVAILABLE';
+              try {
+                this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
+                const { recycleSharedPgPool } = await import('../database/connection.js');
+                await recycleSharedPgPool();
+                const { db } = await import('../db.js');
+                if (db && typeof db.initPostgresRepository === 'function') {
+                  isPgConnected = await db.initPostgresRepository();
+                  dbState = db.getDatabaseState();
+                }
+              } catch (pgErr: any) {
+                this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${pgErr?.message || pgErr}`);
               }
-            } catch (pgErr: any) {
-              this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${pgErr?.message || pgErr}`);
+
+              const successMsg = isPgConnected
+                ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
+                : `SSH Tüneli başarıyla kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL henüz el sıkışmadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
+
+              resolve({
+                success: true,
+                message: successMsg,
+                localPort,
+                isPgConnected,
+                databaseState: dbState,
+              });
             }
+          });
+        };
 
-            const successMsg = isPgConnected
-              ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
-              : `SSH Tüneli başarıyla kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL henüz el sıkışmadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
-
-            resolve({
-              success: true,
-              message: successMsg,
-              localPort,
-              isPgConnected,
-              databaseState: dbState,
-            });
-          }
-        });
+        if (this.netServer) {
+          this.netServer.close(() => {
+            this.netServer = null;
+            startListening();
+          });
+        } else {
+          startListening();
+        }
       });
 
+      let fingerprintError: string | null = null;
+
       sshClient.on('error', (err: any) => {
-        const errMsg = err?.message || 'SSH Tünel Hatası';
+        const errMsg = fingerprintError || err?.message || 'SSH Tünel Hatası';
         this.addLog(`HATA: SSH tüneli kesildi veya kurulamadı: ${errMsg}`);
         this.lastError = errMsg;
         this.status = 'error';
@@ -404,6 +486,7 @@ class SSHTunnelService {
           resolve({
             success: false,
             message: `SSH Tüneli kurulamadı: ${errMsg}`,
+            hostFingerprint: this.activeHostFingerprint,
           });
         }
       });
@@ -423,6 +506,23 @@ class SSHTunnelService {
         readyTimeout: 15000,
         keepaliveInterval: 10000,
         keepaliveCountMax: 3,
+        hostVerifier: (hashedKey: string | Buffer, verifyCallback?: (verified: boolean) => void) => {
+          const res = verifyHostFingerprint(hashedKey, fullConfig.expectedHostFingerprint);
+          this.activeHostFingerprint = res.actualSha256;
+          if (!res.valid) {
+            fingerprintError = res.error || 'Host fingerprint mismatch';
+            this.addLog(`GÜVENLİK UYARISI: ${res.error}`);
+            if (typeof verifyCallback === 'function') {
+              verifyCallback(false);
+            }
+            return false;
+          }
+          this.addLog(`SSH Host Anahtar Parmak İzi doğrulandı: ${res.actualSha256}`);
+          if (typeof verifyCallback === 'function') {
+            verifyCallback(true);
+          }
+          return true;
+        },
       };
 
       if (fullConfig.authType === 'privateKey' && effectivePrivateKey) {
@@ -442,6 +542,7 @@ class SSHTunnelService {
           resolve({
             success: false,
             message: `SSH Tünel başlatma hatası: ${e?.message || e}`,
+            hostFingerprint: this.activeHostFingerprint,
           });
         }
       }

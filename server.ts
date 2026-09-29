@@ -12,6 +12,7 @@ import { initSimulator } from './src/server/services/simulator.js';
 import { startOtaWorker } from './src/server/services/otaWorker.js';
 import { startNoDataWorker } from './src/server/services/noDataWorker.js';
 import { startCommandExpiryWorker } from './src/server/services/command.service.js';
+import { getVaultStatus } from './src/server/utils/crypto.js';
 
 
 // Route Handlers
@@ -63,6 +64,26 @@ function gracefulCrashExit(errType: string, err: any) {
 
 process.on('uncaughtException', (err: any) => {
   const errMsg = err?.message || String(err);
+  const isTransientDbOrSocketError =
+    errMsg.includes('Connection terminated unexpectedly') ||
+    errMsg.includes('ECONNREFUSED') ||
+    errMsg.includes('ECONNRESET') ||
+    errMsg.includes('ETIMEDOUT') ||
+    errMsg.includes('socket hang up') ||
+    err?.code === 'ECONNREFUSED' ||
+    err?.code === 'ECONNRESET' ||
+    err?.code === '57P01' ||
+    err?.code === '08006' ||
+    err?.code === '08001';
+
+  if (isTransientDbOrSocketError) {
+    console.warn('[Process Shield] Anlık veritabanı/ağ soketi kesintisi yakalandı (Node ayakta tutuluyor):', errMsg);
+    try {
+      systemLogger.warn('database', `Veritabanı soket kesintisi yakalandı (${errMsg}). Otomatik yeniden bağlanma devrede.`);
+    } catch {}
+    return;
+  }
+
   console.error('[CRITICAL][uncaughtException]:', errMsg, err?.stack || '');
   try {
     systemLogger.critical('server', `Yakalanmamış Sistem Hatası (uncaughtException): ${errMsg}`, {
@@ -72,20 +93,7 @@ process.on('uncaughtException', (err: any) => {
     });
   } catch {}
 
-  const isTransientDbOrSocketError =
-    errMsg.includes('Connection terminated unexpectedly') ||
-    errMsg.includes('ECONNREFUSED') ||
-    errMsg.includes('ECONNRESET') ||
-    errMsg.includes('ETIMEDOUT') ||
-    errMsg.includes('socket hang up') ||
-    err?.code === 'ECONNREFUSED' ||
-    err?.code === 'ECONNRESET';
-
-  if (!isTransientDbOrSocketError) {
-    gracefulCrashExit('uncaughtException', err);
-  } else {
-    console.warn('[Process Shield] Anlık veritabanı/ağ soketi kesintisi yutuldu, sunucu çalışmaya devam ediyor.');
-  }
+  gracefulCrashExit('uncaughtException', err);
 });
 
 process.on('unhandledRejection', (reason: any) => {
@@ -116,28 +124,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.text({ type: ['text/*', 'application/x-www-form-urlencoded', 'application/octet-stream'], limit: '10mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '10mb' }));
 
-// CORS & Preflight Handling (Secure Allowlist)
-const ALLOWED_ORIGIN_PATTERNS = [
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https?:\/\/.*\.run\.app$/,
-  /^https?:\/\/nexusnodeiot\.com\.tr$/,
-  /^https?:\/\/.*\.nexusnodeiot\.com\.tr$/
-];
+import { isOriginAllowed } from './src/server/utils/corsOrigins.js';
 
+// CORS & Preflight Handling (Explicit Secure Allowlist)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
   if (origin) {
-    // Only allow credentials and reflect origin if it matches our allowlist patterns
-    const isAllowed = ALLOWED_ORIGIN_PATTERNS.some(pattern => pattern.test(origin));
+    // Only allow credentials and reflect origin if it matches our explicit allowlist
+    const isAllowed = isOriginAllowed(origin);
     if (isAllowed) {
       res.header('Access-Control-Allow-Origin', origin);
       res.header('Access-Control-Allow-Credentials', 'true');
     } else {
-      // Do not allow credentials for unknown origins.
-      // We can optionally set it to '*' or omit it. Omitting it means the browser blocks the CORS request.
-      res.header('Access-Control-Allow-Origin', 'null'); // Explicitly deny
+      // Do not allow credentials for unknown origins. Explicitly deny CORS access.
+      res.header('Access-Control-Allow-Origin', 'null');
     }
   } else {
     // Non-browser clients (IoT devices, curl) don't send Origin.
@@ -145,7 +146,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
   }
   
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-auth-token, x-api-key, x-token, x-device-id, x-device-ip, x-mac-address');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-auth-token, x-api-key, x-token, x-device-id, x-device-ip, x-mac-address, x-setup-token');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   
   if (req.method === 'OPTIONS') {
@@ -174,7 +175,9 @@ app.use('/api', (req, res, next) => {
   // Allowed endpoints even when DB is not ready or during configuration
   if (
     req.path.startsWith('/setup') ||
-    req.path.startsWith('/auth') ||
+    req.path.startsWith('/auth/setup-status') ||
+    req.path.startsWith('/auth/complete-setup') ||
+    req.path.startsWith('/auth/verify-setup-token') ||
     req.path.startsWith('/system/ssh-tunnel') ||
     req.path.startsWith('/ssh-tunnel') ||
     req.path === '/system/status' ||
@@ -189,15 +192,14 @@ app.use('/api', (req, res, next) => {
   const isProduction = process.env.NODE_ENV === 'production';
   const dbState = db.getDatabaseState();
   const isPgReady = Boolean(db.postgresRepo?.isReady());
-  const hasRealAdmin = db.getUsers().some(isRealAdminUser);
-  const isSetupDone = setupService.isSetupCompleted() || hasRealAdmin;
   const isStrictMaintenance = process.env.STRICT_MAINTENANCE_LOCK === 'true';
 
-  // System readiness: if strict maintenance lock is enabled, strictly require PostgreSQL.
-  // Otherwise, if setup is completed and admin exists, the high-performance local resilient WAL engine serves traffic.
-  const isSystemReady = isStrictMaintenance
+  // Strict Fail-Closed Enforcement in Production:
+  // In production (or when strict maintenance lock is active), the system strictly requires PostgreSQL to be READY.
+  // In development mode, if PostgreSQL is ready it is authoritative; otherwise local engine facilitates dev preview.
+  const isSystemReady = (isProduction || isStrictMaintenance)
     ? (isPgReady && dbState === DatabaseState.READY)
-    : (isPgReady || dbState === DatabaseState.READY || isSetupDone);
+    : true;
 
   if (!isSystemReady) {
     const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
@@ -206,9 +208,9 @@ app.use('/api', (req, res, next) => {
       code: isMaintenance ? 'DB_MAINTENANCE' : 'DB_UNAVAILABLE',
       state: dbState,
       error: isMaintenance
-        ? 'NexusNode IoT veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
-        : 'NexusNode IoT veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
-      message: 'Veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı kurulumunu tamamlayın.',
+        ? 'NexusNode IoT PostgreSQL veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
+        : 'NexusNode IoT PostgreSQL veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
+      message: 'PostgreSQL veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı bağlantınızı kontrol edin veya kurulum sihirbazını tamamlayın.',
     });
   }
   next();
@@ -363,6 +365,25 @@ if (db.getDatabaseState() === DatabaseState.READY) {
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  if (isProd) {
+    const vaultStatus = getVaultStatus();
+    if (!vaultStatus.configured) {
+      console.error(`====================================================`);
+      console.error(`[FATAL SECURITY ERROR] Secret Vault Şifreleme Anahtarı Eksik!`);
+      console.error(`Üretim (Production) modunda ENCRYPTION_KEY ortam değişkeni veya`);
+      console.error(`/run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.`);
+      console.error(`Şifreli veriler ile anahtarın aynı veri hacmi (volume) içinde bulunması engellenmiştir.`);
+      console.error(`====================================================`);
+      systemLogger.critical('security', 'Üretim ortamında Secret Vault anahtarı (ENCRYPTION_KEY / Docker secret) eksik olduğu için sunucu başlatılamadı.');
+      if (process.env.DISABLE_VAULT_EXIT !== 'true') {
+        process.exit(1);
+      }
+    } else {
+      console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);
+    }
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

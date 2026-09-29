@@ -1,15 +1,5 @@
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('dashboard_token') : null;
-
   const headers = new Headers(init?.headers || {});
-  if (token) {
-    if (!headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
-    if (!headers.has('x-auth-token')) {
-      headers.set('x-auth-token', token);
-    }
-  }
 
   const method = (init?.method || 'GET').toUpperCase();
   const isIdempotent = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(method);

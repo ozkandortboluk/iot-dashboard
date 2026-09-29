@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, requireAdmin } from '../middleware/auth.js';
 import type { SystemEventLevel, SystemEventCategory } from '../../types.js';
 
@@ -133,23 +134,40 @@ systemLogsRouter.get('/export', authenticateUser, requireAdmin, (req, res) => {
 
 /**
  * POST /api/system-logs/client-error
- * Ingest uncaught frontend React / window errors so full client-server telemetry is unified.
+ * Ingest uncaught frontend React / window errors with rate limiting, size capping, and strict truncation.
  */
-systemLogsRouter.post('/client-error', (req, res) => {
+systemLogsRouter.post('/client-error', express.json({ limit: '8kb' }), (req, res) => {
   try {
-    const { message, stack, url, componentStack, userAgent } = req.body || {};
-    if (!message) {
-      return res.status(400).json({ error: 'Log mesajı zorunludur.' });
+    const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+    // Rate limit: max 10 client error reports per minute per IP
+    const rateLimit = rateLimiterService.checkIpRateLimit(`client_error:${clientIp}`, 10);
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: 'Çok fazla istemci hatası bildirimi gönderildi. Lütfen bekleyin.',
+        retryAfterSeconds: rateLimit.retryAfterSeconds,
+      });
     }
+
+    const { message, stack, url, componentStack, userAgent } = req.body || {};
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Geçersiz veya eksik log mesajı.' });
+    }
+
+    // Strict field truncation to prevent DoS via large strings
+    const truncatedMessage = String(message).trim().slice(0, 300);
+    const rawStack = stack || componentStack;
+    const truncatedStack = rawStack && typeof rawStack === 'string' ? rawStack.slice(0, 1500) : undefined;
+    const truncatedUrl = url && typeof url === 'string' ? url.slice(0, 255) : undefined;
+    const truncatedUserAgent = userAgent && typeof userAgent === 'string' ? userAgent.slice(0, 255) : undefined;
 
     systemLogger.error(
       'client',
-      `[İstemci/Web Arayüz Hatası] ${message.slice(0, 300)}`,
+      `[İstemci/Web Arayüz Hatası] ${truncatedMessage}`,
       {
-        stack: stack || componentStack,
-        url,
-        userAgent,
-        ip: req.ip || req.socket.remoteAddress,
+        stack: truncatedStack,
+        url: truncatedUrl,
+        userAgent: truncatedUserAgent,
+        ip: clientIp,
       },
       'client_browser'
     );

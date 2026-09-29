@@ -742,7 +742,7 @@ export class SetupService {
         if (msg.includes('ENOTFOUND') || msg.includes('EAI_AGAIN')) {
           this.lastDbError = `Sunucu adresi ("${this.runtimeConfig?.host || 'timescaledb'}") DNS/Host olarak çözümlenemedi.`;
         } else if (msg.includes('ECONNREFUSED')) {
-          this.lastDbError = `Bağlantı reddedildi (${this.runtimeConfig?.host || 'timescaledb'}:${this.runtimeConfig?.port || 5432}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında uzak IP bağlantılarına izin verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
+          this.lastDbError = `Bağlantı reddedildi (${this.runtimeConfig?.host || 'timescaledb'}:${this.runtimeConfig?.port || 5432}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen: 1) Docker içinde "timescaledb" veya "127.0.0.1" adresini kullandığınızı, 2) Uzak VPS erişimi için portu internete açmak yerine yerleşik "SSH Tüneli" kullandığınızı, 3) PostgreSQL servisinin aktif çalıştığını doğrulayın.`;
         } else if (msg.includes('password authentication failed')) {
           this.lastDbError = 'Kimlik doğrulama başarısız: Veritabanı şifresi veya kullanıcı adı hatalı.';
         } else {
@@ -822,10 +822,9 @@ export class SetupService {
       currentStep = 1;
     }
 
-    const isDev = process.env.NODE_ENV === 'development';
-    const isAuth = systemMode !== 'SETUP' ? true : (isAuthenticated || isDev);
-    const setupTokenRequired = systemMode === 'SETUP' && !isDev;
-    const activeSetupToken = systemMode === 'SETUP' ? this.getOrInitSetupToken(true) : undefined;
+    const isAuth = systemMode !== 'SETUP' ? true : Boolean(isAuthenticated);
+    const setupTokenRequired = systemMode === 'SETUP';
+    const activeSetupToken = systemMode === 'SETUP' && isAuth ? this.getOrInitSetupToken(true) : undefined;
 
     return {
       systemMode,
@@ -967,7 +966,7 @@ export class SetupService {
         if (isLocalHost) {
           sanitizedMessage = `Yerel bağlantı reddedildi (${config.host}:${config.port}). AI Studio Önizleme ortamındaysanız "localhost" Cloud Run konteynerini temsil eder (VPS veritabanınız için sol menüden "SSH Tüneli" başlatmalısınız). VPS sunucunuzda Docker içinde çalışıyorsanız "host.docker.internal" veya "172.17.0.1" adresini kullanın. IPv6 çakışmasını önlemek için "localhost" yerine "127.0.0.1" yazın.`;
         } else {
-          sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Lütfen sunucunuzda: 1) postgresql.conf içinde listen_addresses = '*' olduğunu, 2) pg_hba.conf dosyasında erişim izni verildiğini, 3) Güvenlik duvarında (UFW) 5432 portunun açık olduğunu kontrol edin (sudo ufw allow 5432/tcp).`;
+          sanitizedMessage = `Bağlantı reddedildi (${config.host}:${config.port}). PostgreSQL sunucusu 5432 portunda bağlantıyı reddetti (ECONNREFUSED). Güvenlik için 5432 portunu genel internete açmayınız. Lütfen: 1) Docker içinde "timescaledb" veya "127.0.0.1" adresini kullanın, 2) Uzak VPS erişimi için yerleşik "SSH Tüneli" başlatın, 3) PostgreSQL servisinin çalıştığını doğrulayın.`;
         }
         errorCode = 'CONN_REFUSED';
       } else if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('EAI_AGAIN')) {

@@ -75,10 +75,12 @@ export class InitialDataSeeder {
           voltage: 224.8,
         };
 
+        const testApiKeyPrefix = 'dev_key_test';
+
         await client.query(`
           INSERT INTO devices (
             id, tenant_id, user_id, name, device_type, role_key,
-            api_key, api_key_hash, status, location, ip_address,
+            api_key, api_key_prefix, api_key_hash, status, location, ip_address,
             hardware_model, firmware_version, rate_limit_per_min, encryption_method,
             is_simulated, data_flow_active, metrics, output_definitions,
             capabilities, expected_interval_seconds, heartbeat_timeout_seconds,
@@ -86,7 +88,7 @@ export class InitialDataSeeder {
           ) VALUES (
             'dev_test_01', 'system', NULL,
             'Kanonik Saha Test Cihazı (ESP32)', 'sensor', 'production_sensor',
-            $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100',
+            NULL, $1, $2, 'online', 'Test Laboratuvarı - Saha İstasyonu #1', '192.168.1.100',
             'ESP32-WROOM-32D', 'v1.0.0', 300, 'AES-256-GCM',
             true, true, $3::jsonb, $4::jsonb,
             $5::jsonb, 10, 60,
@@ -94,7 +96,8 @@ export class InitialDataSeeder {
           )
           ON CONFLICT (id) DO UPDATE SET
             name = EXCLUDED.name,
-            api_key = EXCLUDED.api_key,
+            api_key = NULL,
+            api_key_prefix = EXCLUDED.api_key_prefix,
             api_key_hash = EXCLUDED.api_key_hash,
             status = 'online',
             ip_address = EXCLUDED.ip_address,
@@ -102,7 +105,7 @@ export class InitialDataSeeder {
             output_definitions = EXCLUDED.output_definitions,
             last_seen = CURRENT_TIMESTAMP;
         `, [
-          testApiKey,
+          testApiKeyPrefix,
           testApiKeyHash,
           JSON.stringify(initialMetrics),
           JSON.stringify(supportedOutputs),

@@ -862,111 +862,10 @@ class LocalDatabase {
       }
     }
 
-    // Ensure the primary canonical admin user always exists as the first administrator
-    const testAdmin = parsed.users.find(u => u.id === 'usr_test_admin' || u.email === 'test@nexusnodeiot.com.tr');
-    if (!testAdmin) {
-      const testAdminId = 'usr_test_admin';
-      parsed.users.unshift({
-        id: testAdminId,
-        name: 'Test Kullanıcısı (Yönetici)',
-        email: 'test@nexusnodeiot.com.tr',
-        phone: '+905550000000',
-        notificationEmail: 'test@nexusnodeiot.com.tr',
-        whatsappNumber: '+905550000000',
-        role: 'admin',
-        companyName: 'Test Laboratuvarı',
-        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-        created_at: new Date().toISOString(),
-      });
-      parsed.passwords[testAdminId] = hashPassword('test1234');
-      parsed.dashboards.push({
-        id: `dash_${testAdminId}`,
-        tenantId: testAdminId,
-        title: `Test Laboratuvarı Özel Dashboard`,
-        widgets: [...defaultWidgets],
-        updatedAt: new Date().toISOString(),
-      });
-    } else {
-      testAdmin.role = 'admin';
-      testAdmin.email = 'test@nexusnodeiot.com.tr';
-      if (!parsed.passwords[testAdmin.id] || !verifyPassword('test1234', parsed.passwords[testAdmin.id])) {
-        parsed.passwords[testAdmin.id] = hashPassword('test1234');
-      }
-    }
-
-    // Add persistent test device if it doesn't exist
-    const hasTestDevice = parsed.devices.some(d => d.id === 'dev_test_01');
-    if (!hasTestDevice) {
-      parsed.devices.push({
-        id: 'dev_test_01',
-        tenantId: 'usr_test_admin',
-        name: 'Test Simülasyon Cihazı',
-        type: 'sensor',
-        apiKey: 'dev_key_test_0000000000000000',
-        status: 'online',
-        location: 'Sanal Test Odası',
-        ipAddress: '127.0.0.1',
-        lastSeen: new Date().toISOString(),
-        rateLimitPerMin: 100,
-        encryptionMethod: 'AES-256-GCM',
-        isSimulated: true,
-        metrics: { temperature: 24.5, humidity: 55.0 }
-      });
-    }
-
-    // Check if admin user exists (usr_admin or admin@dashboard.io)
-    const adminId = 'usr_admin';
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@dashboard.io';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
-    const adminName = process.env.ADMIN_NAME || 'Sistem Yöneticisi';
-    const adminCompany = process.env.ADMIN_COMPANY || 'Merkez Yönetim';
-
-    const existingAdminIndex = parsed.users.findIndex((u: any) => u.id === adminId || u.email.toLowerCase() === adminEmail.toLowerCase());
-
-    if (existingAdminIndex >= 0) {
-      parsed.users[existingAdminIndex].id = adminId;
-      parsed.users[existingAdminIndex].email = adminEmail;
-      parsed.users[existingAdminIndex].role = 'admin';
-      parsed.users[existingAdminIndex].name = adminName;
-      parsed.users[existingAdminIndex].companyName = adminCompany;
-      parsed.passwords[adminId] = hashPassword(adminPassword);
-    } else {
-      const adminUser: User = {
-        id: adminId,
-        name: adminName,
-        email: adminEmail,
-        phone: '+905551234567',
-        notificationEmail: adminEmail,
-        whatsappNumber: '+905551234567',
-        telegramChatId: '129837465',
-        role: 'admin',
-        companyName: adminCompany,
-        notificationPreferences: { app: true, email: true, whatsapp: true, telegram: true, sms: true, webhook: true },
-        created_at: new Date().toISOString(),
-      };
-
-      parsed.users.push(adminUser);
-      parsed.passwords[adminId] = hashPassword(adminPassword);
-      parsed.dashboards.push({
-        id: `dash_${adminId}`,
-        tenantId: adminId,
-        title: `${adminCompany} Özel Dashboard`,
-        widgets: [...defaultWidgets],
-        updatedAt: new Date().toISOString(),
-      });
-      parsed.auditLogs.push({
-        id: 'log_admin_init',
-        timestamp: new Date().toISOString(),
-        tenantId: adminId,
-        userName: adminName,
-        action: 'Yönetici Hesabı (admin@dashboard.io) Başarıyla Yapılandırıldı',
-        ip: '127.0.0.1',
-        severity: 'low',
-      });
-    }
-
     this.data = parsed;
-    this.saveData(parsed);
+    if (!this.isPostgresProductionMode() && process.env.NODE_ENV !== 'production') {
+      this.saveData(parsed);
+    }
 
     return parsed;
   }
@@ -3030,10 +2929,10 @@ class LocalDatabase {
           user: parsedUser,
           suggestionTitle: `Sunucu Bağlantıyı Reddetti (${parsedHost}:${parsedPort})`,
           suggestionSteps: [
-            "postgresql.conf: 'listen_addresses = \\'*\\'' olarak ayarlayın (varsayılan 'localhost' dış bağlantıları reddeder).",
-            "pg_hba.conf: 'host all all 0.0.0.0/0 scram-sha-256' satırını ekleyerek dış erişime izin verin.",
-            'Servisi yeniden başlatın: sudo systemctl restart postgresql (veya Docker konteynerini yeniden başlatın).',
-            'Port ve Firewall: Sunucuda 5432 portunu açın (sudo ufw allow 5432/tcp) veya Docker -p 5432:5432 port yönlendirmesini kontrol edin.',
+            'SSH Tüneli Kullanın: Güvenlik için 5432 portunu internete açmak yerine platformun yerleşik "SSH Tüneli" özelliğini kullanarak güvenli bağlantı kurun.',
+            'Konteyner / Yerel Ağ: Docker ortamında çalışıyorsanız host olarak "timescaledb" veya "127.0.0.1" kullanın.',
+            'Servis Durumu: PostgreSQL servisinin çalıştığını doğrulayın: sudo systemctl status postgresql (veya docker ps).',
+            'Ağ İzolasyonu: Güvenlik nedeniyle PostgreSQL portunu asla 0.0.0.0/0 olarak genel internete açmayınız; yerel ağ veya SSH tüneli tercih ediniz.',
           ],
         };
       } else if (errCode === 'ETIMEDOUT' || errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
@@ -3045,9 +2944,9 @@ class LocalDatabase {
           user: parsedUser,
           suggestionTitle: `Zaman Aşımı / Sunucuya Ulaşılamadı (${parsedHost}:${parsedPort})`,
           suggestionSteps: [
-            'Sunucu IP adresi ve portun (5432) doğruluğunu kontrol edin.',
-            'Bulut sağlayıcınızın (Hetzner, AWS Security Group, DigitalOcean, vb.) Inbound Firewall kurallarında 5432 TCP portunun açık olduğunu doğrulayın.',
-            'Sunucu üzerinde UFW veya iptables güvenlik duvarını kontrol edin (sudo ufw status).',
+            'SSH Tüneli ile Bağlanın: Uzak VPS veritabanına bağlanmak için 5432 portunu açmak yerine Port 22 üzerinden SSH Tüneli açın.',
+            'Ağ Yönlendirmesi: Sunucu IP adresi ve port bilgilerini kontrol edin veya dahili Docker ağını (timescaledb:5432) kullanın.',
+            'Özel Ağ / VPN: Bulut sunucunuza erişim için Tailscale, WireGuard veya bulut özel VPC ağını tercih edin.',
           ],
         };
       } else if (errCode === '28P01' || errMsg.includes('password authentication failed')) {

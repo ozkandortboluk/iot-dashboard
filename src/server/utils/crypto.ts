@@ -80,7 +80,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
-  // 3. Custom path via ENCRYPTION_KEY_PATH
+  // 3. Custom path via ENCRYPTION_KEY_PATH or ENCRYPTION_KEY_FILE
   const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
   if (keyPath) {
     try {
@@ -95,7 +95,20 @@ export function resolveEncryptionKey(): Buffer | null {
     } catch {}
   }
 
-  // 4. Standalone protected vault key file (data/.vault_key)
+  // ==========================================================================
+  // PRODUCTION SECURITY BOUNDARY:
+  // In production (NODE_ENV=production or VPS_PRODUCTION=true), the encryption key
+  // MUST NOT be generated or co-located inside the shared data volume (data/.vault_key).
+  // It MUST be supplied via ENCRYPTION_KEY environment variable or a dedicated
+  // Docker secret mount (/run/secrets/encryption_key).
+  // If not configured, returns null (causing fail-closed startup or explicit vault error).
+  // ==========================================================================
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  if (isProd) {
+    return null;
+  }
+
+  // 4. Standalone protected vault key file (data/.vault_key) for dev / local / test only
   try {
     if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
       const localRaw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
@@ -107,7 +120,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
-  // 5. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key if no key exists
+  // 5. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key (DEVELOPMENT / TEST ONLY)
   try {
     const dataDir = path.dirname(LOCAL_VAULT_KEY_PATH);
     if (!fs.existsSync(dataDir)) {

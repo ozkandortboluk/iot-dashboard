@@ -26,6 +26,14 @@ export function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key.trim()).digest('hex');
 }
 
+export function sanitizeDevice(dev: Device): Device {
+  const prefix = dev.apiKeyPrefix || (dev.apiKey && !dev.apiKey.includes('USE_CACHED') && !dev.apiKey.includes('...') ? dev.apiKey.substring(0, 12) : 'nxs_dev_***');
+  return {
+    ...dev,
+    apiKey: `${prefix}...`,
+  };
+}
+
 export function generateDeviceKeyDetails(providedKey?: string): {
   rawKey: string;
   prefix: string;
@@ -215,14 +223,16 @@ export class DeviceRepository {
       offline: 4,
     };
 
-    return [...list].sort((a, b) => {
-      const pA = statusPriority[a.status] || 99;
-      const pB = statusPriority[b.status] || 99;
-      if (pA !== pB) return pA - pB;
-      const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
-      const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
-      return tsB - tsA;
-    });
+    return [...list]
+      .sort((a, b) => {
+        const pA = statusPriority[a.status] || 99;
+        const pB = statusPriority[b.status] || 99;
+        if (pA !== pB) return pA - pB;
+        const tsA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
+        const tsB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+        return tsB - tsA;
+      })
+      .map(sanitizeDevice);
   }
 
   public async assignDeviceOwner(

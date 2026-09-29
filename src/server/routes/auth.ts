@@ -169,18 +169,41 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: emailRes.error || 'Geçersiz e-posta biçimi.' });
   }
 
-  const result = await db.authenticate(emailRes.normalized, String(password));
-  if (!result) {
-    return res.status(401).json({ error: 'Hatalı e-posta adresi veya şifre.' });
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isPgConfigured = Boolean(db.getPostgresUrl().trim());
+  if ((isProduction || isPgConfigured) && !db.postgresRepo?.isReady()) {
+    return res.status(503).json({
+      success: false,
+      code: 'DB_UNAVAILABLE',
+      error: 'NexusNode IoT PostgreSQL veritabanı bağlantısı aktif değil. Güvenlik nedeniyle giriş yapılamaz.',
+      message: 'PostgreSQL sunucusu hazır olmadığı için kimlik doğrulama işlemi gerçekleştirilemiyor. Lütfen veritabanı bağlantısını kontrol edin.',
+    });
   }
 
-  // Set HttpOnly, Secure session cookie
-  setSessionCookie(res, result.token);
+  try {
+    const result = await db.authenticate(emailRes.normalized, String(password));
+    if (!result) {
+      return res.status(401).json({ error: 'Hatalı e-posta adresi veya şifre.' });
+    }
 
-  res.json({
-    user: result.user,
-    message: 'Giriş başarılı',
-  });
+    // Set HttpOnly, Secure session cookie
+    setSessionCookie(res, result.token);
+
+    res.json({
+      user: result.user,
+      message: 'Giriş başarılı',
+    });
+  } catch (err: any) {
+    const msg = err?.message || '';
+    if (msg.includes('PostgreSQL') || msg.includes('veritabanı')) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_UNAVAILABLE',
+        error: msg,
+      });
+    }
+    return res.status(500).json({ error: 'Giriş işlemi sırasında beklenmeyen bir hata oluştu.' });
+  }
 });
 
 router.post('/register', async (req, res) => {

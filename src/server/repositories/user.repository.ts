@@ -23,9 +23,12 @@ export class UserRepository {
   }
 
   public async createSession(user: User): Promise<string> {
-    const token = crypto.randomBytes(32).toString('hex');
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const tokenPrefix = rawToken.substring(0, 10);
+
     const session: UserSession = {
-      token,
+      token: rawToken, // Used by saveSession to hash & persist
       userId: user.id,
       userRole: user.role,
       userEmail: user.email,
@@ -34,14 +37,21 @@ export class UserRepository {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     };
 
-    // Always maintain in-memory sessions cache for resilient fallback
+    // In-memory cache stores tokenHash for resilient zero-plaintext verification
+    const inMemorySession: any = {
+      ...session,
+      tokenHash,
+      tokenPrefix,
+      token: undefined, // Wipe plaintext token
+    };
+
     if (!this.db.data.sessions) {
       this.db.data.sessions = [];
     }
     this.db.data.sessions = this.db.data.sessions.filter(
       (s: any) => new Date(s.expiresAt).getTime() > Date.now()
     );
-    this.db.data.sessions.push(session);
+    this.db.data.sessions.push(inMemorySession);
     try {
       this.db.saveData(this.db.data, true);
     } catch {}
@@ -49,19 +59,20 @@ export class UserRepository {
     if (this.isPgReady()) {
       await this.db.postgresRepo.saveSession(session).catch((e: any) => console.warn('[PG Error saveSession]', e?.message || e));
     }
-    return token;
+    return rawToken;
   }
 
   public async deleteSession(token: string): Promise<boolean> {
     if (!token) return false;
     const cleanToken = token.trim();
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
 
     if (this.isPgReady()) {
       await this.db.postgresRepo.deleteSession(cleanToken).catch((e: any) => console.warn('[PG Error]', e?.message || e));
     }
 
     const initialLength = (this.db.data.sessions || []).length;
-    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.token !== cleanToken);
+    this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.tokenHash !== tokenHash && s.token !== cleanToken);
     const removed = (this.db.data.sessions || []).length < initialLength;
     if (removed) {
       try {
@@ -78,7 +89,8 @@ export class UserRepository {
       return null;
     }
 
-    const session = this.db.data.sessions.find((s: any) => s.token === cleanToken);
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
+    const session = this.db.data.sessions.find((s: any) => (s.tokenHash && s.tokenHash === tokenHash) || s.token === cleanToken);
     if (!session) {
       return null;
     }
@@ -114,27 +126,31 @@ export class UserRepository {
   public async verifySessionAsync(token: string): Promise<{ user: User; session: UserSession } | null> {
     if (!token) return null;
     const cleanToken = token.trim();
+    const isPgConfigured = Boolean(this.db?.getPostgresUrl?.()?.trim());
+    const isProduction = process.env.NODE_ENV === 'production';
 
     if (this.isPgReady()) {
       const pgResult = await this.db.postgresRepo.verifySession(cleanToken).catch(() => null);
       if (pgResult) {
         return pgResult;
       }
+      return null;
     }
 
-    const localResult = this.verifySession(cleanToken);
-    if (localResult && this.isPgReady()) {
-      // Sync local valid session to PostgreSQL for seamless DB continuity
-      this.db.postgresRepo.saveSession(localResult.session).catch(() => {});
+    // Fail-Closed: When in production or PostgreSQL is configured and down, reject session verification
+    if (isProduction || isPgConfigured) {
+      return null;
     }
 
-    return localResult;
+    return this.verifySession(cleanToken);
   }
 
   public async authenticate(email: string, pass: string): Promise<{ user: User; token: string } | null> {
     const cleanEmail = email.trim().toLowerCase();
+    const isPgConfigured = Boolean(this.db?.getPostgresUrl?.()?.trim());
+    const isProduction = process.env.NODE_ENV === 'production';
 
-    // 1. PostgreSQL Production Mode: PostgreSQL is the primary source of truth
+    // 1. PostgreSQL Mode: PostgreSQL is the authoritative single source of truth
     if (this.isPgReady()) {
       const record = await this.db.postgresRepo.getUserWithPassword(cleanEmail);
       if (record) {
@@ -164,9 +180,17 @@ export class UserRepository {
         this.addAuditLog(user.id, email, 'Hatalı Giriş Denemesi (Şifre Hatalı)', 'high');
         return null;
       }
+      this.addAuditLog('unknown', email, 'Hatalı Giriş Denemesi (Kullanıcı Bulunamadı)', 'high');
+      return null;
     }
 
-    // Fallback for non-postgres local/test mode or in-memory sync
+    // 2. Fail-Closed Enforcement:
+    // In production or when PostgreSQL is configured, NEVER fall back to local in-memory authentication!
+    if (isProduction || isPgConfigured) {
+      throw new Error('PostgreSQL ana veritabanı bağlantısı aktif değil. Güvenlik nedeniyle yerel kimlik doğrulamaya izin verilmez.');
+    }
+
+    // 3. Explicit Standalone Non-Production Local Dev Mode (No PostgreSQL configured)
     const user = (this.db.data.users || []).find((u: any) => u.email.toLowerCase() === cleanEmail);
     if (!user) {
       this.addAuditLog('unknown', email, 'Hatalı Giriş Denemesi (Kullanıcı Bulunamadı)', 'high');
@@ -179,12 +203,9 @@ export class UserRepository {
         const newHashed = hashPassword(pass);
         this.db.data.passwords[user.id] = newHashed;
         this.db.saveData(this.db.data, true);
-        if (this.isPgReady()) {
-          await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch(() => {});
-        }
       }
       const token = await this.createSession(user);
-      this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Bcrypt Verified)', 'low');
+      this.addAuditLog(user.id, user.name, 'Giriş Başarılı (Local Dev Verified)', 'low');
       return { user, token };
     }
     this.addAuditLog(user ? user.id : 'unknown', email, 'Hatalı Giriş Denemesi', 'high');
@@ -561,14 +582,15 @@ export class UserRepository {
   }
 
   public async terminateUserOtherSessions(userId: string, currentToken: string) {
+    const currentHash = crypto.createHash('sha256').update(currentToken.trim()).digest('hex');
     if (this.isPgReady()) {
       await this.db.postgresRepo.query(
-        `DELETE FROM user_sessions WHERE user_id = $1 AND token <> $2;`,
-        [userId, currentToken]
+        `DELETE FROM user_sessions WHERE user_id = $1 AND token_hash <> $2 AND token <> $3;`,
+        [userId, currentHash, currentToken]
       ).catch((e: any) => console.warn('[PG Error terminateOtherSessions]', e?.message || e));
     }
     this.db.data.sessions = (this.db.data.sessions || []).filter(
-      (s: any) => s.userId !== userId || s.token === currentToken
+      (s: any) => s.userId !== userId || s.tokenHash === currentHash || s.token === currentToken
     );
     this.db.saveData(this.db.data, true);
   }
@@ -576,13 +598,13 @@ export class UserRepository {
   public async getUserSessions(userId: string): Promise<any[]> {
     if (this.isPgReady()) {
       const res = await this.db.postgresRepo.query(
-        `SELECT id, token, created_at, expires_at FROM user_sessions WHERE user_id = $1 AND expires_at > NOW() ORDER BY created_at DESC;`,
+        `SELECT id, token_prefix, created_at, expires_at FROM user_sessions WHERE user_id = $1 AND expires_at > NOW() ORDER BY created_at DESC;`,
         [userId]
       ).catch(() => null);
       if (res && res.rows && res.rows.length > 0) {
         return res.rows.map((r: any) => ({
-          id: r.id || (r.token ? r.token.slice(0, 16) : 'sess'),
-          token: r.token,
+          id: r.id || 'sess',
+          token: r.token_prefix ? `${r.token_prefix}...` : 'sess_***',
           createdAt: r.created_at,
           expiresAt: r.expires_at,
         }));
@@ -591,8 +613,8 @@ export class UserRepository {
     return (this.db.data.sessions || [])
       .filter((s: any) => s.userId === userId && new Date(s.expiresAt).getTime() > Date.now())
       .map((s: any) => ({
-        id: s.token.slice(0, 16),
-        token: s.token,
+        id: s.id || (s.tokenPrefix ? s.tokenPrefix : 'sess'),
+        token: s.tokenPrefix ? `${s.tokenPrefix}...` : 'sess_***',
         createdAt: s.createdAt,
         expiresAt: s.expiresAt,
       }));

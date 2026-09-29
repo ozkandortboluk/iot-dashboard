@@ -491,11 +491,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setConnectionStatus('reconnecting');
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const token = localStorage.getItem('dashboard_token') || '';
-      const userId = user?.id || '';
-      const role = user?.role || '';
-      const query = `?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(userId)}&role=${encodeURIComponent(role)}`;
-      const wsUrl = `${protocol}//${window.location.host}/ws${query}`;
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
 
       try {
         ws = new WebSocket(wsUrl);
@@ -514,39 +510,15 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (countdownInterval) clearInterval(countdownInterval);
           lastMessageReceivedAt = Date.now();
 
-          // Authenticate WebSocket connection immediately with user session
-          const currentToken = localStorage.getItem('dashboard_token') || '';
-          const authPayload = {
-            type: 'auth',
-            event: 'auth',
-            token: currentToken,
-            userId: user?.id || 'usr_admin',
-            role: user?.role || 'admin',
-            email: user?.email || '',
-            user: user
-              ? {
-                  id: user.id,
-                  name: user.name,
-                  email: user.email,
-                  role: user.role,
-                  companyName: user.companyName,
-                }
-              : null,
-          };
-
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(authPayload));
-
-            // Resubscribe to all active channels (physical, simulation, etc.)
-            const channelsToSub = Array.from(activeSubscriptionsRef.current);
-            if (channelsToSub.length > 0) {
-              ws.send(
-                JSON.stringify({
-                  event: 'subscribe',
-                  channels: channelsToSub,
-                })
-              );
-            }
+          // Resubscribe to all active channels (physical, simulation, etc.)
+          const channelsToSub = Array.from(activeSubscriptionsRef.current);
+          if (channelsToSub.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                event: 'subscribe',
+                channels: channelsToSub,
+              })
+            );
           }
 
           // Periodic ping for latency calculation & connection keepalive
@@ -580,11 +552,17 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               if (data.timestamp) {
                 setWsLatency(Math.max(1, Date.now() - Number(data.timestamp)));
               }
-            } else if (data.event === 'auth:success') {
+            } else if (
+              data.event === 'auth:success' ||
+              (data.event === 'system:connected' && data.payload?.authenticated)
+            ) {
+              isConnectedRef.current = true;
               setIsConnected(true);
               setConnectionStatus('connected');
+              setReconnectAttempt(0);
+              setReconnectCountdown(0);
 
-              // Automatically resubscribe to all active channels (physical & simulation) upon auth confirmation
+              // Automatically resubscribe to all active channels upon auth confirmation
               if (ws && ws.readyState === WebSocket.OPEN) {
                 const channelsToSub = Array.from(activeSubscriptionsRef.current);
                 if (channelsToSub.length > 0) {
@@ -596,6 +574,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   );
                 }
               }
+            } else if (data.event === 'auth:failed') {
+              console.warn('[WebSocket] Kimlik doğrulama bildirimi:', data.error || 'Oturum doğrulanamadı.');
             } else if (
               data.event === 'telemetry:physical:new' ||
               data.event === 'telemetry:physical:batch' ||

@@ -918,13 +918,16 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
     // 13. USER SESSIONS TABLE
     user_sessions: {
       name: 'user_sessions',
-      description: 'Web & API authentication session tokens with sliding TTL expiration',
-      primaryKey: ['token'],
+      description: 'Web & API authentication session tokens stored securely via SHA-256 token hashing',
+      primaryKey: ['id'],
       foreignKeys: [
         { name: 'fk_user_sessions_user_id', columns: ['user_id'], referencedTable: 'users', referencedColumns: ['id'], onDelete: 'CASCADE' }
       ],
       columns: [
-        { name: 'token', type: 'VARCHAR(128)', nullable: false, primaryKey: true },
+        { name: 'id', type: 'VARCHAR(64)', nullable: false, primaryKey: true },
+        { name: 'token_hash', type: 'VARCHAR(128)', nullable: true },
+        { name: 'token_prefix', type: 'VARCHAR(32)', nullable: true },
+        { name: 'token', type: 'VARCHAR(128)', nullable: true },
         { name: 'user_id', type: 'VARCHAR(64)', nullable: true },
         { name: 'user_role', type: 'VARCHAR(32)', nullable: true, defaultValue: "'operator'" },
         { name: 'user_email', type: 'VARCHAR(128)', nullable: true },
@@ -933,6 +936,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'expires_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: "(CURRENT_TIMESTAMP + INTERVAL '7 days')" }
       ],
       indexes: [
+        { name: 'idx_user_sessions_token_hash', columns: ['token_hash'] },
         { name: 'idx_user_sessions_user_id', columns: ['user_id'] },
         { name: 'idx_user_sessions_expires_at', columns: ['expires_at'] }
       ]

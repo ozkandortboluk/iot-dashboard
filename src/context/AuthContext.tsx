@@ -20,6 +20,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser] = useState<any>(null);
   const [user, setUser] = useState<User | null>(() => {
+    // Clean up any stale dashboard_token to prevent conflicting session states
+    try {
+      localStorage.removeItem('dashboard_token');
+    } catch {
+      // ignore
+    }
+
     const saved = localStorage.getItem('dashboard_user');
     if (saved) {
       try {
@@ -34,17 +41,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
-  const [token, setToken] = useState<string | null>(() => {
-    return localStorage.getItem('dashboard_token') || null;
-  });
-
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('dashboard_token');
-    if (savedToken) {
-      refreshUser();
-    }
+    // Initial verification with backend session cookie
+    refreshUser();
   }, []);
 
   useEffect(() => {
@@ -54,14 +55,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('dashboard_user');
     }
   }, [user]);
-
-  useEffect(() => {
-    if (token) {
-      localStorage.setItem('dashboard_token', token);
-    } else {
-      localStorage.removeItem('dashboard_token');
-    }
-  }, [token]);
 
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
@@ -86,11 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const userData = data.user;
 
-      // Save user to localStorage; token is stored in HttpOnly cookie
-      if (data.token) {
-        localStorage.setItem('dashboard_token', data.token);
-        setToken(data.token);
-      }
+      localStorage.removeItem('dashboard_token');
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
       localStorage.removeItem('nexus_active_tab');
       localStorage.removeItem('nexus_admin_selected_customer');
@@ -155,11 +144,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const userData = data.user;
-      localStorage.setItem('dashboard_token', data.token);
+      localStorage.removeItem('dashboard_token');
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
 
       setUser(userData);
-      setToken(data.token);
     } finally {
       setIsLoading(false);
     }
@@ -198,12 +186,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('nexus_active_tab');
     localStorage.removeItem('nexus_admin_selected_customer');
     setUser(null);
-    setToken(null);
   };
 
   useEffect(() => {
     const handleUnauthorized = () => {
-      console.warn('[AuthContext] Oturum süresi doldu veya geçersiz jeton tespit edildi. Oturum temizleniyor...');
+      console.warn('[AuthContext] Oturum süresi doldu veya oturum sonlandırıldı. Temizleniyor...');
       logout();
     };
 
@@ -215,13 +202,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = async (): Promise<User | null> => {
     try {
-      const savedToken = token || localStorage.getItem('dashboard_token');
-      const headers: Record<string, string> = {};
-      if (savedToken) {
-        headers['Authorization'] = `Bearer ${savedToken}`;
-      }
       const res = await fetch('/api/profile', {
-        headers,
         credentials: 'include',
       });
       if (res.status === 401) {
@@ -246,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
-        token,
+        token: null,
         login,
         register,
         setup,

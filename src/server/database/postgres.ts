@@ -538,12 +538,27 @@ export class PostgresRepository {
         const migRes = await runAllMigrations(p1);
         if (!migRes.success) {
           this.isSchemaEnsured = false;
-          systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi başarısız: ${migRes.error}`);
+          const isConnErr =
+            migRes.error?.includes('ECONNREFUSED') ||
+            migRes.error?.includes('ETIMEDOUT') ||
+            migRes.error?.includes('Connection terminated') ||
+            migRes.error?.includes('timeout');
+          if (isConnErr) {
+            systemLogger.warn('database', `[PostgreSQL Migrations] Veritabanı şu anda erişilebilir değil (${migRes.error}). Bağlantı kurulduğunda otomatik uygulanacak.`);
+          } else {
+            systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi başarısız: ${migRes.error}`);
+          }
           return;
         }
       } catch (migErr: any) {
         this.isSchemaEnsured = false;
-        systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi istisnası: ${migErr?.message || migErr}`);
+        const msg = migErr?.message || String(migErr);
+        const isConnErr = msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('Connection terminated');
+        if (isConnErr) {
+          systemLogger.warn('database', `[PostgreSQL Migrations] Veritabanı bağlantı uyarısı: ${msg}`);
+        } else {
+          systemLogger.error('database', `[PostgreSQL Migrations] Sürüm geçişi istisnası: ${msg}`);
+        }
         return;
       }
 
@@ -1133,7 +1148,7 @@ export class PostgresRepository {
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
         device_type = EXCLUDED.device_type,
-        api_key = EXCLUDED.api_key,
+        api_key = NULL,
         api_key_prefix = EXCLUDED.api_key_prefix,
         api_key_hash = EXCLUDED.api_key_hash,
         status = EXCLUDED.status,
@@ -1176,7 +1191,7 @@ export class PostgresRepository {
       effectiveUserId,
       dev.name,
       effectiveType,
-      dev.apiKey || null,
+      null, // Plaintext api_key is NEVER stored in database table
       dev.apiKeyPrefix || null,
       dev.apiKeyHash || null,
       dev.status || 'online',
@@ -1248,33 +1263,12 @@ export class PostgresRepository {
   }
 
   public mapDeviceRow(r: any): Device {
-    let apiKey = (r.api_key || '').trim();
-    if (
-      !apiKey ||
-      apiKey === '__USE_CACHED_TOKEN__' ||
-      apiKey.includes('USE_CACHED') ||
-      apiKey === 'Yok' ||
-      apiKey === 'undefined' ||
-      apiKey === 'null'
-    ) {
-      if (r.id === 'dev_test_01') {
-        apiKey = 'dev_key_test_0000000000000000';
-      } else {
-        apiKey = `nex_${crypto.randomBytes(4).toString('hex')}_${crypto.randomBytes(12).toString('hex')}`;
-      }
-      if (this.isReady()) {
-        const hPrefix = apiKey.substring(0, 12);
-        const hHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-        this.query(
-          'UPDATE devices SET api_key = $1, api_key_prefix = $2, api_key_hash = $3 WHERE id = $4;',
-          [apiKey, hPrefix, hHash, r.id]
-        ).catch(() => {});
-      }
-    }
     const apiKeyPrefix = (r.api_key_prefix && !r.api_key_prefix.includes('USE_CACHED')) 
       ? r.api_key_prefix 
-      : apiKey.substring(0, 12);
-    const apiKeyHash = r.api_key_hash || crypto.createHash('sha256').update(apiKey).digest('hex');
+      : (r.api_key ? r.api_key.substring(0, 12) : undefined);
+    const apiKeyHash = r.api_key_hash || (r.api_key ? crypto.createHash('sha256').update(r.api_key).digest('hex') : undefined);
+    // Plaintext API key is NEVER returned in mapped/queried device records to prevent exposure
+    const maskedApiKey = apiKeyPrefix ? `${apiKeyPrefix}...` : undefined;
 
     return {
       id: r.id,
@@ -1286,7 +1280,7 @@ export class PostgresRepository {
       roleKey: r.role_key || undefined,
       hardwareModel: r.hardware_model || undefined,
       firmwareVersion: r.firmware_version || undefined,
-      apiKey,
+      apiKey: maskedApiKey as any,
       apiKeyPrefix,
       apiKeyHash,
       status: r.status || 'online',
@@ -1339,8 +1333,13 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
-    if (!apiKey) return null;
-    const res = await this.query(`SELECT * FROM devices WHERE api_key = $1 OR api_key_hash = $1 LIMIT 1;`, [apiKey]);
+    const cleanKey = (apiKey || '').trim();
+    if (!cleanKey) return null;
+    const keyHash = crypto.createHash('sha256').update(cleanKey).digest('hex');
+    const res = await this.query(
+      `SELECT * FROM devices WHERE api_key_hash = $1 OR api_key = $2 OR api_key = $1 LIMIT 1;`,
+      [keyHash, cleanKey]
+    );
     if (res.rows && res.rows.length > 0) {
       return this.mapDeviceRow(res.rows[0]);
     }
@@ -2710,15 +2709,18 @@ export class PostgresRepository {
   // ==========================================
   public async getSession(token: string): Promise<UserSession | null> {
     if (!this.pool || !this.isConnected || !token) return null;
+    const cleanToken = token.trim();
+    if (!cleanToken) return null;
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
     try {
       const res = await this.query(
-        `SELECT * FROM user_sessions WHERE token = $1 AND expires_at > NOW() LIMIT 1;`,
-        [token.trim()]
+        `SELECT * FROM user_sessions WHERE (token_hash = $1 OR token = $2) AND expires_at > NOW() LIMIT 1;`,
+        [tokenHash, cleanToken]
       );
       if (res.rows && res.rows.length > 0) {
         const r = res.rows[0];
         return {
-          token: r.token,
+          token: cleanToken,
           userId: r.user_id,
           userRole: r.user_role as any,
           userEmail: r.user_email,
@@ -2752,8 +2754,11 @@ export class PostgresRepository {
   }
 
   public async saveSession(session: UserSession): Promise<void> {
-    if (!this.pool) return;
+    if (!this.pool || !session.token) return;
     const sessionId = (session as any).id || `sess_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
+    const cleanToken = session.token.trim();
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
+    const tokenPrefix = cleanToken.length > 8 ? cleanToken.substring(0, 8) + '...' : 'sess_...';
     const expiresAt = session.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const createdAt = session.createdAt || new Date().toISOString();
 
@@ -2784,9 +2789,11 @@ export class PostgresRepository {
 
     try {
       const sql = `
-        INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (token) DO UPDATE SET 
+        INSERT INTO user_sessions (id, token_hash, token_prefix, token, user_id, user_role, user_email, user_name, created_at, expires_at)
+        VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (id) DO UPDATE SET 
+          token_hash = EXCLUDED.token_hash,
+          token_prefix = EXCLUDED.token_prefix,
           expires_at = EXCLUDED.expires_at,
           user_role = EXCLUDED.user_role,
           user_email = EXCLUDED.user_email,
@@ -2794,7 +2801,8 @@ export class PostgresRepository {
       `;
       await this.query(sql, [
         sessionId,
-        session.token,
+        tokenHash,
+        tokenPrefix,
         targetUserId,
         session.userRole || 'customer',
         session.userEmail || '',
@@ -2803,30 +2811,12 @@ export class PostgresRepository {
         expiresAt,
       ]);
     } catch (insertErr: any) {
-      // Resilient fallback: ensure unique index and update or insert
       try {
-        await this.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);`);
-        const updateRes = await this.query(
-          `UPDATE user_sessions SET expires_at = $1, user_role = $2, user_email = $3, user_name = $4 WHERE token = $5 RETURNING id;`,
-          [expiresAt, session.userRole || 'customer', session.userEmail || '', session.userName || '', session.token]
-        );
-        if (!updateRes.rows || updateRes.rows.length === 0) {
-          await this.query(
-            `INSERT INTO user_sessions (id, token, user_id, user_role, user_email, user_name, created_at, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT DO NOTHING;`,
-            [
-              sessionId,
-              session.token,
-              targetUserId,
-              session.userRole || 'customer',
-              session.userEmail || '',
-              session.userName || '',
-              createdAt,
-              expiresAt,
-            ]
-          );
-        }
+        await this.query(`
+          UPDATE user_sessions 
+          SET expires_at = $1, user_role = $2, user_email = $3, user_name = $4, token_prefix = $5
+          WHERE token_hash = $6 OR token = $7;
+        `, [expiresAt, session.userRole || 'customer', session.userEmail || '', session.userName || '', tokenPrefix, tokenHash, cleanToken]);
       } catch (fallbackErr: any) {
         console.warn('[PostgreSQL saveSession fallback warning]:', fallbackErr?.message || fallbackErr);
       }
@@ -2834,8 +2824,10 @@ export class PostgresRepository {
   }
 
   public async deleteSession(token: string): Promise<void> {
-    if (!this.pool) return;
-    await this.query(`DELETE FROM user_sessions WHERE token = $1;`, [token]);
+    if (!this.pool || !token) return;
+    const cleanToken = token.trim();
+    const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
+    await this.query(`DELETE FROM user_sessions WHERE token_hash = $1 OR token = $2;`, [tokenHash, cleanToken]);
   }
 
   // ==========================================

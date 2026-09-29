@@ -8,6 +8,8 @@ import { commandService } from './command.service.js';
 import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 import { tenantSecurityService } from './tenantSecurity.service.js';
 import { systemLogger } from './systemLogger.service.js';
+import { isAllowedWsOrigin } from '../utils/corsOrigins.js';
+export { isAllowedWsOrigin };
 
 export interface AuthenticatedWebSocket extends WebSocket {
   isAuth?: boolean;
@@ -24,22 +26,6 @@ const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512 KB soft limit
 const TERMINATE_BUFFERED_AMOUNT = 2 * 1024 * 1024; // 2 MB hard limit
 const WS_RATE_LIMIT_WINDOW_MS = 10000; // 10 seconds window
 const WS_MAX_MESSAGES_PER_WINDOW = 120; // 120 messages per 10s allowed per socket
-
-const ALLOWED_WS_ORIGIN_PATTERNS = [
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https?:\/\/.*\.run\.app$/,
-  /^https?:\/\/.*\.googleusercontent\.com$/,
-  /^https?:\/\/.*\.aistudio\.google\.com$/,
-  /^https?:\/\/nexusnodeiot\.com\.tr$/,
-  /^https?:\/\/.*\.nexusnodeiot\.com\.tr$/,
-];
-
-export function isAllowedWsOrigin(origin?: string | null): boolean {
-  if (!origin) return true; // Non-browser clients (ESP32, NodeMCU, Python scripts) don't send Origin
-  if (process.env.NODE_ENV === 'development') return true;
-  return ALLOWED_WS_ORIGIN_PATTERNS.some(pattern => pattern.test(origin));
-}
 
 let wss: WebSocketServer | null = null;
 let heartbeatInterval: NodeJS.Timeout | null = null;
@@ -78,10 +64,6 @@ export function safeSend(client: AuthenticatedWebSocket, message: string): boole
 // Strict session token verification helper for WebSocket connections
 function resolveUser(token?: string | null): User | null {
   if (!token || typeof token !== 'string' || token.trim() === '') {
-    if (process.env.NODE_ENV === 'development') {
-      const users = db.getUsers();
-      return users.find((u) => u.role === 'admin') || users[0] || null;
-    }
     return null;
   }
 
@@ -89,13 +71,6 @@ function resolveUser(token?: string | null): User | null {
   const session = db.verifySession(clean);
   if (session?.user) {
     return session.user;
-  }
-
-  if (process.env.NODE_ENV === 'development') {
-    const users = db.getUsers();
-    const userById = users.find((u) => u.id === clean || u.email === clean);
-    if (userById) return userById;
-    return users.find((u) => u.role === 'admin') || users[0] || null;
   }
 
   return null;
@@ -647,11 +622,6 @@ export function initWebSocketServer(server: http.Server) {
           }
         }
 
-        if (!user && !device && process.env.NODE_ENV === 'development') {
-          const users = db.getUsers();
-          user = users.find((u) => u.role === 'admin') || users[0] || null;
-        }
-
         wss!.handleUpgrade(request, socket, head, (ws: AuthenticatedWebSocket) => {
           ws.isAuth = Boolean(user || device);
           ws.user = user || undefined;
@@ -710,11 +680,32 @@ export function initWebSocketServer(server: http.Server) {
       })
     );
 
-    // Push initial bootstrap data ONLY if user is authenticated
+    // If connection was already authenticated during HTTP Upgrade (via HttpOnly session cookie or token),
+    // immediately confirm auth:success so client transitions to connected without double-auth race conditions
     if (ws.isAuth && ws.user) {
+      safeSend(
+        ws,
+        JSON.stringify({
+          event: 'auth:success',
+          payload: { user: ws.user, authenticated: true, source: 'handshake' },
+        })
+      );
       sendBootstrapData(ws, ws.user);
     } else if (ws.isAuth && ws.device) {
       deviceWsProtocolService.registerDeviceSocket(ws.device.id, ws);
+      safeSend(
+        ws,
+        JSON.stringify({
+          event: 'auth:success',
+          payload: {
+            type: 'device',
+            deviceId: ws.device.id,
+            deviceName: ws.device.name,
+            status: 'online',
+            source: 'handshake',
+          },
+        })
+      );
       commandService.getAndDeliverPendingCommands(ws.device.id).then((pendingCmds) => {
         if (pendingCmds.length > 0) {
           safeSend(
@@ -769,67 +760,95 @@ export function initWebSocketServer(server: http.Server) {
         // Authentication message from client (supports User Session Token or Device API Key)
         if (parsed.event === 'auth' || parsed.type === 'auth') {
           const token = parsed.token || parsed.sessionToken || parsed.apiKey;
-          let verifiedUser = resolveUser(token);
 
-          if (!verifiedUser && process.env.NODE_ENV === 'development') {
-            const users = db.getUsers();
-            verifiedUser = (parsed.userId ? users.find((u: any) => u.id === parsed.userId) : null) || users.find((u: any) => u.role === 'admin') || users[0] || null;
+          // 1. Explicit token provided in message
+          if (token && typeof token === 'string' && token.trim()) {
+            const verifiedUser = resolveUser(token);
+            if (verifiedUser) {
+              ws.isAuth = true;
+              ws.user = verifiedUser;
+              ws.device = undefined;
+              console.log(`[WebSocket] Kullanıcı oturumu doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
+              safeSend(
+                ws,
+                JSON.stringify({
+                  event: 'auth:success',
+                  payload: { user: verifiedUser },
+                })
+              );
+
+              // Bootstrap fresh data for this authenticated user
+              sendBootstrapData(ws, verifiedUser);
+              return;
+            }
+
+            const verifiedDevice = resolveDevice(token);
+            if (verifiedDevice) {
+              ws.isAuth = true;
+              ws.device = verifiedDevice;
+              ws.user = undefined;
+              deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
+              console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
+              safeSend(
+                ws,
+                JSON.stringify({
+                  event: 'auth:success',
+                  payload: {
+                    type: 'device',
+                    deviceId: verifiedDevice.id,
+                    deviceName: verifiedDevice.name,
+                    status: 'online',
+                  },
+                })
+              );
+
+              // Claim and deliver any queued pending commands immediately to this connected device
+              commandService.getAndDeliverPendingCommands(verifiedDevice.id).then((pendingCmds) => {
+                if (pendingCmds.length > 0) {
+                  safeSend(
+                    ws,
+                    JSON.stringify({
+                      event: 'command:downlink',
+                      commands: pendingCmds,
+                      timestamp: new Date().toISOString(),
+                    })
+                  );
+                }
+              });
+              return;
+            }
           }
 
-          if (verifiedUser) {
-            ws.isAuth = true;
-            ws.user = verifiedUser;
-            ws.device = undefined;
-            console.log(`[WebSocket] Kullanıcı oturumu doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
+          // 2. If token in message is absent/empty BUT connection was ALREADY authenticated on HTTP Upgrade (HttpOnly cookie)
+          if (ws.isAuth && ws.user) {
             safeSend(
               ws,
               JSON.stringify({
                 event: 'auth:success',
-                payload: { user: verifiedUser },
+                payload: { user: ws.user, authenticated: true, source: 'session_cookie' },
               })
             );
-
-            // Bootstrap fresh data for this authenticated user
-            sendBootstrapData(ws, verifiedUser);
             return;
           }
 
-          const verifiedDevice = resolveDevice(token);
-          if (verifiedDevice) {
-            ws.isAuth = true;
-            ws.device = verifiedDevice;
-            ws.user = undefined;
-            deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
-            console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
+          if (ws.isAuth && ws.device) {
             safeSend(
               ws,
               JSON.stringify({
                 event: 'auth:success',
                 payload: {
                   type: 'device',
-                  deviceId: verifiedDevice.id,
-                  deviceName: verifiedDevice.name,
+                  deviceId: ws.device.id,
+                  deviceName: ws.device.name,
                   status: 'online',
+                  source: 'handshake',
                 },
               })
             );
-
-            // Claim and deliver any queued pending commands immediately to this connected device
-            commandService.getAndDeliverPendingCommands(verifiedDevice.id).then((pendingCmds) => {
-              if (pendingCmds.length > 0) {
-                safeSend(
-                  ws,
-                  JSON.stringify({
-                    event: 'command:downlink',
-                    commands: pendingCmds,
-                    timestamp: new Date().toISOString(),
-                  })
-                );
-              }
-            });
             return;
           }
 
+          // 3. Neither message token nor cookie authentication succeeded
           ws.isAuth = false;
           ws.user = undefined;
           ws.device = undefined;

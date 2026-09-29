@@ -59,9 +59,8 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     const fetchLatestCustomer = async () => {
       setIsLoading(true);
       try {
-        const token = localStorage.getItem('dashboard_token');
         const res = await fetch(`/api/admin/tenants/${customer.id}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
         });
         if (res.ok) {
           const data = await res.json();
@@ -98,13 +97,12 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     setSuccessMsg('');
     setIsSubmitting(true);
     try {
-      const token = localStorage.getItem('dashboard_token');
       const res = await fetch(`/api/admin/tenants/${customer.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify({
           name: formData.name.trim(),
           companyName: formData.companyName.trim(),
@@ -134,13 +132,12 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const handleStatusChange = async (status: 'active' | 'suspended') => {
     try {
-      const token = localStorage.getItem('dashboard_token');
       const res = await fetch(`/api/admin/tenants/${customer.id}/suspend`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify({ status }),
       });
       if (!res.ok) {
@@ -158,10 +155,9 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
     setIsResettingPassword(true);
     setErrorMsg('');
     try {
-      const token = localStorage.getItem('dashboard_token');
       const res = await fetch(`/api/admin/tenants/${customer.id}/reset-password`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -178,10 +174,9 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
 
   const handleTerminateSessions = async () => {
     try {
-      const token = localStorage.getItem('dashboard_token');
       const res = await fetch(`/api/admin/tenants/${customer.id}/terminate-sessions`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Oturumlar sonlandırılamadı.');
       setSuccessMsg('Tüm aktif oturumlar sonlandırıldı.');
