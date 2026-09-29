@@ -58,7 +58,13 @@ export function verifyHostFingerprint(
   const { sha256, md5 } = computeHostFingerprints(serverKey);
 
   if (!expectedFingerprint || !expectedFingerprint.trim()) {
-    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: false };
+    return {
+      valid: false,
+      actualSha256: sha256,
+      actualMd5: md5,
+      pinned: false,
+      error: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Güvenilir SHA256 parmak izi pini tanımlanmadan SSH bağlantısı ve kimlik bilgisi gönderimi reddedildi (fail-closed).`,
+    };
   }
 
   const cleanExpected = expectedFingerprint.trim();
@@ -277,6 +283,14 @@ class SSHTunnelService {
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
     return new Promise((resolve) => {
+      if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
+        return resolve({
+          success: false,
+          message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Güvenilir SHA256 parmak izi tanımlanmadan SSH kimlik bilgileri gönderilemez (fail-closed). Lütfen parmak izi sorgulama butonunu kullanarak parmak izini alın ve doğrulayın.',
+          hostFingerprint: null,
+        });
+      }
+
       const client = new Client();
       let isResolved = false;
       let discoveredFingerprint: string | null = null;
@@ -415,6 +429,17 @@ class SSHTunnelService {
       password: effectivePassword,
       privateKey: effectivePrivateKey,
     };
+
+    if (!fullConfig.expectedHostFingerprint || !fullConfig.expectedHostFingerprint.trim()) {
+      this.status = 'error';
+      this.lastError = 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik.';
+      this.addLog('GÜVENLİK HATASI: Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Tünel başlatılamadı.');
+      return {
+        success: false,
+        message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Güvenilir SHA256 parmak izi tanımlanmadan SSH tüneli başlatılamaz ve kimlik bilgileri gönderilemez (fail-closed). Lütfen parmak izi sorgulama butonunu kullanarak parmak izini alın ve doğrulayın.',
+        hostFingerprint: null,
+      };
+    }
 
     this.activeConfig = fullConfig;
     this.saveConfig(fullConfig);
