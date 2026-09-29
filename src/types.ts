@@ -1000,6 +1000,9 @@ export interface SystemEvent {
   ip?: string;
   userId?: string;
   statusCode?: number;
+  traceId?: string;
+  tenantId?: string;
+  deviceId?: string;
 }
 
 export interface SystemLoggerConfig {

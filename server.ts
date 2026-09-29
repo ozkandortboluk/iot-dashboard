@@ -2,6 +2,7 @@ import 'express-async-errors';
 import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 
@@ -13,6 +14,7 @@ import { startOtaWorker } from './src/server/services/otaWorker.js';
 import { startNoDataWorker } from './src/server/services/noDataWorker.js';
 import { startCommandExpiryWorker } from './src/server/services/command.service.js';
 import { getVaultStatus } from './src/server/utils/crypto.js';
+import { validateProductionSecurityPolicy } from './src/server/utils/startupSecurityPolicy.js';
 
 
 // Route Handlers
@@ -114,6 +116,46 @@ const app = express();
 // Configure Trust Proxy: Trust loopback/reverse proxy by default or TRUST_PROXY env setting
 const trustProxyConfig = process.env.TRUST_PROXY || 'loopback';
 app.set('trust proxy', trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : trustProxyConfig);
+
+// Security Headers Middleware (OLD-219: CSP, HSTS, X-Content-Type-Options, etc.)
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  // Content-Security-Policy (OLD-219: Secure CSP with allowance for Vite dev/scripts & WebSocket telemetry)
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
+    "style-src 'self' 'unsafe-inline' https:; " +
+    "img-src 'self' data: blob: https:; " +
+    "font-src 'self' data: https:; " +
+    "connect-src 'self' ws: wss: http: https:; " +
+    "frame-ancestors 'self' https: http://localhost:* http://127.0.0.1:*;"
+  );
+  next();
+});
+
+// Distributed Request & Error Tracing Middleware (OLD-171)
+app.use((req, res, next) => {
+  const incomingTrace = (req.headers['x-trace-id'] || req.headers['x-request-id']) as string;
+  const traceId = incomingTrace && typeof incomingTrace === 'string' && incomingTrace.trim().length > 0
+    ? incomingTrace.trim()
+    : `trc_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+
+  (req as any).traceId = traceId;
+  res.setHeader('X-Trace-Id', traceId);
+  res.setHeader('X-Request-Id', traceId);
+  next();
+});
+
 const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3000', 10);
 const server = http.createServer(app);
 
@@ -391,6 +433,18 @@ async function setupViteOrStatic() {
       }
     } else {
       console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);
+    }
+
+    const policyResult = validateProductionSecurityPolicy();
+    if (!policyResult.valid && process.env.ALLOW_INSECURE_PRODUCTION_SECRETS !== 'true') {
+      console.error(`====================================================`);
+      console.error(`[FATAL SECURITY POLICY ERROR] Startup Denied!`);
+      policyResult.errors.forEach(e => console.error(e));
+      console.error(`====================================================`);
+      systemLogger.critical('security', `Üretim güvenlik politikası ihlali nedeniyle sunucu başlatılamadı: ${policyResult.errors.join('; ')}`);
+      if (process.env.DISABLE_VAULT_EXIT !== 'true') {
+        process.exit(1);
+      }
     }
   }
 

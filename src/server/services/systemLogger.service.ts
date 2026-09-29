@@ -249,6 +249,9 @@ class SystemLoggerService {
     let ip: string | undefined;
     let userId: string | undefined;
     let statusCode: number | undefined;
+    let traceId: string | undefined;
+    let tenantId: string | undefined;
+    let deviceId: string | undefined;
     let detailsString: string | undefined;
 
     if (details) {
@@ -258,6 +261,9 @@ class SystemLoggerService {
         if (details.url || details.path) pathStr = String(details.url || details.path);
         if (details.ip) ip = String(details.ip);
         if (details.userId) userId = String(details.userId);
+        if (details.traceId) traceId = String(details.traceId);
+        if (details.tenantId) tenantId = String(details.tenantId);
+        if (details.deviceId) deviceId = String(details.deviceId);
         if (typeof details.statusCode === 'number') statusCode = details.statusCode;
 
         try {
@@ -289,6 +295,9 @@ class SystemLoggerService {
       ip,
       userId,
       statusCode,
+      traceId,
+      tenantId,
+      deviceId,
     };
 
     // Circular memory buffer

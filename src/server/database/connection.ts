@@ -5,6 +5,7 @@ const { Pool } = pg;
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
+import { isDefaultPassword } from '../utils/startupSecurityPolicy.js';
 
 import { DatabaseState } from '../../types.js';
 export { DatabaseState };
@@ -428,6 +429,22 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
   const url = resolvePostgresConnectionString(customUrl);
   if (!url) {
     return null;
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  if (isProduction && process.env.ALLOW_INSECURE_DB_PASSWORD !== 'true') {
+    const urlMatch = url.match(/^(?:postgres(?:ql)?):\/\/[^:]+:([^@]+)@/);
+    if (urlMatch && urlMatch[1]) {
+      const extractedPass = decodeURIComponent(urlMatch[1]);
+      if (isDefaultPassword(extractedPass)) {
+        systemLogger.critical(
+          'security',
+          `[CRITICAL POLICY] Üretim ortamında varsayılan / güvensiz veritabanı parolası ('${extractedPass}') ile bağlantı reddedildi (OLD-112).`
+        );
+        console.error(`[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolasıyla bağlantı reddedildi (OLD-112).`);
+        return null;
+      }
+    }
   }
 
   const currentPool = global._unifiedPostgresPool;

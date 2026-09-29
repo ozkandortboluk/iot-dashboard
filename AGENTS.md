@@ -43,3 +43,20 @@
 3. **Production Seeding Kesin Olarak Kapalıdır**:
    - Üretim ortamında (`NODE_ENV === 'production'`) veritabanına otomatik demo veya test verisi tohumlama (seeding) yapılması kesin olarak engellenir.
    - Canlı üretim veritabanına yalnızca operatör tarafından yetkilendirilmiş gerçek kullanıcı ve cihaz kayıtları girebilir.
+
+---
+
+## KURAL 4: Yol Haritası (Roadmap) 3 Kutu Durum Takip Sistemi ve Denetim Döngüsü
+
+1. **3 Kutu Durum Anlamları**:
+   - `☐ ☐ ☐` → Henüz yapılmadı (Açık iş kalemi).
+   - `☑ ☐ ☐` → AI Studio uyguladı, Codex incelemesi bekleniyor.
+   - `☑ ☐ ☑` → Codex inceledi ve düzeltme / revizyon istedi (3. kutu denetçinin düzeltme beklediğini, AI Studio'nun bu maddeye tekrar bakması gerektiğini belirtir).
+   - `☑ ☑ ☐` → Codex onayladı (Kabul kriterleri başarıyla karşılandı).
+
+2. **Düzeltme ve Tarihçe Koruma Kuralı**:
+   - Codex düzeltme istediğinde AI Studio'nun ilk kutucuktaki işareti asla silinmez; 3. kutu işaretlenerek `☑ ☐ ☑` durumuna getirilir. Bu sayede "AI Studio bunu uyguladı" geçmişi korunurken "Codex düzeltme istiyor" durumu net biçimde görünür.
+   - AI Studio istenen düzeltmeyi yaptıktan sonra durumu `☑ ☐ ☑` → `☑ ☐ ☐` yapar (3. kutu temizlenir, Codex'in yeniden denetlemesi beklenir).
+   - Codex yeniden kontrol edip onay verdiğinde durum `☑ ☑ ☐` olarak tescillenir.
+   - AI Studio, 3. kutusu işaretli (`☑ ☐ ☑`) olan tüm maddeleri öncelikli düzeltme bekleyen işler olarak ele alır ve bu maddeleri eksiksiz inceler/düzeltir.
+
