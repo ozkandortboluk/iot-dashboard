@@ -558,20 +558,24 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                 </div>
               </div>
 
-              {/* Section 4: Security & Host Key Fingerprint Pinning */}
+              {/* Section 4: Security & Host Key Fingerprint (Permissive Mode) */}
               <div className="space-y-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-cyan-400" /> Host Key Fingerprint (Sabitleme / Pinning)
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> Host Key Parmak İzi (Opsiyonel / Esnek Mod)
                   </h4>
-                  <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                    MITM Koruması
+                  <span className="text-[10px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
+                    Engelleme Devre Dışı
                   </span>
                 </div>
 
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Geliştirme ortamında VPS veritabanınıza engelsiz erişebilmeniz için katı Host Key sabitleme zorunluluğu kapatılmıştır. Parmak izi bilgisi bilgilendirme amacıyla görüntülenir.
+                </p>
+
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] text-slate-400">Beklenen Host Fingerprint (Opsiyonel / Pinned Key)</label>
+                    <label className="text-[11px] text-slate-400">Host Fingerprint (İsteğe Bağlı)</label>
                     <button
                       type="button"
                       onClick={handleProbeFingerprint}
@@ -585,7 +589,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                         </>
                       ) : (
                         <>
-                          <ShieldCheck className="w-3 h-3" /> Sunucudan Sorgula (Şifresiz)
+                          <ShieldCheck className="w-3 h-3" /> Sunucudan Sorgula
                         </>
                       )}
                     </button>
@@ -594,7 +598,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     type="text"
                     value={expectedHostFingerprint}
                     onChange={(e) => setExpectedHostFingerprint(e.target.value)}
-                    placeholder="SHA256:abc123xyz... veya MD5:..."
+                    placeholder="SHA256:abc123xyz... (İsteğe bağlı)"
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                   />
                 </div>
@@ -610,11 +614,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                         type="button"
                         onClick={() => {
                           setExpectedHostFingerprint(discoveredFingerprint);
-                          setActionMessage({ type: 'success', text: 'Host Fingerprint başarıyla sabitlendi (Pinned).' });
+                          setActionMessage({ type: 'success', text: 'Host Fingerprint alanı dolduruldu.' });
                         }}
                         className="px-2 py-1 text-[11px] font-medium rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 transition-colors shrink-0 cursor-pointer"
                       >
-                        Sabitle (Pin)
+                        Kopyala
                       </button>
                     )}
                   </div>

@@ -47,7 +47,8 @@ export function computeHostFingerprints(key: string | Buffer): { sha256: string;
 }
 
 /**
- * Checks server host key against optional pinned fingerprint
+ * Checks server host key and returns fingerprints for display.
+ * Fingerprint strict blocking is disabled to allow seamless VPS connection in development environments.
  */
 export function verifyHostFingerprint(
   serverKey: string | Buffer,
@@ -55,31 +56,13 @@ export function verifyHostFingerprint(
 ): { valid: boolean; actualSha256: string; actualMd5: string; pinned: boolean; error?: string } {
   const { sha256, md5 } = computeHostFingerprints(serverKey);
 
-  if (!expectedFingerprint || !expectedFingerprint.trim()) {
-    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: false };
-  }
-
-  const cleanExpected = expectedFingerprint.trim().toLowerCase();
-  const cleanSha256 = sha256.toLowerCase();
-  const cleanMd5 = md5.toLowerCase();
-  const rawSha256 = sha256.replace(/^sha256:/i, '').toLowerCase();
-
-  const isMatch =
-    cleanExpected === cleanSha256 ||
-    cleanExpected === cleanMd5 ||
-    cleanExpected === rawSha256 ||
-    cleanExpected.replace(/[:\s]/g, '') === cleanMd5.replace(/[:\s]/g, '');
-
-  if (isMatch) {
-    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: true };
-  }
-
+  // Permissive mode: Fingerprints are computed and logged/displayed for reference,
+  // but fingerprint mismatch never blocks or aborts SSH tunnel creation.
   return {
-    valid: false,
+    valid: true,
     actualSha256: sha256,
     actualMd5: md5,
-    pinned: true,
-    error: `SSH Host Key Fingerprint uyuşmazlığı tespit edildi! Beklenen: "${expectedFingerprint}", Sunucudan gelen: "${sha256}". Olası Ortadaki Adam (MITM) veya sahte sunucu bağlantı girişimi engellendi.`,
+    pinned: Boolean(expectedFingerprint && expectedFingerprint.trim()),
   };
 }
 
