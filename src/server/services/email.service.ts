@@ -327,6 +327,9 @@ export class EmailService {
           payload.text = text;
         }
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -334,7 +337,8 @@ export class EmailService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutId));
 
         const data: any = await response.json().catch(() => ({}));
 

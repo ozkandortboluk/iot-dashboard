@@ -38,7 +38,12 @@ function getSampleDeviceApiKey() {
 async function runSmokeTest() {
   console.log('🏗️ Starting production server bundle (dist/server.cjs) for CI smoke test...');
   
-  const serverEnv = { ...process.env, PORT: '3001', NODE_ENV: 'production' };
+  const serverEnv = {
+    ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || '0000000000000000000000000000000000000000000000000000000000000000',
+    ...process.env,
+    PORT: '3001',
+    NODE_ENV: 'production'
+  };
 
   const server = spawn('node', ['dist/server.cjs'], {
     env: serverEnv,

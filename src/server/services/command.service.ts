@@ -14,6 +14,29 @@ function normalizeAckStatus(status?: string): 'acknowledged' | 'applied' | 'fail
 
 export class CommandService {
   /**
+   * Creates a new device command atomically in DB and broadcasts real-time events.
+   */
+  public async createCommand(
+    options: { deviceId: string; commandPayload?: string; command?: string; payload?: any; source?: string; tenantId?: string },
+    actor?: { id: string; name: string; role: string }
+  ): Promise<DeviceCommand> {
+    const cmd = await db.addCommand({
+      deviceId: options.deviceId,
+      command: options.command || 'CUSTOM',
+      commandType: options.command || 'CUSTOM',
+      payload: options.commandPayload !== undefined ? options.commandPayload : options.payload,
+      value: options.commandPayload !== undefined ? options.commandPayload : options.payload,
+      source: options.source || (actor?.name ? `user:${actor.name}` : 'automation'),
+      userId: actor?.id,
+      tenantId: options.tenantId,
+    });
+    broadcast('command:created', cmd);
+    const allDeviceCommands = await db.getCommands(options.deviceId);
+    broadcast('commands:updated', allDeviceCommands);
+    return cmd;
+  }
+
+  /**
    * Retrieves pending commands for a device and atomically marks them as 'claimed'.
    * Ensures the PostgreSQL and RAM state transitions are completed and persisted
    * BEFORE returning the commands in the downlink response to avoid duplicate execution.

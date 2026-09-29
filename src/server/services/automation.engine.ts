@@ -1,5 +1,6 @@
 import { db } from '../db.js';
 import { broadcast } from './websocket.js';
+import { commandService } from './command.service.js';
 import type { TelemetryReading, Automation } from '../../types.js';
 
 export class AutomationEngine {
@@ -52,44 +53,35 @@ export class AutomationEngine {
     }
   }
 
-  private executeAction(auto: Automation) {
+  private async executeAction(auto: Automation) {
     console.log(`[Automation] Triggering automation: ${auto.name}`);
     const device = db.getDevices().find(d => d.id === auto.action.deviceId);
     if (!device) return;
 
-    // Create a command
-    const newCmd = {
-      id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      deviceId: device.id,
-      tenantId: device.tenantId,
-      issuerId: 'system_automation',
-      issuerName: 'Otomasyon Motoru',
-      commandPayload: auto.action.commandPayload,
-      status: 'PENDING',
-      createdAt: new Date().toISOString()
-    };
+    try {
+      await commandService.createCommand(
+        {
+          deviceId: device.id,
+          commandPayload: typeof auto.action.commandPayload === 'string'
+            ? auto.action.commandPayload
+            : JSON.stringify(auto.action.commandPayload),
+        },
+        {
+          id: 'system_automation',
+          name: 'Otomasyon Motoru',
+          role: 'admin',
+        }
+      );
 
-    if (!db.data.commands) db.data.commands = [];
-    db.data.commands.push(newCmd as any);
-    db.saveData(db.data);
-    
-    // Broadcast creation
-    broadcast('command:created', newCmd);
-    
-    // Trigger the device to handle it (send over WS if online)
-    // The easiest way is to let the existing MQTT/WS system handle PENDING commands 
-    // or emit a control event
-    broadcast('device:control', {
-      deviceId: device.id,
-      command: auto.action.commandPayload
-    });
-
-    db.addAuditLog(
-      auto.tenantId,
-      'System Automation',
-      `Otomasyon tetiklendi: "${auto.name}". Cihaz: ${device.name} hedefine komut gönderildi.`,
-      'high'
-    );
+      db.addAuditLog(
+        auto.tenantId || device.tenantId || 'system',
+        'System Automation',
+        `Otomasyon tetiklendi: "${auto.name}". Cihaz: ${device.name} hedefine komut gönderildi.`,
+        'high'
+      );
+    } catch (err: any) {
+      console.error(`[Automation] Komut gönderim hatası (${auto.name}):`, err?.message || err);
+    }
   }
 }
 

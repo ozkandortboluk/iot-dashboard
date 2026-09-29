@@ -105,7 +105,7 @@ process.on('unhandledRejection', (reason: any) => {
       name: reason?.name,
     });
   } catch {}
-  if (process.env.STRICT_UNHANDLED_REJECTION === 'true') {
+  if (process.env.STRICT_UNHANDLED_REJECTION === 'true' || process.env.NODE_ENV === 'production') {
     gracefulCrashExit('unhandledRejection', reason);
   }
 });

@@ -155,7 +155,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 2. Uygulamanın çalışması — kurulum, bağlantı ve dağıtım
 
-- ☐ ☐ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — Doğrulanmış kod bulgusu.
   - **Kanıt:** [CI run 36569168748](https://github.com/ozkandortboluk/iot-dashboard/actions/runs/36569168748), Node 22 job 109408534559: smoke başlangıcında FATAL SECURITY ERROR, ENCRYPTION_KEY eksik. `.github/workflows/ci.yml` ve `scripts/smoke-test.mjs` anahtar sağlamıyor.
   - **Etki:** Production smoke kırmızı; sonraki güvenlik E2E çalışmıyor. Bu kanıt VPS’in şu anda kapalı olduğunu göstermez.
   - **Yapılacak:** CI job’a her çalışmada üretilen yalnız test amaçlı güvenli anahtar sağla; gerçek production anahtarını kullanma/loglama. Anahtar yokken production fail-closed kontrolünü koru; process erken çıkınca smoke hemen nedenini raporlasın.
@@ -179,7 +179,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Demo/local profilini açık seçim yap. Uzak DB seçilmişse development dahil kesintide 503 ve yazmayı durdur. transportConnected/dbAuthenticated/schemaReady/setupComplete/wsAuthenticated alanlarını ayrı göster; loading/error için local varsayma.
   - **Kabul:** SSH 127.0.0.1:15432 → VPS loopback 5432 ve VPS app→timescaledb:5432 akışları; yanlış DB parolası, tünel kopması, sayfa yenileme ve recovery testleri; yerel veri oluşmamalı.
 
-- ☐ ☐ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `server.ts`: `unhandledRejection` yalnız STRICT_UNHANDLED_REJECTION=true iken çıkıyor; uncaughtException ağ metni eşleşmesiyle devam edebiliyor. Eski roadmap tüm production crash yollarını tamamlandı sayıyordu.
   - **Etki:** Bilinmeyen süreç durumunda uygulama çalışmaya devam edebilir; hata mesajına göre genelleme gerçek programlama hatasını gizleyebilir.
   - **Yapılacak:** Beklenen bağlantı hatalarını kaynağında yakala; yakalanmamış hatalarda kontrollü çıkış ve restart politikası uygula; shutdown’da HTTP/WS/worker/pool kapanışını doğrula.
@@ -190,8 +190,8 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 ### Önceki yol haritasından korunan kayıtlar
 
 - ☑ ☐ **OLD-025** `/health/ready` DB hazır değilse 503. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.4 — DB hazır olmadan uygulama hazır olmamalı.
-- ☐ ☐ **OLD-102** `uncaughtException` sonrası kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
-- ☐ ☐ **OLD-103** `unhandledRejection` için kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
+- ☑ ☐ **OLD-102** `uncaughtException` sonrası kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
+- ☑ ☐ **OLD-103** `unhandledRejection` için kontrollü crash exit. **Yeniden açıldı 2026-09-29:** koşullu crash davranışı; RUN-05. — Eski kaynak: P0.18 — Process crash handling.
 - ☑ ☐ **OLD-104** Graceful shutdown loglama mekanizması. *(Önceki tamamlanmış kayıt korundu; bu tur için ayrıca canlı ortam başarısı iddiası değildir.)* — Eski kaynak: P0.18 — Process crash handling.
 - ☐ ☐ **OLD-105** Docker restart policy ile E2E doğrulama. — Eski kaynak: P0.18 — Process crash handling.
 - ☐ ☐ **OLD-110** Image digest pinle. — Eski kaynak: P0.20 — Production Compose ile CI Timescale parity.
@@ -364,7 +364,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 6. Cihaz, WebSocket, komut ve otomasyon
 
-- ☐ ☐ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — Doğrulanmış kod bulgusu.
+- ☑ ☐ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — Doğrulanmış kod bulgusu.
   - **Kanıt:** `src/server/services/automation.engine.ts` → executeAction: RAM commands.push + saveData; production’da saveData no-op. `PENDING`/commandPayload şeması ortak command servisinden ayrı.
   - **Etki:** Otomasyon komutu yayınlanıp DB’ye yazılmadan kaybolabilir; yeniden başlatma/claim/ACK durumu manuel komutlarla ayrışır.
   - **Yapılacak:** Manuel ve otomasyon komutunu aynı await edilen DB oluşturma/claim/ACK/idempotency hattından geçir; eylem anında güncel tenant sahipliğini tekrar kontrol et.

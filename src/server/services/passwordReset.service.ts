@@ -112,7 +112,7 @@ export class PasswordResetService {
       } catch (dbErr: any) {
         console.error('[PasswordResetService] DB error while saving token:', dbErr?.message || dbErr);
         if (process.env.NODE_ENV === 'production') {
-          throw new Error('Veritabanı hatası: Şifre sıfırlama kaydı oluşturulamadı.');
+          throw new Error('Veritabanı hatası: Şifre sıfırlama kaydı oluşturulamadı.', { cause: dbErr });
         }
       }
     } else if (process.env.NODE_ENV === 'production') {
@@ -160,7 +160,7 @@ export class PasswordResetService {
       } catch (err: any) {
         console.error('[PasswordResetService] DB find error:', err?.message || err);
         if (process.env.NODE_ENV === 'production') {
-          throw new Error('Veritabanı hatası: Şifre sıfırlama tokenı doğrulanamadı.');
+          throw new Error('Veritabanı hatası: Şifre sıfırlama tokenı doğrulanamadı.', { cause: err });
         }
       }
     } else if (process.env.NODE_ENV === 'production') {
