@@ -62,14 +62,19 @@ export function safeSend(client: AuthenticatedWebSocket, message: string): boole
 }
 
 // Strict session token verification helper for WebSocket connections
-function resolveUser(token?: string | null): User | null {
+async function resolveUser(token?: string | null): Promise<User | null> {
   if (!token || typeof token !== 'string' || token.trim() === '') {
     return null;
   }
 
   const clean = token.trim();
-  const session = db.verifySession(clean);
-  if (session?.user) {
+  // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
+  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+    return null;
+  }
+
+  const session = await db.verifySessionAsync(clean);
+  if (session?.user && (session.user.status === 'active' || !session.user.status) && session.user.status !== 'suspended' && !session.user.deletedAt) {
     return session.user;
   }
 
@@ -77,14 +82,25 @@ function resolveUser(token?: string | null): User | null {
 }
 
 // Physical device API key / Token verification helper for WebSocket connections
-function resolveDevice(token?: string | null): Device | null {
+async function resolveDevice(token?: string | null): Promise<Device | null> {
   if (!token || typeof token !== 'string' || token.trim() === '') {
     return null;
   }
 
   const cleanToken = token.trim();
-  const dev = db.getDeviceByApiKey(cleanToken);
-  const foundDev = dev || db.getDevices().find((d) => (d.id === cleanToken || d.apiKey === cleanToken) && d.apiKey);
+  // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
+  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+    return null;
+  }
+
+  // Authoritative check against PostgreSQL if ready, fallback to in-memory in dev
+  let foundDev: Device | null = null;
+  if (db.postgresRepo?.isReady()) {
+    foundDev = await db.postgresRepo.getDeviceByApiKey(cleanToken).catch(() => null);
+  }
+  if (!foundDev) {
+    foundDev = db.getDeviceByApiKey(cleanToken) || null;
+  }
   if (!foundDev) return null;
 
   // 1. API Key Revocation Check
@@ -575,7 +591,7 @@ export function initWebSocketServer(server: http.Server) {
   }, 10000);
 
   // Setup server-level HTTP upgrade routing
-  server.on('upgrade', (request, socket, head) => {
+  server.on('upgrade', async (request, socket, head) => {
     socket.on('error', (err: any) => {
       systemLogger.warn('websocket', 'İstemci socket upgrade hatası', err?.message || err);
     });
@@ -608,18 +624,34 @@ export function initWebSocketServer(server: http.Server) {
           connectionToken = String(request.headers['x-api-key']).trim();
         } else if (!connectionToken && request.headers?.['sec-websocket-protocol']) {
           connectionToken = String(request.headers['sec-websocket-protocol']).split(',')[0].trim();
-        } else if (!connectionToken) {
-          connectionToken = urlObj.searchParams.get('token') || urlObj.searchParams.get('apiKey') || urlObj.searchParams.get('api_key');
         }
+        // Security: URL query string tokens (?token=..., ?apiKey=...) are explicitly disabled
+        // to prevent sensitive credentials from leaking into Nginx access logs and URL history.
 
         // 2. Validate Token
         let user = null;
         let device = null;
         if (connectionToken) {
-          user = resolveUser(connectionToken);
+          user = await resolveUser(connectionToken);
           if (!user) {
-            device = resolveDevice(connectionToken);
+            device = await resolveDevice(connectionToken);
           }
+        }
+
+        // Strict 401 Unauthorized for Unauthenticated or Invalid WebSocket Upgrade Requests
+        if (!user && !device) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        // Strict Fail-Closed Check in Production:
+        // When in production (or strict maintenance mode), PostgreSQL must be READY before accepting authenticated WebSocket connections.
+        if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+          console.warn('[WebSocket Security] WebSocket upgrade reddedildi (503 Service Unavailable): PostgreSQL üretim modunda hazır değil.');
+          socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\n\r\n');
+          socket.destroy();
+          return;
         }
 
         wss!.handleUpgrade(request, socket, head, (ws: AuthenticatedWebSocket) => {
@@ -763,7 +795,7 @@ export function initWebSocketServer(server: http.Server) {
 
           // 1. Explicit token provided in message
           if (token && typeof token === 'string' && token.trim()) {
-            const verifiedUser = resolveUser(token);
+            const verifiedUser = await resolveUser(token);
             if (verifiedUser) {
               ws.isAuth = true;
               ws.user = verifiedUser;
@@ -782,7 +814,7 @@ export function initWebSocketServer(server: http.Server) {
               return;
             }
 
-            const verifiedDevice = resolveDevice(token);
+            const verifiedDevice = await resolveDevice(token);
             if (verifiedDevice) {
               ws.isAuth = true;
               ws.device = verifiedDevice;
@@ -875,7 +907,7 @@ export function initWebSocketServer(server: http.Server) {
           if (ws.device) {
             verifiedDevId = ws.device.id;
           } else if (parsed.token || parsed.apiKey) {
-            const dev = resolveDevice(parsed.token || parsed.apiKey);
+            const dev = await resolveDevice(parsed.token || parsed.apiKey);
             if (dev) verifiedDevId = dev.id;
           } else if (ws.user) {
             // If sender is an authenticated web user (e.g. admin or device owner acknowledging on behalf of simulator)
@@ -931,7 +963,7 @@ export function initWebSocketServer(server: http.Server) {
           parsed.event === 'device:commands:get' ||
           parsed.type === 'command:poll'
         ) {
-          const targetDevice = ws.device || (parsed.token ? resolveDevice(parsed.token) : null);
+          const targetDevice = ws.device || (parsed.token ? await resolveDevice(parsed.token) : null);
           if (targetDevice) {
             const pendingCmds = await commandService.getAndDeliverPendingCommands(targetDevice.id);
             safeSend(

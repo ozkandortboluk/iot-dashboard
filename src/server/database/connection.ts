@@ -312,12 +312,42 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
 
 /**
  * Centralized SSL option resolver based on connection string, provider heuristics, and environment.
+ * Supports verify-full and verify-ca with custom root certificates.
  */
-export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean } | undefined {
+export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean; ca?: string } | undefined {
   if (!url) return undefined;
   if (url.includes('sslmode=disable') || url.includes('sslmode=off') || url.includes('ssl=false') || url.includes('ssl=0')) {
     return undefined;
   }
+
+  // Check for strict verification modes (verify-full, verify-ca)
+  const isVerifyFull = url.includes('sslmode=verify-full') || process.env.PGSSLMODE === 'verify-full';
+  const isVerifyCa = url.includes('sslmode=verify-ca') || process.env.PGSSLMODE === 'verify-ca';
+
+  let caCert: string | undefined;
+  const caPath = process.env.PGSSLROOTCERT || process.env.DATABASE_SSL_CA_PATH || '/run/secrets/pg_ssl_root_cert';
+  if (fs.existsSync(caPath)) {
+    try {
+      caCert = fs.readFileSync(caPath, 'utf8');
+    } catch {}
+  } else if (process.env.DATABASE_SSL_CA) {
+    caCert = process.env.DATABASE_SSL_CA;
+  }
+
+  // When a trusted CA is explicitly provided or strict verification is requested, reject unauthorized certificates
+  const rejectUnauthorizedExplicit =
+    process.env.PG_REJECT_UNAUTHORIZED === 'true' ||
+    isVerifyFull ||
+    isVerifyCa ||
+    Boolean(caCert);
+
+  if (rejectUnauthorizedExplicit) {
+    return {
+      rejectUnauthorized: true,
+      ...(caCert ? { ca: caCert } : {}),
+    };
+  }
+
   const hasSslParam =
     url.includes('sslmode=') ||
     url.includes('ssl=true') ||
@@ -350,8 +380,15 @@ export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean
     process.env.NODE_ENV === 'production' &&
     !isInternalDockerOrLoopback;
 
+  const allowInsecureTls = process.env.PG_ALLOW_INSECURE_TLS === 'true';
+
   if (hasSslParam || isCloudHost || isProductionRemote) {
-    return { rejectUnauthorized: false };
+    // Cloud hosts with trusted public CAs are verified by default unless allowInsecureTls is set
+    const rejectUnauth = !allowInsecureTls && isCloudHost;
+    return {
+      rejectUnauthorized: rejectUnauth,
+      ...(caCert ? { ca: caCert } : {}),
+    };
   }
   return undefined;
 }

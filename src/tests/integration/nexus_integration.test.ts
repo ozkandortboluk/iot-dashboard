@@ -6,6 +6,7 @@ import { db } from '../../server/db';
 import { authRouter } from '../../server/routes/auth';
 import { telemetryRouter } from '../../server/routes/telemetry';
 import { devicesRouter } from '../../server/routes/devices';
+import { hashPassword } from '../../server/utils/crypto';
 
 // Mount a test app
 const app = express();
@@ -18,20 +19,32 @@ app.use('/api/devices', devicesRouter);
 describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
   let sessionCookie: string = '';
 
+  const testEmail = `test@nexusnodeiot.com.tr`;
+  const testPassword = 'test1234';
+
   beforeAll(async () => {
     await db.waitForInitialization();
-    const users = db.getUsers();
-    if (!users.some((u: any) => u.role === 'admin')) {
-      // Using persistent test admin
+    let user = db.getUsers().find((u: any) => u.email.toLowerCase() === testEmail.toLowerCase());
+    if (!user) {
+      user = await db.registerUser(
+        'Kanonik Test Yöneticisi',
+        testEmail,
+        testPassword,
+        'admin',
+        'NexusNode Test Laboratuvarı'
+      );
+    }
+    if (user) {
+      if (!db.data.passwords) db.data.passwords = {};
+      db.data.passwords[user.id] = hashPassword(testPassword);
+      user.status = 'active';
+      user.deletedAt = undefined;
     }
   });
 
   afterAll(async () => {
     // Cleanup if needed
   });
-
-  const testEmail = `test@nexusnodeiot.com.tr`;
-  const testPassword = 'test1234';
 
   describe('1. Auth & Tenant Isolation (HttpOnly Cookie & RBAC)', () => {
     it('should login and return HttpOnly secure cookie', async () => {

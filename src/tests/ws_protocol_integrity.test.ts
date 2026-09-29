@@ -8,12 +8,26 @@ describe('P1 - 2.3: WebSocket Protocol Integrity & Hardening', () => {
   const testDevId = 'dev_test_01';
   const testApiKey = 'dev_key_test_0000000000000000';
 
-  beforeEach(() => {
-    const dev = db.getDeviceById('dev_test_01');
+  beforeEach(async () => {
+    let dev = db.getDeviceById(testDevId);
+    if (!dev) {
+      await db.createDevice({
+        id: testDevId,
+        name: 'Kanonik Test Cihazı',
+        tenantId: 'usr_test_admin',
+        userId: 'usr_test_admin',
+        deviceType: 'custom',
+        apiKey: testApiKey,
+        status: 'online',
+        dataFlowActive: true,
+      } as any);
+      dev = db.getDeviceById(testDevId);
+    }
     if (dev) {
       dev.status = 'online';
       dev.tenantId = 'usr_test_admin';
       dev.apiKey = testApiKey;
+      dev.apiKeyRevoked = false;
     }
   });
 

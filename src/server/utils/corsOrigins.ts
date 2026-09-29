@@ -15,12 +15,11 @@ function getCleanOrigin(urlStr?: string): string | null {
   }
 }
 
-// Static explicit allowed origins
+// Static explicit allowed origins (HTTPS only for production domains)
 const STATIC_EXPLICIT_ORIGINS = new Set([
   'https://nexusnodeiot.com.tr',
   'https://www.nexusnodeiot.com.tr',
-  'http://nexusnodeiot.com.tr',
-  'http://www.nexusnodeiot.com.tr',
+  'https://app.nexusnodeiot.com.tr',
 ]);
 
 // Local development origins
@@ -73,6 +72,12 @@ export function isOriginAllowed(originOrReferer?: string | null): boolean {
     if (list.includes(clean)) {
       return true;
     }
+  }
+
+  // 4. In test or development environment, allow AI Studio / Cloud Run preview domains
+  const isTestOrDev = process.env.NODE_ENV !== 'production' || Boolean(process.env.VITEST);
+  if (isTestOrDev && /^https:\/\/[a-z0-9-]+\.run\.app$/i.test(clean)) {
+    return true;
   }
 
   return false;

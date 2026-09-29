@@ -723,7 +723,8 @@ class LocalDatabase {
   }
 
   public isPostgresProductionMode(): boolean {
-    return !!this.postgresRepo?.isReady();
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    return isProduction || !!this.postgresRepo?.isReady();
   }
 
   private ensureDirectory() {
@@ -1269,12 +1270,15 @@ class LocalDatabase {
   }
 
   public saveData(dataToSave: DatabaseSchema, forceWrite = false) {
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProduction) {
+      // Security Invariant: In production, NEVER persist auth/users/devices/credentials to local disk db.json!
+      return;
+    }
     if (this.isPostgresProductionMode()) {
       return;
     }
     if (this.postgresRepo.isReady() && !forceWrite) {
-      // Normal çalışmada gerçek veri kaynağı PostgreSQL'dir.
-      // Disk I/O (db.json) sürekli güncellenmez, sadece geçici cache/emergency buffer olarak tutulur.
       return;
     }
     // Atomic Write Queue to handle concurrent incoming writes without data corruption
@@ -1343,7 +1347,7 @@ class LocalDatabase {
   public async checkDeviceStatuses(): Promise<boolean> { return await this.deviceRepository.checkDeviceStatuses(); }
   public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> { return await this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
   public getDevices(tenantId?: string, customerId?: string): Device[] { return this.deviceRepository.getDevices(tenantId, customerId); }
-  public getDeviceById(deviceId: string): Device | undefined { return this.getDevices().find((d) => d.id === deviceId); }
+  public getDeviceById(deviceId: string): Device | undefined { return this.data.devices?.find((d) => d.id === deviceId) || this.getDevices().find((d) => d.id === deviceId); }
   public async assignDeviceOwner(deviceId: string, targetTenantId: string): Promise<Device | undefined> { return await this.deviceRepository.assignDeviceOwner(deviceId, targetTenantId); }
   public getDeviceByApiKey(apiKey: string): Device | undefined { return this.deviceRepository.getDeviceByApiKey(apiKey); }
   public async createDevice(deviceData: Omit<Device, 'id' | 'apiKey' | 'lastSeen'> & { id?: string; apiKey?: string; isSimulated?: boolean; saveSimulatedDataToDb?: boolean }): Promise<Device> { return await this.deviceRepository.createDevice(deviceData); }

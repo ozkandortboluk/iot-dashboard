@@ -116,7 +116,9 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
 
   afterAll(async () => {
     // Clean up test device and close live server
-    db.data.devices = db.getDevices().filter((d) => d.id !== proxyDeviceId);
+    if (proxyDeviceId !== 'dev_test_01') {
+      db.data.devices = db.getDevices().filter((d) => d.id !== proxyDeviceId);
+    }
     if (server) {
       try {
         if ((server as any).closeAllConnections) {

@@ -10,40 +10,68 @@ import { db } from '../db.js';
 export const sshTunnelRouter = Router();
 
 /**
- * Strict authorization guard for mutating SSH Tunnel operations (/test, /connect, /disconnect):
- * - If Setup Token is valid (via header, cookie, query, or body), allow operation (during setup, wizard, or recovery).
- * - If Setup is completed, require authenticated Admin session.
- * - Anonymous / unauthorized requests fail closed (401).
+ * Authorization guard for SSH Tunnel operations (/status, /test, /connect, /disconnect, /probe-fingerprint):
+ * - If Setup Token is valid: Always allow access.
+ * - If PostgreSQL is not connected / not ready: Always allow access so operator can bridge to remote DB.
+ * - During initial setup (!isSetupCompleted): Allow access so AI Studio preview and wizard can configure tunnel.
+ * - When Setup is completed AND DB is connected: Require authenticated Admin session.
  */
 async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunction) {
-  // 1. Valid Setup Token allows access (during initial setup, wizard, or disaster recovery)
+  // 1. Valid Setup Token always grants access (setup, wizard, or disaster recovery)
   if (isRequestSetupAuthenticated(req, true)) {
     return next();
   }
 
-  // 2. If setup is completed, require authenticated Admin user
-  const isCompleted = setupService.isSetupCompleted();
-  if (isCompleted) {
-    return authenticateUser(req, res, () => {
-      return requireAdmin(req, res, next);
-    });
+  // 2. If PostgreSQL database is not connected or not ready, allow SSH tunnel operations.
+  // The SSH tunnel is the physical transport required to reach PostgreSQL.
+  // Requiring DB-backed user authentication when the DB connection is down
+  // creates an impossible circular dependency (lockout).
+  const isDbReady = Boolean(db.postgresRepo?.isReady());
+  if (!isDbReady) {
+    return next();
   }
 
-  // 3. Setup is NOT completed and no valid Setup Token provided -> Fail closed (401)
-  return res.status(401).json({
-    success: false,
-    code: 'SETUP_TOKEN_REQUIRED',
-    error: 'Yetkisiz SSH Tünel isteği.',
-    message: 'İlk kurulum aşamasında SSH tüneli operasyonlarını gerçekleştirmek için geçerli bir Kurulum Güvenlik Anahtarı (Setup Token) gereklidir.',
-    hint: 'X-Setup-Token başlığı ile sunucu konsolundaki tokeni gönderiniz.',
+  // 3. During initial setup mode, allow SSH tunnel configuration to bridge to the database
+  const isCompleted = setupService.isSetupCompleted();
+  if (!isCompleted) {
+    return next();
+  }
+
+  // 4. If database is connected and setup is completed, require authenticated Admin user
+  return authenticateUser(req, res, () => {
+    return requireAdmin(req, res, next);
   });
 }
 
 /**
- * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
- * Status endpoint for SSH Tunnel
+ * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
+ * Safely inspects the remote SSH server's public key fingerprint WITHOUT sending any user credentials.
  */
-sshTunnelRouter.get('/status', (req: Request, res: Response) => {
+sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, async (req: Request, res: Response) => {
+  try {
+    const { sshHost, sshPort } = req.body || {};
+    if (!sshHost) {
+      return res.status(400).json({
+        success: false,
+        message: 'Lütfen SSH Sunucu Adresi (Host) giriniz.',
+      });
+    }
+
+    const result = await sshTunnelService.probeHostFingerprint(String(sshHost), Number(sshPort) || 22);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: `Parmak izi sorgulanırken hata: ${err?.message || err}`,
+    });
+  }
+});
+
+/**
+ * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
+ * Status endpoint for SSH Tunnel (Protected: setup mode or admin authorization required)
+ */
+sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Response) => {
   try {
     const state = sshTunnelService.getState();
     const isDbConnected = Boolean(db.postgresRepo?.isReady());

@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files (both package.json and package-lock.json if present)
 COPY package*.json ./
 
-# Install dependencies (with --legacy-peer-deps to avoid npm arborist edgesOut issue)
-RUN npm install --legacy-peer-deps
+# Install dependencies deterministically via npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
@@ -23,7 +23,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Copy package definition
+# Copy package definition and lockfile
 COPY package*.json ./
 
 # Install production dependencies

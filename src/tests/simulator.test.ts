@@ -105,7 +105,23 @@ describe('IoT Device Simulator Engine Test Suite', () => {
     });
 
     it('should generate simulated telemetry strictly for isSimulated === true devices', async () => {
-      const simDev = db.getDeviceById('dev_test_01');
+      let simDev = db.getDeviceById('dev_test_01');
+      if (!simDev) {
+        simDev = {
+          id: 'dev_test_01',
+          tenantId: 'usr_test_admin',
+          name: 'Kanonik Saha Test Cihazı (ESP32)',
+          type: 'sensor',
+          apiKey: 'dev_key_test_0000000000000000',
+          status: 'online',
+          location: 'Test Laboratuvarı',
+          metrics: { temperature: 24.5, humidity: 52.0 },
+          isSimulated: true,
+          dataFlowActive: true,
+        } as any;
+        if (!db.data.devices) db.data.devices = [];
+        db.data.devices.push(simDev);
+      }
       expect(simDev).toBeDefined();
       if (simDev) {
         simDev.isSimulated = true;
@@ -130,7 +146,23 @@ describe('IoT Device Simulator Engine Test Suite', () => {
 
   describe('4. Simulation Channel & Telemetry Event Propagation', () => {
     it('should route simulation telemetry correctly and isolate physical devices', async () => {
-      const simDev = db.getDeviceById('dev_test_01');
+      let simDev = db.getDeviceById('dev_test_01');
+      if (!simDev) {
+        simDev = {
+          id: 'dev_test_01',
+          tenantId: 'usr_test_admin',
+          name: 'Kanonik Saha Test Cihazı (ESP32)',
+          type: 'sensor',
+          apiKey: 'dev_key_test_0000000000000000',
+          status: 'online',
+          location: 'Test Laboratuvarı',
+          metrics: { temperature: 24.5, humidity: 52.0 },
+          isSimulated: true,
+          dataFlowActive: true,
+        } as any;
+        if (!db.data.devices) db.data.devices = [];
+        db.data.devices.push(simDev);
+      }
       expect(simDev).toBeDefined();
       if (simDev) {
         simDev.isSimulated = true;

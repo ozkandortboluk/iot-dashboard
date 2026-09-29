@@ -139,7 +139,7 @@ export class DatabaseAutoHealer {
    */
   public async clearHungQueriesAndDeadlocks(maxQueryDurationSec: number = 30): Promise<number> {
     const pool = this.dbInstance.getPgPool();
-    if (!pool) return 0;
+    if (!pool || !this.dbInstance.postgresRepo?.isConnected) return 0;
 
     let clearedCount = 0;
     try {

@@ -814,7 +814,7 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected || !userId) return null;
     try {
       const res = await this.query(
-        `SELECT * FROM users WHERE id = $1 AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        `SELECT * FROM users WHERE id = $1 AND (deleted_at IS NULL AND status != 'deleted') LIMIT 1;`,
         [userId]
       );
       if (res.rows && res.rows.length > 0) {
@@ -830,7 +830,7 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected || !email) return null;
     try {
       const res = await this.query(
-        `SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        `SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND (deleted_at IS NULL AND status != 'deleted') LIMIT 1;`,
         [email.trim()]
       );
       if (res.rows && res.rows.length > 0) {
@@ -846,7 +846,27 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected || !emailOrId) return null;
     try {
       const res = await this.query(
-        `SELECT * FROM users WHERE (LOWER(email) = LOWER($1) OR id = $1) AND (deleted_at IS NULL OR status != 'deleted') LIMIT 1;`,
+        `SELECT * FROM users WHERE (LOWER(email) = LOWER($1) OR id = $1) AND deleted_at IS NULL AND status = 'active' LIMIT 1;`,
+        [emailOrId.trim()]
+      );
+      if (res.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          user: this.mapUserRow(r),
+          passwordHash: r.password_hash || '',
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async getUserWithPasswordForAdmin(emailOrId: string): Promise<{ user: User; passwordHash: string } | null> {
+    if (!this.pool || !this.isConnected || !emailOrId) return null;
+    try {
+      const res = await this.query(
+        `SELECT * FROM users WHERE (LOWER(email) = LOWER($1) OR id = $1) LIMIT 1;`,
         [emailOrId.trim()]
       );
       if (res.rows && res.rows.length > 0) {
@@ -866,7 +886,7 @@ export class PostgresRepository {
     if (!this.pool || !this.isConnected) return [];
     try {
       const res = await this.query(
-        `SELECT * FROM users WHERE (deleted_at IS NULL OR status != 'deleted') ORDER BY created_at ASC;`
+        `SELECT * FROM users WHERE (deleted_at IS NULL AND status != 'deleted') ORDER BY created_at ASC;`
       );
       return (res.rows || []).map((r) => this.mapUserRow(r));
     } catch {
@@ -948,8 +968,8 @@ export class PostgresRepository {
       await client.query(`
         UPDATE devices
         SET 
-          tenant_id = 'usr_test_admin',
-          user_id = 'usr_test_admin',
+          tenant_id = COALESCE((SELECT id FROM users WHERE role = 'admin' AND status = 'active' AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 1), 'usr_admin'),
+          user_id = COALESCE((SELECT id FROM users WHERE role = 'admin' AND status = 'active' AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 1), 'usr_admin'),
           location = CASE 
             WHEN location IS NULL OR location = '' OR location = 'Varsayılan' 
             THEN 'Merkez Depo (Eski Müşteri: ' || COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), $1) || ')'
@@ -1083,21 +1103,21 @@ export class PostgresRepository {
       return; // Do not persist ephemeral test devices to PostgreSQL
     }
 
-    // Canonical Tenant Doğrulaması: Boş veya tanımsız tenantId kesinlikle 'usr_test_admin'e yönlendirilir
-    const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || 'usr_test_admin';
+    // Resolve user_id and tenant_id referencing users(id) foreign key constraint
+    const validUsers = await this.getValidUserIds();
+    const fallbackTenant = validUsers.has('usr_admin') ? 'usr_admin' : (validUsers.has('usr_test_admin') ? 'usr_test_admin' : 'usr_admin');
+    const canonicalTenantId = (dev.tenantId || (dev as any).userId || '').trim() || fallbackTenant;
     const effectiveType = dev.deviceType || dev.type || 'sensor';
     const effectiveIp = (dev as any).ipAddress || (dev as any).ip || null;
 
-    // Resolve user_id referencing users(id) foreign key constraint
-    const validUsers = await this.getValidUserIds();
     const candidateUserId = ((dev as any).userId || (dev.tenantId?.startsWith('usr_') ? dev.tenantId : '')).trim();
     let effectiveUserId: string | null = null;
     if (candidateUserId && validUsers.has(candidateUserId)) {
       effectiveUserId = candidateUserId;
-    } else if (validUsers.has('usr_test_admin')) {
-      effectiveUserId = 'usr_test_admin';
     } else if (validUsers.has('usr_admin')) {
       effectiveUserId = 'usr_admin';
+    } else if (validUsers.has('usr_test_admin')) {
+      effectiveUserId = 'usr_test_admin';
     } else {
       effectiveUserId = null;
     }
@@ -2741,7 +2761,7 @@ export class PostgresRepository {
       const session = await this.getSession(token);
       if (!session) return null;
       const user = await this.getUserById(session.userId);
-      if (!user) return null;
+      if (!user || user.status !== 'active' || user.deletedAt) return null;
       return { user, session };
     } catch {
       return null;
@@ -3284,14 +3304,16 @@ export class PostgresRepository {
       if (sessRes?.rows) {
         sessRes.rows.forEach((r: any) => {
           sessions.push({
-            token: r.token,
+            token: r.token || (r.token_prefix ? `${r.token_prefix}...` : undefined),
+            tokenHash: r.token_hash,
+            tokenPrefix: r.token_prefix,
             userId: r.user_id,
             userRole: r.user_role,
             userEmail: r.user_email,
             userName: r.user_name,
             createdAt: new Date(r.created_at).toISOString(),
             expiresAt: new Date(r.expires_at).toISOString(),
-          });
+          } as any);
         });
       }
 

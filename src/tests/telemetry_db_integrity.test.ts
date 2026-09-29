@@ -9,8 +9,21 @@ describe('P1 - 2.2: Telemetry Database Integrity & Application Referential Polic
 
   beforeEach(() => {
     // Ensure canonical test device exists
-    const dev = db.getDeviceById('dev_test_01');
-    if (dev) {
+    let dev = db.getDeviceById('dev_test_01');
+    if (!dev) {
+      dev = {
+        id: testDevId,
+        tenantId: 'usr_test_admin',
+        name: 'Kanonik Test Cihazı',
+        type: 'sensor',
+        apiKey: testApiKey,
+        status: 'online',
+        location: 'Test Laboratuvarı',
+        metrics: {},
+      } as Device;
+      if (!db.data.devices) db.data.devices = [];
+      db.data.devices.push(dev);
+    } else {
       dev.tenantId = 'usr_test_admin';
       dev.apiKey = testApiKey;
       dev.status = 'online';

@@ -44,8 +44,21 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
   it('1. Create durable JSON/SQL backup and verify structural completeness', async () => {
     // Ensure canonical test device exists
     const testDevId = 'dev_test_01';
-    const dev = db.getDeviceById(testDevId);
-    if (dev) {
+    let dev = db.getDeviceById(testDevId);
+    if (!dev) {
+      dev = {
+        id: testDevId,
+        tenantId: 'usr_test_admin',
+        name: 'Kanonik Test Cihazı',
+        type: 'sensor',
+        apiKey: 'dev_key_test_0000000000000000',
+        status: 'online',
+        location: 'Test Laboratuvarı',
+        metrics: { temperature: 24.5 },
+      } as any;
+      if (!db.data.devices) db.data.devices = [];
+      db.data.devices.push(dev);
+    } else {
       dev.tenantId = 'usr_test_admin';
     }
 
@@ -81,7 +94,21 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
 
   it('3. Restore database state from backup and verify entity preservation', async () => {
     const targetDevId = 'dev_test_01';
-    const originalDev = db.getDeviceById(targetDevId);
+    let originalDev = db.getDeviceById(targetDevId);
+    if (!originalDev) {
+      originalDev = {
+        id: targetDevId,
+        tenantId: 'usr_test_admin',
+        name: 'Kanonik Test Cihazı',
+        type: 'sensor',
+        apiKey: 'dev_key_test_0000000000000000',
+        status: 'online',
+        location: 'Test Laboratuvarı',
+        metrics: { pressure: 99.9 },
+      } as any;
+      if (!db.data.devices) db.data.devices = [];
+      db.data.devices.push(originalDev);
+    }
     expect(originalDev).toBeDefined();
     
     // Set specific test metric before backup

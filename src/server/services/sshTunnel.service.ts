@@ -52,11 +52,11 @@ export function computeHostFingerprints(key: string | Buffer): { sha256: string;
 export function verifyHostFingerprint(
   serverKey: string | Buffer,
   expectedFingerprint?: string
-): { valid: boolean; actualSha256: string; actualMd5: string; error?: string } {
+): { valid: boolean; actualSha256: string; actualMd5: string; pinned: boolean; error?: string } {
   const { sha256, md5 } = computeHostFingerprints(serverKey);
 
   if (!expectedFingerprint || !expectedFingerprint.trim()) {
-    return { valid: true, actualSha256: sha256, actualMd5: md5 };
+    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: false };
   }
 
   const cleanExpected = expectedFingerprint.trim().toLowerCase();
@@ -71,13 +71,14 @@ export function verifyHostFingerprint(
     cleanExpected.replace(/[:\s]/g, '') === cleanMd5.replace(/[:\s]/g, '');
 
   if (isMatch) {
-    return { valid: true, actualSha256: sha256, actualMd5: md5 };
+    return { valid: true, actualSha256: sha256, actualMd5: md5, pinned: true };
   }
 
   return {
     valid: false,
     actualSha256: sha256,
     actualMd5: md5,
+    pinned: true,
     error: `SSH Host Key Fingerprint uyuşmazlığı tespit edildi! Beklenen: "${expectedFingerprint}", Sunucudan gelen: "${sha256}". Olası Ortadaki Adam (MITM) veya sahte sunucu bağlantı girişimi engellendi.`,
   };
 }
@@ -163,6 +164,7 @@ class SSHTunnelService {
         remoteDbPort: config.remoteDbPort || 5432,
         localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
         autoConnect: config.autoConnect,
+        expectedHostFingerprint: config.expectedHostFingerprint,
       };
 
       this.activeConfig = {
@@ -199,6 +201,74 @@ class SSHTunnelService {
       logs: this.logs,
       hostFingerprint: this.activeHostFingerprint,
     };
+  }
+
+  /**
+   * Probes the remote SSH server's public host key fingerprint WITHOUT sending any credentials.
+   * Connects only to exchange keys and disconnects immediately during KEX, eliminating MITM exposure.
+   */
+  public async probeHostFingerprint(
+    host: string,
+    port: number = 22
+  ): Promise<{ success: boolean; sha256?: string; md5?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const client = new Client();
+      let isResolved = false;
+      const timeout = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          try {
+            client.end();
+          } catch {}
+          resolve({ success: false, error: 'SSH sunucu parmak izi sorgusu zaman aşımına uğradı (10s).' });
+        }
+      }, 10000);
+
+      client.on('error', (err: any) => {
+        if (!isResolved) {
+          isResolved = true;
+          clearTimeout(timeout);
+          let msg = err?.message || 'SSH bağlantı hatası';
+          if (err?.code === 'ECONNREFUSED') {
+            msg = `SSH sunucusu bağlantıyı reddetti (${host}:${port}).`;
+          }
+          resolve({ success: false, error: msg });
+        }
+      });
+
+      const sshConnConfig: ConnectConfig = {
+        host: host.trim(),
+        port: Number(port) || 22,
+        username: 'probe_identity_check',
+        readyTimeout: 8000,
+        hostVerifier: (hashedKey: string | Buffer, verifyCallback?: (verified: boolean) => void) => {
+          const { sha256, md5 } = computeHostFingerprints(hashedKey);
+          if (!isResolved) {
+            isResolved = true;
+            clearTimeout(timeout);
+            // End client connection immediately: host key obtained before any credentials sent
+            if (typeof verifyCallback === 'function') {
+              verifyCallback(false);
+            }
+            try {
+              client.end();
+            } catch {}
+            resolve({ success: true, sha256, md5 });
+          }
+          return false;
+        },
+      };
+
+      try {
+        client.connect(sshConnConfig);
+      } catch (err: any) {
+        if (!isResolved) {
+          isResolved = true;
+          clearTimeout(timeout);
+          resolve({ success: false, error: err?.message || 'SSH bağlantısı başlatılamadı.' });
+        }
+      }
+    });
   }
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {

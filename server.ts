@@ -119,6 +119,16 @@ const server = http.createServer(app);
 
 // Global Middleware & Body Parsers
 app.use(cookieParser());
+
+// Early request body size guard for public endpoints to prevent memory parsing DoS
+app.use('/api/system-logs/client-error', (req, res, next) => {
+  const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+  if (contentLength > 8192) {
+    return res.status(413).json({ error: 'Payload Too Large: İstemci hata bildirim boyutu 8KB sınırını aşıyor.' });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.text({ type: ['text/*', 'application/x-www-form-urlencoded', 'application/octet-stream'], limit: '10mb' }));

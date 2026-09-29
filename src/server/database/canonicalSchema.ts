@@ -1229,81 +1229,15 @@ EXCEPTION
 END $$;\n`;
   }
 
-  // Seed Canonical Test Account strictly in test environments if users table was created
-  if (tableName === 'users') {
-    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-    if (isTestEnv) {
-      ddl += `
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_test_admin',
-    'Kanonik Test Yöneticisi',
-    'test@nexusnodeiot.com.tr',
-    '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
-    'admin',
-    'NexusNode Test Laboratuvarı',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;\n`;
-    }
-  }
-
-  // Seed Canonical Test Device if devices table was created and test environment is enabled
-  if (tableName === 'devices') {
-    const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-    if (isTestEnv) {
-      ddl += `
-INSERT INTO devices (
-    id, tenant_id, user_id, name, device_type, role_key,
-    api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
-    heartbeat_timeout_seconds, expected_interval_seconds, created_at
-)
-VALUES (
-    'dev_test_01',
-    'usr_test_admin',
-    'usr_test_admin',
-    'Kanonik Saha Test Cihazı (ESP32)',
-    'ESP32',
-    'production_sensor',
-    'dev_key_test_0000000000000000',
-    'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
-    'online',
-    300,
-    'AES-256-GCM',
-    60,
-    10,
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;\n`;
-    }
-  }
-
   return ddl;
 }
 
 /**
  * Generates the complete, idempotent, self-healing DDL SQL string for the entire Canonical Schema.
+ * NOTE: Production canonical schema contains STRICTLY schema definitions (tables, constraints, triggers, indexes).
+ * Test fixtures (usr_test_admin, dev_test_01) are strictly isolated to test fixtures / InitialDataSeeder.
  */
 export function generateCanonicalSchemaDDL(): string {
-  const testUserDdl = `
--- Canonical Permanent Test Administrator (usr_test_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_test_admin',
-    'Kanonik Test Yöneticisi',
-    'test@nexusnodeiot.com.tr',
-    '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.',
-    'admin',
-    'NexusNode Test Laboratuvarı',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO UPDATE SET
-    status = 'active',
-    password_hash = EXCLUDED.password_hash;
-`;
-
   return `
 -- ============================================================================
 -- NexusNode IoT - Complete Canonical Database Schema (PostgreSQL + TimescaleDB)
@@ -1387,8 +1321,6 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
-${testUserDdl}
-
 -- 2.2 DEVICES
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
@@ -1444,30 +1376,6 @@ CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices(api_key_hash);
 CREATE INDEX IF NOT EXISTS idx_devices_hardware_model ON devices(hardware_model);
 CREATE INDEX IF NOT EXISTS idx_devices_role_key ON devices(role_key);
 CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC);
-
--- Canonical Permanent Test Device (dev_test_01)
-INSERT INTO devices (
-    id, tenant_id, user_id, name, device_type, role_key,
-    api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
-    heartbeat_timeout_seconds, expected_interval_seconds, created_at
-)
-VALUES (
-    'dev_test_01',
-    'usr_test_admin',
-    'usr_test_admin',
-    'Kanonik Saha Test Cihazı (ESP32)',
-    'ESP32',
-    'production_sensor',
-    'dev_key_test_0000000000000000',
-    'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
-    'online',
-    300,
-    'AES-256-GCM',
-    60,
-    10,
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
 
 -- 2.3 DEVICE WEBSOCKET MESSAGES DEDUPLICATION
 CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (

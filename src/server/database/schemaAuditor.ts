@@ -1311,8 +1311,9 @@ export class SchemaAuditor {
           const refTable = fkDef.referencedTable;
           const refCol = fkDef.referencedColumns[0];
           try {
-            // Heal reference if missing user is the canonical permanent test admin or root admin
-            if (refTable === 'users') {
+            // In test/development only, heal reference if missing user is the canonical permanent test admin
+            const isTestOrDev = process.env.NODE_ENV !== 'production' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+            if (refTable === 'users' && isTestOrDev) {
               try {
                 await poolOrClient.query(`
                   INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
@@ -1681,15 +1682,13 @@ export class SchemaAuditor {
         const notifMsg = `Kritik: Otomatik şema onarım döngüsü (Repair → Verify) tamamlanamadı. Re-check aşamasında ${remainingDiscrepancies.length} adet uyumsuzluk giderilemedi. Veritabanı sağlık skoru: %${afterReport.score}. Lütfen şema ve izinleri kontrol ediniz.`;
         
         const notifId1 = `notif_schema_fail_adm_${Date.now()}`;
-        const notifId2 = `notif_schema_fail_test_${Date.now()}`;
 
         await poolOrClient.query(`
           INSERT INTO notifications (id, tenant_id, user_id, type, severity, title, message, source, is_read, read, created_at)
           VALUES 
-            ($1, 'usr_admin', 'usr_admin', 'DATABASE_SCHEMA_FAIL', 'critical', $2, $3, 'system', false, false, CURRENT_TIMESTAMP),
-            ($4, 'usr_test_admin', 'usr_test_admin', 'DATABASE_SCHEMA_FAIL', 'critical', $2, $3, 'system', false, false, CURRENT_TIMESTAMP)
+            ($1, 'usr_admin', 'usr_admin', 'DATABASE_SCHEMA_FAIL', 'critical', $2, $3, 'system', false, false, CURRENT_TIMESTAMP)
           ON CONFLICT (id) DO NOTHING;
-        `, [notifId1, notifTitle, notifMsg, notifId2]);
+        `, [notifId1, notifTitle, notifMsg]);
       } catch (notifErr) {
         console.warn('[SchemaAutoHealer] Yönetici bildirimi kaydedilemedi:', notifErr);
       }

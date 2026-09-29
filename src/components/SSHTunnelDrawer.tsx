@@ -52,6 +52,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [testing, setTesting] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [probingFingerprint, setProbingFingerprint] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
@@ -65,6 +66,43 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       headers['X-Setup-Token'] = setupToken;
     }
     return headers;
+  };
+
+  const handleProbeFingerprint = async () => {
+    if (!sshHost) {
+      setActionMessage({ type: 'error', text: 'Lütfen SSH Sunucu Adresi (Host) giriniz.' });
+      return;
+    }
+    setProbingFingerprint(true);
+    setActionMessage({ type: 'info', text: 'Sunucu Host Key parmak izi sorgulanıyor (Kimlik bilgisi gönderilmeden)...' });
+    try {
+      const res = await fetch('/api/system/ssh-tunnel/probe-fingerprint', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          sshHost,
+          sshPort: Number(sshPort) || 22,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.sha256) {
+        setDiscoveredFingerprint(data.sha256);
+        setActionMessage({
+          type: 'success',
+          text: `Host Key parmak izi güvenle sorgulandı: ${data.sha256}. Aşağıdaki butona tıklayarak sabitleyebilirsiniz.`,
+        });
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: data.error || data.message || 'Parmak izi sorgulanamadı. Sunucu adresi veya portu kontrol edin.',
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: `Sorgu hatası: ${err?.message || err}` });
+    } finally {
+      setProbingFingerprint(false);
+    }
   };
 
   // Poll status from server
@@ -532,7 +570,26 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400">Beklenen Host Fingerprint (Opsiyonel / Pinned Key)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-slate-400">Beklenen Host Fingerprint (Opsiyonel / Pinned Key)</label>
+                    <button
+                      type="button"
+                      onClick={handleProbeFingerprint}
+                      disabled={probingFingerprint || !sshHost}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 hover:underline cursor-pointer disabled:opacity-50"
+                      title="SSH sunucusundan anahtar parmak izini şifre göndermeden doğrudan sorgular"
+                    >
+                      {probingFingerprint ? (
+                        <>
+                          <RefreshCw className="w-3 h-3 animate-spin" /> Sorgulanıyor...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-3 h-3" /> Sunucudan Sorgula (Şifresiz)
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={expectedHostFingerprint}
