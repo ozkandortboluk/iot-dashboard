@@ -30,6 +30,7 @@ import { SSHTunnelDrawer } from './components/SSHTunnelDrawer';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
+import { apiFetch as fetch } from './lib/apiFetch';
 import {
   LayoutDashboard,
   Cpu,

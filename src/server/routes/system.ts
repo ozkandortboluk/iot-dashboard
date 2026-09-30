@@ -22,6 +22,9 @@ import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from 
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
 import { DataMaintenanceService } from '../database/dataMaintenance.js';
 import { emailService } from '../services/email.service.js';
+import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
+import { isSshTunnelAllowed } from '../database/connection.js';
+import { sshTunnelService } from '../services/sshTunnel.service.js';
 
 const startTime = Date.now();
 
@@ -112,6 +115,35 @@ systemRouter.get('/health', (req, res) => {
     },
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Runtime Diagnostics Endpoint (Requirement 13)
+systemRouter.get('/runtime', (req, res) => {
+  const config = getRuntimeConfig();
+  const isTunnelActive = isSshTunnelAllowed() && sshTunnelService.isConnected();
+  const isPgReady = Boolean(db.postgresRepo?.isReady());
+  const databaseTransport = isTunnelActive ? 'ssh-tunnel' : (isPgReady ? 'postgres-direct' : 'in-memory');
+
+  if (config.isVps) {
+    const authHeader = req.headers.authorization;
+    const cookie = (req as any).cookies?.nexus_session_token;
+    if (!authHeader && !cookie) {
+      return res.json({
+        environment: 'vps',
+        production: true,
+      });
+    }
+  }
+
+  const cookieMode = config.isVps || config.isAiStudio ? 'same-origin-secure' : 'local-development';
+
+  return res.json({
+    environment: config.environment,
+    production: config.isProductionRuntime,
+    sshTunnelAllowed: isSshTunnelAllowed(),
+    cookieMode,
+    databaseTransport,
   });
 });
 

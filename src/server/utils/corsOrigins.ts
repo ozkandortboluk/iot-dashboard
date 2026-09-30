@@ -1,9 +1,10 @@
 /**
  * Explicit Origin Allowlist for CORS, CSRF, and WebSocket Connection Validation
  *
- * Replaces overly broad wildcards (*.run.app, *.nexusnodeiot.com.tr) with an explicit,
- * strictly audited set of production and development origins.
+ * Configured per runtime environment (vps, aistudio, local, test) with strict deny-by-default.
  */
+
+import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 
 function getCleanOrigin(urlStr?: string): string | null {
   if (!urlStr || !urlStr.trim()) return null;
@@ -15,8 +16,8 @@ function getCleanOrigin(urlStr?: string): string | null {
   }
 }
 
-// Static explicit allowed origins (HTTPS only for production domains)
-const STATIC_EXPLICIT_ORIGINS = new Set([
+// Static production origins (HTTPS only)
+const STATIC_VPS_ORIGINS = new Set([
   'https://nexusnodeiot.com.tr',
   'https://www.nexusnodeiot.com.tr',
   'https://app.nexusnodeiot.com.tr',
@@ -34,8 +35,14 @@ const LOCAL_DEV_ORIGINS = new Set([
   'https://127.0.0.1:5173',
 ]);
 
+// Local loopback regex (allows any localhost or 127.0.0.1 port in local/test environments)
+const LOCAL_LOOPBACK_REGEX = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
+
+// Multi-segment Cloud Run domain pattern (e.g. https://ais-dev-...europe-west1.run.app)
+const CLOUD_RUN_ORIGIN_REGEX = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app$/i;
+
 /**
- * Checks if a given origin or referer string matches the explicit allowlist.
+ * Checks if a given origin or referer string matches the explicit allowlist for the current environment.
  */
 export function isOriginAllowed(originOrReferer?: string | null): boolean {
   if (!originOrReferer || !originOrReferer.trim()) {
@@ -45,17 +52,28 @@ export function isOriginAllowed(originOrReferer?: string | null): boolean {
   const clean = getCleanOrigin(originOrReferer);
   if (!clean) return false;
 
-  // 1. Check static production origins
-  if (STATIC_EXPLICIT_ORIGINS.has(clean)) {
+  const env = resolveRuntimeEnvironment();
+
+  // 1. Static production origins (always allowed)
+  if (STATIC_VPS_ORIGINS.has(clean)) {
     return true;
   }
 
-  // 2. Check local development origins
-  if (LOCAL_DEV_ORIGINS.has(clean)) {
-    return true;
+  // 2. Local development & test: Allow localhost & loopback variants
+  if (env === 'local' || env === 'test') {
+    if (LOCAL_LOOPBACK_REGEX.test(clean) || LOCAL_DEV_ORIGINS.has(clean)) {
+      return true;
+    }
   }
 
-  // 3. Check explicitly configured runtime environment origins (e.g. APP_URL, CLIENT_ORIGIN)
+  // 3. AI Studio / Preview / Test / Local: Allow Google Cloud Run preview domains (not allowed in VPS production)
+  if (env !== 'vps') {
+    if (CLOUD_RUN_ORIGIN_REGEX.test(clean)) {
+      return true;
+    }
+  }
+
+  // 4. Runtime environment variable overrides (APP_URL, CLIENT_ORIGIN, ALLOWED_ORIGINS)
   const appUrlOrigin = getCleanOrigin(process.env.APP_URL);
   if (appUrlOrigin && clean === appUrlOrigin) {
     return true;
@@ -72,12 +90,6 @@ export function isOriginAllowed(originOrReferer?: string | null): boolean {
     if (list.includes(clean)) {
       return true;
     }
-  }
-
-  // 4. In test or development environment, allow AI Studio / Cloud Run preview domains
-  const isTestOrDev = process.env.NODE_ENV !== 'production' || Boolean(process.env.VITEST);
-  if (isTestOrDev && /^https:\/\/[a-z0-9-]+\.run\.app$/i.test(clean)) {
-    return true;
   }
 
   return false;

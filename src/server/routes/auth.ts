@@ -9,6 +9,7 @@ import { setupService } from '../services/setup.service.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import { passwordResetService } from '../services/passwordReset.service.js';
 import { emailService } from '../services/email.service.js';
+import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 import {
   validateSetupInput,
   validateRegistrationInput,
@@ -29,12 +30,15 @@ function getClientIp(req: Request): string {
   return '127.0.0.1';
 }
 
-// Cookie helper: Set secure, HttpOnly, SameSite session cookie
+// Cookie helper: Set secure, HttpOnly, SameSite session cookie based on runtime environment
 export function setSessionCookie(res: Response, token: string) {
-  const isProd = process.env.NODE_ENV === 'production';
+  const env = resolveRuntimeEnvironment();
+  // VPS and AI Studio run strictly over HTTPS. Local development and unit tests use HTTP.
+  const isSecure = env === 'vps' || env === 'aistudio';
+
   res.cookie('nexus_session_token', token, {
     httpOnly: true,
-    secure: isProd,
+    secure: isSecure,
     sameSite: 'lax',
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     path: '/',
@@ -43,8 +47,12 @@ export function setSessionCookie(res: Response, token: string) {
 
 // Cookie helper: Clear session cookie
 export function clearSessionCookie(res: Response) {
+  const env = resolveRuntimeEnvironment();
+  const isSecure = env === 'vps' || env === 'aistudio';
+
   res.clearCookie('nexus_session_token', {
     httpOnly: true,
+    secure: isSecure,
     sameSite: 'lax',
     path: '/',
   });
@@ -135,7 +143,6 @@ router.post('/setup', requireSetupAuth, async (req, res) => {
 
     res.json({
       user: result.user,
-      token: result.token,
       message: 'Kurulum başarıyla tamamlandı ve güvenli oturum açıldı.',
     });
   } catch (err: unknown) {

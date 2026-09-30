@@ -22,7 +22,7 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
     const args = isBundled ? ['dist/server.cjs'] : ['tsx', 'server.ts'];
 
     serverProcess = spawn(cmd, args, {
-      env: { ...process.env, PORT: String(PORT), SERVER_PORT: String(PORT), NODE_ENV: 'production' }
+      env: { ...process.env, PORT: String(PORT), SERVER_PORT: String(PORT), NODE_ENV: 'test', APP_ENV: 'test', VITEST: 'true', DISABLE_SETUP_TOKEN: 'true' }
     });
     serverProcess.stderr?.on('data', (data: Buffer) => {
       // console.error(`[E2E Server stderr]: ${data}`);
@@ -46,6 +46,28 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
     if (!isUp) {
       throw new Error("E2E Server failed to start within timeout");
     }
+
+    try {
+      const statusRes = await fetch(`${BASE_URL}/api/auth/setup-status`);
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.needSetup) {
+          await fetch(`${BASE_URL}/api/auth/setup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: 'Test Administrator',
+              email: testEmail,
+              password: 'testPassword123!',
+              companyName: 'NexusNode Test Lab',
+            })
+          });
+        }
+      }
+    } catch {
+      // setup check fallback
+    }
+
     await wait(1000); // give it a moment to finalize WS server binding
   }, 25000);
 
@@ -78,14 +100,14 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
 
   describe('2. Login, HttpOnly Cookie, and Session State', () => {
     it('Should login and set an HttpOnly & SameSite=Lax cookie', async () => {
-      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'test@nexusnodeiot.com.tr', password: 'test1234' })
+        body: JSON.stringify({ email: testEmail, password: 'testPassword123!' })
       });
       
-      expect(res.status).toBe(200);
-      const setCookie = res.headers.get('set-cookie');
+      expect(loginRes.status).toBe(200);
+      const setCookie = loginRes.headers.get('set-cookie');
       expect(setCookie).toBeTruthy();
       expect(setCookie).toMatch(/HttpOnly/);
       expect(setCookie).toMatch(/SameSite=Lax/);
@@ -98,7 +120,7 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       const res = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'test@nexusnodeiot.com.tr', password: 'test1234' })
+        body: JSON.stringify({ email: testEmail, password: 'testPassword123!' })
       });
       expect(res.status).toBe(200);
       const setCookie = res.headers.get('set-cookie');

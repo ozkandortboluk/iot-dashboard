@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { apiFetch as fetch } from '../lib/apiFetch';
 import { 
   Lock, 
   UserCheck, 

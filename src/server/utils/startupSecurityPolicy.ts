@@ -227,18 +227,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     } catch {}
   }
 
-  // Deterministic derivation fallback: If master ENCRYPTION_KEY or Docker secret exists, derive high-entropy JWT_SECRET
-  if (!sessionSecret) {
-    try {
-      const activeVaultKey = resolveEncryptionKey();
-      if (activeVaultKey && activeVaultKey.length >= 16) {
-        sessionSecret = crypto.createHmac('sha256', activeVaultKey).update('SESSION_JWT_SECRET_DERIVATION').digest('hex');
-        process.env.JWT_SECRET = sessionSecret;
-        process.env.SESSION_SECRET = sessionSecret;
-      }
-    } catch {}
-  }
-
   if (!sessionSecret || sessionSecret.trim() === '') {
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında SESSION_SECRET veya JWT_SECRET tanımlanmamıştır (SEC-13 / OLD-113). .env dosyanıza JWT_SECRET ekleyin veya Docker secrets kullanın.`

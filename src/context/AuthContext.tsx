@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User } from '../types';
+import { apiFetch } from '../lib/apiFetch';
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string, role?: User['role']) => Promise<void>;
   setup: (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean) => Promise<void>;
@@ -20,12 +20,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser] = useState<any>(null);
   const [user, setUser] = useState<User | null>(() => {
-    // Clean up any stale dashboard_token to prevent conflicting session states
+    // Purge legacy dashboard_token if any remnants remain in localStorage
     try {
       localStorage.removeItem('dashboard_token');
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     const saved = localStorage.getItem('dashboard_user');
     if (saved) {
@@ -34,9 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (u && u.id && u.email) {
           return u;
         }
-      } catch {
-        // Fallback
-      }
+      } catch {}
     }
     return null;
   });
@@ -59,11 +55,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
     try {
-      // Local/Backend API Auth with HttpOnly cookie support
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ email, password: pass }),
       });
 
@@ -77,7 +71,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error(data.error || 'Giriş yapılamadı.');
       }
 
-      const userData = data.user;
+      // Requirement 4: Verify session cookie functionality before accepting user state
+      const verifyRes = await apiFetch('/api/auth/me');
+      if (verifyRes.status === 401) {
+        throw new Error('Oturum oluşturuldu ancak tarayıcı oturum çerezini kabul etmedi veya sonraki istekte göndermedi.');
+      }
+      if (!verifyRes.ok) {
+        throw new Error('Oturum doğrulama isteği başarısız oldu.');
+      }
+
+      const verifyData = await verifyRes.json();
+      const userData = verifyData.user || data.user;
 
       localStorage.removeItem('dashboard_token');
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
@@ -93,11 +97,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (name: string, email: string, pass: string, role?: User['role']) => {
     setIsLoading(true);
     try {
-      // Backend API Registration
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ name, email, password: pass, role }),
       });
 
@@ -111,7 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error(data.error || 'Kayıt başarısız.');
       }
 
-      // Auto login
+      // Auto login and verify cookie
       await login(email, pass);
     } finally {
       setIsLoading(false);
@@ -126,10 +128,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (activeSetupToken) {
         headers['X-Setup-Token'] = activeSetupToken;
       }
-      const res = await fetch('/api/setup/create-admin', {
+      const res = await apiFetch('/api/setup/create-admin', {
         method: 'POST',
         headers,
-        credentials: 'include',
         body: JSON.stringify({ name, email, password: pass, passwordConfirm: pass, companyName }),
       });
 
@@ -143,7 +144,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error(data.error || data.message || 'Onboarding kurulum işlemi başarısız.');
       }
 
-      const userData = data.user;
+      // Verify session cookie before finalizing setup
+      const verifyRes = await apiFetch('/api/auth/me');
+      if (verifyRes.status === 401) {
+        throw new Error('Oturum oluşturuldu ancak tarayıcı oturum çerezini kabul etmedi veya sonraki istekte göndermedi.');
+      }
+
+      const verifyData = await verifyRes.json();
+      const userData = verifyData.user || data.user;
+
       localStorage.removeItem('dashboard_token');
       localStorage.setItem('dashboard_user', JSON.stringify(userData));
 
@@ -155,7 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkSetupStatus = async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/setup-status');
+      const res = await apiFetch('/api/auth/setup-status');
       const data = await res.json();
       return !!data.needSetup;
     } catch {
@@ -167,20 +176,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updatedUser);
     try {
       localStorage.setItem('dashboard_user', JSON.stringify(updatedUser));
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
+      await apiFetch('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include',
       });
-    } catch {
-      // ignore
-    }
+    } catch {}
     localStorage.removeItem('dashboard_token');
     localStorage.removeItem('dashboard_user');
     localStorage.removeItem('nexus_active_tab');
@@ -202,24 +206,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = async (): Promise<User | null> => {
     try {
-      const res = await fetch('/api/profile', {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/api/auth/me');
       if (res.status === 401) {
         logout();
         return null;
       }
       const contentType = res.headers.get('content-type');
       if (res.ok && contentType && contentType.includes('application/json')) {
-        const freshUser = await res.json();
+        const data = await res.json();
+        const freshUser = data.user;
         if (freshUser && freshUser.id) {
           updateUser(freshUser);
           return freshUser;
         }
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
     return null;
   };
 
@@ -227,7 +228,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
-        token: null,
         login,
         register,
         setup,
@@ -251,4 +251,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

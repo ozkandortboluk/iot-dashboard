@@ -137,7 +137,7 @@ interface DatabaseStatsResponse {
 }
 
 export const DatabaseDataView: React.FC = () => {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const { isConnected, wsLatency } = useRealtime();
 
   const getAuthHeaders = (extra: Record<string, string> = {}) => {

@@ -18,6 +18,7 @@ import {
   ArrowRightLeft,
   Info,
 } from 'lucide-react';
+import { apiFetch as fetch } from '../lib/apiFetch';
 
 export interface SSHTunnelDrawerProps {
   isOpen: boolean;

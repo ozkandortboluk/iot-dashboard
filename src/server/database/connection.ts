@@ -6,6 +6,7 @@ import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { isDefaultPassword } from '../utils/startupSecurityPolicy.js';
+import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 
 import { DatabaseState } from '../../types.js';
 export { DatabaseState };
@@ -17,6 +18,8 @@ declare global {
   var _unifiedPostgresPoolUrl: string | undefined;
   var _poolRecycleListeners: Set<PgPoolRecycleListener> | undefined;
 }
+
+let lastLoggedSshTunnelPort: number | null = null;
 
 export type PgPoolRecycleListener = (newPool: pg.Pool | null) => void;
 
@@ -56,8 +59,9 @@ export function isSshTunnelAllowed(): boolean {
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
     return false;
   }
-  const isProductionVps = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-  return !isProductionVps;
+  const env = resolveRuntimeEnvironment();
+  // By default, SSH tunnel is disallowed on VPS production, and allowed in AI Studio, local development, and test.
+  return env !== 'vps';
 }
 
 /**
@@ -263,7 +267,10 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         } else {
           candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
         }
-        systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
+        if (lastLoggedSshTunnelPort !== localPort) {
+          lastLoggedSshTunnelPort = localPort;
+          systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
+        }
       } catch {
         candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
       }
@@ -281,9 +288,14 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         const encPass = pass ? encodeURIComponent(pass) : '';
         const auth = encPass ? `${encUser}:${encPass}` : encUser;
         candidateUrl = `postgresql://${auth}@127.0.0.1:${localPort}/${dbName}`;
-        systemLogger.info('database', `SSH Tüneli aktif: Veritabanı bağlantı adresi 127.0.0.1:${localPort} olarak otomatik yapılandırıldı.`);
+        if (lastLoggedSshTunnelPort !== localPort) {
+          lastLoggedSshTunnelPort = localPort;
+          systemLogger.info('database', `SSH Tüneli aktif: Veritabanı bağlantı adresi 127.0.0.1:${localPort} olarak otomatik yapılandırıldı.`);
+        }
       } catch {}
     }
+  } else {
+    lastLoggedSshTunnelPort = null;
   }
 
   // 8. Same-VPS / Local Loopback Auto-Fallback (non-production dev mode only)
