@@ -12,17 +12,77 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   let createdUserId: string = '';
   const PORT = 3006;
   const BASE_URL = `http://127.0.0.1:${PORT}`;
-  const testEmail = `test_${Date.now()}@test.com`;
+  const activeTestEmail = `e2e_admin_${Date.now()}@nexusnode.local`;
+  const activeTestPassword = 'testPassword123!';
+
+  let dbConfigBackupCreated = false;
+  let dbJsonBackupCreated = false;
+  let testDbJsonBackupCreated = false;
+  let systemSecretsBackupCreated = false;
+  let sshTunnelBackupCreated = false;
+  const dbConfigPath = 'data/.db_config.json';
+  const backupDbConfigPath = 'data/.db_config.json.e2e_bak';
+  const dbJsonPath = 'data/db.json';
+  const backupDbJsonPath = 'data/db.json.e2e_bak';
+  const testDbJsonPath = 'data/test_db.json';
+  const backupTestDbJsonPath = 'data/test_db.json.e2e_bak';
+  const systemSecretsPath = 'data/.system_secrets.json';
+  const backupSystemSecretsPath = 'data/.system_secrets.json.e2e_bak';
+  const sshTunnelPath = 'data/.ssh_tunnel_config.json';
+  const backupSshTunnelPath = 'data/.ssh_tunnel_config.json.e2e_bak';
 
   beforeAll(async () => {
-    // Start production bundle if exists, else tsx server.ts
+    // Temporarily isolate local data files so E2E server boots in clean setup state
     const fs = await import('node:fs');
+    if (fs.existsSync(dbConfigPath)) {
+      fs.copyFileSync(dbConfigPath, backupDbConfigPath);
+      fs.unlinkSync(dbConfigPath);
+      dbConfigBackupCreated = true;
+    }
+    if (fs.existsSync(dbJsonPath)) {
+      fs.copyFileSync(dbJsonPath, backupDbJsonPath);
+      fs.unlinkSync(dbJsonPath);
+      dbJsonBackupCreated = true;
+    }
+    if (fs.existsSync(testDbJsonPath)) {
+      fs.copyFileSync(testDbJsonPath, backupTestDbJsonPath);
+      fs.unlinkSync(testDbJsonPath);
+      testDbJsonBackupCreated = true;
+    }
+    if (fs.existsSync(systemSecretsPath)) {
+      fs.copyFileSync(systemSecretsPath, backupSystemSecretsPath);
+      fs.unlinkSync(systemSecretsPath);
+      systemSecretsBackupCreated = true;
+    }
+    if (fs.existsSync(sshTunnelPath)) {
+      fs.copyFileSync(sshTunnelPath, backupSshTunnelPath);
+      fs.unlinkSync(sshTunnelPath);
+      sshTunnelBackupCreated = true;
+    }
+
+    // Start production bundle if exists, else tsx server.ts
     const isBundled = fs.existsSync('dist/server.cjs');
     const cmd = isBundled ? 'node' : 'npx';
     const args = isBundled ? ['dist/server.cjs'] : ['tsx', 'server.ts'];
 
     serverProcess = spawn(cmd, args, {
-      env: { ...process.env, PORT: String(PORT), SERVER_PORT: String(PORT), NODE_ENV: 'test', APP_ENV: 'test', VITEST: 'true', DISABLE_SETUP_TOKEN: 'true' }
+      env: {
+        ...process.env,
+        PORT: String(PORT),
+        SERVER_PORT: String(PORT),
+        NODE_ENV: 'test',
+        APP_ENV: 'test',
+        VITEST: 'true',
+        DISABLE_SETUP_TOKEN: 'true',
+        DATABASE_URL: '',
+        POSTGRES_URL: '',
+        POSTGRESQL_URL: '',
+        PG_URL: '',
+        SQL_HOST: '',
+        PGHOST: '',
+        POSTGRES_HOST: '',
+        DB_HOST: '',
+      }
     });
     serverProcess.stderr?.on('data', (data: Buffer) => {
       // console.error(`[E2E Server stderr]: ${data}`);
@@ -52,16 +112,20 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         if (statusData.needSetup) {
-          await fetch(`${BASE_URL}/api/auth/setup`, {
+          const setupRes = await fetch(`${BASE_URL}/api/auth/setup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: 'Test Administrator',
-              email: testEmail,
-              password: 'testPassword123!',
+              email: activeTestEmail,
+              password: activeTestPassword,
               companyName: 'NexusNode Test Lab',
             })
           });
+          if (!setupRes.ok) {
+            const errJson = await setupRes.json().catch(() => ({}));
+            console.error('SETUP FAILED:', setupRes.status, errJson);
+          }
         }
       }
     } catch {
@@ -72,9 +136,30 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   }, 25000);
 
   afterAll(async () => {
+    const fs = await import('node:fs');
     if (serverProcess) {
       serverProcess.kill('SIGTERM');
       await wait(1000);
+    }
+    if (dbConfigBackupCreated && fs.existsSync(backupDbConfigPath)) {
+      fs.copyFileSync(backupDbConfigPath, dbConfigPath);
+      fs.unlinkSync(backupDbConfigPath);
+    }
+    if (dbJsonBackupCreated && fs.existsSync(backupDbJsonPath)) {
+      fs.copyFileSync(backupDbJsonPath, dbJsonPath);
+      fs.unlinkSync(backupDbJsonPath);
+    }
+    if (testDbJsonBackupCreated && fs.existsSync(backupTestDbJsonPath)) {
+      fs.copyFileSync(backupTestDbJsonPath, testDbJsonPath);
+      fs.unlinkSync(backupTestDbJsonPath);
+    }
+    if (systemSecretsBackupCreated && fs.existsSync(backupSystemSecretsPath)) {
+      fs.copyFileSync(backupSystemSecretsPath, systemSecretsPath);
+      fs.unlinkSync(backupSystemSecretsPath);
+    }
+    if (sshTunnelBackupCreated && fs.existsSync(backupSshTunnelPath)) {
+      fs.copyFileSync(backupSshTunnelPath, sshTunnelPath);
+      fs.unlinkSync(backupSshTunnelPath);
     }
   });
 
@@ -103,7 +188,7 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'testPassword123!' })
+        body: JSON.stringify({ email: activeTestEmail, password: activeTestPassword })
       });
       
       expect(loginRes.status).toBe(200);
@@ -120,7 +205,7 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       const res = await fetch(`${BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'testPassword123!' })
+        body: JSON.stringify({ email: activeTestEmail, password: activeTestPassword })
       });
       expect(res.status).toBe(200);
       const setCookie = res.headers.get('set-cookie');

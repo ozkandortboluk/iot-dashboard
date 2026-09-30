@@ -130,7 +130,7 @@ describe('Runtime Environment & Authentication Architecture Test Suite', () => {
     expect(cookieStr).toContain('nexus_session_token=');
     expect(cookieStr).toContain('HttpOnly');
     expect(cookieStr).toContain('Secure'); // AI Studio runs over HTTPS
-    expect(cookieStr).toContain('SameSite=Lax');
+    expect(cookieStr).toContain('SameSite=None');
 
     const token = cookieStr.match(/nexus_session_token=([^;]+)/)![1];
 

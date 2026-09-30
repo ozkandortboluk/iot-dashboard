@@ -86,6 +86,7 @@ export interface HistoricalChecksumRecord {
   hashAlgorithm: string;
   verifiedGitCommitOrTag: string;
   sourceArtifactHash: string;
+  provenanceStatus: 'verified' | 'observed';
   notes: string;
 }
 
@@ -112,6 +113,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production database checksum',
       },
       {
@@ -119,6 +121,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -126,6 +129,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        provenanceStatus: 'verified',
         notes: 'Normalized source checksum',
       },
       {
@@ -133,6 +137,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        provenanceStatus: 'verified',
         notes: 'Early normalized source checksum',
       },
     ],
@@ -147,6 +152,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        provenanceStatus: 'observed',
         notes: 'Proven database checksum',
       },
       {
@@ -154,6 +160,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -161,6 +168,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        provenanceStatus: 'verified',
         notes: 'Normalized source checksum',
       },
       {
@@ -168,6 +176,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
       {
@@ -175,6 +184,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
     ],
@@ -189,6 +199,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -196,6 +207,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -203,6 +215,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -210,6 +223,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -224,6 +238,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -231,6 +246,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -238,6 +254,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -245,6 +262,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -259,6 +277,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -266,6 +285,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -273,6 +293,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -280,6 +301,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -294,6 +316,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -301,6 +324,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -308,6 +332,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -315,6 +340,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -329,6 +355,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -336,6 +363,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -343,6 +371,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -350,6 +379,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -364,6 +394,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -371,6 +402,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -378,6 +410,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -385,6 +418,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -399,6 +433,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -406,6 +441,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -413,6 +449,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -420,6 +457,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -434,6 +472,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'ee9c4295608b3fbc7260fd13b659468d',
+        provenanceStatus: 'verified',
         notes: 'Pre-regex fix baseline checksum',
       },
       {
@@ -441,6 +480,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production checksum',
       },
       {
@@ -448,6 +488,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -455,6 +496,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        provenanceStatus: 'verified',
         notes: 'normalized source checksum',
       },
       {
@@ -462,6 +504,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
       {
@@ -469,6 +512,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
     ],
@@ -483,6 +527,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -490,6 +535,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -497,6 +543,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -511,6 +558,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '8a7ce75da8147c0d8f29706540a0c62c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -518,6 +566,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '8a7ce75da8147c0d8f29706540a0c62c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -532,6 +581,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -539,6 +589,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -546,6 +597,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -553,6 +605,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -567,6 +620,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production checksum',
       },
       {
@@ -574,6 +628,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -581,6 +636,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        provenanceStatus: 'verified',
         notes: 'normalized source checksum',
       },
       {
@@ -588,6 +644,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
       {
@@ -595,6 +652,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
     ],
@@ -609,6 +667,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '4a0b31b6332d926c4d5d217230849600',
+        provenanceStatus: 'verified',
         notes: 'Pre-regex fix baseline checksum',
       },
       {
@@ -616,6 +675,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production checksum',
       },
       {
@@ -623,6 +683,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -630,6 +691,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        provenanceStatus: 'verified',
         notes: 'normalized source checksum',
       },
       {
@@ -637,6 +699,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
     ],
@@ -651,6 +714,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -658,6 +722,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -665,6 +730,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -672,6 +738,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -679,6 +746,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -693,6 +761,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -700,6 +769,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -707,6 +777,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -714,6 +785,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -728,6 +800,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '84b7db96208a73578037a9db2bfdaf31',
+        provenanceStatus: 'verified',
         notes: 'Pre-regex fix baseline checksum',
       },
       {
@@ -735,6 +808,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production checksum',
       },
       {
@@ -742,6 +816,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -749,6 +824,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        provenanceStatus: 'verified',
         notes: 'normalized source checksum',
       },
       {
@@ -756,6 +832,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -763,6 +840,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -777,6 +855,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-normalized-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        provenanceStatus: 'observed',
         notes: 'Proven 2026-09-30 VPS production checksum',
       },
       {
@@ -784,6 +863,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        provenanceStatus: 'verified',
         notes: 'tsx baseline checksum',
       },
       {
@@ -791,6 +871,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        provenanceStatus: 'verified',
         notes: 'earlier release checksum',
       },
       {
@@ -798,6 +879,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        provenanceStatus: 'verified',
         notes: 'normalized source checksum',
       },
       {
@@ -805,6 +887,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        provenanceStatus: 'verified',
         notes: 'Early normalized checksum',
       },
     ],
@@ -819,6 +902,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -826,6 +910,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -833,6 +918,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -840,6 +926,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -847,6 +934,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -861,6 +949,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -868,6 +957,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -875,6 +965,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -882,6 +973,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -889,6 +981,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
@@ -903,6 +996,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -910,6 +1004,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -917,6 +1012,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -924,6 +1020,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
       {
@@ -931,11 +1028,61 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
         hashAlgorithm: 'sha256-legacy-v2',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
         sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        provenanceStatus: 'observed',
         notes: 'Historical DB checksum',
       },
     ],
   },
 };
+
+/**
+ * Validates manifest provenance integrity across all canonical migrations 001–022.
+ */
+export function validateManifestProvenance(): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const expectedVersions = Array.from({ length: 22 }, (_, i) => String(i + 1).padStart(3, '0'));
+
+  for (const ver of expectedVersions) {
+    const entry = CANONICAL_MIGRATION_MANIFEST[ver];
+    if (!entry) {
+      errors.push(`Manifest missing entry for migration version ${ver}`);
+      continue;
+    }
+
+    const migration = ALL_MIGRATIONS.find((m) => m.version === ver);
+    if (!migration) {
+      errors.push(`Codebase ALL_MIGRATIONS missing migration version ${ver}`);
+      continue;
+    }
+
+    const currentHash = computeMigrationChecksum(migration);
+    if (entry.canonicalSourceHash !== currentHash) {
+      errors.push(
+        `Migration ${ver} (${entry.name}) canonicalSourceHash mismatch! Manifest: ${entry.canonicalSourceHash}, Current Computed: ${currentHash}`
+      );
+    }
+
+    for (const h of entry.historicalChecksums) {
+      if (!h.checksum || typeof h.checksum !== 'string' || h.checksum.length !== 32) {
+        errors.push(`Migration ${ver} has invalid historical checksum string: ${h.checksum}`);
+      }
+      if (!h.hashAlgorithm || !h.hashAlgorithm.startsWith('sha256-')) {
+        errors.push(`Migration ${ver} historical checksum ${h.checksum} has invalid algorithm: ${h.hashAlgorithm}`);
+      }
+      if (!h.provenanceStatus || !['verified', 'observed'].includes(h.provenanceStatus)) {
+        errors.push(`Migration ${ver} historical checksum ${h.checksum} missing valid provenanceStatus ('verified'|'observed')`);
+      }
+      if (!h.notes || h.notes.trim().length === 0) {
+        errors.push(`Migration ${ver} historical checksum ${h.checksum} missing explanatory provenance notes`);
+      }
+      if (!h.sourceArtifactHash || h.sourceArtifactHash.length !== 32) {
+        errors.push(`Migration ${ver} historical checksum ${h.checksum} missing valid sourceArtifactHash`);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
 
 /**
  * Layer A: Validates that the migration source file in the codebase has NOT been mutated

@@ -111,6 +111,9 @@ export class SetupService {
    * Safely reads Docker secrets, environment variables, or server-side protected runtime secret file
    */
   public loadRuntimeSecretConfig(): DatabaseConfigPayload | null {
+    if ((process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) && !process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.TEST_POSTGRES_URL) {
+      return null;
+    }
     try {
       // 1. Check Docker Secrets first (production standard)
       if (fs.existsSync(DOCKER_SECRET_DATABASE_URL_PATH)) {
@@ -1265,32 +1268,45 @@ export class SetupService {
     let hasAdmin = false;
     let placeholderExists = false;
 
-    const client = await pool.connect();
-    client.on('error', () => {});
-    try {
-      const adminCheck = await client.query(`
-        SELECT id, email FROM users 
-        WHERE role = 'admin' 
-          AND status != 'deleted' 
-          AND (deleted_at IS NULL)
-          AND id != 'usr_test_admin'
-          AND LOWER(email) != 'test@nexusnodeiot.com.tr'
-        LIMIT 1;
-      `).catch(() => ({ rows: [] }));
+    let pgClient: any = null;
+    if (pool) {
+      try {
+        pgClient = await pool.connect();
+        pgClient.on('error', () => {});
+      } catch {}
+    }
 
-      if (adminCheck.rows.length > 0) {
+    if (pgClient) {
+      try {
+        const adminCheck = await pgClient.query(`
+          SELECT id, email FROM users 
+          WHERE role = 'admin' 
+            AND status != 'deleted' 
+            AND (deleted_at IS NULL)
+            AND id != 'usr_test_admin'
+            AND LOWER(email) != 'test@nexusnodeiot.com.tr'
+          LIMIT 1;
+        `).catch(() => ({ rows: [] }));
+
+        if (adminCheck.rows.length > 0) {
+          hasAdmin = true;
+        }
+
+        // Check if placeholder usr_admin exists to upgrade it
+        const placeholderCheck = await pgClient.query(`
+          SELECT id FROM users WHERE id = 'usr_admin' LIMIT 1;
+        `).catch(() => ({ rows: [] }));
+        if (placeholderCheck.rows.length > 0) {
+          placeholderExists = true;
+        }
+      } finally {
+        pgClient.release();
+      }
+    } else {
+      const users = await db.getUsersAsync();
+      if (users.some(isRealAdminUser)) {
         hasAdmin = true;
       }
-
-      // Check if placeholder usr_admin exists to upgrade it
-      const placeholderCheck = await client.query(`
-        SELECT id FROM users WHERE id = 'usr_admin' LIMIT 1;
-      `).catch(() => ({ rows: [] }));
-      if (placeholderCheck.rows.length > 0) {
-        placeholderExists = true;
-      }
-    } finally {
-      client.release();
     }
 
     if (hasAdmin) {

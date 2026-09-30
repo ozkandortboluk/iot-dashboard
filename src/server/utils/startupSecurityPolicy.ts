@@ -166,7 +166,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
         } catch {}
       }
 
-      if (!candidateDbPass) {
+      if (!candidateDbPass && !process.env.NO_SECRET_FILES) {
         const dockerSecretPath = '/run/secrets/db_password';
         const appSecretPath = 'secrets/db_password';
         try {
@@ -212,7 +212,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
 
   // 2. JWT / Session Secret Validation (SEC-13 / OLD-113)
   let sessionSecret = (process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
-  if (!sessionSecret) {
+  if (!sessionSecret && !process.env.NO_SECRET_FILES) {
     // Check mounted Docker secrets or dedicated app secrets
     try {
       if (fs.existsSync('/run/secrets/jwt_secret')) {
@@ -239,7 +239,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
 
   // 3. Vault Encryption Key Entropy Validation (SEC-13 / OLD-115)
   let encKey = (process.env.ENCRYPTION_KEY || '').trim();
-  if (!encKey) {
+  if (!encKey && !process.env.NO_SECRET_FILES) {
     const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
     try {
       if (keyPath && fs.existsSync(keyPath)) {

@@ -73,6 +73,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     process.env.NODE_ENV = 'production';
     process.env.POSTGRES_PASSWORD = 'StrongUniquePass_987654321!';
     process.env.JWT_SECRET = 'StrongUniqueJwtSecret_1234567890!';
+    process.env.SESSION_SECRET = 'StrongUniqueJwtSecret_1234567890!';
     process.env.ENCRYPTION_KEY = 'e8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
 
     const result = validateProductionSecurityPolicy();
@@ -82,6 +83,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
 
   it('7. Rejects startup in production when DB password is missing (SEC-12)', () => {
     process.env.NODE_ENV = 'production';
+    process.env.NO_SECRET_FILES = 'true';
     delete process.env.POSTGRES_PASSWORD;
     delete process.env.SQL_ADMIN_PASSWORD;
     delete process.env.SQL_PASSWORD;
@@ -89,6 +91,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     delete process.env.DB_PASSWORD;
     process.env.DATABASE_URL = 'postgresql://iot_user@localhost:5432/iot_db';
     process.env.JWT_SECRET = 'StrongUniqueJwtSecret_1234567890!';
+    process.env.SESSION_SECRET = 'StrongUniqueJwtSecret_1234567890!';
     process.env.ENCRYPTION_KEY = 'e8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
 
     const result = validateProductionSecurityPolicy();
@@ -98,6 +101,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
 
   it('8. Rejects startup in production when JWT secret is missing or too short (SEC-13)', () => {
     process.env.NODE_ENV = 'production';
+    process.env.NO_SECRET_FILES = 'true';
     process.env.POSTGRES_PASSWORD = 'StrongUniquePass_987654321!';
     delete process.env.JWT_SECRET;
     delete process.env.SESSION_SECRET;
@@ -109,6 +113,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
 
     // Too short (< 16 chars)
     process.env.JWT_SECRET = 'short_secret';
+    delete process.env.SESSION_SECRET;
     const shortResult = validateProductionSecurityPolicy();
     expect(shortResult.valid).toBe(false);
     expect(shortResult.errors.join(' ')).toContain('SEC-13');

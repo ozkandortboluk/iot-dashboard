@@ -7,6 +7,7 @@ import {
   normalizeMigrationSource,
   runAllMigrations,
   getMigrationStatus,
+  validateManifestProvenance,
 } from '../server/database/migrations/migrationRunner.js';
 import { migration002 } from '../server/database/migrations/002_timescale_hypertables.js';
 import { migration022 } from '../server/database/migrations/022_add_system_settings_and_device_activity_columns.js';
@@ -64,6 +65,12 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
         expect(manifestEntry.name).toBe(m.name);
         expect(computedHash).toBe(manifestEntry.canonicalSourceHash);
       }
+    });
+
+    it('should pass validateManifestProvenance check with 0 errors and valid provenanceStatus', () => {
+      const provResult = validateManifestProvenance();
+      expect(provResult.valid).toBe(true);
+      expect(provResult.errors).toHaveLength(0);
     });
 
     it('should produce identical checksums across comment and whitespace formatting changes', () => {
