@@ -239,15 +239,23 @@ async function verifySchemaDrift() {
       driftDetected = true;
     }
 
-    // 6c. Verify Checksum on each applied migration
+    // 6c. Verify Name Contract and Checksum on each applied migration
     for (const row of appliedRows) {
-      const manifest = CANONICAL_MIGRATION_MANIFEST[row.version];
-      if (manifest) {
-        const canonicalChecksum = manifest.canonicalChecksum;
-        const isValid = isMigrationChecksumValid(row.version, row.checksum);
+      const codeMigration = ALL_MIGRATIONS.find((m) => m.version === row.version);
+      if (codeMigration) {
+        // Enforce name contract
+        if (row.name !== codeMigration.name) {
+          console.error(
+            `❌ [NAME DRIFT DETECTED] Migration ${row.version} name mismatch! DB: '${row.name}', Codebase expects: '${codeMigration.name}'`
+          );
+          driftDetected = true;
+        }
+
+        const currentChecksum = computeMigrationChecksum(codeMigration);
+        const isValid = isMigrationChecksumValid(row.version, row.checksum, currentChecksum);
         if (!isValid) {
           console.error(
-            `❌ [CHECKSUM DRIFT DETECTED] Migration ${row.version} (${row.name}) checksum mismatch! DB: ${row.checksum}, Canonical: ${canonicalChecksum}`
+            `❌ [CHECKSUM DRIFT DETECTED] Migration ${row.version} (${row.name}) checksum mismatch! DB: ${row.checksum}, Current Content Hash: ${currentChecksum}`
           );
           driftDetected = true;
         }

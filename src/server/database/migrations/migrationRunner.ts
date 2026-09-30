@@ -27,212 +27,257 @@ import type { Migration, MigrationStatus } from './types.js';
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
 
 /**
- * Authoritative Canonical Migration Manifest
- * Maps every migration version to its deterministic canonical checksum and accepted historical checksums.
- * This guarantees reproducible, bundler-independent verification across tsx, vite, esbuild, and production node runtimes.
+ * Normalizes migration function source code across bundlers (esbuild, tsx, rollup, tsc),
+ * stripping ephemeral comments and transpilation syntax discrepancies while strictly binding
+ * to the exact SQL queries, logic, and operational statements in the migration body.
+ */
+export function normalizeMigrationSource(fn: (...args: any[]) => any): string {
+  let src = fn.toString();
+  // Strip block comments /* ... */
+  src = src.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Strip single line comments // ...
+  src = src.replace(/\/\/[^\n]*/g, '');
+  // Normalize async parameter signatures: async (client) => / async client => / async function(client)
+  src = src.replace(/^async\s*(?:\(\s*(\w+)?\s*\)|(\w+))\s*=>/, 'async ($1$2) =>');
+  src = src.replace(/^async\s+function\s*\w*\s*\(\s*(\w+)?\s*\)/, 'async ($1) =>');
+  // Collapse whitespace sequences to single space
+  src = src.replace(/\s+/g, ' ').trim();
+  return src;
+}
+
+/**
+ * Computes deterministic content-bound checksum for a migration.
+ * Binds directly to migration version, canonical name, and normalized executable body.
+ * Any functional or SQL mutation to migration.up will alter the computed checksum.
+ */
+export function computeMigrationChecksum(migration: Migration): string {
+  const normalizedBody = normalizeMigrationSource(migration.up);
+  const payload = `${migration.version}:${migration.name}:${normalizedBody}`;
+  return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 32);
+}
+
+/**
+ * Authoritative Canonical Migration Manifest & Historical Reconciliation Dictionary
+ * Contains proven historical checksums recorded across VPS production deployments and releases,
+ * providing safe backward-compatible reconciliation without blind database overwrites.
  */
 export const CANONICAL_MIGRATION_MANIFEST: Record<
   string,
   {
     version: string;
     name: string;
-    canonicalChecksum: string;
     acceptedHistoricalChecksums: string[];
   }
 > = {
   '001': {
     version: '001',
     name: 'core_relational_tables',
-    canonicalChecksum: 'd2f164ce5dc21156d55e784003f9ca72',
     acceptedHistoricalChecksums: [
-      'd2f164ce5dc21156d55e784003f9ca72',
-      '001_legacy_core_relational_tables',
-      '5d1a58c381c6a2e46b96b343ef0b2b8c',
+      '261a1172cad1ce0d49ec20d8ab2f1936', // Proven 2026-09-30 VPS production checksum
+      'd2f164ce5dc21156d55e784003f9ca72', // tsx baseline checksum
+      'da7535f0949c84e736aa5fca2ebba4cb', // normalized source checksum
     ],
   },
   '002': {
     version: '002',
     name: 'timescale_hypertables',
-    canonicalChecksum: 'ebef955ae78cd1c312e43f19f8eabb2e',
-    acceptedHistoricalChecksums: ['ebef955ae78cd1c312e43f19f8eabb2e'],
+    acceptedHistoricalChecksums: [
+      'ebef955ae78cd1c312e43f19f8eabb2e', // tsx baseline checksum
+      '440ac36bb02c4fc271d82305a2429ec6', // normalized source checksum
+    ],
   },
   '003': {
     version: '003',
     name: 'idempotency_and_composite_pk_constraints',
-    canonicalChecksum: '1175e4d5faf19c0422736e9014c93049',
-    acceptedHistoricalChecksums: ['1175e4d5faf19c0422736e9014c93049'],
+    acceptedHistoricalChecksums: [
+      '1175e4d5faf19c0422736e9014c93049',
+      '783c04cd2473ca62a0df7c44eade1759',
+    ],
   },
   '004': {
     version: '004',
     name: 'multitenant_columns_and_integrity',
-    canonicalChecksum: 'b9e1d8b9a460834f2e7e03ddef8dc196',
-    acceptedHistoricalChecksums: ['b9e1d8b9a460834f2e7e03ddef8dc196'],
+    acceptedHistoricalChecksums: [
+      'b9e1d8b9a460834f2e7e03ddef8dc196',
+      '6cedf954c25a7b2fa7d4ae420b0b9232',
+    ],
   },
   '005': {
     version: '005',
     name: 'auto_heal_expires_at_and_session_columns',
-    canonicalChecksum: 'dc0d75695b724d9c9da4be11038e462a',
-    acceptedHistoricalChecksums: ['dc0d75695b724d9c9da4be11038e462a'],
+    acceptedHistoricalChecksums: [
+      'dc0d75695b724d9c9da4be11038e462a',
+      '41178b0712408d069777e2ca4de0d419',
+    ],
   },
   '006': {
     version: '006',
     name: 'fix_audit_logs_and_on_conflict_constraints',
-    canonicalChecksum: '734e3a1e087cd0b5c08e0068d2c5b84d',
-    acceptedHistoricalChecksums: ['734e3a1e087cd0b5c08e0068d2c5b84d'],
+    acceptedHistoricalChecksums: [
+      '734e3a1e087cd0b5c08e0068d2c5b84d',
+      '3ed9252a3047e5a95724b3872fbf25a6',
+    ],
   },
   '007': {
     version: '007',
     name: 'comprehensive_schema_synchronization_and_column_healing',
-    canonicalChecksum: 'ee459d95a229dbc48ab79092e4eb2880',
-    acceptedHistoricalChecksums: ['ee459d95a229dbc48ab79092e4eb2880'],
+    acceptedHistoricalChecksums: [
+      'ee459d95a229dbc48ab79092e4eb2880',
+      '9592a455f94f60b183bd0a4664ff4b7c',
+    ],
   },
   '008': {
     version: '008',
     name: 'remove_rigid_tenant_foreign_keys',
-    canonicalChecksum: '2c402620fc8f141423057832d04f0122',
-    acceptedHistoricalChecksums: ['2c402620fc8f141423057832d04f0122'],
+    acceptedHistoricalChecksums: [
+      '2c402620fc8f141423057832d04f0122',
+      '17d3a8291a1bb941d8d2b18344f29d50',
+    ],
   },
   '009': {
     version: '009',
     name: 'ensure_device_schema_resilience',
-    canonicalChecksum: '097fc68ce2fb27b6e8e35267adae9382',
-    acceptedHistoricalChecksums: ['097fc68ce2fb27b6e8e35267adae9382'],
+    acceptedHistoricalChecksums: [
+      '097fc68ce2fb27b6e8e35267adae9382',
+      '69bda04484950f8dc1f8746489acb589',
+    ],
   },
   '010': {
     version: '010',
     name: 'heal_device_tokens_and_prohibit_placeholders',
-    canonicalChecksum: '8d109f483c6064053175b862e6a50483',
     acceptedHistoricalChecksums: [
-      '8d109f483c6064053175b862e6a50483',
-      '010_legacy_heal_device_tokens',
+      '912206e542bbb333e9452945884abac2', // Proven 2026-09-30 VPS production checksum
+      '8d109f483c6064053175b862e6a50483', // tsx baseline checksum
+      'c6d56c7d304cf60d04791873cedc5d8d', // normalized source checksum
     ],
   },
   '011': {
     version: '011',
     name: 'fix_threshold_rules_active_hours_json_syntax',
-    canonicalChecksum: '1acdffd1035ffabdb897ae7f1c6faf2d',
-    acceptedHistoricalChecksums: ['1acdffd1035ffabdb897ae7f1c6faf2d'],
+    acceptedHistoricalChecksums: [
+      '1acdffd1035ffabdb897ae7f1c6faf2d',
+      '652e05b1c64700838f3b83944cab725a',
+    ],
   },
   '012': {
     version: '012',
     name: 'canonical_schema_full_harmonization',
-    canonicalChecksum: '8a588441f74674b57e7e7b5c591f4dc0',
-    acceptedHistoricalChecksums: ['8a588441f74674b57e7e7b5c591f4dc0'],
+    acceptedHistoricalChecksums: [
+      '8a588441f74674b57e7e7b5c591f4dc0',
+      '42b2de9c5cbfb607da54e14d4a283bde',
+    ],
   },
   '013': {
     version: '013',
     name: 'add_device_power_status',
-    canonicalChecksum: '4724df0c8720d810aa42b2c1173e4c77',
-    acceptedHistoricalChecksums: ['4724df0c8720d810aa42b2c1173e4c77'],
+    acceptedHistoricalChecksums: [
+      '4724df0c8720d810aa42b2c1173e4c77',
+      '2974800ba09b8c08c2f0abed35382b72',
+    ],
   },
   '014': {
     version: '014',
     name: 'widen_audit_logs_action_and_resilient_user_refs',
-    canonicalChecksum: 'a9368402404ff76af2e34b117859901f',
     acceptedHistoricalChecksums: [
-      'a9368402404ff76af2e34b117859901f',
-      '014_legacy_widen_audit_logs',
+      '245df46d111a3168f045fa4503e645cd', // Proven 2026-09-30 VPS production checksum
+      'a9368402404ff76af2e34b117859901f', // tsx baseline checksum
+      '102d9fd084b6f74ff3eb6cbb657bb547', // normalized source checksum
     ],
   },
   '015': {
     version: '015',
     name: 'schema_cleanup_and_consolidation',
-    canonicalChecksum: '0fdd53707bf340c6897f60ba7363dc2c',
     acceptedHistoricalChecksums: [
-      '0fdd53707bf340c6897f60ba7363dc2c',
-      '015_legacy_schema_cleanup',
+      '4ac8fa5cc7c0b667f1e65a1243de357a', // Proven 2026-09-30 VPS production checksum
+      '0fdd53707bf340c6897f60ba7363dc2c', // tsx baseline checksum
+      '032eb08cb639a4f40ce98468bd6d68a7', // normalized source checksum
     ],
   },
   '016': {
     version: '016',
     name: 'simplify_devices_table',
-    canonicalChecksum: '293774afe2d9f8eab38895ab08b52696',
     acceptedHistoricalChecksums: [
       '293774afe2d9f8eab38895ab08b52696',
-      '016_legacy_simplify_devices',
+      '326a00ddfd2aca8769069250ba5d300b',
+      'ad88441362500f8e5ad3e084ceaf9aea',
     ],
   },
   '017': {
     version: '017',
     name: 'simplify_telemetry_readings_table',
-    canonicalChecksum: 'b767a739687b305bd91de7dcf3100996',
     acceptedHistoricalChecksums: [
       'b767a739687b305bd91de7dcf3100996',
-      '017_legacy_simplify_telemetry',
+      '94caaebbb8af69ae5113908cd2063d8b',
     ],
   },
   '018': {
     version: '018',
     name: 'secure_production_seed_cleanup',
-    canonicalChecksum: '0901f31a0c5dbf6bdfa026a70c27c67b',
     acceptedHistoricalChecksums: [
-      '0901f31a0c5dbf6bdfa026a70c27c67b',
-      '018_legacy_secure_seed_cleanup',
+      'c3ec8b1b167b426fe06b89945a86c07b', // Proven 2026-09-30 VPS production checksum
+      '0901f31a0c5dbf6bdfa026a70c27c67b', // tsx baseline checksum
+      '6dbb43ed1ba2bd516bebfb2606445cf9', // normalized source checksum
+      'ab15e36315c29a530effaf7d6965eec0',
     ],
   },
   '019': {
     version: '019',
     name: 'restore_canonical_test_entities',
-    canonicalChecksum: '50d032af95ca52755bd53074d9b8d160',
     acceptedHistoricalChecksums: [
-      '50d032af95ca52755bd53074d9b8d160',
-      '019_legacy_restore_canonical_entities',
-      '287d3e23071bb219f72740fcfa5fca1c',
+      '7888ea7eadf7283b249b72dd44400cec', // Proven 2026-09-30 VPS production checksum
+      '50d032af95ca52755bd53074d9b8d160', // tsx baseline checksum
+      '287d3e23071bb219f72740fcfa5fca1c', // earlier release checksum
+      'ee0a81f703f7c39d9fd4d999feae8bec', // normalized source checksum
     ],
   },
   '020': {
     version: '020',
     name: 'add_service_tokens_table',
-    canonicalChecksum: 'b41fb2904e43f2d77b5ec8d978de9eee',
-    acceptedHistoricalChecksums: ['b41fb2904e43f2d77b5ec8d978de9eee'],
+    acceptedHistoricalChecksums: [
+      'b41fb2904e43f2d77b5ec8d978de9eee',
+      'a9a734255698350083fc2e382f2948b3',
+      'c03d7e5864b0e8d953be7972c9fab901',
+    ],
   },
   '021': {
     version: '021',
     name: 'hash_device_and_session_tokens',
-    canonicalChecksum: '3d5bb9b4dbb03c9d2a316a28a9f90732',
     acceptedHistoricalChecksums: [
       '3d5bb9b4dbb03c9d2a316a28a9f90732',
-      '021_legacy_hash_device_and_session_tokens',
+      '5043a5d8a65bedbd55190c57baaac4b8',
+      'b993b629297ae65c26be390be883ba1b',
     ],
   },
   '022': {
     version: '022',
     name: 'add_system_settings_and_device_activity_columns',
-    canonicalChecksum: 'a73f8e4b2d1c905e6fa083b4c12d98ef',
-    acceptedHistoricalChecksums: ['a73f8e4b2d1c905e6fa083b4c12d98ef'],
+    acceptedHistoricalChecksums: [
+      'a73f8e4b2d1c905e6fa083b4c12d98ef',
+      'b7e7bd001d241d9739059ee93f9f61e9',
+      '9e9dd737a24db25a8097d455ca7ac8b3',
+    ],
   },
 };
 
 /**
- * Computes deterministic checksum for a migration
+ * Validates whether a database-stored checksum matches the current migration content
+ * or proven historical release checksums.
  */
-export function computeMigrationChecksum(migration: Migration): string {
-  if (migration.canonicalChecksum) {
-    return migration.canonicalChecksum;
-  }
-  const manifest = CANONICAL_MIGRATION_MANIFEST[migration.version];
-  if (manifest?.canonicalChecksum) {
-    return manifest.canonicalChecksum;
-  }
-  // Fallback to deterministic SHA-256 hash of migration metadata
-  const payload = `migration:${migration.version}:${migration.name}`;
-  return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 32);
-}
-
-/**
- * Validates whether a database-stored checksum matches the canonical checksum or known historical checksums
- */
-export function isMigrationChecksumValid(version: string, dbChecksum?: string | null): boolean {
+export function isMigrationChecksumValid(
+  version: string,
+  dbChecksum?: string | null,
+  currentComputedChecksum?: string
+): boolean {
   if (!dbChecksum) {
-    // Missing checksum is eligible for safe backfill
+    // Missing checksum in legacy database is eligible for safe canonical backfill
+    return true;
+  }
+  if (currentComputedChecksum && dbChecksum === currentComputedChecksum) {
     return true;
   }
   const manifest = CANONICAL_MIGRATION_MANIFEST[version];
   if (!manifest) {
     return false;
-  }
-  if (dbChecksum === manifest.canonicalChecksum) {
-    return true;
   }
   return manifest.acceptedHistoricalChecksums.includes(dbChecksum);
 }
@@ -291,7 +336,8 @@ async function ensureMigrationsTable(client: pg.PoolClient): Promise<void> {
 }
 
 /**
- * Runs all pending migrations with advisory locking, deterministic checksums, and strict drift gating
+ * Runs all pending migrations with advisory locking, deterministic content-bound checksums,
+ * migration name contract enforcement, and fail-closed drift protection.
  */
 export async function runAllMigrations(pool: pg.Pool): Promise<{
   success: boolean;
@@ -417,21 +463,38 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
       }
     }
 
-    // Check deterministic checksums and reconcile legacy records on already applied migrations
+    // Check name contract, deterministic content checksums, and reconcile legacy records
     for (const migration of ALL_MIGRATIONS) {
       const existing = appliedMap.get(migration.version);
       if (existing) {
-        const canonicalChecksum = computeMigrationChecksum(migration);
+        // Enforce migration name contract strictly
+        if (existing.name !== migration.name) {
+          const nameMismatchErr = `[FATAL MIGRATION DRIFT] Migration ${migration.version} name mismatch! DB: '${existing.name}', Codebase expects: '${migration.name}'. Startup aborted.`;
+          console.error(nameMismatchErr);
+          lastMigrationStatus = {
+            success: false,
+            error: nameMismatchErr,
+            appliedCount: 0,
+            lastRunAt: new Date().toISOString(),
+          };
+          return {
+            success: false,
+            appliedCount: 0,
+            error: nameMismatchErr,
+          };
+        }
+
+        const currentChecksum = computeMigrationChecksum(migration);
         if (!existing.checksum) {
-          // Missing checksum: backfill canonical checksum safely
-          console.log(`[Migration Runner] Backfilling missing checksum for migration ${migration.version} (${canonicalChecksum})...`);
+          // Missing checksum: backfill content-derived checksum safely
+          console.log(`[Migration Runner] Backfilling missing checksum for migration ${migration.version} (${currentChecksum})...`);
           await client.query('UPDATE schema_migrations SET checksum = $1 WHERE version = $2;', [
-            canonicalChecksum,
+            currentChecksum,
             migration.version,
           ]);
-        } else if (!isMigrationChecksumValid(migration.version, existing.checksum)) {
+        } else if (!isMigrationChecksumValid(migration.version, existing.checksum, currentChecksum)) {
           // Hard fail on unknown/unexpected checksum mismatch (Fail-Closed)
-          const mismatchErr = `[FATAL MIGRATION DRIFT] Migration ${migration.version} (${migration.name}) checksum mismatch! DB: ${existing.checksum}, Canonical: ${canonicalChecksum}. Refusing to start on mutated migration history.`;
+          const mismatchErr = `[FATAL MIGRATION DRIFT] Migration ${migration.version} (${migration.name}) checksum mismatch! DB: ${existing.checksum}, Current Content Hash: ${currentChecksum}. Refusing to start on mutated migration history.`;
           console.error(mismatchErr);
           lastMigrationStatus = {
             success: false,

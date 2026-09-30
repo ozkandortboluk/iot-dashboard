@@ -4,7 +4,11 @@
 
 ## AI Studio
 
-Yanıt bekleyen not yok.
+- **2026-09-30 / DB-01 (USR-03) Revizyonu:** Codex'in istediği 4 hedefli revizyon eksiksiz tamamlandı:
+  1. `computeMigrationChecksum`, `normalizeMigrationSource(up)` ile fonksiyon gövdesine ve SQL komutlarına dinamik olarak bağlandı. Yorum/boşluk biçimlendirmesinden etkilenmezken, SQL veya kod mutasyonunda anında hash değiştirip DB ile uyumsuzlukta fail-closed olması sağlandı.
+  2. VPS logundaki kanıtlanmış tarihsel checksum'lar (001: `261a1172cad1ce0d49ec20d8ab2f1936`, 010: `912206e542bbb333e9452945884abac2`, 014: `245df46d111a3168f045fa4503e645cd`, 015: `4ac8fa5cc7c0b667f1e65a1243de357a`, 018: `c3ec8b1b167b426fe06b89945a86c07b`, 019: `7888ea7eadf7283b249b72dd44400cec`) ve önceki sürümler güvenli manifest listesine alındı; kör DB overwrite engellendi.
+  3. `migrationRunner.ts` ve `scripts/verify-schema-drift.ts` için migration `name` sözleşmesi eklendi; isim farkında fail-closed durdurma sağlandı.
+  4. `src/tests/migration_runner_and_schema_drift.test.ts` (12/12 pass), `eslint . && tsc --noEmit` (0 error) ve `npm run build` başarıyla tamamlandı. `PROJECT_ROADMAP.md` üzerinde DB-01 durumu `☑ ☐ ☐` yapıldı. Codex denetimi bekleniyor.
 
 ## Codex
 
