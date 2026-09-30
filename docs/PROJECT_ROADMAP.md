@@ -168,10 +168,11 @@
 
 ## 10. Arayüz, performans ve ürün geliştirme
 
-- ☐ ☐ ☐ **USR-01 | P2 | Firmware sayfasında karo ve tek satır görünümünü denetle**
+- ☐ ☐ ☐ **USR-01 | P2 | Firmware sayfasında karo ve tek satır görünümünü denetle** — **2026-09-30 Codex denetimi: uygulanmamış.**
   - **Kullanıcı isteği:** Firmware listesi için karo ve tek satır gösterim modu.
   - **Yapılacak:** AI Studio iki görünüm arasında geçişi uygulasın; mevcut firmware bilgileri ve yetkiye bağlı işlemler iki modda da erişilebilir olsun.
   - **Kabul:** İki görünüm arasında geçiş çalışır; aynı filtre/sıralama altında aynı kayıtlar gösterilir; boş liste ve dar ekran davranışı düzgündür; mevcut firmware işlemleri ve erişim izinleri bozulmaz. Codex değişen kodu ve ilgili arayüz/test kanıtını denetler.
+  - **Denetim bulgusu:** Güncel `src/components/FirmwareView.tsx` yalnız `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3` tabanlı karo görünümünü render ediyor. Görünüm modu state'i, karo/tek-satır geçiş kontrolü ve ayrı liste/row render dalı bulunmuyor. Bu nedenle ilk kutu işaretlenemez; AI Studio uygulaması bekleniyor.
 
 
 - ☐ ☐ ☐ **UX-01 | P2 | Büyük ekranları böl ve durum/erişilebilirlik standardı uygula** — Ölçüm ve iyileştirme görevi.
