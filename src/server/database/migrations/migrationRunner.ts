@@ -76,14 +76,17 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '261a1172cad1ce0d49ec20d8ab2f1936', // Proven 2026-09-30 VPS production checksum
       'd2f164ce5dc21156d55e784003f9ca72', // tsx baseline checksum
       'da7535f0949c84e736aa5fca2ebba4cb', // normalized source checksum
+      '7c1203ee1174eb0251bdec618b81dab2',
     ],
   },
   '002': {
     version: '002',
     name: 'timescale_hypertables',
     acceptedHistoricalChecksums: [
+      '6a4fde889f777b0d6b8751a704e7b175', // Proven database checksum
       'ebef955ae78cd1c312e43f19f8eabb2e', // tsx baseline checksum
       '440ac36bb02c4fc271d82305a2429ec6', // normalized source checksum
+      '222629ceb93777c383d327b654503b83',
     ],
   },
   '003': {
@@ -92,6 +95,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       '1175e4d5faf19c0422736e9014c93049',
       '783c04cd2473ca62a0df7c44eade1759',
+      '662f930f67bdb8a5345194da22b908e0',
     ],
   },
   '004': {
@@ -100,6 +104,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       'b9e1d8b9a460834f2e7e03ddef8dc196',
       '6cedf954c25a7b2fa7d4ae420b0b9232',
+      'db598cc77565cd5a62db46d3d96c6f94',
     ],
   },
   '005': {
@@ -108,6 +113,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       'dc0d75695b724d9c9da4be11038e462a',
       '41178b0712408d069777e2ca4de0d419',
+      'ee7e51016600eb378f31096542f6afe2',
     ],
   },
   '006': {
@@ -116,6 +122,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       '734e3a1e087cd0b5c08e0068d2c5b84d',
       '3ed9252a3047e5a95724b3872fbf25a6',
+      '20b36914111a3d34856b143ca38d0ac5',
     ],
   },
   '007': {
@@ -124,6 +131,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       'ee459d95a229dbc48ab79092e4eb2880',
       '9592a455f94f60b183bd0a4664ff4b7c',
+      'b5aaf51bfb75ba8e5891d8d92ea4acb4',
     ],
   },
   '008': {
@@ -132,6 +140,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       '2c402620fc8f141423057832d04f0122',
       '17d3a8291a1bb941d8d2b18344f29d50',
+      '7a39a4fe209da0d73a4b9b87426acdaf',
     ],
   },
   '009': {
@@ -140,6 +149,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       '097fc68ce2fb27b6e8e35267adae9382',
       '69bda04484950f8dc1f8746489acb589',
+      '78026d1276f5e8dc7ec42539c0813911',
     ],
   },
   '010': {
@@ -149,6 +159,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '912206e542bbb333e9452945884abac2', // Proven 2026-09-30 VPS production checksum
       '8d109f483c6064053175b862e6a50483', // tsx baseline checksum
       'c6d56c7d304cf60d04791873cedc5d8d', // normalized source checksum
+      '0e35860a00e46fc3fc30be7752de7b63',
     ],
   },
   '011': {
@@ -173,6 +184,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       '4724df0c8720d810aa42b2c1173e4c77',
       '2974800ba09b8c08c2f0abed35382b72',
+      '998a30d0c767b5fd5f8788e483096b45',
     ],
   },
   '014': {
@@ -182,6 +194,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '245df46d111a3168f045fa4503e645cd', // Proven 2026-09-30 VPS production checksum
       'a9368402404ff76af2e34b117859901f', // tsx baseline checksum
       '102d9fd084b6f74ff3eb6cbb657bb547', // normalized source checksum
+      '90c352eaae3ba201e8ed205b648c1346',
     ],
   },
   '015': {
@@ -191,6 +204,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '4ac8fa5cc7c0b667f1e65a1243de357a', // Proven 2026-09-30 VPS production checksum
       '0fdd53707bf340c6897f60ba7363dc2c', // tsx baseline checksum
       '032eb08cb639a4f40ce98468bd6d68a7', // normalized source checksum
+      '5b02dcd376d8d55307c5f6e5d8e8251a',
     ],
   },
   '016': {
@@ -200,6 +214,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '293774afe2d9f8eab38895ab08b52696',
       '326a00ddfd2aca8769069250ba5d300b',
       'ad88441362500f8e5ad3e084ceaf9aea',
+      'ff08ece41843556f207c4a0c91988a7b',
     ],
   },
   '017': {
@@ -208,6 +223,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
     acceptedHistoricalChecksums: [
       'b767a739687b305bd91de7dcf3100996',
       '94caaebbb8af69ae5113908cd2063d8b',
+      'f274bb7df432993d7ee48777309efacc',
     ],
   },
   '018': {
@@ -218,6 +234,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '0901f31a0c5dbf6bdfa026a70c27c67b', // tsx baseline checksum
       '6dbb43ed1ba2bd516bebfb2606445cf9', // normalized source checksum
       'ab15e36315c29a530effaf7d6965eec0',
+      '797240f7d708aa4a5042193bdfa9757d',
     ],
   },
   '019': {
@@ -228,6 +245,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '50d032af95ca52755bd53074d9b8d160', // tsx baseline checksum
       '287d3e23071bb219f72740fcfa5fca1c', // earlier release checksum
       'ee0a81f703f7c39d9fd4d999feae8bec', // normalized source checksum
+      '12c2e97b1d790354fd893839d330abcd',
     ],
   },
   '020': {
@@ -237,6 +255,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       'b41fb2904e43f2d77b5ec8d978de9eee',
       'a9a734255698350083fc2e382f2948b3',
       'c03d7e5864b0e8d953be7972c9fab901',
+      '5f2852cd9bf7e21f16176394a6b88014',
     ],
   },
   '021': {
@@ -246,6 +265,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       '3d5bb9b4dbb03c9d2a316a28a9f90732',
       '5043a5d8a65bedbd55190c57baaac4b8',
       'b993b629297ae65c26be390be883ba1b',
+      '8c4915f29710dcf0b8cf2e693795f339',
     ],
   },
   '022': {
@@ -255,6 +275,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<
       'a73f8e4b2d1c905e6fa083b4c12d98ef',
       'b7e7bd001d241d9739059ee93f9f61e9',
       '9e9dd737a24db25a8097d455ca7ac8b3',
+      '1708a3f0fda1ce01216fbcd9c27b1431',
     ],
   },
 };
