@@ -620,56 +620,25 @@ export class PostgresRepository {
         await client.query("SET statement_timeout = '30s';");
         await client.query("SET lock_timeout = '10s';");
 
-        // 1. Authoritative Schema Auditor & Self-Healer with Repair -> Verify Loop
-        const healRes = await SchemaAuditor.autoHeal(client);
-        if (!healRes.verificationPassed || !healRes.isHealthy) {
-          console.error(`[PostgreSQL Schema FAIL] SchemaAuditor Repair -> Verify doğrulaması başarısız oldu! Skor: %${healRes.afterReport.score}. Hatalar:`, healRes.errors);
-        } else if (healRes.actionsTaken.length > 0) {
-          console.log(`[PostgreSQL Schema PASS] SchemaAuditor ${healRes.actionsTaken.length} adet otomatik şema düzeltmesi uyguladı ve doğruladı.`);
+        const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+
+        // 1. Authoritative Schema Check: Versioned migrations are the sole authority in production.
+        // Auto-heal DDL execution is restricted to non-production/development environments.
+        if (!isProdEnv) {
+          const healRes = await SchemaAuditor.autoHeal(client);
+          if (!healRes.verificationPassed || !healRes.isHealthy) {
+            console.warn(`[PostgreSQL Dev Schema] SchemaAuditor non-prod report (Skor: %${healRes.afterReport.score}). Hatalar:`, healRes.errors);
+          } else if (healRes.actionsTaken.length > 0) {
+            console.log(`[PostgreSQL Dev Schema] SchemaAuditor ${healRes.actionsTaken.length} adet otomatik şema düzeltmesi uyguladı.`);
+          }
         }
 
-        // 2. Data synchronization and schema harmonization for backwards compatibility
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS system_settings (
-            key VARCHAR(64) PRIMARY KEY,
-            value JSONB NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-          );
-          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
-          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
-          ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
-          ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(256);
-          DO $$
-          BEGIN
-            IF EXISTS (
-              SELECT 1 FROM pg_indexes 
-              WHERE tablename = 'notifications' 
-                AND indexname = 'idx_notifications_event_key' 
-                AND indexdef NOT ILIKE '%UNIQUE%'
-            ) THEN
-              DROP INDEX IF EXISTS idx_notifications_event_key;
-            END IF;
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
-          END $$;
-          UPDATE notifications SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
-          UPDATE notifications SET read = is_read WHERE read IS NULL AND is_read IS NOT NULL;
-          UPDATE notifications SET is_read = read WHERE is_read IS NULL AND read IS NOT NULL;
-          UPDATE threshold_rules SET tenant_id = user_id WHERE (tenant_id IS NULL OR tenant_id = '') AND user_id IS NOT NULL;
-          UPDATE dispatch_logs SET tenant_id = user_id WHERE tenant_id IS NULL AND user_id IS NOT NULL;
-          UPDATE devices SET data_flow_active = TRUE WHERE data_flow_active IS NULL;
-          UPDATE device_commands SET command = command_name WHERE (command IS NULL OR command = '') AND (command_name IS NOT NULL AND command_name != '');
-          UPDATE device_commands SET command_name = command WHERE (command_name IS NULL OR command_name = '') AND (command IS NOT NULL AND command != '');
-          UPDATE device_commands SET command_type = 'GENERAL_COMMAND' WHERE command_type IS NULL OR command_type = '';
-        `).catch(() => {});
-
-        // 6. Check existing user count to avoid resurrecting deleted users or force-seeding
+        // 2. Check existing user count in isolated test environments
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
         const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && (process.env.VITEST === 'true' || process.env.VITEST === '1');
-        const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
         if (totalUsers === 0 && isIsolatedTestRunner && !isProdEnv) {
-          // Strictly in unit test runner environments against non-production databases, populate initial database test paths
           try {
             await InitialDataSeeder.populateInitialDatabase(p2);
           } catch (seedErr: any) {
@@ -677,12 +646,13 @@ export class PostgresRepository {
           }
         }
 
+        // 3. Strict schema contract verification (Read-only verification)
         const contractValid = await this.verifySchemaContract(client);
         this.isSchemaEnsured = contractValid;
         if (!contractValid) {
           console.error('[PostgreSQL ensureTelemetrySchema FATAL] Schema contract verification failed! Readiness 503 kalacak.');
         } else {
-          console.log('[PostgreSQL ensureTelemetrySchema] Schema and contract successfully verified.');
+          console.log('[PostgreSQL ensureTelemetrySchema] Schema and contract successfully verified. Readiness OK.');
         }
       } catch (err: any) {
         this.isSchemaEnsured = false;

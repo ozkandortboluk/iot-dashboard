@@ -5,6 +5,8 @@ export const migration002: Migration = {
   version: '002',
   name: 'timescale_hypertables',
   disableTransaction: true,
+  canonicalChecksum: 'ebef955ae78cd1c312e43f19f8eabb2e',
+  acceptedHistoricalChecksums: ['ebef955ae78cd1c312e43f19f8eabb2e'],
   up: async (client: pg.PoolClient) => {
     // 0. Ensure no stale aborted transaction on the client connection
     try {
@@ -68,7 +70,6 @@ export const migration002: Migration = {
 
     // 2. Convert telemetry_readings into hypertable (7 days interval)
     try {
-      // Check if already registered as hypertable
       let alreadyHypertable = false;
       try {
         const htCheck = await client.query(`
@@ -88,7 +89,13 @@ export const migration002: Migration = {
         console.log('[Migration 002] telemetry_readings is already a TimescaleDB hypertable.');
       }
     } catch (err: any) {
-      console.warn('[Migration 002] create_hypertable telemetry_readings notice:', err?.message || err);
+      const isAlready =
+        err?.message?.includes('already a hypertable') ||
+        err?.message?.includes('is already partitioned');
+      if (!isAlready) {
+        console.error('[Migration 002 FATAL] Failed to create hypertable for telemetry_readings:', err?.message || err);
+        throw err;
+      }
     }
 
     // 3. Convert simulation_telemetry_readings into hypertable (1 day interval)
@@ -112,7 +119,13 @@ export const migration002: Migration = {
         console.log('[Migration 002] simulation_telemetry_readings is already a TimescaleDB hypertable.');
       }
     } catch (err: any) {
-      console.warn('[Migration 002] create_hypertable simulation_telemetry_readings notice:', err?.message || err);
+      const isAlready =
+        err?.message?.includes('already a hypertable') ||
+        err?.message?.includes('is already partitioned');
+      if (!isAlready) {
+        console.error('[Migration 002 FATAL] Failed to create hypertable for simulation_telemetry_readings:', err?.message || err);
+        throw err;
+      }
     }
 
     // 4. Configure compression policies on TimescaleDB if supported
@@ -129,10 +142,19 @@ export const migration002: Migration = {
       `);
       console.log('[Migration 002] Compression policy enabled on telemetry_readings (7 days).');
     } catch (err: any) {
-      console.warn('[Migration 002] Compression policy notice (skipping, may be unsupported by community license or already configured):', err?.message || err);
+      const isIgnorable =
+        err?.message?.includes('already exists') ||
+        err?.message?.includes('unsupported') ||
+        err?.message?.includes('license');
+      if (isIgnorable) {
+        console.warn('[Migration 002] Compression policy notice (skipping):', err?.message || err);
+      } else {
+        console.error('[Migration 002 FATAL] Compression configuration failed on TimescaleDB:', err?.message || err);
+        throw err;
+      }
     }
   },
-  down: async (client: pg.PoolClient) => {
+  down: async (_client: pg.PoolClient) => {
     console.warn('[Migration 002] Down migration invoked.');
   },
 };

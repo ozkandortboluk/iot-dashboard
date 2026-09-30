@@ -6,6 +6,8 @@ export interface Migration {
   up: (client: pg.PoolClient) => Promise<void>;
   down?: (client: pg.PoolClient) => Promise<void>;
   disableTransaction?: boolean;
+  canonicalChecksum?: string;
+  acceptedHistoricalChecksums?: string[];
 }
 
 export interface AppliedMigration {
@@ -25,6 +27,7 @@ export interface MigrationStatus {
     name: string;
     applied: boolean;
     appliedAt?: string;
+    checksum?: string;
   }[];
   hasFailed: boolean;
   lastError?: string;

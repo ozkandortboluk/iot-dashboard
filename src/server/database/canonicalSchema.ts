@@ -1108,6 +1108,21 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'idx_service_tokens_tenant_id', columns: ['tenant_id'] },
         { name: 'idx_service_tokens_user_id', columns: ['user_id'] }
       ]
+    },
+
+    // 21. SYSTEM SETTINGS TABLE
+    system_settings: {
+      name: 'system_settings',
+      description: 'Encrypted system configurations, operational flags, and persisted vault secrets',
+      primaryKey: ['key'],
+      columns: [
+        { name: 'key', type: 'VARCHAR(64)', nullable: false, primaryKey: true },
+        { name: 'value', type: 'JSONB', nullable: false },
+        { name: 'updated_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
+      ],
+      indexes: [
+        { name: 'idx_system_settings_updated_at', columns: ['updated_at DESC'] }
+      ]
     }
   }
 };
@@ -1136,6 +1151,8 @@ export function getCanonicalTableCreationOrder(): string[] {
     'firmwares',
     'ota_deployment_jobs',
     'schema_migrations',
+    'service_tokens',
+    'system_settings',
   ];
 }
 
