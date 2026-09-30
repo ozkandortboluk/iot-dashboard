@@ -91,13 +91,11 @@
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
-- ☑ ☐ ☐ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **AI Studio tüm gereksinimleri başarıyla tamamladı ve Codex incelemesine sundu.**
-  - **Kanıt / kabul edilenler:** `git rev-parse` + `git show` ile gerçek Git-object provenance doğrulaması yapılıyor. Null checksum pristine + legacy (001-017) koşulunda kontrollü reconciliation ile çözüldü.
-  - **Düzeltmeler:** (1) DB-01 doğrulama job'ı için `TEST_DATABASE_URL` zorunlu kılındı; DB erişilemezse test fail-closed vererek başarısız olur. (2) "001–021 → 022 upgrade" senaryosu artık `schema_migrations` tablosuna gerçek VPS baseline checksum'larını yazar ve upgrade işlemini tamamen `runAllMigrations(pool)` üzerinden icra eder. Sonuç başarılıdır, sadece pending 022 migration'ı uygulanır, kullanıcı ve cihaz verileri korunur. (3) DB-01 drift hatasına yol açan `78a059e5cd4f5494bd8243cb68b95f0c` checksum kaydı migration 003 manifestine 'observed' olarak eklendi ve sorun giderildi.
-- ☑ ☐ ☐ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — **AI Studio tüm gereksinimleri başarıyla tamamladı.**
-  - **Kanıt:** `db.ts` başarılı hydration sonrası `users/devices/rules/dashboards/activeAlarms` koleksiyonlarını boş olsa bile authoritative snapshot ile değiştiriyor.
-  - **Düzeltmeler:** Başarılı authoritative hydration durumunda passwords, sessions, firmwares ve otaJobs dahil tüm cache yapıları PostgreSQL snapshot'ı ile tamamen değiştirilir (merge/doluluk kontrolü kaldırılmıştır). Query hatası aldığında RAM korunur; başarılı boş sonuçta ise RAM temizlenir. `src/tests/db_hydration.test.ts` ile tüm hata ve boş hydration akışları test edilmiştir.
-
+- ☑ ☐ ☑ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **Ana çözüm kabul edilebilir; yalnız historical upgrade fixture'ında tek nokta düzeltilmeli.**
+  - **Kanıt:** `2f26d374...` ile gerçek DB upgrade testi artık doğrudan `runAllMigrations(pool)` çağırıyor, yalnız pending 022 için `appliedCount === 1` bekliyor ve örnek user/device verisinin korunduğunu kontrol ediyor. Provenance, source-integrity, controlled null-checksum reconciliation ve parity düzenlemeleri korunuyor.
+  - **Tek kalan nokta:** Test açıklaması “gerçek VPS baseline checksum” diyor fakat `real_postgres_migrations.test.ts` fixture'ı 001–021 satırlarına `manifestEntry.canonicalSourceHash` yazıyor. Bu nedenle historical/observed checksum kabul yolu bu testte kullanılmıyor.
+  - **Nokta atışı düzeltme:** 001–021 fixture checksum'larını mümkün olan sürümlerde manifestteki gerçek `provenanceStatus: 'observed'` saha checksumlarından seç; observed kaydı olmayan sürüm için açıkça canonical fallback kullan. Sonra aynı `runAllMigrations(pool)` yolunu çalıştır. Historical checksum kabul edilmiyorsa test fail etsin.
+  - **Onay için yeterli:** Bu fixture değişikliğiyle gerçek DB upgrade testi başarılıysa DB-01 kapanır. Yeni migration mimarisi, ek concurrency testi veya başka kapsam istenmiyor.
 - ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Yeni Codex bulgusu.**
   - **Kabul:** Migration failure/pending/drift → live 200, ready 503; migration+schema doğrulaması tam → ready 200; Docker healthcheck bu sözleşmeyi kullanır.
 
@@ -119,9 +117,6 @@
 
 ## 6. Cihaz, WebSocket, komut ve otomasyon
 
-- ☑ ☐ ☐ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — **AI Studio tüm gereksinimleri başarıyla tamamladı.**
-  - **Kanıt:** `automation.engine.ts` komutu doğrudan geçici WS/RAM yoluna göndermek yerine `commandService.createCommand()` kullanıyor; tenant/device sahipliği execution anında kontrol ediliyor ve createCommand hata verirse otomasyon başarısız dönüyor. PostgreSQL claim tarafında `FOR UPDATE SKIP LOCKED` ile atomik claim uygulanmış.
-  - **Düzeltmeler:** `isPostgresProductionMode()` true iken PostgreSQL claim hatasında RAM fallback yapılması kesin olarak engellenmiştir. DB hata aldığında hata fırlatılır, komutlar DB düzelene kadar pending/güvenli durumda bırakılır. `src/tests/iot_command_claim_fallback.test.ts` ile tüm fail-closed ve success claim akışları test edilmiştir.
 
 - ☐ ☐ ☐ **IOT-02 | P1 | WebSocket örnekleri ve smoke istemcisini gerçek auth protokolüne eşitle** — Doğrulanmış kod bulgusu.
   - **Yapılacak:** Cihazda x-api-key/Authorization desteklenen handshake’i, tarayıcıda HttpOnly cookie’yi kullan. Query token kabulünü geri açma. OpenAPI/HelpView/ESP örneğini birlikte güncelle.
