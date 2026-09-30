@@ -383,7 +383,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Değişmez migration içeriğinden deterministik checksum üret; uyumsuzluğu fail ettir. 002 zorunlu başarısızlıklarını yukarı taşı; version kaydını ancak sözleşme doğrulanınca yaz. Gerçek migration sonrası schema verifier’ı CI gate yap.
   - **Kabul:** Temiz DB, önceki sürümden upgrade, kasıtlı checksum değişimi, başarısız hypertable/compression ve iki instance yarışında doğru exit/readiness; tsx ve bundle aynı checksum.
 
-- ☐ ☐ ☐ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — Doğrulanmış kod bulgusu.
+- ☑ ☐ ☐ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — **AI Studio uyguladı.**
   - **Kanıt:** `src/server/db.ts` → `initPostgresRepository`: users/devices/rules yalnız gelen dizi length>0 iken değiştiriliyor; password map eski değerlerle birleştiriliyor.
   - **Etki:** DB’de bütün kayıtlar silinmiş veya farklı DB’ye geçilmişse eski cihaz/kural/kullanıcı RAM’de kalabilir.
   - **Yapılacak:** Başarılı boş sonuç ile sorgu hatasını ayır; başarılı snapshot’ı boş olsa da atomik uygula. Cache kimliğini DB/tenant ile ilişkilendir; eski credential cache’ini temizle.

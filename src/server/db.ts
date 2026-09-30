@@ -537,26 +537,15 @@ class LocalDatabase {
         hydrated.rules = hydrated.rules.filter((r: any) => !isTestOrEphemeralArtifact(r.id) && !isTestOrEphemeralArtifact(r.deviceId));
         hydrated.users = hydrated.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
 
-        if (hydrated.users.length > 0) {
-          this.data.users = hydrated.users;
-          this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
-        }
-
-        if (hydrated.devices.length > 0) {
-          this.data.devices = hydrated.devices;
-        }
-
-        if (hydrated.rules.length > 0) {
-          this.data.rules = hydrated.rules;
-        }
-
-        if (hydrated.dashboards.length > 0) {
-          this.data.dashboards = hydrated.dashboards;
-        }
-
-        if (hydrated.alarms.length > 0) {
-          this.data.activeAlarms = hydrated.alarms;
-        }
+        // DB-02: Authoritative PostgreSQL snapshot application (empty collections must also overwrite RAM)
+        this.data.users = hydrated.users;
+        this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
+        this.data.devices = hydrated.devices;
+        this.data.rules = hydrated.rules;
+        this.data.dashboards = hydrated.dashboards;
+        this.data.activeAlarms = hydrated.alarms;
+        if (hydrated.firmwares) this.data.firmwares = hydrated.firmwares;
+        if (hydrated.otaJobs) this.data.otaJobs = hydrated.otaJobs;
 
         if (hydrated.sessions && hydrated.sessions.length > 0) {
           const sessionMap = new Map<string, UserSession>();
