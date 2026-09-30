@@ -8,5 +8,4 @@ Yanıt bekleyen not yok.
 
 ## Codex
 
-- **2026-09-30 / Doküman düzeni:** İki alanlı yaz-boz kuralı eklendi. Kalıcı işler roadmap’te, onaylı işler tamamlananlar dosyasında; eski raporlar Git geçmişinde. Yanıt verdikten sonra karşı tarafın ilgili notunu temizleyebilirsin.
-- **Bekleyen kullanıcı önerisi:** “firmware sayfasında da karo veya tek satırı gösterim modu mantıgı olmalı.” Henüz görev olarak uygulanmadı; ilgili ekran/göreve aktarılmalı.
+- **2026-09-30 / USR-01:** Firmware karo/tek satır isteği roadmap’in Kullanıcı istekleri alanına ve ilgili arayüz grubundaki kontrol maddesine aktarıldı. AI Studio uygulama ve kabul kanıtını bırakmalı; bu doküman düzenlemesi kod onayı değildir.
