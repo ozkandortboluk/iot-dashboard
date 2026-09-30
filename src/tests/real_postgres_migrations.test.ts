@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
-import { runAllMigrations, ALL_MIGRATIONS } from '../server/database/migrations/migrationRunner.js';
+import { runAllMigrations, ALL_MIGRATIONS, CANONICAL_MIGRATION_MANIFEST } from '../server/database/migrations/migrationRunner.js';
 
 describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
   let pool: pg.Pool | null = null;
@@ -16,8 +16,8 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       const client = await pool.connect();
       client.release();
       isDbReachable = true;
-    } catch {
-      // Skip running real assertions if no database is running in this sandboxed preview container.
+    } catch (err) {
+      isDbReachable = false;
       pool = null;
     }
   });
@@ -30,8 +30,12 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
   it('should run clean install (001 -> latest) on completely empty DB and verify READY status', async () => {
     if (!isDbReachable || !pool) {
-      console.log('⚠️ Skipping real PostgreSQL clean install test (No reachable database at: ' + dbUrl + ')');
-      return;
+      if (process.env.TEST_DATABASE_URL) {
+        expect.fail(`❌ [DB-01 FATAL] TEST_DATABASE_URL/PostgreSQL is configured but unreachable at: ${dbUrl}. Real PostgreSQL tests are MANDATORY for DB-01 validation.`);
+      } else {
+        console.log('⚠️ Skipping real PostgreSQL clean install test (TEST_DATABASE_URL is not configured and no local postgres found).');
+        return;
+      }
     }
 
     const schemaName = 'test_clean_migration_install';
@@ -40,40 +44,59 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       // 1. Setup isolated clean schema sandbox
       await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`);
       await client.query(`CREATE SCHEMA ${schemaName};`);
-      await client.query(`SET search_path TO ${schemaName};`);
+
+      // Set user search path to direct all pool client checkouts to our clean schema
+      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
+      client.release();
 
       // 2. Perform fresh clean install via migrationRunner
       const res = await runAllMigrations(pool);
       expect(res.success).toBe(true);
       expect(res.appliedCount).toBe(22);
 
-      // 3. Verify all canonical tables are present
-      const tableCheck = await client.query(`
-        SELECT table_name FROM information_schema.tables 
-        WHERE table_schema = $1 AND table_type = 'BASE TABLE';
-      `, [schemaName]);
-      const tableNames = new Set(tableCheck.rows.map((r: any) => r.table_name));
+      // Re-connect to verify
+      const client2 = await pool.connect();
+      try {
+        await client2.query(`SET search_path TO ${schemaName};`);
 
-      expect(tableNames.has('users')).toBe(true);
-      expect(tableNames.has('devices')).toBe(true);
-      expect(tableNames.has('telemetry_readings')).toBe(true);
-      expect(tableNames.has('schema_migrations')).toBe(true);
+        // 3. Verify all canonical tables are present
+        const tableCheck = await client2.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_type = 'BASE TABLE';
+        `, [schemaName]);
+        const tableNames = new Set(tableCheck.rows.map((r: any) => r.table_name));
 
-      // 4. Verify migration count in schema_migrations
-      const countRes = await client.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
-      expect(Number(countRes.rows[0].count)).toBe(22);
-    } finally {
-      // Clean sandbox schema
-      await client.query(`SET search_path TO public;`).catch(() => {});
-      await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
-      client.release();
+        expect(tableNames.has('users')).toBe(true);
+        expect(tableNames.has('devices')).toBe(true);
+        expect(tableNames.has('telemetry_readings')).toBe(true);
+        expect(tableNames.has('schema_migrations')).toBe(true);
+
+        // 4. Verify migration count in schema_migrations
+        const countRes = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
+        expect(Number(countRes.rows[0].count)).toBe(22);
+      } finally {
+        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
+        await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+        client2.release();
+      }
+    } catch (err: any) {
+      // Cleanup user search_path on failure
+      const cleanupClient = await pool.connect();
+      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
+      await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+      cleanupClient.release();
+      throw err;
     }
   });
 
   it('should run upgrade from historical state (001-021) to latest (022) with data preservation', async () => {
     if (!isDbReachable || !pool) {
-      console.log('⚠️ Skipping real PostgreSQL upgrade test (No reachable database at: ' + dbUrl + ')');
-      return;
+      if (process.env.TEST_DATABASE_URL) {
+        expect.fail(`❌ [DB-01 FATAL] TEST_DATABASE_URL/PostgreSQL is configured but unreachable at: ${dbUrl}. Real PostgreSQL tests are MANDATORY for DB-01 validation.`);
+      } else {
+        console.log('⚠️ Skipping real PostgreSQL upgrade test (TEST_DATABASE_URL is not configured and no local postgres found).');
+        return;
+      }
     }
 
     const schemaName = 'test_historical_upgrade';
@@ -99,9 +122,12 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
       for (const m of migrations021) {
         await m.up(client);
+        const manifestEntry = CANONICAL_MIGRATION_MANIFEST[m.version];
+        expect(manifestEntry).toBeDefined();
+
         await client.query(
           `INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3);`,
-          [m.version, m.name, 'some_checksum_placeholder']
+          [m.version, m.name, manifestEntry.canonicalSourceHash]
         );
       }
 
@@ -116,36 +142,45 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         VALUES ('dev_test_historical', 'Historical Device', 'meter', 'some_key', 'offline');
       `);
 
-      // 3. Perform live upgrade to 022
-      // Execute the remaining 022 migration
-      const m022 = ALL_MIGRATIONS.find((m: any) => m.version === '022');
-      expect(m022).toBeDefined();
-
-      if (m022) {
-        await m022.up(client);
-        await client.query(
-          `INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3);`,
-          [m022.version, m022.name, 'some_checksum_placeholder']
-        );
-      }
-
-      // 4. Verify entity preservation (data/schema is preserved!)
-      const userRes = await client.query(`SELECT id, email, name FROM users WHERE id = 'usr_test_historical';`);
-      expect(userRes.rows).toHaveLength(1);
-      expect(userRes.rows[0].email).toBe('test@historical.com');
-
-      const devRes = await client.query(`SELECT id, name FROM devices WHERE id = 'dev_test_historical';`);
-      expect(devRes.rows).toHaveLength(1);
-      expect(devRes.rows[0].name).toBe('Historical Device');
-
-      // 5. Verify the drift / schema structure check
-      const totalCount = await client.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
-      expect(Number(totalCount.rows[0].count)).toBe(22);
-    } finally {
-      // Clean sandbox schema
-      await client.query(`SET search_path TO public;`).catch(() => {});
-      await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+      // Set default search path of user to this historical sandbox schema
+      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
       client.release();
+
+      // 3. Perform live upgrade to 022 using the official runAllMigrations
+      // Only the pending 022 should be detected and applied!
+      const res = await runAllMigrations(pool);
+      expect(res.success).toBe(true);
+      expect(res.appliedCount).toBe(1); // Exactly 1 migration (022) applied!
+
+      // Connect to verify state after upgrade
+      const client2 = await pool.connect();
+      try {
+        await client2.query(`SET search_path TO ${schemaName};`);
+
+        // 4. Verify entity preservation (data/schema is preserved!)
+        const userRes = await client2.query(`SELECT id, email, name FROM users WHERE id = 'usr_test_historical';`);
+        expect(userRes.rows).toHaveLength(1);
+        expect(userRes.rows[0].email).toBe('test@historical.com');
+
+        const devRes = await client2.query(`SELECT id, name FROM devices WHERE id = 'dev_test_historical';`);
+        expect(devRes.rows).toHaveLength(1);
+        expect(devRes.rows[0].name).toBe('Historical Device');
+
+        // 5. Verify the drift / schema structure check
+        const totalCount = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
+        expect(Number(totalCount.rows[0].count)).toBe(22);
+      } finally {
+        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
+        await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+        client2.release();
+      }
+    } catch (err: any) {
+      // Cleanup user search_path on failure
+      const cleanupClient = await pool.connect();
+      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
+      await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+      cleanupClient.release();
+      throw err;
     }
   });
 });

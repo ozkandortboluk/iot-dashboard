@@ -557,31 +557,15 @@ class LocalDatabase {
         hydrated.users = hydrated.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
 
         // DB-02: Authoritative PostgreSQL snapshot application (empty collections must also overwrite RAM)
-        this.data.users = hydrated.users;
-        this.data.passwords = { ...this.data.passwords, ...hydrated.passwords };
-        this.data.devices = hydrated.devices;
-        this.data.rules = hydrated.rules;
-        this.data.dashboards = hydrated.dashboards;
-        this.data.activeAlarms = hydrated.alarms;
-        if (hydrated.firmwares) this.data.firmwares = hydrated.firmwares;
-        if (hydrated.otaJobs) this.data.otaJobs = hydrated.otaJobs;
-
-        if (hydrated.sessions && hydrated.sessions.length > 0) {
-          const sessionMap = new Map<string, UserSession>();
-          if (this.data.sessions) {
-            this.data.sessions.forEach((s) => sessionMap.set(s.token, s));
-          }
-          hydrated.sessions.forEach((s) => sessionMap.set(s.token, s));
-          this.data.sessions = Array.from(sessionMap.values());
-        }
-
-        if (hydrated.firmwares && hydrated.firmwares.length > 0) {
-          this.data.firmwares = hydrated.firmwares;
-        }
-
-        if (hydrated.otaJobs && hydrated.otaJobs.length > 0) {
-          this.data.otaJobs = hydrated.otaJobs;
-        }
+        this.data.users = hydrated.users || [];
+        this.data.passwords = hydrated.passwords || {}; // Overwrite snapshot instead of merging
+        this.data.devices = hydrated.devices || [];
+        this.data.rules = hydrated.rules || [];
+        this.data.dashboards = hydrated.dashboards || [];
+        this.data.activeAlarms = hydrated.alarms || [];
+        this.data.sessions = hydrated.sessions || []; // Overwrite snapshot instead of merging/checking length
+        this.data.firmwares = hydrated.firmwares || []; // Overwrite unconditionally
+        this.data.otaJobs = hydrated.otaJobs || []; // Overwrite unconditionally
 
         if (hydrated.serviceConfig) {
           this.data.serviceConfig = hydrated.serviceConfig;
@@ -1736,7 +1720,8 @@ class LocalDatabase {
         }
         return claimed;
       } catch (err: any) {
-        console.warn(`[Command Sync Warning] claimPendingCommands Postgres failure, falling back to memory: ${err?.message || err}`);
+        console.error(`[Command Sync Error] claimPendingCommands Postgres failure in production mode. Refusing RAM fallback: ${err?.message || err}`);
+        throw err;
       }
     }
 

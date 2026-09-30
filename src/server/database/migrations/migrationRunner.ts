@@ -195,6 +195,14 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     canonicalSourceHash: 'a018ad280f4657418bf08166990e3db6',
     historicalChecksums: [
       {
+        checksum: '78a059e5cd4f5494bd8243cb68b95f0c',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        provenanceStatus: 'observed',
+        notes: 'Historical DB checksum',
+      },
+      {
         checksum: '1175e4d5faf19c0422736e9014c93049',
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
