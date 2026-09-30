@@ -83,12 +83,6 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
   }
 
   if (!token || !setupService.validateSetupToken(token)) {
-    const isDevOrStudio = process.env.NODE_ENV !== 'production' || process.env.AI_STUDIO === 'true';
-    if (isDevOrStudio) {
-      next();
-      return;
-    }
-
     res.status(401).json({
       success: false,
       code: 'SETUP_TOKEN_REQUIRED',

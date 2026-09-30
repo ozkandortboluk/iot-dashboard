@@ -5,9 +5,46 @@ import { isSshTunnelAllowed } from '../database/connection.js';
 import { authenticateUser, requireAdmin } from '../middleware/auth.js';
 import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
 import { setupService } from '../services/setup.service.js';
+import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { db } from '../db.js';
 
 export const sshTunnelRouter = Router();
+
+function getClientIp(req: Request): string {
+  if (req.ip) return req.ip;
+  const socketIp = req.socket?.remoteAddress;
+  if (socketIp) return socketIp;
+  return '127.0.0.1';
+}
+
+function validateTunnelTarget(
+  sshHost?: string,
+  sshPort?: number,
+  remoteDbHost?: string,
+  remoteDbPort?: number,
+  localPort?: number
+): { valid: boolean; error?: string } {
+  if (!sshHost || typeof sshHost !== 'string' || !sshHost.trim()) {
+    return { valid: false, error: 'Geçerli bir SSH Sunucu adresi (host) girilmelidir.' };
+  }
+  const cleanHost = sshHost.trim();
+  if (/[;&|`$<>\s]/.test(cleanHost)) {
+    return { valid: false, error: 'SSH Sunucu adresi geçersiz karakterler içermektedir.' };
+  }
+  const port = Number(sshPort);
+  if (sshPort !== undefined && (isNaN(port) || port < 1 || port > 65535)) {
+    return { valid: false, error: 'SSH Port numarası 1 ile 65535 arasında olmalıdır.' };
+  }
+  const dbPort = Number(remoteDbPort);
+  if (remoteDbPort !== undefined && (isNaN(dbPort) || dbPort < 1 || dbPort > 65535)) {
+    return { valid: false, error: 'Uzak veritabanı port numarası 1 ile 65535 arasında olmalıdır.' };
+  }
+  const lPort = Number(localPort);
+  if (localPort !== undefined && (isNaN(lPort) || lPort < 1024 || lPort > 65535)) {
+    return { valid: false, error: 'Yerel tünel port numarası 1024 ile 65535 arasında olmalıdır.' };
+  }
+  return { valid: true };
+}
 
 /**
  * Authorization guard for SSH Tunnel operations (/status, /test, /connect, /disconnect, /probe-fingerprint):
@@ -48,16 +85,24 @@ function guardSshTunnelPolicy(req: Request, res: Response, next: NextFunction) {
  * Safely inspects the remote SSH server's public key fingerprint WITHOUT sending any user credentials.
  */
 sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_probe:${clientIp}`, 15);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      message: 'Çok fazla istek yapıldı. Lütfen biraz bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   try {
     const { sshHost, sshPort } = req.body || {};
-    if (!sshHost) {
-      return res.status(400).json({
-        success: false,
-        message: 'Lütfen SSH Sunucu Adresi (Host) giriniz.',
-      });
+    const validation = validateTunnelTarget(sshHost, sshPort);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, message: validation.error });
     }
 
-    const result = await sshTunnelService.probeHostFingerprint(String(sshHost), Number(sshPort) || 22);
+    const result = await sshTunnelService.probeHostFingerprint(String(sshHost).trim(), Number(sshPort) || 22);
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({
@@ -77,14 +122,18 @@ sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Respons
     const isDbConnected = Boolean(db.postgresRepo?.isReady());
     const databaseState = db.getDatabaseState();
     const activeEngine = db.getActiveEngine();
+    const isSchemaEnsured = Boolean(db.postgresRepo?.getIsSchemaEnsured());
+    const isSetupDone = setupService.isSetupCompleted();
+    const migrationSuccess = Boolean(db.postgresRepo?.getLatestMigrationRunStatus()?.success);
 
     return res.json({
       success: true,
       isTunnelAllowed: isSshTunnelAllowed(),
       transportConnected: state.status === 'connected',
       dbAuthenticated: isDbConnected,
-      schemaReady: isDbConnected && databaseState === 'READY',
-      setupComplete: databaseState !== 'SETUP',
+      schemaReady: isDbConnected && isSchemaEnsured && databaseState === 'READY',
+      setupComplete: isSetupDone,
+      migrationSuccessful: migrationSuccess,
       isDbConnected,
       databaseState,
       activeEngine,
@@ -104,6 +153,16 @@ sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Respons
  * Test SSH Credentials & verify host fingerprint (Protected)
  */
 sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_test:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      message: 'Çok fazla istek yapıldı. Lütfen biraz bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   try {
     const {
       sshHost,
@@ -123,6 +182,11 @@ sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async 
         success: false,
         message: 'Lütfen SSH Sunucu Adresi (Host) ve Kullanıcı Adı giriniz.',
       });
+    }
+
+    const validation = validateTunnelTarget(sshHost, sshPort, remoteDbHost, remoteDbPort, localPort);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, message: validation.error });
     }
 
     const config: SSHTunnelConfig = {
@@ -154,6 +218,16 @@ sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async 
  * Connect and establish SSH Tunnel with host key pinning & verification (Protected)
  */
 sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_connect:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      message: 'Çok fazla istek yapıldı. Lütfen biraz bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
   try {
     const {
       sshHost,
@@ -175,6 +249,11 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
       });
     }
 
+    const validation = validateTunnelTarget(sshHost, sshPort, remoteDbHost, remoteDbPort, localPort);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, message: validation.error });
+    }
+
     const config: SSHTunnelConfig = {
       sshHost: String(sshHost).trim(),
       sshPort: Number(sshPort) || 22,
@@ -189,6 +268,16 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
     };
 
     const result = await sshTunnelService.connectTunnel(config);
+    // Secret-free audit logging (SEC-01)
+    const actorId = (req as any).user?.id || 'setup_recovery';
+    const actorName = (req as any).user?.name || 'Kurulum Yöneticisi';
+    db.addAuditLog(
+      actorId,
+      actorName,
+      `SSH Tüneli ${result.success ? 'başarıyla bağlandı' : 'bağlantı denendi'}: ${config.sshHost}:${config.sshPort} -> ${config.remoteDbHost}:${config.remoteDbPort} (Yerel Port: ${config.localPort})`,
+      result.success ? 'low' : 'medium'
+    ).catch(() => {});
+
     return res.json(result);
   } catch (err: any) {
     systemLogger.error('database', `SSH Tünel başlatma hatası: ${err?.message}`);
@@ -203,9 +292,12 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
  * POST /api/system/ssh-tunnel/disconnect & POST /api/setup/ssh-tunnel/disconnect
  * Disconnect active SSH Tunnel (Protected)
  */
-sshTunnelRouter.post('/disconnect', requireSshTunnelAuth, guardSshTunnelPolicy, async (_req: Request, res: Response) => {
+sshTunnelRouter.post('/disconnect', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
   try {
     const result = await sshTunnelService.disconnectTunnel();
+    const actorId = (req as any).user?.id || 'setup_recovery';
+    const actorName = (req as any).user?.name || 'Kurulum Yöneticisi';
+    db.addAuditLog(actorId, actorName, 'SSH Tüneli bağlantısı sonlandırıldı.', 'low').catch(() => {});
     return res.json(result);
   } catch (err: any) {
     systemLogger.error('database', `SSH Tünel kapatma hatası: ${err?.message}`);

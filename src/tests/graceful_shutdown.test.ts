@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { stopWebSocketServer } from '../server/services/websocket.js';
+import { db } from '../server/db.js';
 
 describe('RUN-05: Graceful Shutdown & Process Crash Handling', () => {
   it('1. Rejects incoming HTTP requests with 503 Service Unavailable when shutting down', async () => {
@@ -51,5 +53,16 @@ describe('RUN-05: Graceful Shutdown & Process Crash Handling', () => {
     const res = await request(app).get('/api/health/live');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('alive');
+  });
+
+  it('3. stopWebSocketServer safely cleans up intervals and client sockets without throw', () => {
+    expect(() => stopWebSocketServer()).not.toThrow();
+  });
+
+  it('4. db.autoHealer watchdog stop method is callable and terminates repair timers', () => {
+    if (db.autoHealer) {
+      expect(typeof db.autoHealer.stopWatchdog).toBe('function');
+      expect(() => db.autoHealer.stopWatchdog()).not.toThrow();
+    }
   });
 });

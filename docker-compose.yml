@@ -52,13 +52,17 @@ services:
       POSTGRES_PORT: ${DB_PORT:-5432}
       POSTGRES_USER: ${POSTGRES_USER:-iot_user}
       POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
     volumes:
       - app_data:/app/data
       - ./secrets:/app/secrets:ro
     secrets:
       - encryption_key
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -72,7 +76,7 @@ services:
     restart: unless-stopped
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"

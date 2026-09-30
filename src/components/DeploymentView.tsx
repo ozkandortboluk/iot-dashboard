@@ -72,15 +72,15 @@ export const DeploymentView: React.FC = () => {
     restart: unless-stopped
     shm_size: 256mb
     environment:
-      POSTGRES_USER: iot_user
-      POSTGRES_PASSWORD: ${customDbPassword}
-      POSTGRES_DB: iot_dashboard
+      POSTGRES_USER: \${POSTGRES_USER:-iot_user}
+      POSTGRES_PASSWORD: \${POSTGRES_INIT_PASSWORD:-\${POSTGRES_PASSWORD:-${customDbPassword}}}
+      POSTGRES_DB: \${POSTGRES_DB:-iot_dashboard}
     ports:
-      - "127.0.0.1:5432:5432" # Dış ağa kapalı, yalnız sunucu içi (loopback) erişim
+      - "\${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}" # Dış ağa kapalı, yalnız sunucu içi (loopback) erişim
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U iot_user -d iot_dashboard"]
+      test: ["CMD-SHELL", "pg_isready -U \${POSTGRES_USER:-iot_user} -d \${POSTGRES_DB:-iot_dashboard}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -90,32 +90,40 @@ export const DeploymentView: React.FC = () => {
 
   # IoT Telemetri, REST & WebSocket Uygulama Sunucusu
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iot-dashboard-app
     container_name: nexus_app
     restart: unless-stopped
     depends_on:
       timescaledb:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${customAppPort}:3000"
+      - "\${PORT_BIND:-127.0.0.1:${customAppPort}:3000}"
     environment:
       NODE_ENV: production
       PORT: 3000
-      ENCRYPTION_KEY: \${ENCRYPTION_KEY}
-      JWT_SECRET: \${JWT_SECRET}
-      DB_HOST: timescaledb
-      DB_PORT: 5432
-      DB_NAME: iot_dashboard
-      DB_USER: iot_user
-      POSTGRES_HOST: timescaledb
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: iot_user
-      POSTGRES_DB: iot_dashboard
+      ENCRYPTION_KEY: \${ENCRYPTION_KEY:-}
+      DB_HOST: \${DB_HOST:-timescaledb}
+      DB_PORT: \${DB_PORT:-5432}
+      DB_NAME: \${POSTGRES_DB:-iot_dashboard}
+      DB_USER: \${POSTGRES_USER:-iot_user}
+      POSTGRES_HOST: \${DB_HOST:-timescaledb}
+      POSTGRES_PORT: \${DB_PORT:-5432}
+      POSTGRES_USER: \${POSTGRES_USER:-iot_user}
+      POSTGRES_DB: \${POSTGRES_DB:-iot_dashboard}
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-${customDbPassword}}
+      DATABASE_URL: \${DATABASE_URL:-}
+      JWT_SECRET: \${JWT_SECRET:-}
+      SESSION_SECRET: \${SESSION_SECRET:-}
     volumes:
       - app_data:/app/data
       - ./secrets:/app/secrets:ro
+    secrets:
+      - encryption_key
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -130,7 +138,7 @@ export const DeploymentView: React.FC = () => {
     restart: unless-stopped
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
@@ -145,9 +153,25 @@ export const DeploymentView: React.FC = () => {
     networks:
       - nexus_net
 
+  # Opsiyonel Yönetim Arayüzü (Adminer)
+  adminer:
+    image: adminer:latest
+    container_name: nexus_adminer
+    restart: unless-stopped
+    ports:
+      - "\${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}"
+    networks:
+      - nexus_net
+    depends_on:
+      - timescaledb
+
 volumes:
   timescaledb_data:
   app_data:
+
+secrets:
+  encryption_key:
+    file: ./secrets/encryption_key
 
 networks:
   nexus_net:

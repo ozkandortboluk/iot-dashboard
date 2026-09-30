@@ -14,6 +14,26 @@ function safeTerminateUserSockets(userId: string, code = 1008, reason = 'Session
   } catch {}
 }
 
+function safeTerminateUserOtherSockets(userId: string, keepTokenOrId: string, code = 1008, reason = 'Other sessions revoked') {
+  try {
+    import('../services/websocket.js').then((wsMod) => {
+      if (typeof wsMod.terminateUserOtherSockets === 'function') {
+        wsMod.terminateUserOtherSockets(userId, keepTokenOrId, code, reason);
+      }
+    }).catch(() => {});
+  } catch {}
+}
+
+function safeTerminateSessionSocket(sessionToken: string, code = 1008, reason = 'Session deleted') {
+  try {
+    import('../services/websocket.js').then((wsMod) => {
+      if (typeof wsMod.terminateSessionSocket === 'function') {
+        wsMod.terminateSessionSocket(sessionToken, code, reason);
+      }
+    }).catch(() => {});
+  } catch {}
+}
+
 export class UserRepository {
   constructor(private db: any) {}
 
@@ -75,10 +95,14 @@ export class UserRepository {
   public async deleteSession(token: string): Promise<boolean> {
     if (!token) return false;
     const cleanToken = token.trim();
+    safeTerminateSessionSocket(cleanToken, 1008, 'Session logged out');
     const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
 
     if (this.isPgReady()) {
-      await this.db.postgresRepo.deleteSession(cleanToken).catch((e: any) => console.warn('[PG Error]', e?.message || e));
+      await this.db.postgresRepo.deleteSession(cleanToken).catch((e: any) => {
+        console.warn('[PG Error deleteSession]', e?.message || e);
+        throw e;
+      });
     }
 
     const initialLength = (this.db.data.sessions || []).length;
@@ -603,7 +627,12 @@ export class UserRepository {
   public async terminateUserSessions(userId: string) {
     safeTerminateUserSockets(userId, 1008, 'Session terminated');
     if (this.isPgReady()) {
-      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
+      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => {
+        console.warn('[PG Error terminateUserSessions]', e?.message || e);
+        throw e;
+      });
+      // Synchronize in-memory sessions cache
+      this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
       return;
     }
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
@@ -611,12 +640,16 @@ export class UserRepository {
   }
 
   public async terminateUserOtherSessions(userId: string, currentToken: string) {
+    safeTerminateUserOtherSockets(userId, currentToken, 1008, 'Other sessions revoked');
     const currentHash = crypto.createHash('sha256').update(currentToken.trim()).digest('hex');
     if (this.isPgReady()) {
       await this.db.postgresRepo.query(
         `DELETE FROM user_sessions WHERE user_id = $1 AND token_hash <> $2 AND token <> $3;`,
         [userId, currentHash, currentToken]
-      ).catch((e: any) => console.warn('[PG Error terminateOtherSessions]', e?.message || e));
+      ).catch((e: any) => {
+        console.warn('[PG Error terminateOtherSessions]', e?.message || e);
+        throw e;
+      });
     }
     this.db.data.sessions = (this.db.data.sessions || []).filter(
       (s: any) => s.userId !== userId || s.tokenHash === currentHash || s.token === currentToken
@@ -650,9 +683,23 @@ export class UserRepository {
   }
 
   public async softDeleteUser(userId: string, adminId: string, adminName: string) {
+    safeTerminateUserSockets(userId, 1008, 'User account suspended');
     if (this.isPgReady()) {
-      await this.db.postgresRepo.softDeleteUser(userId).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      await this.db.postgresRepo.deleteUserSessions(userId).catch(() => {});
+      await this.db.postgresRepo.softDeleteUser(userId).catch((e: any) => {
+        console.warn('[PG Error softDeleteUser]', e?.message || e);
+        throw e;
+      });
+      await this.db.postgresRepo.deleteUserSessions(userId).catch((e: any) => {
+        console.warn('[PG Error deleteUserSessions during softDelete]', e?.message || e);
+        throw e;
+      });
+      // Synchronize in-memory user status
+      const cached = (this.db.data?.users || []).find((u: any) => u.id === userId);
+      if (cached) {
+        cached.status = 'suspended';
+        cached.deletedAt = new Date().toISOString();
+      }
+      this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
       this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Askıya Alındı (Soft Delete): ID ${userId}`, 'high');
       return;
     }

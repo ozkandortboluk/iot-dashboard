@@ -317,13 +317,6 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
  */
 export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean; ca?: string } | undefined {
   if (!url) return undefined;
-  if (url.includes('sslmode=disable') || url.includes('sslmode=off') || url.includes('ssl=false') || url.includes('ssl=0')) {
-    return undefined;
-  }
-
-  // Check for strict verification modes (verify-full, verify-ca)
-  const isVerifyFull = url.includes('sslmode=verify-full') || process.env.PGSSLMODE === 'verify-full';
-  const isVerifyCa = url.includes('sslmode=verify-ca') || process.env.PGSSLMODE === 'verify-ca';
 
   let caCert: string | undefined;
   const caPath = process.env.PGSSLROOTCERT || process.env.DATABASE_SSL_CA_PATH || '/run/secrets/pg_ssl_root_cert';
@@ -334,6 +327,39 @@ export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean
   } else if (process.env.DATABASE_SSL_CA) {
     caCert = process.env.DATABASE_SSL_CA;
   }
+
+  // Parse hostname from connection URL to determine internal Docker / loopback status
+  const hostMatch = url.match(/@([^:/]+)(?::\d+)?/);
+  const host = hostMatch ? hostMatch[1].toLowerCase() : '';
+  const isInternalDockerOrLoopback =
+    !host ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === 'timescaledb' ||
+    host === 'nexus_timescaledb' ||
+    host === 'postgres' ||
+    host === 'db';
+
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  const isRemote = !isInternalDockerOrLoopback;
+
+  // Strict Production Policy (SEC-08):
+  // In production (NODE_ENV=production or VPS_PRODUCTION=true) with a remote database,
+  // TLS verification is strictly mandatory. sslmode=disable and PG_ALLOW_INSECURE_TLS are rejected.
+  if (isProd && isRemote) {
+    return {
+      rejectUnauthorized: true,
+      ...(caCert ? { ca: caCert } : {}),
+    };
+  }
+
+  if (url.includes('sslmode=disable') || url.includes('sslmode=off') || url.includes('ssl=false') || url.includes('ssl=0')) {
+    return undefined;
+  }
+
+  // Check for strict verification modes (verify-full, verify-ca)
+  const isVerifyFull = url.includes('sslmode=verify-full') || process.env.PGSSLMODE === 'verify-full';
+  const isVerifyCa = url.includes('sslmode=verify-ca') || process.env.PGSSLMODE === 'verify-ca';
 
   // When a trusted CA is explicitly provided or strict verification is requested, reject unauthorized certificates
   const rejectUnauthorizedExplicit =
@@ -364,30 +390,12 @@ export function getPostgresSslOption(url: string): { rejectUnauthorized: boolean
     url.includes('cockroachlabs.cloud') ||
     url.includes('cloudsql');
 
-  // Parse hostname from connection URL to determine internal Docker / loopback status
-  const hostMatch = url.match(/@([^:/]+)(?::\d+)?/);
-  const host = hostMatch ? hostMatch[1] : '';
-  const isInternalDockerOrLoopback =
-    !host ||
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === 'timescaledb' ||
-    host === 'nexus_timescaledb' ||
-    host === 'postgres' ||
-    host === 'db' ||
-    !host.includes('.'); // hostnames without a domain dot are internal docker container names
+  const allowInsecureTls = !isProd && process.env.PG_ALLOW_INSECURE_TLS === 'true';
 
-  const isProductionRemote =
-    process.env.NODE_ENV === 'production' &&
-    !isInternalDockerOrLoopback;
-
-  const allowInsecureTls = process.env.PG_ALLOW_INSECURE_TLS === 'true';
-
-  if (hasSslParam || isCloudHost || isProductionRemote) {
-    // Remote hosts and cloud endpoints verify certificates by default unless explicitly opted into allowInsecureTls
-    const rejectUnauth = !allowInsecureTls;
+  if (hasSslParam || isCloudHost || (isRemote && !allowInsecureTls)) {
+    // Remote hosts and cloud endpoints verify certificates by default
     return {
-      rejectUnauthorized: rejectUnauth,
+      rejectUnauthorized: !allowInsecureTls,
       ...(caCert ? { ca: caCert } : {}),
     };
   }

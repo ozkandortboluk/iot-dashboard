@@ -185,6 +185,9 @@ export class SetupService {
       // 3. Check protected system secrets vault (AES-256-GCM encrypted)
       const vaultDb = systemSecretsService.getDatabaseConfig();
       if (vaultDb.isConfigured && vaultDb.host) {
+        const isInternalHost = ['localhost', '127.0.0.1', 'timescaledb', 'nexus_timescaledb', 'postgres', 'db'].includes(vaultDb.host.toLowerCase());
+        const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+        const rejectUnauthorized = isProdEnv && !isInternalHost ? true : (vaultDb.sslMode ? vaultDb.sslMode !== 'disable' : false);
         this.runtimeConfig = {
           host: vaultDb.host,
           port: vaultDb.port,
@@ -192,7 +195,7 @@ export class SetupService {
           user: vaultDb.user,
           password: vaultDb.password,
           sslMode: (vaultDb.sslMode as any) || 'disable',
-          rejectUnauthorized: false,
+          rejectUnauthorized,
         };
         return this.runtimeConfig;
       }

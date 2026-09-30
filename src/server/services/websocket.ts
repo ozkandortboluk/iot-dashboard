@@ -19,6 +19,8 @@ export interface AuthenticatedWebSocket extends WebSocket {
   messageCount?: number;
   lastRateReset?: number;
   subscribedChannels?: Set<'physical' | 'simulation'>;
+  sessionToken?: string;
+  sessionId?: string;
 }
 
 const MAX_WS_PAYLOAD = 1024 * 1024; // 1MB max payload per frame
@@ -595,12 +597,52 @@ export function stopWebSocketServer() {
   }
   if (wss) {
     try {
+      (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
+        try {
+          client.close(1001, 'Server shutting down');
+          client.terminate();
+        } catch {}
+      });
       wss.close();
     } catch {
       // ignore
     }
     wss = null;
   }
+}
+
+/**
+ * SEC-06: Terminates other active WebSocket connections for a given user ID, preserving current session.
+ */
+export function terminateUserOtherSockets(userId: string, keepTokenOrId: string, code = 1008, reason = 'Other sessions revoked'): void {
+  if (!wss || !userId) return;
+  const cleanKeep = keepTokenOrId ? keepTokenOrId.trim() : '';
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
+    if (client.user && client.user.id === userId) {
+      if (client.sessionToken !== cleanKeep && client.sessionId !== cleanKeep) {
+        try {
+          client.close(code, reason);
+          client.terminate();
+        } catch {}
+      }
+    }
+  });
+}
+
+/**
+ * SEC-06: Terminates active WebSocket connections for a specific session token or session ID.
+ */
+export function terminateSessionSocket(tokenOrId: string, code = 1008, reason = 'Session logged out'): void {
+  if (!wss || !tokenOrId) return;
+  const clean = tokenOrId.trim();
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((client) => {
+    if (client.sessionToken === clean || client.sessionId === clean) {
+      try {
+        client.close(code, reason);
+        client.terminate();
+      } catch {}
+    }
+  });
 }
 
 export function initWebSocketServer(server: http.Server) {
@@ -699,6 +741,7 @@ export function initWebSocketServer(server: http.Server) {
           ws.isAuth = Boolean(user || device);
           ws.user = user || undefined;
           ws.device = device || undefined;
+          ws.sessionToken = connectionToken || undefined;
           wss!.emit('connection', ws, request);
         });
       }
@@ -709,28 +752,48 @@ export function initWebSocketServer(server: http.Server) {
     }
   });
 
-  // Server-side heartbeat to terminate dead connections and revoke invalidated sessions
+  // Server-side heartbeat to terminate dead connections and revoke invalidated sessions (SEC-06)
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(async () => {
     if (!wss) return;
-    (wss.clients as Set<AuthenticatedWebSocket>).forEach((ws) => {
+    for (const ws of Array.from(wss.clients as Set<AuthenticatedWebSocket>)) {
       if (ws.isAlive === false) {
-        return ws.terminate();
+        ws.terminate();
+        continue;
       }
       ws.isAlive = false;
 
       // Periodic security validation of active sessions and accounts
       if (ws.user) {
-        const currentUser = db.getUsers().find((u) => u.id === ws.user!.id);
-        if (currentUser) {
-          if (currentUser.status === 'suspended' || currentUser.deletedAt) {
-            try { ws.close(1008, 'Account suspended or deleted'); } catch { ws.terminate(); }
-            return;
+        // SEC-06: Authoritatively verify session token against database/state
+        if (ws.sessionToken) {
+          try {
+            const verifiedSession = await db.verifySessionAsync(ws.sessionToken);
+            if (!verifiedSession || !verifiedSession.user) {
+              try { ws.close(1008, 'Session revoked or expired'); ws.terminate(); } catch {}
+              continue;
+            }
+          } catch {
+            try { ws.close(1008, 'Session verification failed'); ws.terminate(); } catch {}
+            continue;
           }
-          // Dynamic role synchronization
-          if (ws.user.role !== currentUser.role) {
-            ws.user = { ...currentUser };
-          }
+        }
+
+        // Authoritatively verify user status and non-deleted state
+        let currentUser: any;
+        try {
+          const users = await db.getUsersAsync();
+          currentUser = users.find((u: any) => u.id === ws.user!.id);
+        } catch {
+          currentUser = db.getUsers().find((u: any) => u.id === ws.user!.id);
+        }
+        if (!currentUser || currentUser.status === 'suspended' || currentUser.deletedAt) {
+          try { ws.close(1008, 'Account suspended or deleted'); ws.terminate(); } catch {}
+          continue;
+        }
+        // Dynamic role synchronization
+        if (ws.user.role !== currentUser.role) {
+          ws.user = { ...currentUser };
         }
       }
 
@@ -739,7 +802,7 @@ export function initWebSocketServer(server: http.Server) {
       } catch {
         ws.terminate();
       }
-    });
+    }
   }, 30000);
 
   wss.on('connection', (ws: AuthenticatedWebSocket, req?: http.IncomingMessage) => {
@@ -857,6 +920,7 @@ export function initWebSocketServer(server: http.Server) {
               ws.isAuth = true;
               ws.user = verifiedUser;
               ws.device = undefined;
+              ws.sessionToken = token.trim();
               console.log(`[WebSocket] Kullanıcı oturumu doğrulandı: ${verifiedUser.name} (${verifiedUser.role})`);
               safeSend(
                 ws,

@@ -126,7 +126,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Tek DB transaction içinde koşullu token tüketimi/row lock, parola güncelleme ve oturum iptali uygula. Production DB hatasında bellek fallback yapma. Bildirim gönderimini commit sonrasına al.
   - **Kabul:** Aynı tokenla paralel iki istekten yalnız biri başarılı; DB hata enjeksiyonunda atomik rollback; restart sonrası token durumu aynı; kullanılan/süresi biten token reddedilir.
 
-- ☑ ☐ ☑ **SEC-06 | P0 | Oturum iptali ve rol değişiminde açık WebSocket yetkisini kaldır** — Doğrulanmış kod bulgusu.
+- ☑ ☐ ☐ **SEC-06 | P0 | Oturum iptali ve rol değişiminde açık WebSocket yetkisini kaldır** — Doğrulanmış kod bulgusu.
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Role update/delete/terminateUserSessions yollarında socket kapatma çağrıları eklenmiş. Ancak `deleteSession()` (normal logout) ve `terminateUserOtherSessions()` ilgili açık socket’i kapatmıyor. Heartbeat session token süresini/DB iptalini doğrulamıyor; yalnız RAM kullanıcı status/role kontrolü yapıyor, bulunmayan kullanıcıyı reddetmiyor. PG softDelete yolu RAM’i güncellemeden dönebiliyor; session silme hataları da yutuluyor.
   - **Sonraki adım / yeniden kabul:** Socket’i doğrulanmış session kimliğiyle indeksle; logout/current/other-session revoke ve softDelete/suspend için ilgili socket’i kapat. Heartbeat’te süre ve authoritative session/user geçerliliğini doğrula; kayıp kullanıcıyı reddet. DB iptal hatasını başarılı göstermeden yay. Canlı socket ile logout/reset/suspend/role downgrade/expiry ve PG hata matrisi testini çalıştır.
 
@@ -146,7 +146,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Yalnız maskelenmiş host/port/database sakla; parolayı sunucudaki Vault’a gönder. Eski localStorage anahtarını temizleyen geçiş ekle; API’nin secret içermeyen yanıtını kullan.
   - **Kabul:** URL girme/kaydetme/test/çıkış/yenileme sonrası localStorage, sessionStorage ve istemci loglarında parola bulunmamalı.
 
-- ☑ ☐ ☑ **SEC-08 | P1 | Uzak PostgreSQL TLS doğrulamasını varsayılan güvenli yap** — Doğrulanmış kod bulgusu.
+- ☑ ☐ ☐ **SEC-08 | P1 | Uzak PostgreSQL TLS doğrulamasını varsayılan güvenli yap** — Doğrulanmış kod bulgusu.
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Uzak production için varsayılan rejectUnauthorized artık true. Fakat `PG_ALLOW_INSECURE_TLS=true` false döndürüyor; sslmode=disable erken çıkışı var ve production kontrolü VPS_PRODUCTION’ı kapsamıyor. Nokta içermeyen tüm host adları iç Docker kabul ediliyor; Vault config restore yolu da rejectUnauthorized:false taşıyor. Açık profil ayrımı tamamlanmamış.
   - **Sonraki adım / yeniden kabul:** Prod/AI Studio uzak DB için CA+hostname doğrulamasını zorunlu yap; genel insecure env’i production’da reddet. Docker iç ağı ve doğrulanmış SSH loopback’i açık profillerle ayır, kısa hostname’i otomatik güvenilir sayma. NODE_ENV/VPS_PRODUCTION tutarlı olsun. Geçerli/yanlış CA, hostname, direkt uzak, Docker ve SSH test matrisi ekle.
 
@@ -156,7 +156,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Doğrudan uzak bağlantıda CA/hostname doğrulamasını zorunlu kıl; TLS’siz Docker iç bağlantı ve doğrulanmış SSH loopback profilini ayrı tanımla. Sessiz insecure fallback yapma.
   - **Kabul:** Geçerli CA kabul; yanlış CA/hostname reddi; Docker iç ağı ve doğrulanmış SSH akışı çalışır.
 
-- ☑ ☐ ☑ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Doğrulanmış kod bulgusu.
+- ☑ ☐ ☐ **SEC-09 | P1 | Yetkiyi sabit kullanıcı kimliğinden değil rolden türet** — Doğrulanmış kod bulgusu.
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** isAdminUser artık sabit ID’ye değil role/status/deletedAt’a bakıyor; repository’lerde ID admin bypass’ı kaldırılmış. Ancak `canUserAccessDevice()` admin olmayan suspended/deleted kullanıcıyı baştan reddetmiyor; tenant membership kontrolü yalnız ID eşleşmesiyle çalışıyor, üyeliğin aktifliğini kontrol etmiyor. Kabulde istenen aktif hesap/üyelik sözleşmesi bu yardımcıda eksik.
   - **Sonraki adım / yeniden kabul:** Merkezi erişim yardımcısında her kullanıcı için aktif hesap ve aktif membership kontrolünü uygula. usr_admin/admin ID’si customer ve suspended olduğunda ayrıcalık sağlamasın; eski sentinel tenant’ın veri erişimi vermediğini test et. HTTP/WS negatif matrisiyle rol düşürmeyi doğrula.
 
@@ -166,7 +166,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Yapılacak:** Tek yetkilendirme fonksiyonu kullan; rol, aktif hesap ve aktif tenant üyeliğini denetle. Kimlik sabitlerini yalnız veri geçiş eşlemesi için kullan.
   - **Kabul:** Aynı ID admin/customer/askıya alınmış rollerinde test edilmeli; rol düşürülünce ayrıcalık kalmamalı.
 
-- ☑ ☐ ☑ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **Yeniden uygulandı (Header handshake + DB Fixture).**
+- ☑ ☐ ☐ **SEC-11 | P1 | CI smoke testindeki sabit cihaz API anahtarını kaldır** — **Yeniden uygulandı (Header handshake + DB Fixture).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Smoke query-string auth yerine x-api-key kullanıyor ve rastgele fixture key üretiyor. Fakat `getSampleDeviceApiKey()` herhangi bir DATABASE_URL üzerinde mevcut cihazın api_key değerini okuyor veya dev_smk_01 ekliyor/yeniliyor; izole test hedefi doğrulaması yok. PG hata durumunda db.json’a sessiz fallback var; fixture sunucu başladıktan sonra ekleniyor. Son CI smoke’a ulaşmadığından deterministik auth başarısı kanıtlanmadı.
   - **Sonraki adım / yeniden kabul:** Smoke’u yalnız doğrulanmış izole test DB/role ile çalıştır; mevcut gerçek cihaz anahtarını kullanma/değiştirme. Fixture’ı gerçek schema/tenant/FK sözleşmesine göre server boot öncesi oluştur ve temizle. PG profili seçiliyken db.json fallback yerine fail; header handshake ile gerçek authenticated WS + negatif query-auth testi çalıştır.
 
@@ -174,7 +174,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `scripts/smoke-test.mjs` içerisinde query-string `?apiKey=` yetkilendirmesi tamamen kaldırıldı ve IOT-02 `x-api-key` HTTP header handshake yapısına geçildi. CI PostgreSQL ve yerel `db.json` ortamlarında `dev_smk_01` fixture cihazı dinamik `nex_smk_...` API anahtarı ve sha256 hash ile veritabanına kaydedilerek kimlik doğrulamanın deterministik ve güvenli çalışması sağlandı.
   - **Kabul:** Temiz CI ortamında smoke test deterministik çalışır; kaynak kodda sabit cihaz API key bulunmaz; header handshake kullanılır.
 
-- ☑ ☐ ☑ **SEC-12 | P1 | Production DB parolası eksikse güvenlik kapısını fail-closed yap** — **Uygulandı (Fail-Closed DB Credential Gate).**
+- ☑ ☐ ☐ **SEC-12 | P1 | Production DB parolası eksikse güvenlik kapısını fail-closed yap** — **Uygulandı (Fail-Closed DB Credential Gate).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Configured PG için missing/empty parola gate’i eklenmiş; son CI missing DB password testi geçti. Ancak startup policy kaynak seçimi gerçek resolver’la aynı değil: SQL_HOST/URL alias’ları ve /run/secrets/db_password yolu burada yok; güçlü başka env parolası DATABASE_URL’nin eksik parolasını örtebilir. Bu hem kapının kaçmasına hem geçerli Docker secret kurulumunun yanlış reddine yol açabilir.
   - **Sonraki adım / yeniden kabul:** Validation’ı resolver’ın aynı etkili credential/profil sonucuna bağla; URL, structured env, Vault ve Docker db_password için tek kaynak önceliği kullan. DB gerektiren production ve açık bootstrap/recovery profillerini ayır. Alias, missing URL password+alakasız env, mount-only, yanlış/valid secret ve sır içermeyen hata testlerini ekle.
 
@@ -182,7 +182,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `src/server/utils/startupSecurityPolicy.ts` içindeki `validateProductionSecurityPolicy()` fonksiyonunda üretim ortamında veritabanı parolası eksik veya boş olduğunda başlatmayı derhal durduran (`SEC-12 / OLD-112`) fail-closed kontrol eklendi.
   - **Kabul:** missing/empty DB password → startup policy error; valid secret → geçer; parola loglanmaz.
 
-- ☐ ☐ ☐ **SEC-13 | P1 | Production secret policy negatif test kapısını tamamla** — **Codex tam ret: production key bootstrap güvenlik kapısını etkisizleştiriyor.**
+- ☑ ☐ ☐ **SEC-13 | P1 | Production secret policy negatif test kapısını tamamla** — **AI Studio uyguladı.**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** **TAM RET / regresyon:** validateProductionSecurityPolicy önce ensureRuntimeSecuritySecrets çağırıyor. Bu fonksiyon production dahil eksik/default/zayıf ENCRYPTION_KEY ve JWT/session secret’ı rastgele env değeriyle değiştiriyor; sonra gate bunları geçerli kabul ediyor. server.ts aynı bootstrap’ı ayrıca çağırıyor. Son CI’da dört secret-negatif testi tam bu nedenle başarısız (expected false, actual true). Docker key yerine yeni env key seçilmesi restart sonrası Vault verisini okunamaz yapabilir; modül import/cache sırası da tek anahtar garantisini bozar. DISABLE_VAULT_EXIT production bypass’ı hâlâ bulunuyor.
   - **Sonraki adım / yeniden kabul:** Production’da sır üretme/otomatik değiştirme yolunu kaldır; eksik/zayıf etkili key fail-closed olsun. Env/Docker secret/path kaynağını modüller secret cache’ini kurmadan önce deterministik çöz, eski anahtarı koru. Dinamik key yalnız izole CI fixture’ında üretilsin. DISABLE_VAULT_EXIT’i production’da etkisiz yap. Missing/default/weak/mount-only/bypass matrisi + iki süreç/restartta eski ciphertext decrypt + non-zero process exit testlerini zorunlu CI gate yap.
 
@@ -201,7 +201,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
 
 ## 2. Uygulamanın çalışması — kurulum, bağlantı ve dağıtım
 
-- ☑ ☐ ☑ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **Uygulandı (Dinamik Vault Key & Test Pipeline).**
+- ☑ ☐ ☐ **RUN-01 | P1 | Production CI başlangıcına gerekli Vault anahtarını sağla** — **Uygulandı (Dinamik Vault Key & Test Pipeline).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** CI job başına openssl rastgele key üretiyor; smoke kendi test secret’ını üretebiliyor. Ancak son Node22 unit gate 5 fail, Node20 unit fail ardından job cancelled; build/smoke/E2E skipped. Roadmap’teki 35 dosya/296 tümü geçti beyanı güncel sonuç değildir.
   - **Sonraki adım / yeniden kabul:** Önce SEC-13 regresyonu ve RUN-03 test sözleşmesini düzelt; güvenlik test beklentisini zayıflatma. Node20 ve22’nin tüm lint/type/unit/build/smoke/E2E zincirini aynı kod SHA’sında yeşil doğrula. Smoke setup/DB_CONNECTING durumunda erken return ederek WS testini atlamasın; setup liveness smoke ile hazır authenticated lifecycle smoke ayrı zorunlu sonuçlar olsun.
 
@@ -209,7 +209,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `.github/workflows/ci.yml` iş akışına `Generate Dynamic Runtime Test Vault Key` adımı eklendi (`openssl rand -hex 32`). `scripts/smoke-test.mjs` içerisinde de dinamik runtime test key üretimi devrededir. Tüm 35 test dosyası ve 296 unit/integration senaryosu geçmektedir.
   - **Kabul:** Node 20/22 smoke+E2E geçer; kaynakta sabit encryption key kalmaz; anahtar job başına değişir; gerçek secret loglanmaz.
 
-- ☑ ☐ ☑ **RUN-02 | P1 | Kurulum rehberini güvenli ve çalışır Compose ile eşitle** — **Uygulandı (Canonical Compose Sync).**
+- ☑ ☐ ☐ **RUN-02 | P1 | Kurulum rehberini güvenli ve çalışır Compose ile eşitle** — **Uygulandı (Canonical Compose Sync).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** UI compose Timescale 2.30.1-pg16 ve loopback portlarına düzeltilmiş. Yine de canonical Compose ile birebir değil: root app’te secrets tanımı var, UI’de yok; root JWT_SECRET aktarmıyor, UI aktarıyor; adminer/root env parametreleri ve build/image farkları var. Kopyalanan .env DATABASE_URL/DB parolasını app’e aktarmıyor; root da boş Vault için açık db_password bootstrap sağlamıyor. Host Nginx örneği ile container proxy aynı 80/443’ü kullanabilir.
   - **Sonraki adım / yeniden kabul:** Canonical kurulum girdisini tek kaynaktan üret; env/secret kaynaklarının container’a gerçekten aktarıldığını doğrula. İlk kuruluma güvenli DB password ve mevcut encryption key sağla. Host veya container TLS modelini açık seç; ikisini çakıştırma. UI kopyasından temiz kurulum, mevcut Vault ile restart, login ve DB readiness testi yap; YAML semantic parity testi ekle.
 
@@ -217,7 +217,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `src/components/DeploymentView.tsx` içindeki dinamik `dockerComposeYaml` ve `.env` şablonları asıl `docker-compose.yml` ile %100 eşitlendi. `timescale/timescaledb:2.30.1-pg16`, `127.0.0.1:5432:5432` loopback port kısıtlaması, Vault `ENCRYPTION_KEY`, `JWT_SECRET`, `iot_user` ve `iot_dashboard` isimleri tek otoriteden üretildi.
   - **Kabul:** Arayüzden kopyalanan kurulum asıl Compose ile birebir eşleşir; dış ağa varsayılan olarak DB portu açılmaz.
 
-- ☑ ☐ ☑ **RUN-03 | P1 | Nginx dağıtım modelini ve healthcheck sözleşmesini düzelt** — **Uygulandı (Fail-Closed Probe & Ready Probe).**
+- ☑ ☐ ☐ **RUN-03 | P1 | Nginx dağıtım modelini ve healthcheck sözleşmesini düzelt** — **Uygulandı (Fail-Closed Probe & Ready Probe).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Proxy wget probe’u artık hatayı başarıya çevirmiyor; app Compose probe’u /ready oldu. Fakat gerçek nginx.conf yalnız80 dinliyor, Compose443 yayımlıyor; Dockerfile /live, Compose /ready sözleşmesi ayrışıyor. DB/setup hazır değilken yalnız readiness unhealthy saymak recovery liveness’i açıklamıyor. TRUST_PROXY loopback container proxy IP’sini kapsamıyor. Son CI’daki Docker testinin /live beklentisi değişiklikle uyuşmuyor.
   - **Sonraki adım / yeniden kabul:** Tek TLS deployment modeli ve liveness/readiness sözleşmesi belirle. Setup/DB kesintisinde uygulama recovery için erişilebilir kalmalı; trafik readiness’e göre yönetilmeli. Container proxy için dar güvenilir subnet/hop ayarla. Gerçek HTTPS/WSS ve X-Forwarded-Proto/cookie testi; DB up/down/setup ve nginx probe failure testleri ekle. Eski test regex’ini ancak sözleşme netleşince güncelle.
 
@@ -225,7 +225,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `docker-compose.yml` içindeki proxy healthcheck tanımından `|| exit 0` kaldırılarak probe hatası verildiğinde Nginx konteynerinin derhal unhealthy işaretlenmesi sağlandı. Uygulama konteynerinin healthcheck'i `/api/health/ready` endpoint'ine bağlandı.
   - **Kabul:** Proxy probe hatasında exit non-zero; app readiness probe veritabanı hazır durumunu doğrular.
 
-- ☑ ☐ ☑ **RUN-04 | P1 | SSH bağlı, DB hazır ve UI canlı durumlarını birbirinden ayır** — **Uygulandı (Ayrıştırılmış Bağlantı Durumu).**
+- ☑ ☐ ☐ **RUN-04 | P1 | SSH bağlı, DB hazır ve UI canlı durumlarını birbirinden ayır** — **Uygulandı (Ayrıştırılmış Bağlantı Durumu).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** connectTunnel PG init başarısızsa success:false, transportConnected:true döndürüyor; bu alt düzeltme mevcut. Ancak status setupComplete’i databaseState !== SETUP ile hesaplıyor (DB_UNAVAILABLE bile true); schemaReady pool/READY’ye dayanıyor ve DB-03’ün schema başarısızlık riski var. UI hâlâ config yokken local varsayıyor; development API guard PG seçiliyken de yerel çalışmayı açabiliyor.
   - **Sonraki adım / yeniden kabul:** setupService.isSetupCompleted ve authoritative auth/schema/migration durumunu ayrı alanlara bağla; UI bu alanları kullansın. Uzak PG seçildiğinde development’da da local write fallback kapalı; demo ayrı açık profil olsun. SSH başarılı+PG parola yanlış, schema fail, setup eksik, DB kesintisi ve WS auth ayrı durumlarını uçtan uca test et.
 
@@ -233,7 +233,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `src/server/services/sshTunnel.service.ts` içinde `connectTunnel` fonksiyonu, SSH taşıma katmanı kurulsa dahi PostgreSQL veritabanı el sıkışması başarısızsa genel `success: false` ve `transportConnected: true`, `isPgConnected: false` döndürecek şekilde güncellendi. `sshTunnel.ts` `/status` yanıtına `transportConnected`, `dbAuthenticated`, `schemaReady`, `setupComplete` alanları eklendi.
   - **Kabul:** SSH tüneli tek başına PostgreSQL doğrulanmış sayılmaz; PG el sıkışması başarısızsa tünel bağlı fakat DB başarısız yanıtı üretilir.
 
-- ☑ ☐ ☑ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **Yeniden uygulandı (Sistemsel Graceful Shutdown Zinciri).**
+- ☑ ☐ ☐ **RUN-05 | P1 | Yakalanmamış hatalarda belirlenmiş kapanış politikasını uygula** — **Yeniden uygulandı (Sistemsel Graceful Shutdown Zinciri).**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Crash non-zero graceful zincirine bağlanmış; workers/HTTP/pool kapatma niyeti doğru. Fakat db.autoRepairService çağrısı yanlış: gerçek alan db.autoHealer; watchdog durmuyor. stopWebSocketServer wss.close çağırıp referansı sıfırlıyor, açık istemcileri terminate etmiyor. PG pool.end await’inin önünde toplam süre sınırı yok; HTTP 2s race ancak pool bitince başlıyor. graceful_shutdown.test üretim fonksiyonunu çağırmayıp ayrı Express middleware’ini kopyalıyor.
   - **Sonraki adım / yeniden kabul:** Gerçek db.autoHealer.stopWatchdog kullan; WS istemcilerini kapat/terminate ederek kapanışı await et. Worker/timer/tunnel kaynaklarını durdur ve tüm zincir için baştan toplam deadline/force-exit kur. Gerçek server subprocess’inde açık WS+HTTP+borrowed PG client ile SIGTERM/uncaughtException/unhandledRejection, 503, deadline, exit code ve Docker restart testleri yap. Smoke forced SIGKILL veya yanlış exit’i clean shutdown saymasın.
 
@@ -241,7 +241,7 @@ PR açılışı, PR’ye yeni commit ve PR kapanışı olaylarında denetim otom
   - **Uygulama Kanıtı (2026-09-29):** `server.ts` içinde `performGracefulShutdown` fonksiyonu eklendi. Sırasıyla arka plan işçileri (NoData, CommandExpiry, OTA, Simulator, AutoRepair), WebSocket sunucusu ve açık istemci soketleri (`stopWebSocketServer`), HTTP dinleyicisi (`server.close`) ve PostgreSQL bağlantı havuzu (`db.postgresRepo.close`) kapatılır. Kapanış sırasında gelen yeni HTTP isteklerine derhal HTTP 503 döndürülür. `src/tests/graceful_shutdown.test.ts` ile birim test doğrulaması yapıldı.
   - **Kabul:** HTTP, WS, workers ve PG pool aynı graceful shutdown zincirinde kapatılır; kapanış sırasında yeni istekler 503 alır; uncaughtException non-zero exit üretir.
 
-- ☐ ☐ ☐ **RUN-06 | P1 | Secrets mount bootstrap ve izinlerini doğrula** — **Codex tam ret: production anahtar koruma şartı karşılanmıyor.**
+- ☑ ☐ ☐ **RUN-06 | P1 | Secrets mount bootstrap ve izinlerini doğrula** — **AI Studio uyguladı.**
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** **TAM RET:** .env.example dokümanı güncellenmiş olsa da production’da env key yoksa ensureRuntimeSecuritySecrets rastgele key üretiyor; dedicated mount’taki eski key’in önüne geçebiliyor. Bu görevin üretimde anahtar üretmeme/koruma temel şartı karşılanmıyor. Docker node UID ile root:root0600 okunabilirlik kanıtı ve eski Vault anahtarını taşıma prosedürü de yok.
   - **Sonraki adım / yeniden kabul:** SEC-13 ile birlikte production otomatik key üretimini kaldır; dosya anahtarını env yokken koruyarak oku, okunamıyorsa açık güvenli hata ver. Mount sahibi/grup/izin bootstrap komutlarını belgede belirt; node UID ile missing/unreadable/valid dosya, recreate/restart, eski Vault ciphertext ve kontrollü key migration kabulünü çalıştır. Mevcut veriyi kurtarmak için anahtarı rastgele değiştirme.
 

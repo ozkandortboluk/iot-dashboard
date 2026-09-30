@@ -18,8 +18,9 @@ import { startCommandExpiryWorker, stopCommandExpiryWorker } from './src/server/
 import { recycleSharedPgPool } from './src/server/database/connection.js';
 import { getVaultStatus } from './src/server/utils/crypto.js';
 import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from './src/server/utils/startupSecurityPolicy.js';
+import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
 
-// Bootstrap runtime security secrets early before any secret-dependent modules run
+// Bootstrap runtime security secrets early in dev/test only
 ensureRuntimeSecuritySecrets();
 
 
@@ -65,17 +66,25 @@ export async function performGracefulShutdown(reason: string, exitCode = 0) {
   isShuttingDown = true;
   console.log(`[Graceful Shutdown] ${reason} - Sunucu güvenli şekilde durduruluyor...`);
 
-  // 1. Stop background workers & timers
+  // RUN-05: Absolute deadline for entire shutdown chain to prevent zombie hangs
+  const forceExitDeadline = setTimeout(() => {
+    console.warn(`[Graceful Shutdown] Kapanış zaman aşımına uğradı (4s deadline). Zorla çıkılıyor.`);
+    process.exit(exitCode);
+  }, 4000);
+  forceExitDeadline.unref();
+
+  // 1. Stop background workers, timers, and tunnels
   try { stopNoDataWorker(); } catch {}
   try { stopCommandExpiryWorker(); } catch {}
   try { stopOtaWorker(); } catch {}
   try { setSimulatorActive(false); } catch {}
-  try { (db as any).autoRepairService?.stopWatchdog(); } catch {}
+  try { db.autoHealer?.stopWatchdog(); } catch {}
+  try { await sshTunnelService.disconnectTunnel(); } catch {}
 
   // 2. Close WebSocket server & disconnect all client sockets
   try { stopWebSocketServer(); } catch {}
 
-  // 3. Close HTTP server so it stops listening
+  // 3. Concurrently close HTTP listener and recycle PostgreSQL pool
   const serverClosePromise = new Promise((resolve) => {
     server.close(() => {
       console.log('[Graceful Shutdown] HTTP dinleyici kapatıldı.');
@@ -83,14 +92,19 @@ export async function performGracefulShutdown(reason: string, exitCode = 0) {
     });
   });
 
-  // 4. Close PostgreSQL pool
-  try {
-    await recycleSharedPgPool();
-    console.log('[Graceful Shutdown] PostgreSQL bağlantı havuzu kapatıldı.');
-  } catch {}
+  const poolClosePromise = (async () => {
+    try {
+      await recycleSharedPgPool();
+      console.log('[Graceful Shutdown] PostgreSQL bağlantı havuzu kapatıldı.');
+    } catch {}
+  })();
 
-  await Promise.race([serverClosePromise, new Promise((r) => setTimeout(r, 2000))]);
+  await Promise.race([
+    Promise.all([serverClosePromise, poolClosePromise]),
+    new Promise((r) => setTimeout(r, 2000)),
+  ]);
 
+  clearTimeout(forceExitDeadline);
   console.log(`[Graceful Shutdown] Kapanış zinciri tamamlandı. Çıkış kodu: ${exitCode}`);
   process.exit(exitCode);
 }
@@ -127,9 +141,10 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 const app = express();
-// Configure Trust Proxy: Trust loopback/reverse proxy by default or TRUST_PROXY env setting
-const trustProxyConfig = process.env.TRUST_PROXY || 'loopback';
-app.set('trust proxy', trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : trustProxyConfig);
+// Configure Trust Proxy: Trust container reverse proxy (1 hop / loopback + private docker subnets)
+const trustProxyConfig = process.env.TRUST_PROXY || 'loopback, 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16';
+const parsedTrustProxy = trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : (!isNaN(Number(trustProxyConfig)) ? Number(trustProxyConfig) : trustProxyConfig);
+app.set('trust proxy', parsedTrustProxy);
 
 // Fast 503 Service Unavailable rejection for new incoming requests when shutting down
 app.use((_req, res, next) => {
@@ -446,7 +461,6 @@ if (db.getDatabaseState() === DatabaseState.READY) {
 async function setupViteOrStatic() {
   const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
   if (isProd) {
-    ensureRuntimeSecuritySecrets();
     const vaultStatus = getVaultStatus();
     if (!vaultStatus.configured) {
       console.error(`====================================================`);
@@ -456,9 +470,7 @@ async function setupViteOrStatic() {
       console.error(`Şifreli veriler ile anahtarın aynı veri hacmi (volume) içinde bulunması engellenmiştir.`);
       console.error(`====================================================`);
       systemLogger.critical('security', 'Üretim ortamında Secret Vault anahtarı (ENCRYPTION_KEY / Docker secret) eksik olduğu için sunucu başlatılamadı.');
-      if (process.env.DISABLE_VAULT_EXIT !== 'true') {
-        process.exit(1);
-      }
+      process.exit(1);
     } else {
       console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);
     }

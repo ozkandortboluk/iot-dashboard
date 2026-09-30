@@ -666,9 +666,10 @@ export class PostgresRepository {
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
 
-        const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && Boolean(process.env.VITEST);
-        if (totalUsers === 0 && isIsolatedTestRunner) {
-          // Strictly in unit test runner environments, populate initial database test paths
+        const isIsolatedTestRunner = process.env.NODE_ENV === 'test' && (process.env.VITEST === 'true' || process.env.VITEST === '1');
+        const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+        if (totalUsers === 0 && isIsolatedTestRunner && !isProdEnv) {
+          // Strictly in unit test runner environments against non-production databases, populate initial database test paths
           try {
             await InitialDataSeeder.populateInitialDatabase(p2);
           } catch (seedErr: any) {

@@ -23,9 +23,20 @@ export class TenantSecurityService {
   ): boolean {
     if (!user || !dev) return false;
 
+    // SEC-09: Suspended, inactive, or deleted accounts MUST be strictly blocked regardless of ID or role
+    if ((user.status && user.status !== 'active') || user.deletedAt) {
+      return false;
+    }
+
     // 1. Sistem yöneticisi (admin) tüm müşteri cihazlarına ve verilerine tam erişim yetkisine sahiptir
     if (this.isAdminUser(user)) {
       return true;
+    }
+
+    // Sentinel system tenant devices ('usr_admin' or 'system') require active admin role!
+    // A customer account whose ID happens to be 'usr_admin' gains NO privilege over sentinel devices.
+    if (dev.tenantId === 'usr_admin' || dev.tenantId === 'system') {
+      return false;
     }
 
     // 2. Cihazın doğrudan sahibi kontrolü (tenantId, customerId veya userId)
@@ -39,12 +50,16 @@ export class TenantSecurityService {
       return true;
     }
 
-    // 3. Çoklu üyelik / Tenant Memberships kontrolü
+    // 3. Çoklu üyelik / Tenant Memberships kontrolü (aktif üyelik şartı)
     if (Array.isArray(tenantMemberships) && dev.tenantId) {
       const isMember = tenantMemberships.some(
         (m: any) =>
           (m.userId === user.id || m.memberId === user.id) &&
-          m.tenantId === dev.tenantId
+          m.tenantId === dev.tenantId &&
+          (m.status === 'active' || m.status === undefined) &&
+          m.status !== 'suspended' &&
+          m.status !== 'inactive' &&
+          !m.deletedAt
       );
       if (isMember) return true;
     }

@@ -183,4 +183,41 @@ describe('Production Setup Authentication & Token Security', () => {
     expect(authNext).toHaveBeenCalledOnce();
     expect(authRes.status).not.toHaveBeenCalled();
   });
+
+  it('7. should reject missing/invalid setup token in development and AI_STUDIO mode (SEC-01 no-bypass)', () => {
+    delete process.env.DISABLE_SETUP_TOKEN;
+    const testCases = [
+      { NODE_ENV: 'development', AI_STUDIO: 'false' },
+      { NODE_ENV: 'development', AI_STUDIO: 'true' },
+      { NODE_ENV: 'production', AI_STUDIO: 'true' },
+    ];
+
+    for (const tc of testCases) {
+      process.env.NODE_ENV = tc.NODE_ENV;
+      process.env.AI_STUDIO = tc.AI_STUDIO;
+
+      const req: any = {
+        path: '/configure-database',
+        originalUrl: '/api/setup/configure-database',
+        headers: {},
+        cookies: {},
+        query: {},
+        body: {},
+      };
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+      };
+      const next = vi.fn();
+
+      requireSetupAuth(req, res, next);
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 'SETUP_TOKEN_REQUIRED',
+        })
+      );
+    }
+  });
 });

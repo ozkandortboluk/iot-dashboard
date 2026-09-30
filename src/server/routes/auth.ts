@@ -1,7 +1,7 @@
 import { Router, type Response, type Request } from 'express';
 import { db } from '../db.js';
 import { DatabaseState } from '../../types.js';
-import { broadcast } from '../services/websocket.js';
+import { broadcast, terminateSessionSocket, terminateUserSockets } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
 import { requireSetupAuth, isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
@@ -250,7 +250,9 @@ router.post('/logout', (req, res) => {
   clearSessionCookie(res);
   const token = (req as any).cookies?.nexus_session_token || req.headers['x-auth-token'];
   if (token && typeof token === 'string') {
-    db.deleteSession(token.trim());
+    const cleanToken = token.trim();
+    db.deleteSession(cleanToken);
+    terminateSessionSocket(cleanToken);
   }
   res.json({ success: true, message: 'Başarıyla çıkış yapıldı ve oturum sunucuda sonlandırıldı.' });
 });
@@ -260,6 +262,7 @@ router.post('/revoke-all-sessions', authenticateUser, async (req, res) => {
   const currentUser = authReq.user!;
   try {
     await db.terminateUserSessions(currentUser.id);
+    terminateUserSockets(currentUser.id);
     clearSessionCookie(res);
     res.json({ success: true, message: 'Tüm aktif oturumlarınız başarıyla sonlandırıldı.' });
   } catch (err: any) {

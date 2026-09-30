@@ -44,6 +44,11 @@ const LOCAL_VAULT_KEY_PATH = path.resolve(process.cwd(), 'data', '.vault_key');
 let cachedKeyBuffer: Buffer | null = null;
 let keySourceDescription = 'none';
 
+export function resetEncryptionKeyCache(): void {
+  cachedKeyBuffer = null;
+  keySourceDescription = 'none';
+}
+
 /**
  * Resolves the 256-bit (32-byte) AES master key from strictly non-predictable sources:
  * 1. Environment variable: process.env.ENCRYPTION_KEY

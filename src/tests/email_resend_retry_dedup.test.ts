@@ -33,6 +33,7 @@ describe('ALM-02: Email Service Retry, Backoff, Deduplication & HTTPS URL Policy
   });
 
   it('3. Deduplicates identical emails sent with same dedupKey within threshold', async () => {
+    emailService.updateEmailConfig({ provider: 'resend', resendApiKey: 're_test_12345678' });
     vi.spyOn(global, 'fetch').mockImplementation(async () => {
       return new Response(JSON.stringify({ id: 'msg_test_123' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     });

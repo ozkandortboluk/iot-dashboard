@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
+import { resetEncryptionKeyCache } from './crypto.js';
 
 /**
  * Common default, weak, or sample passwords that MUST be strictly blocked in production.
@@ -66,18 +67,29 @@ export interface SecurityPolicyValidationResult {
 
 /**
  * Ensures that high-entropy runtime security secrets (ENCRYPTION_KEY, JWT_SECRET, SESSION_SECRET)
- * are bootstrapped when missing or matching insecure sample defaults in container runtimes.
+ * are bootstrapped when missing or matching insecure sample defaults in local development runtimes only.
+ * In production (NODE_ENV=production or VPS_PRODUCTION=true), secrets MUST NOT be auto-generated or modified.
  */
 export function ensureRuntimeSecuritySecrets(): void {
-  // 1. Vault ENCRYPTION_KEY bootstrap
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.CLOUD_RUN_TIMEOUT_SECONDS) && !isVpsProd;
+  const isProd = (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+
+  if (isProd) {
+    // SEC-13 / RUN-06: Production VPS environments strictly require explicit configuration or mounted Docker secrets.
+    return;
+  }
+
+  // 1. Vault ENCRYPTION_KEY bootstrap (Development, Test, and Cloud Run preview sandbox)
   const rawEncKey = (process.env.ENCRYPTION_KEY || '').trim();
   if (!rawEncKey || isDefaultSecret(rawEncKey) || rawEncKey.length < 16) {
     const generatedVaultKey = crypto.randomBytes(32).toString('hex');
     process.env.ENCRYPTION_KEY = generatedVaultKey;
+    resetEncryptionKeyCache();
     console.log('[Security Bootstrap] High-entropy runtime Vault ENCRYPTION_KEY bootstrapped.');
   }
 
-  // 2. SESSION_SECRET & JWT_SECRET bootstrap
+  // 2. SESSION_SECRET & JWT_SECRET bootstrap (Development, Test, and Cloud Run preview sandbox)
   const rawJwt = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
   if (!rawJwt || isDefaultSecret(rawJwt) || rawJwt.length < 16) {
     const generatedJwtSecret = crypto.randomBytes(32).toString('hex');
@@ -91,10 +103,9 @@ export function ensureRuntimeSecuritySecrets(): void {
  * Validates the startup security posture of the platform.
  * Enforces OLD-112 (No default DB password in production),
  * OLD-113 (No default JWT/session secrets in production), and
- * OLD-115 (Secret scanning & startup policy gate).
+ * OLD-115 / SEC-13 (Secret scanning & startup policy gate).
  */
 export function validateProductionSecurityPolicy(): SecurityPolicyValidationResult {
-  ensureRuntimeSecuritySecrets();
   const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -105,49 +116,94 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   }
 
   // 1. Database Password Validation (SEC-12 / OLD-112)
-  let candidateDbPass: string | undefined =
-    process.env.SQL_ADMIN_PASSWORD ||
-    process.env.SQL_PASSWORD ||
-    process.env.PGPASSWORD ||
-    process.env.POSTGRES_PASSWORD ||
-    process.env.DB_PASSWORD;
+  // Single-source precedence matching getEffectivePostgresUrl() in connection.ts
+  const envUrl = (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRESQL_URL ||
+    process.env.PG_URL ||
+    ''
+  ).trim();
 
-  if (!candidateDbPass) {
-    try {
-      candidateDbPass = systemSecretsService.getDatabasePassword();
-    } catch {}
-  }
+  const envHost = (
+    process.env.SQL_HOST ||
+    process.env.PGHOST ||
+    process.env.POSTGRES_HOST ||
+    process.env.DB_HOST ||
+    ''
+  ).trim();
 
-  if (process.env.DATABASE_URL) {
-    const rawUrl = process.env.DATABASE_URL;
-    const urlMatch = rawUrl.match(/^(?:postgres(?:ql)?):\/\/[^:]+:([^@]+)@/);
+  let candidateDbPass: string | undefined;
+  let isPgConfigured = false;
+
+  if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
+    // 1. Connection string URL takes absolute precedence.
+    // Unrelated POSTGRES_PASSWORD in environment MUST NOT mask an omitted or empty password in DATABASE_URL!
+    isPgConfigured = true;
+    const urlMatch = envUrl.match(/^(?:postgres(?:ql)?):\/\/[^:]*(?::([^@]*))?@/);
     if (urlMatch && urlMatch[1]) {
-      const extractedPass = decodeURIComponent(urlMatch[1]);
-      if (isDefaultPassword(extractedPass)) {
-        errors.push(
-          `[CRITICAL POLICY] DATABASE_URL içinde varsayılan/güvensiz parola tespit edildi (OLD-112).`
-        );
-      }
+      candidateDbPass = decodeURIComponent(urlMatch[1]);
+    } else {
+      candidateDbPass = ''; // Explicitly empty password inside URL
+    }
+  } else {
+    // 2. Structured environment or direct database password configured
+    const structuredPass =
+      process.env.SQL_ADMIN_PASSWORD ||
+      process.env.SQL_PASSWORD ||
+      process.env.PGPASSWORD ||
+      process.env.POSTGRES_PASSWORD ||
+      process.env.DB_PASSWORD;
+
+    if (envHost || structuredPass !== undefined) {
+      isPgConfigured = true;
+      candidateDbPass = structuredPass;
+
       if (!candidateDbPass) {
-        candidateDbPass = extractedPass;
+        try {
+          candidateDbPass = systemSecretsService.getDatabasePassword();
+        } catch {}
+      }
+
+      if (!candidateDbPass) {
+        const dockerSecretPath = '/run/secrets/db_password';
+        const appSecretPath = 'secrets/db_password';
+        try {
+          const fs = require('node:fs');
+          if (fs.existsSync(dockerSecretPath)) {
+            candidateDbPass = fs.readFileSync(dockerSecretPath, 'utf8').trim();
+          } else if (fs.existsSync(appSecretPath)) {
+            candidateDbPass = fs.readFileSync(appSecretPath, 'utf8').trim();
+          }
+        } catch {}
+      }
+    } else {
+      // 3. Check runtime secret store or vault
+      try {
+        const vaultDb = systemSecretsService.getDatabaseConfig();
+        if (vaultDb.isConfigured && vaultDb.host) {
+          isPgConfigured = true;
+          candidateDbPass = vaultDb.password;
+        }
+      } catch {}
+
+      if (process.env.REQUIRE_DB_PASSWORD === 'true') {
+        isPgConfigured = true;
       }
     }
   }
-
-  const isPgConfigured = Boolean(
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_HOST ||
-    process.env.PGHOST ||
-    process.env.DB_HOST ||
-    process.env.REQUIRE_DB_PASSWORD === 'true'
-  );
 
   if (isPgConfigured) {
     if (!candidateDbPass || candidateDbPass.trim() === '') {
       errors.push(
         `[CRITICAL POLICY] Üretim ortamında veritabanı parolası tanımlanmamıştır (SEC-12 / OLD-112).`
       );
-    } else if (isDefaultPassword(candidateDbPass)) {
+    } else if (
+      isDefaultPassword(candidateDbPass) ||
+      (process.env.POSTGRES_PASSWORD && isDefaultPassword(process.env.POSTGRES_PASSWORD)) ||
+      (process.env.SQL_PASSWORD && isDefaultPassword(process.env.SQL_PASSWORD)) ||
+      (process.env.PGPASSWORD && isDefaultPassword(process.env.PGPASSWORD))
+    ) {
       errors.push(
         `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası tespiti nedeniyle başlatma engellenmiştir (OLD-112).`
       );
@@ -167,7 +223,21 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   }
 
   // 3. Vault Encryption Key Entropy Validation (SEC-13 / OLD-115)
-  const encKey = process.env.ENCRYPTION_KEY;
+  let encKey = (process.env.ENCRYPTION_KEY || '').trim();
+  if (!encKey) {
+    const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
+    try {
+      const fs = require('node:fs');
+      if (keyPath && fs.existsSync(keyPath)) {
+        encKey = fs.readFileSync(keyPath, 'utf8').trim();
+      } else if (fs.existsSync('/run/secrets/encryption_key')) {
+        encKey = fs.readFileSync('/run/secrets/encryption_key', 'utf8').trim();
+      } else if (fs.existsSync('secrets/encryption_key')) {
+        encKey = fs.readFileSync('secrets/encryption_key', 'utf8').trim();
+      }
+    } catch {}
+  }
+
   if (!encKey || encKey.trim() === '') {
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında ENCRYPTION_KEY (Vault şifreleme anahtarı) tanımlanmamıştır (SEC-13 / OLD-115).`
