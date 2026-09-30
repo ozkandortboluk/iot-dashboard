@@ -20,8 +20,7 @@ export const migration012: Migration = {
     console.log('[Migration 012] Starting Full Canonical Schema Harmonization...');
 
     // 1. Execute Canonical DDL
-    const canonicalDDL = generateCanonicalSchemaDDL();
-    await client.query(canonicalDDL);
+    await client.query(generateCanonicalSchemaDDL());
 
     // 2. Perform automated column healing for any legacy schemas
     await client.query(`

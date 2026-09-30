@@ -46,10 +46,24 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
       expect(mutatedChecksum).not.toBe(originalChecksum);
       expect(mutatedChecksum).toHaveLength(32);
 
-      // Verify that the mutated checksum fails against original DB record
-      const isValid = isMigrationChecksumValid('001', originalChecksum, mutatedChecksum);
-      // Because originalChecksum is in acceptedHistoricalChecksums, test with an unaccepted mutated hash
+      // Verify that the mutated checksum fails even when the DB stored checksum is a valid historical checksum
+      const isValidWithHistoricalDb = isMigrationChecksumValid('001', '261a1172cad1ce0d49ec20d8ab2f1936', mutatedChecksum);
+      expect(isValidWithHistoricalDb).toBe(false);
+
+      // Verify that the mutated checksum fails against unaccepted DB record
       expect(isMigrationChecksumValid('001', 'tampered_non_historical_hash_99999', mutatedChecksum)).toBe(false);
+    });
+
+    it('should verify 100% parity between computed migration checksums and manifest canonical hashes for all 22 migrations', () => {
+      expect(ALL_MIGRATIONS.length).toBe(22);
+      for (const m of ALL_MIGRATIONS) {
+        const computedHash = computeMigrationChecksum(m);
+        const manifestEntry = CANONICAL_MIGRATION_MANIFEST[m.version];
+        expect(manifestEntry).toBeDefined();
+        expect(manifestEntry.version).toBe(m.version);
+        expect(manifestEntry.name).toBe(m.name);
+        expect(computedHash).toBe(manifestEntry.canonicalSourceHash);
+      }
     });
 
     it('should produce identical checksums across comment and whitespace formatting changes', () => {

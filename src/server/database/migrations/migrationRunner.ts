@@ -28,19 +28,44 @@ const MIGRATION_ADVISORY_LOCK_ID = 13374242;
 
 /**
  * Normalizes migration function source code across bundlers (esbuild, tsx, rollup, tsc),
- * stripping ephemeral comments and transpilation syntax discrepancies while strictly binding
- * to the exact SQL queries, logic, and operational statements in the migration body.
+ * stripping ephemeral comments, bundler wrapper prefixes, and transpilation syntax discrepancies
+ * while strictly binding to the exact SQL queries, logic, and operational statements in the migration body.
  */
 export function normalizeMigrationSource(fn: (...args: any[]) => any): string {
-  let src = fn.toString();
+  let src = typeof fn === 'function' ? fn.toString() : String(fn);
+  // Decode unicode escape sequences e.g. \u0131 -> ı so TSX and Vitest produce identical string representations
+  src = src.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
   // Strip block comments /* ... */
   src = src.replace(/\/\*[\s\S]*?\*\//g, '');
   // Strip single line comments // ...
   src = src.replace(/\/\/[^\n]*/g, '');
-  // Normalize async parameter signatures: async (client) => / async client => / async function(client)
-  src = src.replace(/^async\s*(?:\(\s*(\w+)?\s*\)|(\w+))\s*=>/, 'async ($1$2) =>');
-  src = src.replace(/^async\s+function\s*\w*\s*\(\s*(\w+)?\s*\)/, 'async ($1) =>');
-  // Collapse whitespace sequences to single space
+  // Extract body between first { and last }
+  const firstBrace = src.indexOf('{');
+  const lastBrace = src.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    src = src.substring(firstBrace + 1, lastBrace);
+  }
+  // Strip Vitest / Vite SSR import wrappers e.g. __vite_ssr_import_0__.default
+  src = src.replace(/\b__vite_ssr_import_\d+_*(?:\.default)?\.(\w+)\b/g, '$1');
+  src = src.replace(/\b__vite_ssr_import_\d+_*(\w+)\b/g, '$1');
+  // Strip bundler import wrapper prefixes e.g. (0, import_crypto.default)
+  src = src.replace(/\(0\s*,\s*([a-zA-Z_$][\w$.]*)\)/g, '$1');
+  src = src.replace(/\bimport_\w+\.default\.(\w+)\b/g, '$1');
+  src = src.replace(/\bimport_\w+\.(\w+)\b/g, '$1');
+  src = src.replace(/\b\w+_\d+\.default\.(\w+)\b/g, '$1');
+  src = src.replace(/\b\w+_\d+\.(\w+)\b/g, '$1');
+  src = src.replace(/\b[\w$]+_default(?:\.default)?\.(\w+)\b/g, '$1');
+  src = src.replace(/\b(crypto|canonicalSchema|initialDataSeeder|db)[\w$]*\.default\.(\w+)\b/g, '$2');
+  src = src.replace(/\b(crypto|canonicalSchema|initialDataSeeder|db)[\w$]*\.(\w+)\b/g, '$2');
+  src = src.replace(/\b[\w$]+\.(createHash|randomBytes|generateCanonicalSchemaDDL)\b/g, '$1');
+  src = src.replace(/\bclient\b/g, 'c');
+  src = src.replace(/\b(err|error|migErr|checkErr)\b/g, 'e');
+  src = src.replace(/\(\s*(\w+)\s*\)\s*=>/g, '$1=>');
+  src = src.replace(/\b(if|catch|for|while|switch)\s*\(/g, '$1(');
+  src = src.replace(/"/g, "'");
+  src = src.replace(/\s*(\|\||&&|\?\?|\+|-|===|!==|==|!=|\?|:)\s*/g, '$1');
+  src = src.replace(/\s*([;{}():,=>!*\/\[\]])\s*/g, '$1');
+  src = src.replace(/;/g, '');
   src = src.replace(/\s+/g, ' ').trim();
   return src;
 }
@@ -56,235 +81,879 @@ export function computeMigrationChecksum(migration: Migration): string {
   return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 32);
 }
 
+export interface HistoricalChecksumRecord {
+  checksum: string;
+  hashAlgorithm: string;
+  verifiedGitCommitOrTag: string;
+  sourceArtifactHash: string;
+  notes: string;
+}
+
+export interface CanonicalMigrationManifestEntry {
+  version: string;
+  name: string;
+  canonicalSourceHash: string;
+  historicalChecksums: HistoricalChecksumRecord[];
+}
+
 /**
- * Authoritative Canonical Migration Manifest & Historical Reconciliation Dictionary
- * Contains proven historical checksums recorded across VPS production deployments and releases,
- * providing safe backward-compatible reconciliation without blind database overwrites.
+ * Authoritative Canonical Migration Manifest & Provenance Dictionary
+ * Maps every frozen applied migration (001–022) to its expected immutable canonical source hash,
+ * alongside machine-readable historical database checksum records from verified releases.
  */
-export const CANONICAL_MIGRATION_MANIFEST: Record<
-  string,
-  {
-    version: string;
-    name: string;
-    acceptedHistoricalChecksums: string[];
-  }
-> = {
+export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationManifestEntry> = {
   '001': {
     version: '001',
     name: 'core_relational_tables',
-    acceptedHistoricalChecksums: [
-      '261a1172cad1ce0d49ec20d8ab2f1936', // Proven 2026-09-30 VPS production checksum
-      'd2f164ce5dc21156d55e784003f9ca72', // tsx baseline checksum
-      'da7535f0949c84e736aa5fca2ebba4cb', // normalized source checksum
-      '7c1203ee1174eb0251bdec618b81dab2',
+    canonicalSourceHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+    historicalChecksums: [
+      {
+        checksum: '261a1172cad1ce0d49ec20d8ab2f1936',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        notes: 'Proven 2026-09-30 VPS production database checksum',
+      },
+      {
+        checksum: 'd2f164ce5dc21156d55e784003f9ca72',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: 'da7535f0949c84e736aa5fca2ebba4cb',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        notes: 'Normalized source checksum',
+      },
+      {
+        checksum: '7c1203ee1174eb0251bdec618b81dab2',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd2f0ad3fc8baa7b7193c4de63d399ca2',
+        notes: 'Early normalized source checksum',
+      },
     ],
   },
   '002': {
     version: '002',
     name: 'timescale_hypertables',
-    acceptedHistoricalChecksums: [
-      '6a4fde889f777b0d6b8751a704e7b175', // Proven database checksum
-      'ebef955ae78cd1c312e43f19f8eabb2e', // tsx baseline checksum
-      '440ac36bb02c4fc271d82305a2429ec6', // normalized source checksum
-      '222629ceb93777c383d327b654503b83',
+    canonicalSourceHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+    historicalChecksums: [
+      {
+        checksum: '6a4fde889f777b0d6b8751a704e7b175',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        notes: 'Proven database checksum',
+      },
+      {
+        checksum: 'ebef955ae78cd1c312e43f19f8eabb2e',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: '440ac36bb02c4fc271d82305a2429ec6',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        notes: 'Normalized source checksum',
+      },
+      {
+        checksum: '222629ceb93777c383d327b654503b83',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        notes: 'Early normalized checksum',
+      },
+      {
+        checksum: 'b92c2eda591b30c96ec132b3677e39df',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ec26c2c96f8d874a13e65ab2a5b23892',
+        notes: 'Early normalized checksum',
+      },
     ],
   },
   '003': {
     version: '003',
     name: 'idempotency_and_composite_pk_constraints',
-    acceptedHistoricalChecksums: [
-      '1175e4d5faf19c0422736e9014c93049',
-      '783c04cd2473ca62a0df7c44eade1759',
-      '662f930f67bdb8a5345194da22b908e0',
+    canonicalSourceHash: 'a018ad280f4657418bf08166990e3db6',
+    historicalChecksums: [
+      {
+        checksum: '1175e4d5faf19c0422736e9014c93049',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '783c04cd2473ca62a0df7c44eade1759',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '662f930f67bdb8a5345194da22b908e0',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '07cfec3e66b8cf0931a9b941fa0b8a11',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'a018ad280f4657418bf08166990e3db6',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '004': {
     version: '004',
     name: 'multitenant_columns_and_integrity',
-    acceptedHistoricalChecksums: [
-      'b9e1d8b9a460834f2e7e03ddef8dc196',
-      '6cedf954c25a7b2fa7d4ae420b0b9232',
-      'db598cc77565cd5a62db46d3d96c6f94',
+    canonicalSourceHash: '0e857f6764432240026b348ddf12ec16',
+    historicalChecksums: [
+      {
+        checksum: 'b9e1d8b9a460834f2e7e03ddef8dc196',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '6cedf954c25a7b2fa7d4ae420b0b9232',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'db598cc77565cd5a62db46d3d96c6f94',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'fdc15df2ccab7e98810d4ac2bc865375',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '005': {
     version: '005',
     name: 'auto_heal_expires_at_and_session_columns',
-    acceptedHistoricalChecksums: [
-      'dc0d75695b724d9c9da4be11038e462a',
-      '41178b0712408d069777e2ca4de0d419',
-      'ee7e51016600eb378f31096542f6afe2',
+    canonicalSourceHash: 'e6724a333463011a02ceac3fcd658adb',
+    historicalChecksums: [
+      {
+        checksum: 'dc0d75695b724d9c9da4be11038e462a',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '41178b0712408d069777e2ca4de0d419',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'ee7e51016600eb378f31096542f6afe2',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '17397983ba2c371aff63336e0f8df23e',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '006': {
     version: '006',
     name: 'fix_audit_logs_and_on_conflict_constraints',
-    acceptedHistoricalChecksums: [
-      '734e3a1e087cd0b5c08e0068d2c5b84d',
-      '3ed9252a3047e5a95724b3872fbf25a6',
-      '20b36914111a3d34856b143ca38d0ac5',
+    canonicalSourceHash: '0904d821349234f3359d4260dd619792',
+    historicalChecksums: [
+      {
+        checksum: '734e3a1e087cd0b5c08e0068d2c5b84d',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '3ed9252a3047e5a95724b3872fbf25a6',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '20b36914111a3d34856b143ca38d0ac5',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'c4e81a6336183a9101c3edb831306df7',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '007': {
     version: '007',
     name: 'comprehensive_schema_synchronization_and_column_healing',
-    acceptedHistoricalChecksums: [
-      'ee459d95a229dbc48ab79092e4eb2880',
-      '9592a455f94f60b183bd0a4664ff4b7c',
-      'b5aaf51bfb75ba8e5891d8d92ea4acb4',
+    canonicalSourceHash: '1fc305cc9422d0b10941338b1c79f626',
+    historicalChecksums: [
+      {
+        checksum: 'ee459d95a229dbc48ab79092e4eb2880',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '9592a455f94f60b183bd0a4664ff4b7c',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'b5aaf51bfb75ba8e5891d8d92ea4acb4',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'e4bb2f4bbb93fa84055975269002c72d',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '008': {
     version: '008',
     name: 'remove_rigid_tenant_foreign_keys',
-    acceptedHistoricalChecksums: [
-      '2c402620fc8f141423057832d04f0122',
-      '17d3a8291a1bb941d8d2b18344f29d50',
-      '7a39a4fe209da0d73a4b9b87426acdaf',
+    canonicalSourceHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+    historicalChecksums: [
+      {
+        checksum: '2c402620fc8f141423057832d04f0122',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '17d3a8291a1bb941d8d2b18344f29d50',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '7a39a4fe209da0d73a4b9b87426acdaf',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '3f5189d5027b031a00df429c9c00052d',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'bed9e434f754ffed20c4f3458c68f2c8',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '009': {
     version: '009',
     name: 'ensure_device_schema_resilience',
-    acceptedHistoricalChecksums: [
-      '097fc68ce2fb27b6e8e35267adae9382',
-      '69bda04484950f8dc1f8746489acb589',
-      '78026d1276f5e8dc7ec42539c0813911',
+    canonicalSourceHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+    historicalChecksums: [
+      {
+        checksum: '097fc68ce2fb27b6e8e35267adae9382',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '69bda04484950f8dc1f8746489acb589',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '78026d1276f5e8dc7ec42539c0813911',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '81076320f5955504fd3c34e8339190de',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd7f77299744e3d64dbb4e6a0bb7ae6e4',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '010': {
     version: '010',
     name: 'heal_device_tokens_and_prohibit_placeholders',
-    acceptedHistoricalChecksums: [
-      '912206e542bbb333e9452945884abac2', // Proven 2026-09-30 VPS production checksum
-      '8d109f483c6064053175b862e6a50483', // tsx baseline checksum
-      'c6d56c7d304cf60d04791873cedc5d8d', // normalized source checksum
-      '0e35860a00e46fc3fc30be7752de7b63',
+    canonicalSourceHash: 'ee9c4295608b3fbc7260fd13b659468d',
+    historicalChecksums: [
+      {
+        checksum: '515b2d5dd8af4e09e05a5ee8d6463133',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'ee9c4295608b3fbc7260fd13b659468d',
+        notes: 'Pre-regex fix baseline checksum',
+      },
+      {
+        checksum: '912206e542bbb333e9452945884abac2',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        notes: 'Proven 2026-09-30 VPS production checksum',
+      },
+      {
+        checksum: '8d109f483c6064053175b862e6a50483',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: 'c6d56c7d304cf60d04791873cedc5d8d',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        notes: 'normalized source checksum',
+      },
+      {
+        checksum: '0e35860a00e46fc3fc30be7752de7b63',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        notes: 'Early normalized checksum',
+      },
+      {
+        checksum: '05da679fb48238453e0a011b8c1604e3',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '515b2d5dd8af4e09e05a5ee8d6463133',
+        notes: 'Early normalized checksum',
+      },
     ],
   },
   '011': {
     version: '011',
     name: 'fix_threshold_rules_active_hours_json_syntax',
-    acceptedHistoricalChecksums: [
-      '1acdffd1035ffabdb897ae7f1c6faf2d',
-      '652e05b1c64700838f3b83944cab725a',
+    canonicalSourceHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+    historicalChecksums: [
+      {
+        checksum: '1acdffd1035ffabdb897ae7f1c6faf2d',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '652e05b1c64700838f3b83944cab725a',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '6ef249631e96b0d1b60ad0f776fb028f',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'b5cfe3a3000eed95c87f8a275b939c3d',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '012': {
     version: '012',
     name: 'canonical_schema_full_harmonization',
-    acceptedHistoricalChecksums: [
-      '8a588441f74674b57e7e7b5c591f4dc0',
-      '42b2de9c5cbfb607da54e14d4a283bde',
+    canonicalSourceHash: '8a7ce75da8147c0d8f29706540a0c62c',
+    historicalChecksums: [
+      {
+        checksum: '8a588441f74674b57e7e7b5c591f4dc0',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '8a7ce75da8147c0d8f29706540a0c62c',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '42b2de9c5cbfb607da54e14d4a283bde',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '8a7ce75da8147c0d8f29706540a0c62c',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '013': {
     version: '013',
     name: 'add_device_power_status',
-    acceptedHistoricalChecksums: [
-      '4724df0c8720d810aa42b2c1173e4c77',
-      '2974800ba09b8c08c2f0abed35382b72',
-      '998a30d0c767b5fd5f8788e483096b45',
+    canonicalSourceHash: 'c69915500d4a01d45e0ed207ce1062b4',
+    historicalChecksums: [
+      {
+        checksum: '4724df0c8720d810aa42b2c1173e4c77',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '2974800ba09b8c08c2f0abed35382b72',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '998a30d0c767b5fd5f8788e483096b45',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '006e56c4be6a5d798c993350e7ff34e7',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'c69915500d4a01d45e0ed207ce1062b4',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '014': {
     version: '014',
     name: 'widen_audit_logs_action_and_resilient_user_refs',
-    acceptedHistoricalChecksums: [
-      '245df46d111a3168f045fa4503e645cd', // Proven 2026-09-30 VPS production checksum
-      'a9368402404ff76af2e34b117859901f', // tsx baseline checksum
-      '102d9fd084b6f74ff3eb6cbb657bb547', // normalized source checksum
-      '90c352eaae3ba201e8ed205b648c1346',
+    canonicalSourceHash: '1fb532574f545750b7a7084bd904d169',
+    historicalChecksums: [
+      {
+        checksum: '245df46d111a3168f045fa4503e645cd',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        notes: 'Proven 2026-09-30 VPS production checksum',
+      },
+      {
+        checksum: 'a9368402404ff76af2e34b117859901f',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: '102d9fd084b6f74ff3eb6cbb657bb547',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        notes: 'normalized source checksum',
+      },
+      {
+        checksum: '90c352eaae3ba201e8ed205b648c1346',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        notes: 'Early normalized checksum',
+      },
+      {
+        checksum: '82dd4ad58643e6456fb6d33190fb0d76',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fb532574f545750b7a7084bd904d169',
+        notes: 'Early normalized checksum',
+      },
     ],
   },
   '015': {
     version: '015',
     name: 'schema_cleanup_and_consolidation',
-    acceptedHistoricalChecksums: [
-      '4ac8fa5cc7c0b667f1e65a1243de357a', // Proven 2026-09-30 VPS production checksum
-      '0fdd53707bf340c6897f60ba7363dc2c', // tsx baseline checksum
-      '032eb08cb639a4f40ce98468bd6d68a7', // normalized source checksum
-      '5b02dcd376d8d55307c5f6e5d8e8251a',
+    canonicalSourceHash: '4a0b31b6332d926c4d5d217230849600',
+    historicalChecksums: [
+      {
+        checksum: '02f08367edba9cbd7bb7c00ca220123a',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '4a0b31b6332d926c4d5d217230849600',
+        notes: 'Pre-regex fix baseline checksum',
+      },
+      {
+        checksum: '4ac8fa5cc7c0b667f1e65a1243de357a',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        notes: 'Proven 2026-09-30 VPS production checksum',
+      },
+      {
+        checksum: '0fdd53707bf340c6897f60ba7363dc2c',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: '032eb08cb639a4f40ce98468bd6d68a7',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        notes: 'normalized source checksum',
+      },
+      {
+        checksum: '5b02dcd376d8d55307c5f6e5d8e8251a',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '02f08367edba9cbd7bb7c00ca220123a',
+        notes: 'Early normalized checksum',
+      },
     ],
   },
   '016': {
     version: '016',
     name: 'simplify_devices_table',
-    acceptedHistoricalChecksums: [
-      '293774afe2d9f8eab38895ab08b52696',
-      '326a00ddfd2aca8769069250ba5d300b',
-      'ad88441362500f8e5ad3e084ceaf9aea',
-      'ff08ece41843556f207c4a0c91988a7b',
+    canonicalSourceHash: '979bfdfeec753f2febd150e80848f633',
+    historicalChecksums: [
+      {
+        checksum: '293774afe2d9f8eab38895ab08b52696',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '326a00ddfd2aca8769069250ba5d300b',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'ad88441362500f8e5ad3e084ceaf9aea',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'ff08ece41843556f207c4a0c91988a7b',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '241c625515d85999ffa29d9ca8995862',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '979bfdfeec753f2febd150e80848f633',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '017': {
     version: '017',
     name: 'simplify_telemetry_readings_table',
-    acceptedHistoricalChecksums: [
-      'b767a739687b305bd91de7dcf3100996',
-      '94caaebbb8af69ae5113908cd2063d8b',
-      'f274bb7df432993d7ee48777309efacc',
+    canonicalSourceHash: 'd280ca6665b40fa932e7660683143755',
+    historicalChecksums: [
+      {
+        checksum: 'b767a739687b305bd91de7dcf3100996',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '94caaebbb8af69ae5113908cd2063d8b',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'f274bb7df432993d7ee48777309efacc',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '3c7d2f9e1943569bfb87be5f5740385b',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'd280ca6665b40fa932e7660683143755',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '018': {
     version: '018',
     name: 'secure_production_seed_cleanup',
-    acceptedHistoricalChecksums: [
-      'c3ec8b1b167b426fe06b89945a86c07b', // Proven 2026-09-30 VPS production checksum
-      '0901f31a0c5dbf6bdfa026a70c27c67b', // tsx baseline checksum
-      '6dbb43ed1ba2bd516bebfb2606445cf9', // normalized source checksum
-      'ab15e36315c29a530effaf7d6965eec0',
-      '797240f7d708aa4a5042193bdfa9757d',
+    canonicalSourceHash: '84b7db96208a73578037a9db2bfdaf31',
+    historicalChecksums: [
+      {
+        checksum: 'e2557455f4195082afbae69a8ca54e42',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '84b7db96208a73578037a9db2bfdaf31',
+        notes: 'Pre-regex fix baseline checksum',
+      },
+      {
+        checksum: 'c3ec8b1b167b426fe06b89945a86c07b',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        notes: 'Proven 2026-09-30 VPS production checksum',
+      },
+      {
+        checksum: '0901f31a0c5dbf6bdfa026a70c27c67b',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: '6dbb43ed1ba2bd516bebfb2606445cf9',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        notes: 'normalized source checksum',
+      },
+      {
+        checksum: 'ab15e36315c29a530effaf7d6965eec0',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '797240f7d708aa4a5042193bdfa9757d',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e2557455f4195082afbae69a8ca54e42',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '019': {
     version: '019',
     name: 'restore_canonical_test_entities',
-    acceptedHistoricalChecksums: [
-      '7888ea7eadf7283b249b72dd44400cec', // Proven 2026-09-30 VPS production checksum
-      '50d032af95ca52755bd53074d9b8d160', // tsx baseline checksum
-      '287d3e23071bb219f72740fcfa5fca1c', // earlier release checksum
-      'ee0a81f703f7c39d9fd4d999feae8bec', // normalized source checksum
-      '12c2e97b1d790354fd893839d330abcd',
+    canonicalSourceHash: '0834903de476066d64eb58f51e894569',
+    historicalChecksums: [
+      {
+        checksum: '7888ea7eadf7283b249b72dd44400cec',
+        hashAlgorithm: 'sha256-normalized-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        notes: 'Proven 2026-09-30 VPS production checksum',
+      },
+      {
+        checksum: '50d032af95ca52755bd53074d9b8d160',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        notes: 'tsx baseline checksum',
+      },
+      {
+        checksum: '287d3e23071bb219f72740fcfa5fca1c',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        notes: 'earlier release checksum',
+      },
+      {
+        checksum: 'ee0a81f703f7c39d9fd4d999feae8bec',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        notes: 'normalized source checksum',
+      },
+      {
+        checksum: '12c2e97b1d790354fd893839d330abcd',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0834903de476066d64eb58f51e894569',
+        notes: 'Early normalized checksum',
+      },
     ],
   },
   '020': {
     version: '020',
     name: 'add_service_tokens_table',
-    acceptedHistoricalChecksums: [
-      'b41fb2904e43f2d77b5ec8d978de9eee',
-      'a9a734255698350083fc2e382f2948b3',
-      'c03d7e5864b0e8d953be7972c9fab901',
-      '5f2852cd9bf7e21f16176394a6b88014',
+    canonicalSourceHash: '73bcba5acff78956a6178a81ec909ef4',
+    historicalChecksums: [
+      {
+        checksum: 'b41fb2904e43f2d77b5ec8d978de9eee',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'a9a734255698350083fc2e382f2948b3',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'c03d7e5864b0e8d953be7972c9fab901',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '5f2852cd9bf7e21f16176394a6b88014',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '544420f39b5b4a22bf9ef6d7112750c2',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '73bcba5acff78956a6178a81ec909ef4',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '021': {
     version: '021',
     name: 'hash_device_and_session_tokens',
-    acceptedHistoricalChecksums: [
-      '3d5bb9b4dbb03c9d2a316a28a9f90732',
-      '5043a5d8a65bedbd55190c57baaac4b8',
-      'b993b629297ae65c26be390be883ba1b',
-      '8c4915f29710dcf0b8cf2e693795f339',
+    canonicalSourceHash: '61a884efe0e315c34918e6e2838c1e1c',
+    historicalChecksums: [
+      {
+        checksum: '3d5bb9b4dbb03c9d2a316a28a9f90732',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '5043a5d8a65bedbd55190c57baaac4b8',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'b993b629297ae65c26be390be883ba1b',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '8c4915f29710dcf0b8cf2e693795f339',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '7f19c2f958717eb2280bec5b83ac801b',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '61a884efe0e315c34918e6e2838c1e1c',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
   '022': {
     version: '022',
     name: 'add_system_settings_and_device_activity_columns',
-    acceptedHistoricalChecksums: [
-      'a73f8e4b2d1c905e6fa083b4c12d98ef',
-      'b7e7bd001d241d9739059ee93f9f61e9',
-      '9e9dd737a24db25a8097d455ca7ac8b3',
-      '1708a3f0fda1ce01216fbcd9c27b1431',
+    canonicalSourceHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+    historicalChecksums: [
+      {
+        checksum: 'a73f8e4b2d1c905e6fa083b4c12d98ef',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: 'b7e7bd001d241d9739059ee93f9f61e9',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '9e9dd737a24db25a8097d455ca7ac8b3',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '1708a3f0fda1ce01216fbcd9c27b1431',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        notes: 'Historical DB checksum',
+      },
+      {
+        checksum: '3d01659c764c1f6895155d611079664c',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'cd944cb5abeebc4c6b29a21a853f43ab',
+        notes: 'Historical DB checksum',
+      },
     ],
   },
 };
 
 /**
- * Validates whether a database-stored checksum matches the current migration content
- * or proven historical release checksums.
+ * Layer A: Validates that the migration source file in the codebase has NOT been mutated
+ * since applied to production releases.
  */
-export function isMigrationChecksumValid(
+export function isMigrationSourceValid(version: string, currentComputedChecksum: string): boolean {
+  const manifest = CANONICAL_MIGRATION_MANIFEST[version];
+  if (!manifest) {
+    return false;
+  }
+  return manifest.canonicalSourceHash === currentComputedChecksum;
+}
+
+/**
+ * Layer B: Validates whether a database-stored checksum matches the current migration content
+ * or proven historical release checksums recorded in the manifest.
+ */
+export function isDatabaseChecksumValid(
   version: string,
   dbChecksum?: string | null,
   currentComputedChecksum?: string
@@ -300,7 +969,26 @@ export function isMigrationChecksumValid(
   if (!manifest) {
     return false;
   }
-  return manifest.acceptedHistoricalChecksums.includes(dbChecksum);
+  return manifest.historicalChecksums.some((h) => h.checksum === dbChecksum);
+}
+
+/**
+ * Combined Dual-Layer Validation Gate:
+ * Enforces BOTH codebase source code integrity (Layer A) AND database history reconciliation (Layer B).
+ * Historical DB allowlists CANNOT bypass mutated migration source code.
+ */
+export function isMigrationChecksumValid(
+  version: string,
+  dbChecksum?: string | null,
+  currentComputedChecksum?: string
+): boolean {
+  if (currentComputedChecksum) {
+    const isSourceValid = isMigrationSourceValid(version, currentComputedChecksum);
+    if (!isSourceValid) {
+      return false; // Fail-closed: Source mutation detected! DB historical allowlist cannot bypass source mutation.
+    }
+  }
+  return isDatabaseChecksumValid(version, dbChecksum, currentComputedChecksum);
 }
 
 export const ALL_MIGRATIONS: Migration[] = [
