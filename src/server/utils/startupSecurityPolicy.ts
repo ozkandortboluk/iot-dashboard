@@ -211,10 +211,39 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   }
 
   // 2. JWT / Session Secret Validation (SEC-13 / OLD-113)
-  const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+  let sessionSecret = (process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
+  if (!sessionSecret) {
+    // Check mounted Docker secrets or dedicated app secrets
+    try {
+      const fs = require('node:fs');
+      if (fs.existsSync('/run/secrets/jwt_secret')) {
+        sessionSecret = fs.readFileSync('/run/secrets/jwt_secret', 'utf8').trim();
+      } else if (fs.existsSync('secrets/jwt_secret')) {
+        sessionSecret = fs.readFileSync('secrets/jwt_secret', 'utf8').trim();
+      } else if (fs.existsSync('/run/secrets/session_secret')) {
+        sessionSecret = fs.readFileSync('/run/secrets/session_secret', 'utf8').trim();
+      } else if (fs.existsSync('secrets/session_secret')) {
+        sessionSecret = fs.readFileSync('secrets/session_secret', 'utf8').trim();
+      }
+    } catch {}
+  }
+
+  // Deterministic derivation fallback: If master ENCRYPTION_KEY or Docker secret exists, derive high-entropy JWT_SECRET
+  if (!sessionSecret) {
+    try {
+      const { resolveEncryptionKey } = require('./crypto.js');
+      const activeVaultKey = resolveEncryptionKey();
+      if (activeVaultKey && activeVaultKey.length >= 16) {
+        sessionSecret = crypto.createHmac('sha256', activeVaultKey).update('SESSION_JWT_SECRET_DERIVATION').digest('hex');
+        process.env.JWT_SECRET = sessionSecret;
+        process.env.SESSION_SECRET = sessionSecret;
+      }
+    } catch {}
+  }
+
   if (!sessionSecret || sessionSecret.trim() === '') {
     errors.push(
-      `[CRITICAL POLICY] Üretim ortamında SESSION_SECRET veya JWT_SECRET tanımlanmamıştır (SEC-13 / OLD-113).`
+      `[CRITICAL POLICY] Üretim ortamında SESSION_SECRET veya JWT_SECRET tanımlanmamıştır (SEC-13 / OLD-113). .env dosyanıza JWT_SECRET ekleyin veya Docker secrets kullanın.`
     );
   } else if (isDefaultSecret(sessionSecret) || sessionSecret.trim().length < 16) {
     errors.push(
