@@ -26,7 +26,7 @@
 ## Dosya düzeni ve taşıma döngüsü
 
 - `docs/kurallar.md`: Denetim, öncelik, üç kutu ve kabul kurallarının kaynağıdır. Her çalışma başında okunur.
-- `docs/PROJECT_ROADMAP.md`: Yalnız açık işler; konu grupları, yapılacaklar ve kabul şartları bulunur. `☐ ☐ ☐`, `☑ ☐ ☐` ve `☑ ☐ ☑` burada kalır.
+- `docs/PROJECT_ROADMAP.md`: En üstte açık kullanıcı istekleri; altında konu grupları, yapılacaklar ve kabul şartları bulunur. `☐ ☐ ☐`, `☑ ☐ ☐` ve `☑ ☐ ☑` burada kalır.
 - `docs/tamamlanan_islemler.md`: Codex kabulü tamamlanan `☑ ☑ ☐` görevler, aynı kimlik ve kanıtıyla taşınır. AI Studio’nun ilk kutuyu işaretlemesi tek başına taşıma gerekçesi değildir.
 - `docs/notlar.md`: Yalnız iki geçici iletişim alanı bulunur: **AI Studio** ve **Codex**. Denetim geçmişi veya uzun rapor deposu olarak kullanılmaz; kalıcı karar ve kabul kanıtları görev dosyalarında, önceki sürümler Git geçmişinde korunur.
 - Her görev güncel kayıt olarak yalnız bir yerde bulunur: açık iş roadmap’te, onaylanmış iş tamamlananlarda. Bir madde kapanınca önce tamamlananlara kimliği/kanıtıyla aktarılır, ardından roadmap’ten kaldırılır; bu taşıma geçmişi silmek değildir.
@@ -34,6 +34,19 @@
 - İşe başlamadan dört dosya birlikte okunur. Kurallar roadmap içine tekrar kopyalanmaz; rapor/ortak notlar açık iş listesini şişirmez.
 - Dosya taşıması uygulama denetimi veya yeni onay değildir; mevcut durum ve kabul kapsamı korunur. Canlı test yapılmadıysa yapılmış sayılmaz.
 - Her yazmadan önce değiştirilecek dosyaların güncel blob SHA’sı ve HEAD okunur. Karşı tarafın yeni uygulama veya notları üzerine yazılmaz; eşzamanlı düzenleme varsa yeniden birleştirilir.
+
+## Kullanıcı istekleri ve USR kontrol maddeleri
+
+- Roadmap’in en üstünde **Kullanıcı istekleri** alanı bulunur. Kullanıcı isteklerini serbest metinle yazabilir; kimlik, öncelik veya kutu vermesi gerekmez.
+- Codex her yeni isteği inceler; ilgili konu grubunda somut yapılacaklar ve ölçülebilir kabul şartlarıyla `USR-01`, `USR-02` şeklinde bir kontrol maddesi oluşturur. Kullanıcının kaynak metni anlamı değiştirilmeden korunur ve kontrol maddesiyle eşleştirilir.
+- `USR` kullanıcı isteği kaynaklı görev kodudur. Görev uygun mevcut gruba yerleştirilir; sırf kullanıcı isteği olduğu için ayrı bir konu grubu açılmaz. Aynı konuya ait mevcut görev varsa bağlantı kurulur; aynı iş iki bağımsız uygulama işi olarak çoğaltılmaz.
+- Yeni kimlik verilmeden önce roadmap, tamamlananlar ve Git geçmişindeki USR kayıtları kontrol edilir. Kimlikler tekrar kullanılmaz; numara artan sırayla devam eder.
+- Üstteki alan isteğin kaynağıdır; üç kutulu güncel kontrol durumu yalnız ilgili konu grubundaki USR maddesinde tutulur. Kaynak satırında ikinci bir görev/kutu kaydı oluşturulmaz.
+- AI Studio isteği uygulayıp kanıtını bırakır ve yalnız ilk kutuyu işaretler. Codex kodu, çağıran/çağrılan akışı ve kabul testlerini denetler; aynı onay, hedefli revizyon ve tam ret kuralları USR maddelerine de uygulanır.
+- Öncelik güvenlik ve çalışan uygulama şartlarına göre verilir. Kullanıcı isteği mevcut P0/P1 güvenlik/çalışma engellerini otomatik olarak geçmez.
+- İstek değişirse yeni kapsam ve kabul şartları aynı kimlik altında güncellenir; önceki karar Git geçmişinde korunur. İstek gerçekten ayrı bir işse yeni kimlik verilir.
+- USR maddesi `☑ ☑ ☐` ile kapanınca görev ve kullanıcının kaynak isteği birlikte tamamlananlar dosyasına taşınır; roadmap’in üst alanı da yalnız açık istekleri gösterir. Regresyonda aynı kimlikle geri açılır.
+- Göreve aktarılan geçici kullanıcı notu notlar.md’den temizlenebilir. Kısa yanıt/engel kendi AI Studio veya Codex alanına yazılır; kalıcı istek ve kontrol işi roadmap’te kalır.
 
 ## İki alanlı yaz-boz ve sıfırlama kuralı
 
