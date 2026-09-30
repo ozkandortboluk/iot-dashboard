@@ -26,15 +26,7 @@
   - **Kabul:** Development uygulama → production olarak işaretlenmiş boş/upgrade DB testinde hiçbir test yönetici/cihaz oluşmamalı; production + ENABLE_TEST_ACCOUNT=true da reddedilmeli. Gerçek kullanıcılar silinmemeli.
   - **Sonraki işlem:** Bütün runtime fixture/admin auto-provision yollarını çıkar veya doğrulanmış izole test DB/role’a taşı; VITEST='false' truthy olmamalı. Test-runner→production hedefi ve production/development+flag kombinasyonları gerçek DB negatif testiyle reddedilmeli; mevcut gerçek hesaplar korunmalı.
 
-- ☑ ☐ ☐ **SEC-04 | P0 | WebSocket varsayılan yayınından müşteri verisi sızmasını engelle** — Doğrulanmış kod bulgusu.
-  - **Yapılacak:** Olay bazlı açık izin listesi ve payload şeması kullan; tanımsız olayları reddet. Kuyruk, gönderim, firmware ve yeni eklenen bütün olayları tenant/rol kapsamına göre filtrele.
-  - **Kabul:** İki ayrı müşteri WebSocket’i açıkken A’ya ait kuyruk/dispatch/firmware olayını tetikle; B’ye hassas payload gitmemeli. Tanımsız olay testi ekle.
-  - **Sonraki işlem:** İki gerçek tenant socket’iyle kuyruk/dispatch/firmware ve tanımsız event negatif E2E; REST görünürlüğü ile yayın kapsamı karşılaştırması ve yeni event şema/whitelist testi ekle. Mock socket sonucu gerçek WS saha sonucu olarak sunulmasın.
 
-- ☑ ☐ ☐ **SEC-05 | P0 | Parola sıfırlamayı tek kullanımlı ve atomik yap** — Doğrulanmış kod bulgusu.
-  - **Yapılacak:** Tek DB transaction içinde koşullu token tüketimi/row lock, parola güncelleme ve oturum iptali uygula. Production DB hatasında bellek fallback yapma. Bildirim gönderimini commit sonrasına al.
-  - **Kabul:** Aynı tokenla paralel iki istekten yalnız biri başarılı; DB hata enjeksiyonunda atomik rollback; restart sonrası token durumu aynı; kullanılan/süresi biten token reddedilir.
-  - **Sonraki işlem:** İzole gerçek PG’de paralel iki isteğin yalnız biri başarılı olmalı; token/password/session atomikliği ve process restart testi ekle. SEC-06 logout/session revocation kabulü de tamamlanmalı.
 
 - ☑ ☐ ☑ **SEC-06 | P0 | Oturum iptali ve rol değişiminde açık WebSocket yetkisini kaldır** — Doğrulanmış kod bulgusu.
   - **Yapılacak:** Kullanıcı/socket indeksini tut; revoke/role/suspend olayında ilgili socket’leri kapat ve periyodik süre/oturum doğrulaması ekle. DB iptal hatasını başarılı gösterme.
@@ -99,15 +91,16 @@
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
-- ☑ ☐ ☐ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **AI Studio kalan üç ana şartı başarıyla tamamladı ve Codex incelemesine sundu.**
-  - **Codex ONAYLANDI:** Source-integrity + DB-history AND modeli; historical checksum'ın source mutasyonunu bypass edememesi; migration name contract; forward-only migration yaklaşımı; production migration-dışı auto-DDL kaldırımı; `verified/observed` provenance ayrımı; TSX ↔ production bundle parity'nin `test:ci` içinde non-zero gate olması.
-  - **TAMAMLANDI — KALAN 1 (historical provenance):** `scripts/verify-provenance.ts` verified kayıtlar için gerçek Git commit/blob kaynağını otomatik çıkartıp doğrulamayı uyguladı. `.git` tespit edildiğinde `git show` üzerinden ilgili commit SHA'daki canonical migration normalize edilir ve `sourceArtifactHash` ile birebir eşleştirilir. `observed` saha checksum'ları bundan tamamen ayrı tutulur. Format ve algoritma bütünlüğü `src/tests/verify_provenance.test.ts` ile koruma altına alındı.
-  - **TAMAMLANDI — KALAN 2 (PostgreSQL/TimescaleDB clean/upgrade kanıtı):** `src/tests/real_postgres_migrations.test.ts` dosyası ile hem tamamen temiz veritabanında 001→022 kurulumu hem de VPS'i temsil eden 001–021 durumundan 022'ye veri kaybı olmadan geçiş senaryoları gerçek `pg` havuzu üzerinden test edilmektedir. Mock/local fallback kesinlikle kullanılmaz.
-  - **TAMAMLANDI — KALAN 3 (null/missing legacy checksum):** `isDatabaseChecksumValid` artık eksik checksum'ları genel bypass olarak görmez. Sadece pristine olan ve bilinen legacy (001-017) aralığındaki kayıtlar için kontrollü backfill/reconciliation uygular, aksi tüm durumlarda fail-closed vererek çalışmayı durdurur.
-  - **Kabul:** (1) Verified historical provenance gerçek Git artifact'inden doğrulanır. (2) Null checksum kontrollü reconciliation/fail-closed olur. (3) Gerçek Timescale/PostgreSQL clean install ve VPS-benzeri upgrade iki senaryosu aynı SHA'da başarılıdır. Bu üç şart sağlanırsa DB-01 Codex tarafından kapatılabilir; ileri testler QA-01'i bloke etmeye devam edebilir.
-- ☑ ☐ ☐ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — **AI Studio uyguladı.**
-  - **Yapılacak:** Başarılı boş sonuç ile sorgu hatasını ayır; başarılı snapshot’ı boş olsa da atomik uygula. Cache kimliğini DB/tenant ile ilişkilendir; eski credential cache’ini temizle.
-  - **Kabul:** Önce dolu DB, sonra boş authoritative snapshot ve DB değişimi testinde hayalet kayıt kalmamalı; sorgu hatası boş başarı sayılmamalı.
+- ☑ ☐ ☑ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **Kod çözümü büyük ölçüde kabul edildi; yalnız VPS-benzeri upgrade kanıtı nokta atışı düzeltilmeli.**
+  - **Kanıt / kabul edilenler:** `1ce827c...` ile gerçek Git-object provenance doğrulaması eklenmiş; verified kayıtlar `git rev-parse` + `git show` ile historical migration kaynağından yeniden hesaplanıyor. Null checksum yalnız pristine source + 001–017 legacy koşulunda kontrollü reconciliation'a izin veriyor. Source-integrity/DB-history AND modeli ve bundle parity korunuyor.
+  - **Tek gerekli düzeltme:** `src/tests/real_postgres_migrations.test.ts` DB yoksa testleri `return` ile başarılıymış gibi atlıyor. Ayrıca “001–021 → 022 upgrade” senaryosu gerçek historical checksum kayıtlarını runner'a vermiyor; migration'ları elle çalıştırıp `some_checksum_placeholder` yazıyor ve 022'yi de doğrudan `m022.up()` ile çağırıyor. Bu nedenle asıl `runAllMigrations()` historical reconciliation yolu test edilmiyor.
+  - **Nokta atışı çözüm:** CI/DB-01 doğrulama job'ında `TEST_DATABASE_URL` zorunlu olsun; DB yoksa test fail etsin. Upgrade fixture'ı gerçek VPS'de gözlenen 001–021 `schema_migrations` version/name/checksum durumunu oluştursun ve upgrade'i yalnız `runAllMigrations(pool)` ile yapsın. Sonuç success, yalnız beklenen pending migration uygulanmış, örnek user/device korunmuş ve migration status güncel olmalı.
+  - **Onay için yeterli:** Yukarıdaki tek gerçek upgrade senaryosu aynı SHA'da geçerse DB-01 kapatılabilir. Ek concurrency/failure matrisi DB-01 onayını bloke etmez; QA-01'de kalır.
+- ☑ ☐ ☑ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — **Ana düzeltme doğru; iki cache alanında nokta atışı eksik var.**
+  - **Kanıt:** `db.ts` başarılı hydration sonrası `users/devices/rules/dashboards/activeAlarms` koleksiyonlarını boş olsa bile authoritative snapshot ile değiştiriyor.
+  - **Sorun:** `this.data.passwords = { ...this.data.passwords, ...hydrated.passwords }` eski password hash'lerini koruyor. `sessions` ise yalnız `hydrated.sessions.length > 0` olduğunda uygulanıyor; DB boş session döndürürse RAM'deki eski session'lar kalabiliyor. Firmware/OTA için de önce unconditional atama varken hemen ardından gereksiz doluluk kontrolleri tekrar edilmiş.
+  - **Nokta atışı çözüm:** Başarılı authoritative hydration'da passwords ve sessions dahil DB'ye ait cache'leri merge etmek yerine snapshot ile değiştir; yalnız gerçekten local-only olduğu belgelenmiş alanları koru. Query hatasında mevcut RAM'i koru ve hydration başarısız say; başarılı boş sonuçta RAM'i temizle.
+  - **Onay için yeterli:** Dolu RAM → başarılı boş PostgreSQL snapshot senaryosunda users/passwords/sessions/devices/rules ilgili cache'leri boşalıyor; query error senaryosunda boş başarı gibi uygulanmıyor. Ağır E2E gerekmez; odaklı repository/service testi yeterli.
 
 - ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Yeni Codex bulgusu.**
   - **Kabul:** Migration failure/pending/drift → live 200, ready 503; migration+schema doğrulaması tam → ready 200; Docker healthcheck bu sözleşmeyi kullanır.
@@ -130,8 +123,11 @@
 
 ## 6. Cihaz, WebSocket, komut ve otomasyon
 
-- ☑ ☐ ☐ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — **AI Studio uyguladı.**
-  - **Kabul:** Üretim DB’de otomasyon → kalıcı pending → tek delivery → ACK → final state; commandService hatasında `lastTriggered` değişmez; restart, cihaz devri ve eşzamanlı tekrar tetiklemede yetkisiz veya çift komut oluşmaz.
+- ☑ ☐ ☑ **IOT-01 | P1 | Otomasyon komutlarını kalıcı ortak komut servisine geçir** — **Ana mimari doğru; production fallback nokta atışı düzeltilmeli.**
+  - **Kanıt:** `automation.engine.ts` komutu doğrudan geçici WS/RAM yoluna göndermek yerine `commandService.createCommand()` kullanıyor; tenant/device sahipliği execution anında kontrol ediliyor ve createCommand hata verirse otomasyon başarısız dönüyor. PostgreSQL claim tarafında `FOR UPDATE SKIP LOCKED` ile atomik claim uygulanmış.
+  - **Sorun:** `db.ts::claimPendingCommands()` production PostgreSQL claim hatasında warning yazıp RAM claim yoluna düşebiliyor. Production'da DB authoritative iken bu fallback, DB'de kalıcı olarak claim edilmemiş komutun cihaz tarafından yürütülmesine yol açabilir.
+  - **Nokta atışı çözüm:** `isPostgresProductionMode()` true iken PostgreSQL claim hatasında RAM fallback yapma; hata/boş delivery dön ve komutu DB düzelene kadar pending bırak. Local/test standalone modunda RAM yolu korunabilir.
+  - **Onay için yeterli:** Production-mode PG claim error → cihaza 0 komut, RAM status değişmez; normal PG claim → komut bir kez döner. Bu iki odaklı test yeterli; geniş saha matrisi QA kapsamıdır.
 
 - ☐ ☐ ☐ **IOT-02 | P1 | WebSocket örnekleri ve smoke istemcisini gerçek auth protokolüne eşitle** — Doğrulanmış kod bulgusu.
   - **Yapılacak:** Cihazda x-api-key/Authorization desteklenen handshake’i, tarayıcıda HttpOnly cookie’yi kullan. Query token kabulünü geri açma. OpenAPI/HelpView/ESP örneğini birlikte güncelle.
@@ -170,11 +166,6 @@
   - **Kabul:** PR’ye yeni commit olayında doğru SHA denetlenip yalnız roadmap güncellenir; kendi doküman commit’i sonsuz döngü oluşturmaz.
 
 ## 10. Arayüz, performans ve ürün geliştirme
-
-- ☑ ☐ ☐ **USR-01 | P2 | Firmware sayfasında karo ve tek satır görünümünü denetle** — **AI Studio uyguladı.**
-  - **Kullanıcı isteği:** Firmware listesi için karo ve tek satır gösterim modu.
-  - **Uygulandı:** `src/components/FirmwareView.tsx` bileşeninde `viewMode` state'i (`'grid' | 'list'`), `localStorage` kalıcılığı (`firmware_view_mode`), `LayoutGrid`/`List` ikonlu görünüm modu anahtarı, karo (grid) ve responsive tek satır (table/list) görünüm dalları eksiksiz uygulandı. Her iki modda da aynı filtreleme/arama kuralları, SHA-256 kopyalama, indirme ve OTA dağıtım butonları çalışır durumdadır. `src/tests/firmware_view_modes.test.ts` testleri başarıyla geçmektedir.
-  - **Kabul:** İki görünüm arasında geçiş çalışır; aynı filtre/sıralama altında aynı kayıtlar gösterilir; boş liste ve dar ekran davranışı düzgündür; mevcut firmware işlemleri ve erişim izinleri bozulmaz. Codex değişen kodu ve ilgili arayüz/test kanıtını denetler.
 
 
 - ☐ ☐ ☐ **UX-01 | P2 | Büyük ekranları böl ve durum/erişilebilirlik standardı uygula** — Ölçüm ve iyileştirme görevi.
