@@ -26,3 +26,14 @@
 
   - **Güncel Codex denetimi (2026-09-30, kod `7c51485`; HEAD `89b974a`):** Salt okunur ./secrets:/app/secrets:ro ve Docker secret tanımı mevcut; crypto resolver özel secrets dosyasını okuyor; ignore kuralları mevcut. Önceki dar kapsamlı statik onay korunuyor. Bu onay production bootstrap’ın güvenli olduğu anlamına gelmez: SEC-13/RUN-06’daki env anahtar üretimi dosya kaynağının önüne geçebilir.
   - **Sonraki adım / yeniden kabul:** Mount kodunu koru; etkili anahtar kaynağı, UID/GID izinleri ve restart sonrası eski şifreli veri için SEC-13/RUN-06 kabulünü ayrıca tamamla.
+
+## Kısmen tamamlanan kanonik görevler
+
+### USR-02 → RUN-04 | P1 | Ortam, SSH/DB ve kullanıcı oturum ayrımı — kısmen tamamlandı
+
+- ☑ ☑ ☐ **Tamamlanan alt kapsam — merkezi runtime sınıflandırması:** `src/server/config/runtimeEnvironment.ts` içinde `APP_ENV` öncelikli `vps/aistudio/local/test` çözümleyicisi ve ortam yardımcıları mevcut. İlgili runtime testleri ortam seçimlerini kapsıyor.
+- ☑ ☑ ☐ **Tamamlanan alt kapsam — SSH yönlendirme politikasının kod ayrımı:** `src/server/database/connection.ts` SSH reroute’u yalnız `isSshTunnelAllowed() && sshTunnelService.isConnected()` koşulunda uygular; runtime politikası VPS’de SSH tünelini kapatacak şekilde merkezileştirilmiştir. Bu kayıt kod/test kapsamıdır; gerçek VPS hedef doğrulaması RUN-04’te açık kalır.
+- ☑ ☑ ☐ **Tamamlanan alt kapsam — browser kullanıcı auth mimarisi:** `apiFetch` `credentials: 'include'` değerini çağıran init’in üzerine garanti eder; browser user auth HttpOnly `nexus_session_token` akışına taşınmıştır ve eski `dashboard_token` başlangıçta temizlenir. Login/register akışında `/api/auth/me` doğrulaması yapılmadan başarılı kullanıcı oturumu kabul edilmez.
+- ☑ ☑ ☐ **Tamamlanan alt kapsam — temel negatif auth/CSRF ve WS testleri:** Testlerde cookie yok/geçersiz → 401, yetkisiz Origin + cookie ile state-changing istek → 403, izinli AI Studio Origin akışı ve cookie ile WS kabulü / cookiesiz WS reddi kapsanmıştır. Bu testler Node/supertest/WS seviyesindedir; gerçek browser E2E kalan RUN-04 kapsamındadır.
+- ☑ ☑ ☐ **Tamamlanan alt kapsam — AI Studio 401 saha sorunu:** Kullanıcı 2026-09-30 tarihinde AI Studio geliştirme ortamında önceki `Authorization Token eksik` 401 hatasını artık almadığını ve login sonrası sistemin çalıştığını doğruladı. Bu, temel browser session/korumalı API akışı için pozitif saha kanıtıdır.
+- **Açık kalan kapsam:** Gerçek VPS DB hedef izolasyonu, gerçek AI Studio/VPS deployment environment doğrulaması, PG parola/migration/schema/setup/DB-down matrisi ve cookie elle taşınmayan gerçek browser + WebSocket E2E. Bunlar `PROJECT_ROADMAP.md` içindeki tek aktif kanonik `RUN-04` maddesinde tutulur.
