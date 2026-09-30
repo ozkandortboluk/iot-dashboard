@@ -1,7 +1,8 @@
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
-import { resetEncryptionKeyCache } from './crypto.js';
+import { resetEncryptionKeyCache, resolveEncryptionKey } from './crypto.js';
 
 /**
  * Common default, weak, or sample passwords that MUST be strictly blocked in production.
@@ -169,7 +170,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
         const dockerSecretPath = '/run/secrets/db_password';
         const appSecretPath = 'secrets/db_password';
         try {
-          const fs = require('node:fs');
           if (fs.existsSync(dockerSecretPath)) {
             candidateDbPass = fs.readFileSync(dockerSecretPath, 'utf8').trim();
           } else if (fs.existsSync(appSecretPath)) {
@@ -215,7 +215,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   if (!sessionSecret) {
     // Check mounted Docker secrets or dedicated app secrets
     try {
-      const fs = require('node:fs');
       if (fs.existsSync('/run/secrets/jwt_secret')) {
         sessionSecret = fs.readFileSync('/run/secrets/jwt_secret', 'utf8').trim();
       } else if (fs.existsSync('secrets/jwt_secret')) {
@@ -231,7 +230,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   // Deterministic derivation fallback: If master ENCRYPTION_KEY or Docker secret exists, derive high-entropy JWT_SECRET
   if (!sessionSecret) {
     try {
-      const { resolveEncryptionKey } = require('./crypto.js');
       const activeVaultKey = resolveEncryptionKey();
       if (activeVaultKey && activeVaultKey.length >= 16) {
         sessionSecret = crypto.createHmac('sha256', activeVaultKey).update('SESSION_JWT_SECRET_DERIVATION').digest('hex');
@@ -256,7 +254,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   if (!encKey) {
     const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
     try {
-      const fs = require('node:fs');
       if (keyPath && fs.existsSync(keyPath)) {
         encKey = fs.readFileSync(keyPath, 'utf8').trim();
       } else if (fs.existsSync('/run/secrets/encryption_key')) {

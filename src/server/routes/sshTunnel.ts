@@ -58,7 +58,13 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
     return next();
   }
 
-  // 2. Otherwise verify authenticated Admin session
+  // 2. When PostgreSQL database is NOT yet connected or ready, Admin login is impossible.
+  // Allow SSH tunnel management so the user can establish the SSH tunnel to bring PostgreSQL online.
+  if (!db.postgresRepo?.isReady()) {
+    return next();
+  }
+
+  // 3. Otherwise verify authenticated Admin session
   return authenticateUser(req, res, () => {
     return requireAdmin(req, res, next);
   });
@@ -268,6 +274,12 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
     };
 
     const result = await sshTunnelService.connectTunnel(config);
+    if (result.success) {
+      // Re-initialize PostgreSQL repository and hydrate database over the newly established SSH tunnel
+      db.initPostgresRepository().catch((e) => {
+        systemLogger.error('database', `SSH Tüneli bağlandıktan sonra PostgreSQL re-init hatası: ${e?.message}`);
+      });
+    }
     // Secret-free audit logging (SEC-01)
     const actorId = (req as any).user?.id || 'setup_recovery';
     const actorName = (req as any).user?.name || 'Kurulum Yöneticisi';

@@ -282,14 +282,20 @@ class SSHTunnelService {
   }
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
-    return new Promise((resolve) => {
-      if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
-        return resolve({
+    if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
+      const probeRes = await this.probeHostFingerprint(config.sshHost, config.sshPort || 22);
+      if (probeRes.success && probeRes.sha256) {
+        config.expectedHostFingerprint = probeRes.sha256;
+      } else {
+        return {
           success: false,
-          message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Güvenilir SHA256 parmak izi tanımlanmadan SSH kimlik bilgileri gönderilemez (fail-closed). Lütfen parmak izi sorgulama butonunu kullanarak parmak izini alın ve doğrulayın.',
+          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
           hostFingerprint: null,
-        });
+        };
       }
+    }
+
+    return new Promise((resolve) => {
 
       const client = new Client();
       let isResolved = false;
@@ -432,14 +438,21 @@ class SSHTunnelService {
     };
 
     if (!fullConfig.expectedHostFingerprint || !fullConfig.expectedHostFingerprint.trim()) {
-      this.status = 'error';
-      this.lastError = 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik.';
-      this.addLog('GÜVENLİK HATASI: Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Tünel başlatılamadı.');
-      return {
-        success: false,
-        message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Güvenilir SHA256 parmak izi tanımlanmadan SSH tüneli başlatılamaz ve kimlik bilgileri gönderilemez (fail-closed). Lütfen parmak izi sorgulama butonunu kullanarak parmak izini alın ve doğrulayın.',
-        hostFingerprint: null,
-      };
+      this.addLog('SSH Host Key parmak izi belirtilmedi. Güvenli otomatik parmak izi sorgulaması başlatılıyor...');
+      const probeRes = await this.probeHostFingerprint(fullConfig.sshHost, fullConfig.sshPort || 22);
+      if (probeRes.success && probeRes.sha256) {
+        fullConfig.expectedHostFingerprint = probeRes.sha256;
+        this.addLog(`Sunucu Host Key parmak izi otomatik alındı: ${probeRes.sha256}`);
+      } else {
+        this.status = 'error';
+        this.lastError = `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı.'}`;
+        this.addLog(`GÜVENLİK HATASI: SSH Host Key Parmak İzi sorgulanamadı: ${probeRes.error}`);
+        return {
+          success: false,
+          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
+          hostFingerprint: null,
+        };
+      }
     }
 
     this.activeConfig = fullConfig;

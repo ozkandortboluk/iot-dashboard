@@ -61,9 +61,20 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const getAuthHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const setupToken = sessionStorage.getItem('nexus_setup_token') || localStorage.getItem('nexus_setup_token');
+    const setupToken =
+      sessionStorage.getItem('nexus_setup_token') ||
+      localStorage.getItem('nexus_setup_token') ||
+      sessionStorage.getItem('setup_token') ||
+      localStorage.getItem('setup_token') ||
+      sessionStorage.getItem('x-setup-token') ||
+      localStorage.getItem('x-setup-token');
     if (setupToken) {
       headers['X-Setup-Token'] = setupToken;
+      headers['x-setup-token'] = setupToken;
+    }
+    const userToken = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
+    if (userToken) {
+      headers['Authorization'] = `Bearer ${userToken}`;
     }
     return headers;
   };
@@ -85,6 +96,13 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           sshPort: Number(sshPort) || 22,
         }),
       });
+      if (res.status === 401) {
+        setActionMessage({
+          type: 'error',
+          text: 'Yetkisiz Erişim (401): SSH Tüneli sorgulaması için Sistem Yöneticisi (Admin) girişi gereklidir. Lütfen önce sisteme giriş yapın.',
+        });
+        return;
+      }
       const data = await res.json();
       if (data.success && data.sha256) {
         setDiscoveredFingerprint(data.sha256);
@@ -112,6 +130,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         headers: getAuthHeaders(),
         credentials: 'include',
       });
+      if (res.status === 401) {
+        setLastError('SSH Tüneli yönetimi için Sistem Yöneticisi (Admin) girişi gereklidir. Lütfen önce paneldan giriş yapın.');
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
