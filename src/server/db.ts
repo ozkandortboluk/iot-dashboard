@@ -405,17 +405,19 @@ class LocalDatabase {
   }
 
   private postgresAutoReconnectInterval: any = null;
+  private isInitializingPostgres = false;
+  private lastLoggedPostgresError: string | null = null;
 
   public startPostgresAutoReconnect(): void {
     if (this.postgresAutoReconnectInterval) return;
     this.postgresAutoReconnectInterval = setInterval(async () => {
-      if (!this.postgresRepo.isReady()) {
+      if (!this.postgresRepo.isReady() && !this.isInitializingPostgres) {
         const url = this.getPostgresUrl();
         if (url) {
           await this.initPostgresRepository().catch(() => {});
         }
       }
-    }, process.env.NODE_ENV === 'test' ? 500 : 5000);
+    }, process.env.NODE_ENV === 'test' ? 500 : 15000);
   }
 
   public stopPostgresAutoReconnect(): void {
@@ -458,57 +460,74 @@ class LocalDatabase {
   }
 
   public async initPostgresRepository(): Promise<boolean> {
-    const url = this.getPostgresUrl().trim();
-    const isPgExplicitlyConfigured = !!url || this.data?.databaseSettings?.activeEngine === 'postgres' || !!(process.env.POSTGRES_HOST || process.env.DB_HOST);
-    if (!url) {
-      this.postgresRepo.setPool(null);
-      this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Hatası]: DATABASE_URL / PostgreSQL yapılandırması eksik veya boş.');
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-      }
-      return false;
+    if (this.isInitializingPostgres) {
+      return this.postgresRepo.isReady();
     }
+    this.isInitializingPostgres = true;
 
-    const pool = this.getPgPool();
-    if (!pool) {
-      this.postgresRepo.setPool(null);
-      this.postgresRepo.setConnected(false);
-      if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
-        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        console.error('[PostgreSQL Hatası]: PostgreSQL bağlantı havuzu oluşturulamadı.');
-      } else {
-        this.setDatabaseState(DatabaseState.READY);
-      }
-      return false;
-    }
-
-    const wasAlreadyReady = this.dbState === DatabaseState.READY;
-    this.postgresRepo.setPool(pool);
-    if (!wasAlreadyReady) {
-      this.setDatabaseState(DatabaseState.DB_CONNECTING);
-    }
-
-    let client: any = null;
     try {
-      client = await pool.connect();
-      if (client) client.on('error', () => {});
-      await client.query('SELECT 1;');
-    } catch (connErr: any) {
-      this.postgresRepo.setConnected(false);
-      if (this.data.databaseSettings) {
-        this.data.databaseSettings.isPostgresConnected = false;
+      const url = this.getPostgresUrl().trim();
+      const isPgExplicitlyConfigured = !!url || this.data?.databaseSettings?.activeEngine === 'postgres' || !!(process.env.POSTGRES_HOST || process.env.DB_HOST);
+      if (!url) {
+        this.postgresRepo.setPool(null);
+        this.postgresRepo.setConnected(false);
+        if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
+          this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+          if (this.lastLoggedPostgresError !== 'EMPTY_URL') {
+            this.lastLoggedPostgresError = 'EMPTY_URL';
+            console.error('[PostgreSQL Hatası]: DATABASE_URL / PostgreSQL yapılandırması eksik veya boş.');
+          }
+        } else {
+          this.setDatabaseState(DatabaseState.READY);
+        }
+        return false;
       }
-      this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-      console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${connErr?.code || connErr?.message || 'bağlantı yok'}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
-      return false;
-    } finally {
-      if (client) {
-        try { client.release(); } catch {}
+
+      const pool = this.getPgPool();
+      if (!pool) {
+        this.postgresRepo.setPool(null);
+        this.postgresRepo.setConnected(false);
+        if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
+          this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+          if (this.lastLoggedPostgresError !== 'NO_POOL') {
+            this.lastLoggedPostgresError = 'NO_POOL';
+            console.error('[PostgreSQL Hatası]: PostgreSQL bağlantı havuzu oluşturulamadı.');
+          }
+        } else {
+          this.setDatabaseState(DatabaseState.READY);
+        }
+        return false;
       }
-    }
+
+      const wasAlreadyReady = this.dbState === DatabaseState.READY;
+      this.postgresRepo.setPool(pool);
+      if (!wasAlreadyReady) {
+        this.setDatabaseState(DatabaseState.DB_CONNECTING);
+      }
+
+      let client: any = null;
+      try {
+        client = await pool.connect();
+        if (client) client.on('error', () => {});
+        await client.query('SELECT 1;');
+        this.lastLoggedPostgresError = null;
+      } catch (connErr: any) {
+        this.postgresRepo.setConnected(false);
+        if (this.data.databaseSettings) {
+          this.data.databaseSettings.isPostgresConnected = false;
+        }
+        this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+        const errKey = connErr?.code || connErr?.message || 'bağlantı yok';
+        if (this.lastLoggedPostgresError !== errKey) {
+          this.lastLoggedPostgresError = errKey;
+          console.warn(`[PostgreSQL Bilgisi]: PostgreSQL sunucusuna bağlanılamadı (${errKey}). Durum DB_UNAVAILABLE olarak işaretlendi.`);
+        }
+        return false;
+      } finally {
+        if (client) {
+          try { client.release(); } catch {}
+        }
+      }
 
     this.postgresRepo.setConnected(true, true);
     this.setDatabaseState(DatabaseState.DB_INITIALIZING);
@@ -618,6 +637,9 @@ class LocalDatabase {
     }
 
     return this.postgresRepo.isReady();
+    } finally {
+      this.isInitializingPostgres = false;
+    }
   }
 
   public async syncAllToPostgres(): Promise<{ success: boolean; message: string; counts?: Record<string, number> }> {

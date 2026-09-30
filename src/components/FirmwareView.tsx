@@ -24,6 +24,8 @@ import {
   HardDrive,
   Info,
   Code,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import type { Firmware, OtaDeploymentJob, Device, User } from '../types';
 import { hasPermission, canAccessTab } from '../lib/permissions';
@@ -73,6 +75,25 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
 
   // Copy SHA State
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
+
+  // View Mode & Filter State for Firmware Library
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    try {
+      return (localStorage.getItem('firmware_view_mode') as 'grid' | 'list') || 'grid';
+    } catch {
+      return 'grid';
+    }
+  });
+  const [librarySearch, setLibrarySearch] = useState<string>('');
+  const [libraryFilter, setLibraryFilter] = useState<'all' | 'active' | 'inactive'>('all');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('firmware_view_mode', viewMode);
+    } catch (e) {
+      console.warn('localStorage error for firmware_view_mode:', e);
+    }
+  }, [viewMode]);
 
   // Status Filter State for Jobs Tab
   const [jobStatusFilter, setJobStatusFilter] = useState<string>('all');
@@ -447,146 +468,428 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
       )}
 
       {/* TAB 1: FIRMWARE LIBRARY */}
-      {activeTab === 'library' && (
-        <div className="space-y-4">
-          {firmwares.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center">
-              <Cpu className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-              <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Henüz Firmware Yüklenmemiş</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
-                Sistemde ESP8266 veya ESP32 donanımları için kayıtlı firmware ikili dosyası (.bin) bulunmuyor. Yeni bir firmware yükleyerek OTA güncellemelerine başlayabilirsiniz.
-              </p>
-              {isAdmin && (
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-medium text-sm hover:bg-indigo-500"
-                >
-                  <Plus className="w-4 h-4" />
-                  İlk Firmware'i Yükle
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {firmwares.map((fw) => {
-                const matchingDeviceCount = devices.filter(
-                  (d) => (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase()
-                ).length;
+      {activeTab === 'library' && (() => {
+        const filteredFirmwares = firmwares.filter((fw) => {
+          const matchSearch =
+            !librarySearch ||
+            fw.name.toLowerCase().includes(librarySearch.toLowerCase()) ||
+            fw.version.toLowerCase().includes(librarySearch.toLowerCase()) ||
+            fw.roleKey.toLowerCase().includes(librarySearch.toLowerCase()) ||
+            (fw.deviceType && fw.deviceType.toLowerCase().includes(librarySearch.toLowerCase())) ||
+            (fw.hardwareModel && fw.hardwareModel.toLowerCase().includes(librarySearch.toLowerCase())) ||
+            (fw.description && fw.description.toLowerCase().includes(librarySearch.toLowerCase()));
 
-                return (
-                  <div
-                    key={fw.id}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+          const matchFilter =
+            libraryFilter === 'all' ||
+            (libraryFilter === 'active' && fw.isActive) ||
+            (libraryFilter === 'inactive' && !fw.isActive);
+
+          return matchSearch && matchFilter;
+        });
+
+        return (
+          <div className="space-y-4">
+            {/* Toolbar: Search, Filters, View Mode Switcher, Upload Button */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm">
+              <div className="flex flex-1 items-center gap-2">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Firmware adı, sürüm, görev veya donanım ara..."
+                    value={librarySearch}
+                    onChange={(e) => setLibrarySearch(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:text-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setLibraryFilter('all')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      libraryFilter === 'all'
+                        ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 font-bold'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-3">
-                        <div>
-                          <span className="inline-block px-2.5 py-0.5 text-xs font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 rounded-md mb-1.5">
-                            {fw.version}
-                          </span>
-                          <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-1">{fw.name}</h3>
+                    Tümü ({firmwares.length})
+                  </button>
+                  <button
+                    onClick={() => setLibraryFilter('active')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      libraryFilter === 'active'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    Aktif ({firmwares.filter((f) => f.isActive).length})
+                  </button>
+                  <button
+                    onClick={() => setLibraryFilter('inactive')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      libraryFilter === 'inactive'
+                        ? 'bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-bold'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    Pasif ({firmwares.filter((f) => !f.isActive).length})
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 justify-end">
+                {/* View Mode Switcher: Karo (Grid) vs Tek Satır (List) */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grid')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                      viewMode === 'grid'
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-bold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                    title="Karo Görünüm (Grid)"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Karo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                      viewMode === 'list'
+                        ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm font-bold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                    title="Tek Satır / Liste Görünüm"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>Tek Satır</span>
+                  </button>
+                </div>
+
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl font-medium text-xs hover:bg-indigo-500 shadow-sm transition-all shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Yeni Yükle
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {firmwares.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center">
+                <Cpu className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Henüz Firmware Yüklenmemiş</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
+                  Sistemde ESP8266 veya ESP32 donanımları için kayıtlı firmware ikili dosyası (.bin) bulunmuyor. Yeni bir firmware yükleyerek OTA güncellemelerine başlayabilirsiniz.
+                </p>
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl font-medium text-sm hover:bg-indigo-500"
+                  >
+                    <Plus className="w-4 h-4" />
+                    İlk Firmware'i Yükle
+                  </button>
+                )}
+              </div>
+            ) : filteredFirmwares.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
+                <Filter className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">Eşleşen Firmware Bulunamadı</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Arama kriterlerinize veya durum filtresine uygun kayıt bulunamadı.
+                </p>
+                <button
+                  onClick={() => {
+                    setLibrarySearch('');
+                    setLibraryFilter('all');
+                  }}
+                  className="mt-3 text-xs text-indigo-600 dark:text-indigo-400 font-medium hover:underline"
+                >
+                  Filtreleri Temizle
+                </button>
+              </div>
+            ) : viewMode === 'grid' ? (
+              /* KARO / GRID VIEW */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredFirmwares.map((fw) => {
+                  const matchingDeviceCount = devices.filter(
+                    (d) => (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase()
+                  ).length;
+
+                  return (
+                    <div
+                      key={fw.id}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div>
+                            <span className="inline-block px-2.5 py-0.5 text-xs font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 rounded-md mb-1.5">
+                              {fw.version}
+                            </span>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-1">{fw.name}</h3>
+                          </div>
+                          {fw.isActive ? (
+                            <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-full border border-emerald-300 dark:border-emerald-800">
+                              Aktif
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-xs font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 rounded-full">
+                              Pasif
+                            </span>
+                          )}
                         </div>
-                        {fw.isActive ? (
-                          <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-full border border-emerald-300 dark:border-emerald-800">
-                            Aktif
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 text-xs font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 rounded-full">
-                            Pasif
-                          </span>
+
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">
+                          {fw.description || 'Açıklama girilmemiş.'}
+                        </p>
+
+                        <div className="space-y-2 text-xs bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 mb-4">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400">Görev Kimliği (Role Key):</span>
+                            <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{fw.roleKey}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400">Cihaz Tipi (Device Type):</span>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">{fw.deviceType}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400">Donanım Modeli:</span>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">{fw.hardwareModel || 'ESP32 / ESP8266'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400">Dosya Boyutu:</span>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {(fw.binarySize / 1024).toFixed(1)} KB ({fw.binarySize} B)
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1 border-t border-slate-200 dark:border-slate-700">
+                            <span className="text-slate-500 dark:text-slate-400">Anahtar (Key ID):</span>
+                            <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">
+                              {fw.keyId || 'root_ed25519_v1'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-500 dark:text-slate-400">SHA-256 Hash:</span>
+                            <button
+                              onClick={() => copyToClipboard(fw.sha256)}
+                              className="flex items-center gap-1 font-mono text-[10px] text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 truncate max-w-[140px]"
+                              title="SHA-256 doğrulama kodunu kopyala"
+                            >
+                              <span className="truncate">{fw.sha256.substring(0, 12)}...</span>
+                              {copiedSha === fw.sha256 ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between mb-4">
+                          <span>Eşleşen Cihaz Sayısı:</span>
+                          <span className="font-bold text-indigo-600 dark:text-indigo-400">{matchingDeviceCount} Cihaz</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <a
+                          href={`/api/firmwares/${fw.id}/download`}
+                          download
+                          className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg text-center flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <DownloadCloud className="w-3.5 h-3.5" />
+                          İndir (.bin)
+                        </a>
+
+                        {isAdmin && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setSelectedFirmwareId(fw.id);
+                                setTargetRoleValue(fw.roleKey);
+                                setTargetTypeValue(fw.deviceType);
+                                setActiveTab('deploy');
+                              }}
+                              className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <Radio className="w-3.5 h-3.5" />
+                              OTA Dağıt
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteFirmware(fw.id, fw.name)}
+                              className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+                              title="Firmware'i Sil"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                       </div>
-
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">
-                        {fw.description || 'Açıklama girilmemiş.'}
-                      </p>
-
-                      <div className="space-y-2 text-xs bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800/80 mb-4">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 dark:text-slate-400">Görev Kimliği (Role Key):</span>
-                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{fw.roleKey}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 dark:text-slate-400">Cihaz Tipi (Device Type):</span>
-                          <span className="font-medium text-slate-800 dark:text-slate-200">{fw.deviceType}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 dark:text-slate-400">Donanım Modeli:</span>
-                          <span className="font-medium text-slate-800 dark:text-slate-200">{fw.hardwareModel || 'ESP32 / ESP8266'}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 dark:text-slate-400">Dosya Boyutu:</span>
-                          <span className="font-medium text-slate-800 dark:text-slate-200">
-                            {(fw.binarySize / 1024).toFixed(1)} KB ({fw.binarySize} B)
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center pt-1 border-t border-slate-200 dark:border-slate-700">
-                          <span className="text-slate-500 dark:text-slate-400">Anahtar (Key ID):</span>
-                          <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">
-                            {fw.keyId || 'root_ed25519_v1'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-500 dark:text-slate-400">SHA-256 Hash:</span>
-                          <button
-                            onClick={() => copyToClipboard(fw.sha256)}
-                            className="flex items-center gap-1 font-mono text-[10px] text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 truncate max-w-[140px]"
-                            title="SHA-256 doğrulama kodunu kopyala"
-                          >
-                            <span className="truncate">{fw.sha256.substring(0, 12)}...</span>
-                            {copiedSha === fw.sha256 ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between mb-4">
-                        <span>Eşleşen Cihaz Sayısı:</span>
-                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{matchingDeviceCount} Cihaz</span>
-                      </div>
                     </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* TEK SATIR / LIST VIEW */
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wider">
+                      <tr>
+                        <th className="py-3.5 px-4">Firmware & Sürüm</th>
+                        <th className="py-3.5 px-4">Görev & Cihaz Tipi</th>
+                        <th className="py-3.5 px-4">Donanım</th>
+                        <th className="py-3.5 px-4">Boyut & Anahtar</th>
+                        <th className="py-3.5 px-4">SHA-256 Hash</th>
+                        <th className="py-3.5 px-4 text-center">Eşleşen Cihaz</th>
+                        <th className="py-3.5 px-4 text-right">İşlemler</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                      {filteredFirmwares.map((fw) => {
+                        const matchingDeviceCount = devices.filter(
+                          (d) => (d.roleKey || '').toUpperCase() === fw.roleKey.toUpperCase()
+                        ).length;
 
-                    <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                      <a
-                        href={`/api/firmwares/${fw.id}/download`}
-                        download
-                        className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg text-center flex items-center justify-center gap-1.5 transition-colors"
-                      >
-                        <DownloadCloud className="w-3.5 h-3.5" />
-                        İndir (.bin)
-                      </a>
-
-                      {isAdmin && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setSelectedFirmwareId(fw.id);
-                              setTargetRoleValue(fw.roleKey);
-                              setTargetTypeValue(fw.deviceType);
-                              setActiveTab('deploy');
-                            }}
-                            className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                        return (
+                          <tr
+                            key={fw.id}
+                            className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                           >
-                            <Radio className="w-3.5 h-3.5" />
-                            OTA Dağıt
-                          </button>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2.5">
+                                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shrink-0">
+                                  <Cpu className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-slate-900 dark:text-white truncate">
+                                      {fw.name}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 rounded">
+                                      {fw.version}
+                                    </span>
+                                    {fw.isActive ? (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-full border border-emerald-300 dark:border-emerald-800">
+                                        Aktif
+                                      </span>
+                                    ) : (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 rounded-full">
+                                        Pasif
+                                      </span>
+                                    )}
+                                  </div>
+                                  {fw.description && (
+                                    <p className="text-[11px] text-slate-400 truncate max-w-xs mt-0.5">
+                                      {fw.description}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
 
-                          <button
-                            onClick={() => handleDeleteFirmware(fw.id, fw.name)}
-                            className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
-                            title="Firmware'i Sil"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+                            <td className="py-3 px-4">
+                              <div className="space-y-0.5">
+                                <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400 text-xs">
+                                  {fw.roleKey}
+                                </div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  {fw.deviceType}
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <span className="font-medium text-slate-800 dark:text-slate-200">
+                                {fw.hardwareModel || 'ESP32 / ESP8266'}
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <div className="space-y-0.5">
+                                <div className="font-medium text-slate-800 dark:text-slate-200">
+                                  {(fw.binarySize / 1024).toFixed(1)} KB
+                                </div>
+                                <div className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                                  {fw.keyId || 'root_ed25519_v1'}
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={() => copyToClipboard(fw.sha256)}
+                                className="flex items-center gap-1 font-mono text-[11px] text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
+                                title="SHA-256 doğrulama kodunu kopyala"
+                              >
+                                <span>{fw.sha256.substring(0, 10)}...</span>
+                                {copiedSha === fw.sha256 ? (
+                                  <Check className="w-3 h-3 text-emerald-500 shrink-0" />
+                                ) : (
+                                  <Copy className="w-3 h-3 shrink-0" />
+                                )}
+                              </button>
+                            </td>
+
+                            <td className="py-3 px-4 text-center">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                                {matchingDeviceCount} Cihaz
+                              </span>
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <a
+                                  href={`/api/firmwares/${fw.id}/download`}
+                                  download
+                                  className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition-colors"
+                                  title="İndir (.bin)"
+                                >
+                                  <DownloadCloud className="w-4 h-4" />
+                                </a>
+
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedFirmwareId(fw.id);
+                                        setTargetRoleValue(fw.roleKey);
+                                        setTargetTypeValue(fw.deviceType);
+                                        setActiveTab('deploy');
+                                      }}
+                                      className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center gap-1 text-xs font-medium transition-colors"
+                                      title="OTA Güncellemesi Başlat"
+                                    >
+                                      <Radio className="w-3.5 h-3.5" />
+                                      <span>Dağıt</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleDeleteFirmware(fw.id, fw.name)}
+                                      className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors"
+                                      title="Firmware'i Sil"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* TAB 2: OTA DEPLOYMENT WIZARD */}
       {activeTab === 'deploy' && isAdmin && (

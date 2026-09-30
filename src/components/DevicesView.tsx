@@ -4,7 +4,6 @@ import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
-import { DeviceHierarchyBar } from './devices/DeviceHierarchyBar';
 import { DeviceHealthBadge } from './devices/DeviceHealthBadge';
 import { DeviceTagsEditor } from './devices/DeviceTagsEditor';
 import { DeviceMaintenanceModal } from './devices/DeviceMaintenanceModal';
@@ -98,18 +97,10 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [healthSummaries, setHealthSummaries] = useState<DeviceHealthSummary[]>([]);
   const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
 
-  const [selectedSiteId, setSelectedSiteId] = useState<string>(
-    () => localStorage.getItem('devices_filter_site') || 'all'
-  );
-  const [selectedZoneId, setSelectedZoneId] = useState<string>(
-    () => localStorage.getItem('devices_filter_zone') || 'all'
-  );
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(
-    () => localStorage.getItem('devices_filter_group') || 'all'
-  );
-  const [selectedTag, setSelectedTag] = useState<string>(
-    () => localStorage.getItem('devices_filter_tag') || 'all'
-  );
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('all');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
 
   useEffect(() => {
     if (selectedDeviceId) {
@@ -1421,23 +1412,6 @@ void sendHeartbeat() {
 
   return (
     <div className="space-y-6">
-      {/* Hierarchy Filter Bar */}
-      <DeviceHierarchyBar
-        sites={sites}
-        zones={zones}
-        groups={groups}
-        allTags={allTags}
-        selectedSiteId={selectedSiteId}
-        onSelectSiteId={setSelectedSiteId}
-        selectedZoneId={selectedZoneId}
-        onSelectZoneId={setSelectedZoneId}
-        selectedGroupId={selectedGroupId}
-        onSelectGroupId={setSelectedGroupId}
-        selectedTag={selectedTag}
-        onSelectTag={setSelectedTag}
-        onOpenHierarchyModal={() => setShowHierarchyModal(true)}
-      />
-
       {/* 1. Device List Table */}
       <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
             <div className="p-3.5 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 sm:gap-3 flex-wrap">

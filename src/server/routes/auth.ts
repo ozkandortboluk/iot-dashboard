@@ -35,11 +35,14 @@ export function setSessionCookie(res: Response, token: string) {
   const env = resolveRuntimeEnvironment();
   // VPS and AI Studio run strictly over HTTPS. Local development and unit tests use HTTP.
   const isSecure = env === 'vps' || env === 'aistudio';
+  // AI Studio runs embedded within a cross-site iframe, requiring SameSite=None and Secure=true.
+  // VPS production runs as a first-party site, using SameSite=Lax and Secure=true.
+  const sameSiteMode: 'none' | 'lax' = env === 'aistudio' ? 'none' : 'lax';
 
   res.cookie('nexus_session_token', token, {
     httpOnly: true,
     secure: isSecure,
-    sameSite: 'lax',
+    sameSite: sameSiteMode,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     path: '/',
   });
@@ -49,11 +52,12 @@ export function setSessionCookie(res: Response, token: string) {
 export function clearSessionCookie(res: Response) {
   const env = resolveRuntimeEnvironment();
   const isSecure = env === 'vps' || env === 'aistudio';
+  const sameSiteMode: 'none' | 'lax' = env === 'aistudio' ? 'none' : 'lax';
 
   res.clearCookie('nexus_session_token', {
     httpOnly: true,
     secure: isSecure,
-    sameSite: 'lax',
+    sameSite: sameSiteMode,
     path: '/',
   });
 }
