@@ -19,7 +19,7 @@
 - Tamamlanan maddeler silinmez. Regresyonda aynı kimlik tekrar açılır; eski kanıt, yeni SHA ve gerekçe eklenir. Aynı metnin birebir tekrarları kaynak başlıkları birleştirilerek tekilleştirilmiştir.
 - Önce grubun yeni bulgusu çözülür; aynı kapsamdaki eski kayıt ayrı ikinci iş yaratmaz. Eski sürüm/ortam ifadeleri güncel kanıtla birlikte okunur. Eski tek kutulu `[x]` kayıtları tarihsel uygulama bildirimi olarak `☑ ☐ ☐` biçiminde korunur; uygulayıcının kimliği geçmiş kayıttan ayrıca doğrulanmış sayılmaz. Önceki denetimde açık güncel doğrulama kanıtı bulunan dar kapsamlı kayıtlar `☑ ☑ ☐` olabilir. Bu biçim dönüşümü yeni bir kod/saha denetimi değildir.
 - Her değişiklik küçük ve gözden geçirilebilir olmalı. Güvenlik bypass’ı açarak test/giriş sorunu çözülmez. Canlı DB’ye deneme verisi, test hesabı veya denetim amaçlı yıkıcı işlem uygulanmaz.
-- Google AI Studio görev kimliğini, değişen dosyaları, commit SHA’sını, çalıştırdığı komutları ve gerçek sonuçları `docs/notlar.md` içindeki ortak çalışma alanına yazar. Codex kabul ölçütünü kontrol edip ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
+- Google AI Studio görev kimliğini, ilgili commit SHA’sını, kısa uygulama/test sonucunu ve Codex’ten beklediği yanıtı `docs/notlar.md` içindeki **AI Studio** alanına yazar. Codex yanıtını **Codex** alanına yazar, kabul ölçütünü kontrol edip ilgili görevde ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
 - Her yeni kod commit’inde diff + çağıran/çağrılan kod + schema/API/WS/cihaz örnekleri kontrol edilir. Yalnız değişen satıra bakılmaz. Main’de tamamlandı demek için düzeltme main’de bulunmalıdır.
 - Yazmadan önce güncel HEAD ve dosya blob SHA tekrar okunur; AI Studio’nun eşzamanlı notları korunur. Conflict durumunda dosya yeniden okunup birleştirilir. Yalnız doküman değişikliğinde yeni bulgu yoksa yeni denetim commit’i üretilmez.
 
@@ -28,12 +28,23 @@
 - `docs/kurallar.md`: Denetim, öncelik, üç kutu ve kabul kurallarının kaynağıdır. Her çalışma başında okunur.
 - `docs/PROJECT_ROADMAP.md`: Yalnız açık işler; konu grupları, yapılacaklar ve kabul şartları bulunur. `☐ ☐ ☐`, `☑ ☐ ☐` ve `☑ ☐ ☑` burada kalır.
 - `docs/tamamlanan_islemler.md`: Codex kabulü tamamlanan `☑ ☑ ☐` görevler, aynı kimlik ve kanıtıyla taşınır. AI Studio’nun ilk kutuyu işaretlemesi tek başına taşıma gerekçesi değildir.
-- `docs/notlar.md`: Ortak yaz-boz alanı, öneriler, kanıtlar, SHA/komut sonuçları ve denetim geçmişi bulunur. Buradaki eski kutu/kararlar tarihçedir; güncel durumun otoritesi görev dosyalarıdır.
+- `docs/notlar.md`: Yalnız iki geçici iletişim alanı bulunur: **AI Studio** ve **Codex**. Denetim geçmişi veya uzun rapor deposu olarak kullanılmaz; kalıcı karar ve kabul kanıtları görev dosyalarında, önceki sürümler Git geçmişinde korunur.
 - Her görev güncel kayıt olarak yalnız bir yerde bulunur: açık iş roadmap’te, onaylanmış iş tamamlananlarda. Bir madde kapanınca önce tamamlananlara kimliği/kanıtıyla aktarılır, ardından roadmap’ten kaldırılır; bu taşıma geçmişi silmek değildir.
 - Tamamlanan iş bozulursa aynı kimlikle roadmap’e geri taşınır; yeni duruma göre kutular açılır. Tamamlananlar dosyasında eski onay/regresyon tarihi not olarak korunur; iki aktif görev kaydı oluşturulmaz.
 - İşe başlamadan dört dosya birlikte okunur. Kurallar roadmap içine tekrar kopyalanmaz; rapor/ortak notlar açık iş listesini şişirmez.
 - Dosya taşıması uygulama denetimi veya yeni onay değildir; mevcut durum ve kabul kapsamı korunur. Canlı test yapılmadıysa yapılmış sayılmaz.
 - Her yazmadan önce değiştirilecek dosyaların güncel blob SHA’sı ve HEAD okunur. Karşı tarafın yeni uygulama veya notları üzerine yazılmaz; eşzamanlı düzenleme varsa yeniden birleştirilir.
+
+## İki alanlı yaz-boz ve sıfırlama kuralı
+
+- `docs/notlar.md` yalnız **AI Studio** ve **Codex** başlıklarını içerir. Her taraf kendi alanına kısa not yazar; boş alan “Yanıt bekleyen not yok.” biçiminde kalır.
+- Bir not mümkün olduğunca görev kimliği, tam veya kısa SHA, sonuç/engel ve beklenen sonraki adımdan oluşur. Yalnız yeni soruyu veya düzeltme isteğini açıklayan ayrıntı tutulur; uzun diff, tekrarlanan test çıktısı ve eski raporlar eklenmez.
+- Codex, AI Studio’nun notuna yanıt verdiyse ilgili **AI Studio** notunu temizleyebilir. AI Studio, Codex’in notuna yanıt verdiyse ilgili **Codex** notunu temizleyebilir. Karşı alanı yalnız okumak, notun yanıtlandığı anlamına gelmez.
+- Her denetim sonunda yanıtlanan veya sonuçlanmış eski kayıtlar temizlenir; yeni tur için yalnız güncel yanıt/soru ve kalan engeller bırakılır. Yanıtlanmamış konu sırf yeni denetim yapıldı diye kaybolmaz; kısa tek bir bekleyen not olarak korunur.
+- Temizlemeden önce kalıcı görev durumu, kabul/ret gerekçesi, gerekli test kanıtı ve sonraki iş `PROJECT_ROADMAP.md` veya `tamamlanan_islemler.md` içindeki ilgili maddeye aktarılır. Yaz-boz alanı görev kayıtlarının yerine geçmez.
+- Görev olmayan kullanıcı önerisi cevaplanana veya ilgili göreve aktarılana kadar kısa not olarak tutulur. Tamamlanmış görevler yaz-boz sıfırlamasıyla silinmez.
+- Eski iletişim ve denetim raporları tekrar bu dosyaya taşınmaz; gerektiğinde Git geçmişinden okunur. Notların silinmesi kodun onaylandığı veya bir testin geçtiği anlamına gelmez.
+- Eşzamanlı yazmadan önce güncel dosya/HEAD okunur. Karşı tarafın yeni notu yanlışlıkla silinmez. Notlarda parola, token, private key, tam credential URL veya kişisel müşteri verisi bulunmaz.
 
 ## Tamamlama ve yayın kapısı
 
