@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { setupService, type DatabaseConfigPayload } from '../services/setup.service.js';
+import { systemKeysService } from '../services/systemKeys.service.js';
 import { setSessionCookie } from './auth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
@@ -22,15 +23,60 @@ setupRouter.get('/status', async (req: Request, res: Response) => {
   try {
     const isAuth = isRequestSetupAuthenticated(req);
     const status = await setupService.getStatus(isAuth);
+    const keysStatus = systemKeysService.getKeyStatuses();
     return res.json({
       success: true,
       ...status,
+      keysStatus,
     });
   } catch (err: any) {
     systemLogger.error('server', `Setup durumu alınırken hata: ${err?.message || err}`);
     return res.status(500).json({
       success: false,
       error: 'Kurulum durumu okunamadı.',
+    });
+  }
+});
+
+/**
+ * GET /api/setup/keys-status
+ * Inspects all system security keys status (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
+ * Requires Setup Authentication.
+ */
+setupRouter.get('/keys-status', requireSetupAuth, (req: Request, res: Response) => {
+  try {
+    const keysStatus = systemKeysService.getKeyStatuses();
+    return res.json({
+      success: true,
+      ...keysStatus,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Sistem anahtarları durumu okunamadı.',
+    });
+  }
+});
+
+/**
+ * POST /api/setup/generate-keys
+ * Generates ONLY missing system security keys (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
+ * Strictly preserves existing keys to avoid data or session corruption.
+ * Requires Setup Authentication.
+ */
+setupRouter.post('/generate-keys', requireSetupAuth, (req: Request, res: Response) => {
+  try {
+    const result = systemKeysService.generateMissingKeys();
+    return res.json({
+      success: true,
+      ...result,
+      keysStatus: systemKeysService.getKeyStatuses(),
+    });
+  } catch (err: any) {
+    systemLogger.error('security', `Sistem anahtarları otomatik üretilirken hata: ${err?.message || err}`);
+    return res.status(500).json({
+      success: false,
+      message: 'Güvenlik anahtarları üretilirken bir hata oluştu.',
     });
   }
 });

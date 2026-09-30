@@ -14,6 +14,7 @@ import { db } from '../db.js';
 import { defaultWidgets } from '../initialData.js';
 import { DatabaseState, type AuditLog, type User } from '../../types.js';
 import { systemSecretsService } from './systemSecrets.service.js';
+import { systemKeysService } from './systemKeys.service.js';
 import { isVaultConfigured, getVaultStatus } from '../utils/crypto.js';
 
 export interface DatabaseConfigPayload {
@@ -1482,7 +1483,14 @@ export class SetupService {
     // 2. Configure
     await this.configureDatabase(config);
 
-    // 3. Initialize
+    // 3. Ensure system security keys exist (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
+    try {
+      systemKeysService.generateMissingKeys();
+    } catch (keyErr: any) {
+      systemLogger.warn('security', `Otomatik anahtar üretimi uyarısı: ${keyErr?.message || keyErr}`);
+    }
+
+    // 4. Initialize
     await this.initializeDatabase();
 
     return {

@@ -14,9 +14,12 @@ import {
   RefreshCw,
   Lock,
   KeyRound,
+  Key,
+  Shield,
   Eye,
   EyeOff,
   Check,
+  Copy,
   XCircle,
   HelpCircle,
   Zap,
@@ -139,6 +142,49 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     companyName: 'Merkez Yönetim',
   });
 
+  // System Security Keys Management
+  const [keysStatus, setKeysStatus] = useState<any>(null);
+  const [keysLoading, setKeysLoading] = useState<boolean>(false);
+  const [generatedKeysResult, setGeneratedKeysResult] = useState<any>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyKeyToClipboard = (text: string, keyName: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(keyName);
+      setTimeout(() => setCopiedKey(null), 3000);
+    } catch {}
+  };
+
+  const handleGenerateKeys = async () => {
+    setKeysLoading(true);
+    setError(null);
+    try {
+      const activeToken = setupToken || sessionStorage.getItem('nexus_setup_token');
+      const res = await fetch('/api/setup/generate-keys', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { 'X-Setup-Token': activeToken } : {}),
+        },
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setGeneratedKeysResult(data);
+        if (data.keysStatus) {
+          setKeysStatus(data.keysStatus);
+        }
+      } else {
+        setError(data.message || 'Güvenlik anahtarları üretilemedi.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Sunucuyla iletişim kurulamadı.');
+    } finally {
+      setKeysLoading(false);
+    }
+  };
+
   // Step 7 Result
   const [completedAdmin, setCompletedAdmin] = useState<string | null>(null);
 
@@ -228,6 +274,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
 
         const tokenRequired = Boolean(data.setupTokenRequired);
         setSetupTokenRequired(tokenRequired);
+
+        if (data.keysStatus) {
+          setKeysStatus(data.keysStatus);
+        }
 
         if (data.setupToken) {
           setSetupToken(data.setupToken);
@@ -982,6 +1032,135 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                       </div>
                     </div>
                   </div>
+
+                  {/* System Security Keys Card */}
+                  <div className="p-3.5 bg-slate-950/70 rounded-2xl border border-indigo-950/80 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-indigo-400" />
+                        <span className="font-bold text-xs text-white">Sistem & Üretim Güvenlik Anahtarları</span>
+                      </div>
+                      {keysStatus?.allConfigured ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 border border-emerald-800 text-emerald-300">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          Tüm Anahtarlar Hazır
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 border border-amber-800 text-amber-300">
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          Eksik Anahtarlar Mevcut
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Üretim ortamında oturum güvenliği (<code className="text-indigo-300">JWT_SECRET</code>) ve Kasa şifrelemesi (<code className="text-indigo-300">ENCRYPTION_KEY</code>) zorunludur. Mevcut anahtarlarınız korunur; eksik olanlar güvenle otomatik üretilir.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Oturum / Token İmzası</span>
+                          <span className="font-mono font-bold text-white text-xs">JWT_SECRET</span>
+                        </div>
+                        {keysStatus?.keys?.jwtSecret?.isConfigured ? (
+                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Hazır
+                          </span>
+                        ) : (
+                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" /> Eksik
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Kasa Şifreleme</span>
+                          <span className="font-mono font-bold text-white text-xs">ENCRYPTION_KEY</span>
+                        </div>
+                        {keysStatus?.keys?.encryptionKey?.isConfigured ? (
+                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Hazır
+                          </span>
+                        ) : (
+                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" /> Eksik
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Firmware OTA İmzası</span>
+                          <span className="font-mono font-bold text-white text-xs">OTA_SIGNING_KEY</span>
+                        </div>
+                        {keysStatus?.keys?.otaSigningKey?.isConfigured ? (
+                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Hazır
+                          </span>
+                        ) : (
+                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" /> Eksik
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={keysLoading}
+                        onClick={handleGenerateKeys}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50 cursor-pointer"
+                      >
+                        {keysLoading ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Anahtarlar Doğrulanıyor...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Key className="w-3.5 h-3.5" />
+                            <span>✨ Eksik Güvenlik Anahtarlarını Otomatik Üret</span>
+                          </>
+                        )}
+                      </button>
+
+                      {generatedKeysResult?.envSnippet && (
+                        <button
+                          type="button"
+                          onClick={() => copyKeyToClipboard(generatedKeysResult.envSnippet, 'all_env')}
+                          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-medium transition cursor-pointer"
+                        >
+                          {copiedKey === 'all_env' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span className="text-emerald-300 font-bold">Kopyalandı!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>📋 Tüm .env Bloğunu Kopyala</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    {generatedKeysResult && (
+                      <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl text-xs space-y-2">
+                        <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-[11px]">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>Güvenlik anahtarları başarıyla doğrulandı ve sunucuya kaydedildi!</span>
+                        </div>
+                        <p className="text-[10px] text-slate-300">
+                          Mevcut anahtarlarınız korundu. Üretilen anahtarlar <code className="text-emerald-300">secrets/</code> ve <code className="text-emerald-300">.env</code> dosyalarına kaydedildi.
+                          Dilediğiniz an VPS sunucunuzda terminalden <code className="text-indigo-300 font-bold">npm run show-keys</code> komutunu çalıştırarak bu anahtarları görüntüleyebilirsiniz.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
@@ -1675,11 +1854,35 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </div>
                   )}
                   <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
+                    <span className="text-slate-400">Güvenlik Anahtarları:</span>
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>secrets/ & .env'de Hazır</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
                     <span className="text-slate-400">Setup Durumu:</span>
                     <span className="text-emerald-400 font-semibold flex items-center gap-1">
                       <Lock className="w-3.5 h-3.5" />
                       <span>Kalıcı Olarak Kilitlendi</span>
                     </span>
+                  </div>
+                </div>
+
+                <div className="max-w-md mx-auto p-3 bg-slate-950/40 rounded-xl border border-slate-800 text-left text-xs space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-indigo-300 font-semibold text-[11px]">
+                    <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>VPS Anahtar Yönetim Komutu:</span>
+                  </div>
+                  <div className="p-2 bg-black/60 rounded-lg font-mono text-[11px] text-slate-300 flex items-center justify-between">
+                    <code>npm run show-keys</code>
+                    <button
+                      type="button"
+                      onClick={() => copyKeyToClipboard('npm run show-keys', 'cmd_show_keys')}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 ml-2"
+                    >
+                      {copiedKey === 'cmd_show_keys' ? 'Kopyalandı!' : 'Kopyala'}
+                    </button>
                   </div>
                 </div>
 
