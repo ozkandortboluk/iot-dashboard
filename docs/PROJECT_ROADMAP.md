@@ -2,6 +2,14 @@
 
 [Kurallar](kurallar.md) · [Tamamlanan işlemler](tamamlanan_islemler.md) · [Ortak notlar ve denetim geçmişi](notlar.md)
 
+## Kullanıcı istekleri
+
+İsteklerini bu alana serbest metin olarak ekleyebilirsin. AI Studio uygular; Codex ilgili konu grubunda `USR-*` kodlu kontrol maddesi açar ve üç kutulu kurala göre denetler.
+
+- **USR-01 — Kullanıcı isteği:** Firmware sayfasında karo veya tek satır gösterim modu olsun. **Kontrol maddesi:** Arayüz, performans ve ürün geliştirme grubunda.
+
+<!-- Yeni isteklerini bu satırın altına yazabilirsin. Kod vermen gerekmez; Codex uygun konu grubunda sıradaki USR kodunu oluşturur. -->
+
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
 
 - ☑ ☐ ☑ **SEC-01 | P0 | SSH yönetiminde kimlik doğrulama atlamasını kapat** — Doğrulanmış kod bulgusu.
@@ -153,6 +161,12 @@
   - **Kabul:** PR’ye yeni commit olayında doğru SHA denetlenip yalnız roadmap güncellenir; kendi doküman commit’i sonsuz döngü oluşturmaz.
 
 ## 10. Arayüz, performans ve ürün geliştirme
+
+- ☐ ☐ ☐ **USR-01 | P2 | Firmware sayfasında karo ve tek satır görünümünü denetle**
+  - **Kullanıcı isteği:** Firmware listesi için karo ve tek satır gösterim modu.
+  - **Yapılacak:** AI Studio iki görünüm arasında geçişi uygulasın; mevcut firmware bilgileri ve yetkiye bağlı işlemler iki modda da erişilebilir olsun.
+  - **Kabul:** İki görünüm arasında geçiş çalışır; aynı filtre/sıralama altında aynı kayıtlar gösterilir; boş liste ve dar ekran davranışı düzgündür; mevcut firmware işlemleri ve erişim izinleri bozulmaz. Codex değişen kodu ve ilgili arayüz/test kanıtını denetler.
+
 
 - ☐ ☐ ☐ **UX-01 | P2 | Büyük ekranları böl ve durum/erişilebilirlik standardı uygula** — Ölçüm ve iyileştirme görevi.
   - **Yapılacak:** Ekran bazlı lazy-load, liste sanallaştırma, abonelik seçicileri ve ölçümlü render optimizasyonu yap; erişilebilir odak/klavye/touch hedefleri ve net loading/error/empty durumları kullan.
