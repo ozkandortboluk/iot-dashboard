@@ -1106,8 +1106,18 @@ export function isDatabaseChecksumValid(
   currentComputedChecksum?: string
 ): boolean {
   if (!dbChecksum) {
-    // Missing checksum in legacy database is eligible for safe canonical backfill
-    return true;
+    // If the database has a missing/null checksum:
+    // It is ONLY trusted under legacy reconciliation:
+    // 1. The codebase source code must be pristine (unmutated Layer A check)
+    // 2. The migration must be a known legacy migration (001 - 017)
+    if (currentComputedChecksum) {
+      const isSourcePristine = isMigrationSourceValid(version, currentComputedChecksum);
+      const isKnownLegacy = parseInt(version, 10) <= 17;
+      if (isSourcePristine && isKnownLegacy) {
+        return true; // Eligible for controlled backfill
+      }
+    }
+    return false; // Fail-closed: Null checksum rejected for non-legacy or mutated migration
   }
   if (currentComputedChecksum && dbChecksum === currentComputedChecksum) {
     return true;
