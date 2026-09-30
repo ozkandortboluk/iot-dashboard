@@ -10,6 +10,8 @@
 
 - **USR-02 — Kullanıcı isteği (kalan açık kapsam):** AI Studio/VPS ayrımının gerçek deployment matrisi, VPS DB hedef izolasyonu ve kalan auth/WS/DB hata senaryolarını doğrula. 401/session temel akışı tamamlandı ve tamamlanan işlemlere taşındı. **Kanonik kontrol:** `RUN-04`.
 
+- **USR-03 — Kullanıcı isteği:** VPS'de görülen `Migration Drift Warning` uyarılarının kodsal kök nedenini kalıcı olarak düzelt; uygulanmış migration geçmişini güvenilir hale getir ve migration dışı otomatik şema değişikliklerinin drift üretmesini engelle. **Kanonik kontrol:** `DB-01`.
+
 <!-- Yeni isteklerini bu satırın altına yazabilirsin. Kod vermen gerekmez; Codex uygun konu grubunda sıradaki USR kodunu oluşturur. -->
 
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
@@ -97,9 +99,11 @@
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
-- ☐ ☐ ☐ **DB-01 | P1 | Migration hata yutma ve checksum sahte başarısını kapat** — Doğrulanmış kod bulgusu.
-  - **Yapılacak:** Değişmez migration içeriğinden deterministik checksum üret; uyumsuzluğu fail ettir. 002 zorunlu başarısızlıklarını yukarı taşı; version kaydını ancak sözleşme doğrulanınca yaz. Gerçek migration sonrası schema verifier’ı CI gate yap.
-  - **Kabul:** Temiz DB, önceki sürümden upgrade, kasıtlı checksum değişimi, başarısız hypertable/compression ve iki instance yarışında doğru exit/readiness; tsx ve bundle aynı checksum.
+- ☐ ☐ ☐ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **USR-03 kanonik görevi; doğrulanmış kod/commit geçmişi bulgusu.**
+  - **Yapılacak:** Uygulanmış migration'ları immutable/forward-only kabul et; geçmiş migration davranışını değiştirmek yerine yeni sürümlü migration ekle. Checksum'ı kaynak/bundle temsil farklarından etkilenmeyen deterministik migration içeriğinden üret ve uygulanmış migration checksum uyumsuzluğunu production/CI'da fail ettir. Mevcut driftli migration'ları DB checksum değerlerini körlemesine overwrite etmeden güvenli baseline/reconciliation planıyla ele al. 002 zorunlu başarısızlıklarını yukarı taşı; version kaydını ancak migration sözleşmesi doğrulanınca yaz.
+  - **Yapılacak:** `scripts/verify-schema-drift.ts` yalnız migration sayısını okumakla yetinmemeli; DB'deki `version/name/checksum` ile kodun beklediği migration manifest/checksum değerlerini gerçekten karşılaştırmalı ve mismatch/pending/unknown migration durumunda non-zero çıkmalı.
+  - **Yapılacak:** Production'da versioned migration'ları şema değişikliklerinin tek kanonik yazma otoritesi yap. `SchemaAuditor` normal production startup'ta migration geçmişini atlayarak genel amaçlı DDL/auto-heal uygulamamalı; drift'i raporlamalı ve kritik farkta readiness'i fail-closed tutmalı. Açıkça izin verilen zararsız bakım varsa migration şemasından ayrı ve dar kapsamlı tanımlanmalı.
+  - **Kabul:** (1) Temiz DB ve önceki sürümden upgrade aynı beklenen migration manifestine ulaşır. (2) Uygulanmış bir migration dosyasındaki kasıtlı değişiklik CI/production drift gate'ini non-zero yapar; checksum DB'de otomatik yeniden yazılmaz. (3) Yeni şema değişikliği yeni forward migration ile uygulanır ve eski migration checksum'ları sabit kalır. (4) DB'de unknown/pending/checksum mismatch ayrı ayrı tespit edilir. (5) SchemaAuditor production'da migration dışı DDL ile drift'i sessizce onarmaz; kritik drift ready=503 üretir. (6) Başarısız hypertable/compression ve iki instance yarışında doğru exit/readiness görülür. (7) `tsx` ve production bundle aynı migration manifest/checksum sonucunu üretir. (8) Aynı SHA'da type-check, lint, unit/integration, build, boş gerçek PostgreSQL kurulumu ve mevcut DB upgrade testi geçer.
 
 - ☑ ☐ ☐ **DB-02 | P1 | Başarılı PostgreSQL hydration boş kümeleri de uygulamalı** — **AI Studio uyguladı.**
   - **Yapılacak:** Başarılı boş sonuç ile sorgu hatasını ayır; başarılı snapshot’ı boş olsa da atomik uygula. Cache kimliğini DB/tenant ile ilişkilendir; eski credential cache’ini temizle.
