@@ -29,7 +29,6 @@ import { RecoveryView } from './components/setup/RecoveryView';
 import { SSHTunnelDrawer } from './components/SSHTunnelDrawer';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
-import { useAnimatedFavicon } from './hooks/useAnimatedFavicon';
 import { apiFetch as fetch } from './lib/apiFetch';
 import {
   LayoutDashboard,
@@ -71,9 +70,6 @@ function DashboardContent() {
   useEffect(() => {
     localStorage.setItem('nexus_edit_mode', String(editMode));
   }, [editMode]);
-
-  // Dynamic animated tab pulse favicon synchronized with real-time state
-  useAnimatedFavicon(isConnected, true);
 
   // If the URL contains a password reset token/link, force showing the reset screen even if a session is open
   const isResetPasswordUrl = Boolean(
