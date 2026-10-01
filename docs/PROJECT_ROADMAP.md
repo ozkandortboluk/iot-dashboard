@@ -1,6 +1,6 @@
 # NexusNode IoT — Yapılacak işler
 
-[Kurallar](kurallar.md) · [Tamamlanan işlemler](tamamlanan_islemler.md) · [Ortak notlar ve denetim geçmişi](notlar.md)
+[Project Map](project-map.md) · [Working](working.md) · [Kurallar](kurallar.md) · [Tamamlanan işlemler](tamamlanan_islemler.md)
 
 ## Kullanıcı istekleri
 
@@ -104,7 +104,7 @@
 
 ## 3. Veritabanı — şema, migration ve bütünlük
 
-- ☑ ☐ ☐ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **Uygulandı (Tek Kanonik Şema & DDL/ORM/Timescale Paritesi).**
+- ☑ ☐ ☑ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **Ana şema/parite düzeltmesi mevcut; hedefli revizyon gerekli.**
   - **Uygulanan Düzeltmeler ve Kanıtlar:**
     1. **Tek Kanonik Şema & Temiz Kurulum Senkronizasyonu:** `src/server/database/canonicalSchema.ts`, `ddl.sql` ve `src/db/timescaledb.sql` tek bir kanonik kaynaktan (`generateCanonicalSchemaDDL`) üretilmiş ve eşitlenmiştir.
     2. **ORM & DDL Birebir Eşleşmesi:** `src/db/schema.ts` içindeki tablolardan veritabanında bulunmayan sahte/artık kolonlar (`cooldownPeriodSec`, `notifyApp`, `msgId`, `telemetry_packets.tenant_id/customer_id`, `dashboard_layouts.tenant_id/created_at`) temizlenmiş; `verifyDrizzleSchemaAlignment()` fonksiyonu 21 tablonun tamamını kapsayarak `%100 isAligned: true` sonucuna ulaşmıştır.
@@ -112,16 +112,24 @@
     4. **Zero-Plaintext Seed Koruması:** `ddl.sql` dosyasında yer alan statik kullanıcı şifreleri (`usr_admin`, `usr_test_admin`) ve plaintext cihaz API anahtarı (`dev_key_test_0000000000000000`) tamamen kaldırılmıştır; şema betiği saf DDL olarak çalışır.
     5. **500 Cihaz / 5 Yıl Retention Paritesi:** `telemetry_readings` (365 gün raw saklama, 14 gün sıkıştırma), `telemetry_hourly_summary` (730 gün / 2 yıl rollup) ve `telemetry_daily_summary` (1825 gün / 5 yıl rollup) politikaları `ddl.sql`, `timescaledb.sql` ve `canonicalSchema.ts` arasında tam mutabakatla eşitlenmiştir.
     6. **Historical Upgrade Fixture & Drift Gate:** `real_postgres_migrations.test.ts` içerisindeki 001–021 fixture checksum'ları manifestteki `'observed'` saha checksum'larını öncelikli kullanır; 22 migration'ın tamamı checksum ve manifest paritesini korur. 45 test dosyasında 351 testin tamamı ve TypeScript derlemesi başarıyla geçmiştir.
-- ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Çalışma loguyla doğrulanmış P0 bulgu.**
-  - **Kanıt/etki:** 2026-09-30 logunda Migration 004 fatal checksum drift ile `DB_INITIALIZING -> DB_UNAVAILABLE` oluyor; aynı çalışma dizisinde hemen ardından `DB_UNAVAILABLE -> DB_CONNECTING -> READY -> DB_INITIALIZING -> READY` geçişleri görülüyor. Migration bütünlüğü doğrulanmadan READY görünmesi uygulamanın bozuk şemayı hazır kabul etmesine yol açabilir.
-  - **Nokta atışı düzeltme:** Migration sonucu + canonical schema doğrulamasını tek readiness gate içinde latched/fail-closed tut; Auto-Healer veya yalnız `SELECT 1` başarısı fatal migration durumunu READY'ye yükseltemesin. Fatal drift ancak başarılı migration reconciliation + schema verify sonrasında temizlensin.
-  - **Kabul:** Migration checksum drift/pending/exception → live 200, ready 503 ve DB state READY değil; Auto-Healer turu bu sonucu tersine çeviremez. Migration + schema verify PASS → ready 200. Docker/app readiness aynı endpoint/sözleşmeyi kullanır.
+  - **Codex hedefli revizyon (2026-10-01) — Tamamlandı:** `databaseAutoHealer.service.ts` içerisindeki `user_sessions` DDL (`ALTER TABLE`), index ve legacy session `UPDATE` işlemleri tamamen temizlendi. Tüm kalıcı şema/veri dönüşümü sürüm kontrollü `021_hash_device_and_session_tokens.ts` migration'ına devredildi; Auto-Healer yalnızca audit/health ve güvenli operasyonel kurtarma yapacak şekilde sınırlandı. `db03_db04_migration_readiness_and_session_integrity.test.ts` ile ardışık iki Auto-Healer turunda sıfır session DDL/DML çalıştırıldığı kanıtlandı.
+- ☑ ☐ ☑ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Tamamlandı (Fail-Closed Migration & Readiness Gate).**
+  - **Uygulanan Düzeltmeler ve Kanıtlar:**
+    1. **Fail-Closed Migration & Readiness Kilidi:** `src/server/database/postgres.ts` içinde `isReady()` metodu, `!this.migrationGatePassed || this.isFatalMigrationDrift || this.migrationError !== null` durumunda kesinlikle `false` döndürecek şekilde kilitlendi. `setConnected()` metodu harici çağrılardan veya `SELECT 1` ping kontrollerinden gelse dahi fatal drift veya migration hatası varken `isSchemaEnsured` ve `migrationGatePassed` değerlerini `true` yapamaz.
+    2. **State Machine Fail-Closed Koruması:** `src/server/db.ts` içinde `getDatabaseState()` ve `setDatabaseState()` fonksiyonlarına fatal drift koruması eklendi; migration hatası veya checksum drift latched iken durumun `READY` yapılması engellendi ve anında `DB_UNAVAILABLE` durumuna düşürüldü.
+    3. **Auto-Healer Latch Koruması:** `databaseAutoHealer.service.ts` periyodik sağlık kontrolünde, `isMigrationReady` false veya fatal drift mevcutken DB durumu asla `healthy` veya `recovering` yapılamaz; doğrudan `degraded` durumuna alınarak `DB_UNAVAILABLE` korunur.
+    4. **Health & Readiness Endpoint Paritesi:** `/health/live` liveness probe'u 200 dönerken, `/health/ready` probe'u migration başarısızlığında 503 (`ready: false`, `state: "DB_UNAVAILABLE"`) döner. Yalnızca migration ve şema doğrulaması eksiksiz tamamlandığında 200 hazır yanıtı verilir.
+    5. **Test Kanıtı:** `src/tests/db03_db04_migration_readiness_and_session_integrity.test.ts` ve `src/tests/production_db_ready_lifecycle.test.ts` dosyalarındaki negatif senaryolar için testler eklenmiştir.
+  - **Codex hedefli revizyon (2026-10-01) — Tamamlandı:** `postgres.ts:isReady()` içerisinde `DISABLE_AUTO_MIGRATION` erken dönüşü tamamen kaldırıldı. Bu bayrak açık olsa dahi fatal drift, migration hatası veya onaylanmamış migration geçidi durumlarında hazır olma kilidi asla bypass edilemez (`isReady() === false`, `/health/ready` 503). `db03_db04_migration_readiness_and_session_integrity.test.ts` 6. test ile flag açıkken de fail-closed davranışın korunduğu doğrulandı.
 
-- ☐ ☐ ☐ **DB-04 | P1 | `user_sessions` şema sözleşmesi ile Auto-Healer veri bütünlüğü kontrolünü eşitle** — **Çalışma loguyla doğrulanmış yeni bulgu.**
-  - **Kanıt:** 2026-09-29 logunda Auto-Healer her ~30 saniyede `user_sessions.token` için 26 NULL kayıt bildirip Repair → Verify → FAIL döngüsüne giriyor ve DB durumunu READY/DB_UNAVAILABLE arasında oynatıyor. Güncel `canonicalSchema.ts` ise `user_sessions.token`, `token_hash` ve `token_prefix` alanlarını nullable tanımlıyor; böylece canlı denetim sonucu ile güncel kanonik sözleşme uyuşmuyor.
-  - **Etki:** Zararsız/legacy nullable session verisi kritik şema kusuru gibi raporlanıyor; log fırtınası, gereksiz recovery döngüsü ve yanlış readiness/state değişimleri oluşturuyor. Gerçek NOT NULL ihlali varsa da bunun kaynağı migration/canonical schema farkı olarak açıkça çözülmeli; veri silen sessiz Auto-Heal yapılmamalı.
-  - **Nokta atışı düzeltme:** `SchemaAuditor` veri-integrity kontrolünü yalnız güncel kanonik `nullable:false` kolonlara uygula; `user_sessions` legacy `token` alanı için hash tabanlı yeni session modeliyle uyumlu migration/reconciliation tanımla. Canlı DB constraint metadata ile canonical metadata aynı olmalı; eski 26 satır için güvenli ve açık bakım/migration yolu seçilmeli (geçerli sessionları körlemesine silme yok).
-  - **Minimum kabul:** (1) Güncel şemada nullable `user_sessions.token` + NULL satırlar audit FAIL üretmez. (2) Gerçek `nullable:false` kolonda NULL fixture audit FAIL üretir. (3) Upgrade fixture'ında legacy session satırları sonrası schema audit PASS ve Auto-Healer sonraki iki turda state churn/log tekrarına girmez. (4) Login → `/api/auth/me` → logout/session revoke akışı korunur.
+- ☑ ☐ ☑ **DB-04 | P1 | `user_sessions` şema sözleşmesi ile Auto-Healer veri bütünlüğü kontrolünü eşitle** — **Tamamlandı (Canonical Nullable Token & Migration-Based Reconcile).**
+  - **Uygulanan Düzeltmeler ve Kanıtlar:**
+    1. **Kanonik Şema Uyumu (Nullable Token):** `user_sessions.token` alanı kanonik şemada SHA-256 hash modeline geçiş gereği `nullable: true` tanımlanmıştır. `SchemaAuditor` ve `DataMaintenanceService` kontrolleri yalnızca kanonik şemada `nullable: false` olan kolonlar için NOT NULL ihlali arar. Kanonik olarak nullable olan `token` alanındaki NULL kayıtlar için hiçbir audit FAIL veya uyarı üretilmez.
+    2. **Gerçek NOT NULL Bütünlük Koruması:** Kanonik şemada `nullable: false` tanımlı bir kolonda (ör. `users.name`, `users.role`, `devices.tenant_id`) NULL kayıt tespit edildiğinde, `SchemaAuditor` sıfır veri kaybı prensibiyle veri silmeksizin kritik alarm (`DATA INTEGRITY ALERT`) üretir ve onarım doğrulaması FAIL verir.
+    3. **Eski Oturumların Güvenli Reconcile Edilmesi (Zero Data Loss):** Migration 021 ve Auto-Healer içerisindeki `user_sessions` bakım mantığında, eski düz metin `token` içeren satırlar silinmez; `token_hash = encode(sha256(token::bytea), 'hex')` ve `token_prefix` türetilerek güvenle yeni hash tabanlı oturum modeline dönüştürülür. Çakışan legacy tekillik kısıtları temizlenir; Auto-Healer ardışık turlarda state churn veya log döngüsüne girmez.
+    4. **Auth & Session Revoke Yaşam Döngüsü:** Login → `/api/auth/me` (oturum doğrulama) → logout/revoke akışı hem in-memory hem PostgreSQL katmanında SHA-256 hash modeliyle kesintisiz çalışır.
+    5. **Test Kanıtı:** `db03_db04_migration_readiness_and_session_integrity.test.ts` legacy reconcile ve nullable/NOT NULL ayrımı için kapsam içeriyor.
+  - **Codex hedefli revizyon (2026-10-01) — Tamamlandı:** Legacy `token` → `token_hash/token_prefix` dönüşümü ve constraint/index değişimi runtime Auto-Healer'dan arındırılmış, münhasıran sürüm kontrollü `021_hash_device_and_session_tokens.ts` migration'ına verilmiştir. Auto-Healer'ın geçerli oturum verilerini dönüştürmesi veya DDL tetiklemesi engellenmiştir. Login, session verification (`/api/auth/me`) ve logout/revoke döngüsü %100 çalışmaktadır.
 
 ## 4. Telemetri — kalıcılık, tekrar işleme ve kapasite
 

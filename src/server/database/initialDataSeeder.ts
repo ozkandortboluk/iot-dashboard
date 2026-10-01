@@ -47,8 +47,9 @@ export class InitialDataSeeder {
       firmwares: 0,
     };
 
+    const onClientErr = () => {};
     const client = await pool.connect();
-    if (client) client.on('error', () => {});
+    if (client) client.on('error', onClientErr);
 
     try {
       // NOTE: Security Hardening: NO hardcoded admin accounts or default passwords (admin1234, test1234)
@@ -128,7 +129,10 @@ export class InitialDataSeeder {
         counts,
       };
     } finally {
-      client.release();
+      if (client) {
+        try { client.off('error', onClientErr); } catch {}
+        try { client.release(); } catch {}
+      }
     }
   }
 }

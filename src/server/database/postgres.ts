@@ -460,10 +460,11 @@ export class PostgresRepository {
     if (!clientInstance && !pool) return false;
     let client = clientInstance;
     let shouldRelease = false;
+    const onVerifyClientErr = () => {};
     if (!client) {
       try {
         client = await pool!.connect();
-        if (client) client.on('error', () => {});
+        if (client) client.on('error', onVerifyClientErr);
         shouldRelease = true;
       } catch (connErr) {
         console.error('[Schema Contract Check] DB connection failed:', connErr);
@@ -493,7 +494,8 @@ export class PostgresRepository {
       return false;
     } finally {
       if (shouldRelease && client) {
-        client.release();
+        try { client.off('error', onVerifyClientErr); } catch {}
+        try { client.release(); } catch {}
       }
     }
   }
@@ -565,11 +567,12 @@ export class PostgresRepository {
       let client: any = null;
       let hasLock = false;
       const SCHEMA_LOCK_ID = 13374242; // Distributed lock ID for schema migration
+      const onEnsureClientErr = () => {};
       try {
         const p2 = this.getPool();
         if (!p2) return;
         client = await p2.connect();
-        if (client) client.on('error', () => {});
+        if (client) client.on('error', onEnsureClientErr);
         
         // Use a distributed advisory lock to prevent multiple cloud instances from running DDL simultaneously
         const lockRes = await client.query('SELECT pg_try_advisory_lock($1) as acquired', [SCHEMA_LOCK_ID]);
@@ -659,6 +662,7 @@ export class PostgresRepository {
         console.error('[PostgreSQL ensureTelemetrySchema Error]:', err?.message || err);
       } finally {
         if (client) {
+          try { client.off('error', onEnsureClientErr); } catch {}
           try {
             if (hasLock) {
               await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_LOCK_ID]).catch(() => {});

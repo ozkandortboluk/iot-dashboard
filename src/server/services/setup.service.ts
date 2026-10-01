@@ -693,9 +693,10 @@ export class SetupService {
 
     if (pool) {
       let client: any = null;
+      const onStatusClientErr = () => {};
       try {
         const connectPromise = pool.connect().then((c) => {
-          c.on('error', () => {});
+          c.on('error', onStatusClientErr);
           return c;
         });
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -763,6 +764,7 @@ export class SetupService {
         }
       } finally {
         if (client && typeof client.release === 'function') {
+          try { client.off('error', onStatusClientErr); } catch {}
           try { client.release(); } catch {}
         }
       }
@@ -902,6 +904,7 @@ export class SetupService {
     const startTime = Date.now();
     let pool: pg.Pool | null = null;
     let client: any = null;
+    const onTestClientErr = () => {};
 
     try {
       pool = new Pool({
@@ -918,7 +921,7 @@ export class SetupService {
       });
 
       client = await pool.connect();
-      client.on('error', () => {});
+      client.on('error', onTestClientErr);
       const latencyMs = Date.now() - startTime;
 
       let pgVersion = 'PostgreSQL';
@@ -1007,6 +1010,7 @@ export class SetupService {
       };
     } finally {
       if (client && typeof client.release === 'function') {
+        try { client.off('error', onTestClientErr); } catch {}
         try { client.release(); } catch {}
       }
       if (pool) {
@@ -1082,8 +1086,9 @@ export class SetupService {
     }
 
     const steps: { name: string; status: 'done' | 'failed' | 'skipped'; details?: string }[] = [];
+    const onInitClientErr = () => {};
     const client = await pool.connect();
-    client.on('error', () => {});
+    client.on('error', onInitClientErr);
 
     try {
       this.logAudit({
@@ -1215,9 +1220,13 @@ export class SetupService {
         message: 'Veritabanı ilklendirme, migrasyon ve şema doğrulama işlemleri başarıyla tamamlandı. Yönetici hesabı oluşturulabilir.',
       };
     } catch (err: any) {
-      try { client.release(); } catch {}
       systemLogger.error('database', `Veritabanı ilklendirme hatası: ${err?.message || err}`);
       throw err;
+    } finally {
+      if (client) {
+        try { client.off('error', onInitClientErr); } catch {}
+        try { client.release(); } catch {}
+      }
     }
   }
 
@@ -1269,10 +1278,11 @@ export class SetupService {
     let placeholderExists = false;
 
     let pgClient: any = null;
+    const onPgClientErr = () => {};
     if (pool) {
       try {
         pgClient = await pool.connect();
-        pgClient.on('error', () => {});
+        pgClient.on('error', onPgClientErr);
       } catch {}
     }
 
@@ -1300,7 +1310,10 @@ export class SetupService {
           placeholderExists = true;
         }
       } finally {
-        pgClient.release();
+        if (pgClient) {
+          try { pgClient.off('error', onPgClientErr); } catch {}
+          try { pgClient.release(); } catch {}
+        }
       }
     } else {
       const users = await db.getUsersAsync();
@@ -1332,8 +1345,9 @@ export class SetupService {
 
     // Save user to PostgreSQL repository if pool is available
     if (pool) {
+      const onUserClientErr = () => {};
       const userClient = await pool.connect();
-      userClient.on('error', () => {});
+      userClient.on('error', onUserClientErr);
       try {
         await userClient.query('BEGIN');
 
@@ -1397,7 +1411,10 @@ export class SetupService {
         systemLogger.error('database', `Yönetici veritabanına kaydedilirken kritik hata: ${pgInsertErr?.message || pgInsertErr}`);
         throw new Error(`Yönetici hesabı veritabanına kaydedilemedi: ${pgInsertErr?.message || pgInsertErr}`, { cause: pgInsertErr });
       } finally {
-        userClient.release();
+        if (userClient) {
+          try { userClient.off('error', onUserClientErr); } catch {}
+          try { userClient.release(); } catch {}
+        }
       }
 
       if (db.postgresRepo) {

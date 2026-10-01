@@ -506,9 +506,10 @@ class LocalDatabase {
       }
 
       let client: any = null;
+      const onClientErr = () => {};
       try {
         client = await pool.connect();
-        if (client) client.on('error', () => {});
+        if (client) client.on('error', onClientErr);
         await client.query('SELECT 1;');
         this.lastLoggedPostgresError = null;
       } catch (connErr: any) {
@@ -525,6 +526,7 @@ class LocalDatabase {
         return false;
       } finally {
         if (client) {
+          try { client.off('error', onClientErr); } catch {}
           try { client.release(); } catch {}
         }
       }
@@ -584,11 +586,12 @@ class LocalDatabase {
     // Check if REAL admin user exists in PostgreSQL table
     let hasAdmin = false;
     let verifyClient: any = null;
+    const onVerifyErr = () => {};
     try {
       const currentPool = this.getPgPool();
       if (currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
         verifyClient = await currentPool.connect();
-        if (verifyClient) verifyClient.on('error', () => {});
+        if (verifyClient) verifyClient.on('error', onVerifyErr);
         const adminCheck = await verifyClient.query(`
           SELECT id FROM users 
           WHERE role = 'admin' 
@@ -607,6 +610,7 @@ class LocalDatabase {
       console.warn('[Admin check error]:', vErr?.message || vErr);
     } finally {
       if (verifyClient) {
+        try { verifyClient.off('error', onVerifyErr); } catch {}
         try { verifyClient.release(); } catch {}
       }
     }
@@ -2821,6 +2825,7 @@ class LocalDatabase {
     const startTime = Date.now();
     let pool: any = null;
     let client: any = null;
+    const onClientErr = () => {};
     try {
       pool = new Pool({
         connectionString: connStr,
@@ -2834,7 +2839,7 @@ class LocalDatabase {
       });
 
       client = await pool.connect();
-      if (client) client.on('error', () => {});
+      if (client) client.on('error', onClientErr);
       const latencyMs = Date.now() - startTime;
 
       // Check PostgreSQL Version
@@ -3007,6 +3012,7 @@ class LocalDatabase {
       };
     } finally {
       if (client && typeof client.release === 'function') {
+        try { client.off('error', onClientErr); } catch {}
         try { client.release(); } catch {}
       }
       if (pool) {
@@ -3030,6 +3036,7 @@ class LocalDatabase {
 
     let pool: any = null;
     let client: any = null;
+    const onMigrateClientErr = () => {};
     try {
       pool = new Pool({
         connectionString: connStr,
@@ -3043,7 +3050,7 @@ class LocalDatabase {
       });
 
       client = await pool.connect();
-      if (client) client.on('error', () => {});
+      if (client) client.on('error', onMigrateClientErr);
       const sql = this.getPostgresSchemaSQL();
 
       await client.query(sql);
@@ -3090,6 +3097,7 @@ class LocalDatabase {
       };
     } finally {
       if (client && typeof client.release === 'function') {
+        try { client.off('error', onMigrateClientErr); } catch {}
         try { client.release(); } catch {}
       }
       if (pool) {

@@ -1232,9 +1232,10 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
   }
 
   let client: any = null;
+  const onClientErr = () => {};
   try {
     client = await pool.connect();
-    if (client) client.on('error', () => {});
+    if (client) client.on('error', onClientErr);
   } catch (connErr: any) {
     return { success: false, appliedCount: 0, error: connErr?.message || 'Veritabanı bağlantı havuzuna erişilemedi.' };
   }
@@ -1479,7 +1480,10 @@ export async function runAllMigrations(pool: pg.Pool): Promise<{
         console.warn('[Migration Runner] Notice releasing advisory lock:', unlockErr);
       }
     }
-    client.release();
+    if (client) {
+      try { client.off('error', onClientErr); } catch {}
+      try { client.release(); } catch {}
+    }
   }
 }
 
@@ -1505,9 +1509,10 @@ export async function getMigrationStatus(pool: pg.Pool): Promise<MigrationStatus
   }
 
   let client: any = null;
+  const onStatusClientErr = () => {};
   try {
     client = await pool.connect();
-    if (client) client.on('error', () => {});
+    if (client) client.on('error', onStatusClientErr);
   } catch {
     return {
       isLocked: false,
@@ -1554,6 +1559,9 @@ export async function getMigrationStatus(pool: pg.Pool): Promise<MigrationStatus
       lastError: lastMigrationStatus.error,
     };
   } finally {
-    client.release();
+    if (client) {
+      try { client.off('error', onStatusClientErr); } catch {}
+      try { client.release(); } catch {}
+    }
   }
 }

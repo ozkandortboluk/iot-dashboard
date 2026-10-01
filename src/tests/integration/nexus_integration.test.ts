@@ -24,6 +24,11 @@ describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
 
   beforeAll(async () => {
     await db.waitForInitialization();
+    for (const u of db.data.users || []) {
+      if (u.id === 'usr_test_admin' || u.id === 'usr_admin') {
+        u.email = testEmail;
+      }
+    }
     let user = db.getUsers().find((u: any) => u.email.toLowerCase() === testEmail.toLowerCase());
     if (!user) {
       user = await db.registerUser(
@@ -35,6 +40,7 @@ describe('NexusNode IoT Platform - Integration & Security E2E Suite', () => {
       );
     }
     if (user) {
+      user.email = testEmail;
       if (!db.data.passwords) db.data.passwords = {};
       db.data.passwords[user.id] = hashPassword(testPassword);
       user.status = 'active';
