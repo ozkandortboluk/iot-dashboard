@@ -12,6 +12,8 @@
 
 - **USR-03 — Kullanıcı isteği:** VPS'de görülen `Migration Drift Warning` uyarılarının kodsal kök nedenini kalıcı olarak düzelt; uygulanmış migration geçmişini güvenilir hale getir ve migration dışı otomatik şema değişikliklerinin drift üretmesini engelle. **Kanonik kontrol:** `DB-01`.
 
+- **USR-04 — Kullanıcı isteği:** 2026-09-29/30 çalışma loglarında görülen migration drift, yanlış şema/oturum bütünlüğü döngüsü, migration başarısızken READY geçişi ve OTA imzalama anahtarı eksikliği hatalarını kod + canlı deployment açısından gider. **Kanonik kontroller:** `DB-01`, `DB-03`, `DB-04`, `DR-02` (aynı teknik işler için ikinci görev oluşturulmaz).
+
 <!-- Yeni isteklerini bu satırın altına yazabilirsin. Kod vermen gerekmez; Codex uygun konu grubunda sıradaki USR kodunu oluşturur. -->
 
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
@@ -92,12 +94,22 @@
 ## 3. Veritabanı — şema, migration ve bütünlük
 
 - ☑ ☐ ☑ **DB-01 | P1 | Migration hata yutma, checksum drift ve şema otoritesi çakışmasını kapat** — **Ana çözüm kabul edilebilir; yalnız historical upgrade fixture'ında tek nokta düzeltilmeli.**
+  - **Yeni saha kanıtı (2026-09-30):** Canlı çalışma logu `Migration 004 (multitenant_columns_and_integrity)` için DB checksum `6e66bd...` ile current content hash `0e857f...` uyuşmazlığı nedeniyle `[FATAL MIGRATION DRIFT]` üretiyor. Bu, historical checksum yolunun gerçek deployment verisiyle hâlâ kapanmadığını doğruluyor.
+  - **Ek kabul:** Mevcut VPS `schema_migrations` geçmişi destructive reset yapılmadan current manifest/provenance ile uzlaştırılmalı; Migration 004 dahil observed historical checksum kabul yolu gerçek upgrade fixture ve canlı read-only doğrulamada aynı sonucu vermeli. Uygulanmış migration dosyasını yeniden yazmak veya drift kontrolünü kapatmak kabul değildir.
   - **Kanıt:** `2f26d374...` ile gerçek DB upgrade testi artık doğrudan `runAllMigrations(pool)` çağırıyor, yalnız pending 022 için `appliedCount === 1` bekliyor ve örnek user/device verisinin korunduğunu kontrol ediyor. Provenance, source-integrity, controlled null-checksum reconciliation ve parity düzenlemeleri korunuyor.
   - **Tek kalan nokta:** Test açıklaması “gerçek VPS baseline checksum” diyor fakat `real_postgres_migrations.test.ts` fixture'ı 001–021 satırlarına `manifestEntry.canonicalSourceHash` yazıyor. Bu nedenle historical/observed checksum kabul yolu bu testte kullanılmıyor.
   - **Nokta atışı düzeltme:** 001–021 fixture checksum'larını mümkün olan sürümlerde manifestteki gerçek `provenanceStatus: 'observed'` saha checksumlarından seç; observed kaydı olmayan sürüm için açıkça canonical fallback kullan. Sonra aynı `runAllMigrations(pool)` yolunu çalıştır. Historical checksum kabul edilmiyorsa test fail etsin.
   - **Onay için yeterli:** Bu fixture değişikliğiyle gerçek DB upgrade testi başarılıysa DB-01 kapanır. Yeni migration mimarisi, ek concurrency testi veya başka kapsam istenmiyor.
-- ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Yeni Codex bulgusu.**
-  - **Kabul:** Migration failure/pending/drift → live 200, ready 503; migration+schema doğrulaması tam → ready 200; Docker healthcheck bu sözleşmeyi kullanır.
+- ☐ ☐ ☐ **DB-03 | P0 | Migration başarısızken PostgreSQL readiness/READY durumunu true göstermeyi engelle** — **Çalışma loguyla doğrulanmış P0 bulgu.**
+  - **Kanıt/etki:** 2026-09-30 logunda Migration 004 fatal checksum drift ile `DB_INITIALIZING -> DB_UNAVAILABLE` oluyor; aynı çalışma dizisinde hemen ardından `DB_UNAVAILABLE -> DB_CONNECTING -> READY -> DB_INITIALIZING -> READY` geçişleri görülüyor. Migration bütünlüğü doğrulanmadan READY görünmesi uygulamanın bozuk şemayı hazır kabul etmesine yol açabilir.
+  - **Nokta atışı düzeltme:** Migration sonucu + canonical schema doğrulamasını tek readiness gate içinde latched/fail-closed tut; Auto-Healer veya yalnız `SELECT 1` başarısı fatal migration durumunu READY'ye yükseltemesin. Fatal drift ancak başarılı migration reconciliation + schema verify sonrasında temizlensin.
+  - **Kabul:** Migration checksum drift/pending/exception → live 200, ready 503 ve DB state READY değil; Auto-Healer turu bu sonucu tersine çeviremez. Migration + schema verify PASS → ready 200. Docker/app readiness aynı endpoint/sözleşmeyi kullanır.
+
+- ☐ ☐ ☐ **DB-04 | P1 | `user_sessions` şema sözleşmesi ile Auto-Healer veri bütünlüğü kontrolünü eşitle** — **Çalışma loguyla doğrulanmış yeni bulgu.**
+  - **Kanıt:** 2026-09-29 logunda Auto-Healer her ~30 saniyede `user_sessions.token` için 26 NULL kayıt bildirip Repair → Verify → FAIL döngüsüne giriyor ve DB durumunu READY/DB_UNAVAILABLE arasında oynatıyor. Güncel `canonicalSchema.ts` ise `user_sessions.token`, `token_hash` ve `token_prefix` alanlarını nullable tanımlıyor; böylece canlı denetim sonucu ile güncel kanonik sözleşme uyuşmuyor.
+  - **Etki:** Zararsız/legacy nullable session verisi kritik şema kusuru gibi raporlanıyor; log fırtınası, gereksiz recovery döngüsü ve yanlış readiness/state değişimleri oluşturuyor. Gerçek NOT NULL ihlali varsa da bunun kaynağı migration/canonical schema farkı olarak açıkça çözülmeli; veri silen sessiz Auto-Heal yapılmamalı.
+  - **Nokta atışı düzeltme:** `SchemaAuditor` veri-integrity kontrolünü yalnız güncel kanonik `nullable:false` kolonlara uygula; `user_sessions` legacy `token` alanı için hash tabanlı yeni session modeliyle uyumlu migration/reconciliation tanımla. Canlı DB constraint metadata ile canonical metadata aynı olmalı; eski 26 satır için güvenli ve açık bakım/migration yolu seçilmeli (geçerli sessionları körlemesine silme yok).
+  - **Minimum kabul:** (1) Güncel şemada nullable `user_sessions.token` + NULL satırlar audit FAIL üretmez. (2) Gerçek `nullable:false` kolonda NULL fixture audit FAIL üretir. (3) Upgrade fixture'ında legacy session satırları sonrası schema audit PASS ve Auto-Healer sonraki iki turda state churn/log tekrarına girmez. (4) Login → `/api/auth/me` → logout/session revoke akışı korunur.
 
 ## 4. Telemetri — kalıcılık, tekrar işleme ve kapasite
 
@@ -112,6 +124,8 @@
   - **Kabul:** Vault-only config ile üretim benzeri DB dump → boş DB restore → kayıt/tenant/telemetry/komut sayıları ve uygulama açılışı doğrulanmalı; JSON fallback tam yedek başarısı vermemeli.
 
 - ☐ ☐ ☐ **DR-02 | P1 | Firmware, yedek ve imzalama anahtarı kalıcılığını tamamla** — Doğrulanmış kod bulgusu.
+  - **Yeni saha kanıtı:** 2026-09-30 `/api/compiler/build` isteği production ortamında kalıcı Ed25519 private key bulunamadığı için 500 dönüyor. `ota-crypto.ts` güvenli biçimde production'da yeni key üretmiyor; mevcut Compose ise OTA signing secret'ını açık bir Docker secret olarak tanımlamıyor. Bu davranış güvenlik açısından doğru fail-closed, deployment/bootstrap ise eksik.
+  - **Nokta atışı düzeltme:** Mevcut sahada kullanılan/pinlenmiş OTA root key varsa onu kurtarıp kalıcı secret kaynağına bağla; yoksa ilk güvenli provisioning sürecini açıkça tanımla ve cihaz public-key pinning süreciyle birlikte tek seferlik anahtar üret. Container recreate/redeploy sonrası aynı private key okunmalı; secret repo/log/ENV çıktısına sızmamalı.
   - **Yapılacak:** Firmware ve backup için kalıcı volume/harici hedef tanımla; anahtarı ayrı güvenli secret olarak yönet. Anahtar kurtarma ve firmware metadata/dosya tutarlılığı prosedürü ekle.
   - **Kabul:** Recreate sonrası eski firmware indirilebilir ve doğrulanabilir; yedek geri yüklenebilir; sabit public key kullanan cihaz OTA doğrulamasını sürdürebilir.
 
