@@ -125,9 +125,18 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         const manifestEntry = CANONICAL_MIGRATION_MANIFEST[m.version];
         expect(manifestEntry).toBeDefined();
 
+        // Mümkün olan sürümlerde manifestteki gerçek 'provenanceStatus: 'observed' saha checksum'ını seç;
+        // yoksa canonicalSourceHash'e fallback yap.
+        const observedChecksumEntry = manifestEntry.historicalChecksums?.find(
+          (hc: any) => hc.provenanceStatus === 'observed'
+        );
+        const checksumToInsert = observedChecksumEntry 
+          ? observedChecksumEntry.checksum 
+          : manifestEntry.canonicalSourceHash;
+
         await client.query(
           `INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3);`,
-          [m.version, m.name, manifestEntry.canonicalSourceHash]
+          [m.version, m.name, checksumToInsert]
         );
       }
 

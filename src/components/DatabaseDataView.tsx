@@ -1571,34 +1571,6 @@ export const DatabaseDataView: React.FC = () => {
       {/* TAB: POSTGRESQL & SELF-HOSTED SETUP */}
       {activeTab === 'postgres' && (
         <div className="space-y-6">
-          {/* Top Info Banner - Cost & Scale Advantage */}
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl p-5 shadow-xs">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-mono text-[10px] font-bold">POSTGRESQL + TIMESCALEDB</span>
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Kendi Sunucunuzda (VPS / Dedicated / Ev Sunucusu) Sıfır Maliyetli IoT Altyapısı
-                  </h2>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
-                  Firebase Firestore gibi bulut veritabanlarında saniyede 100 sensör verisi aylık <strong>$300+</strong> faturaya sebep olabilirken,
-                  kendi sunucunuzda kuracağınız PostgreSQL / TimescaleDB ile <strong>sabit $0 ek ücretle</strong> saniyede on binlerce okuma/yazma gerçekleştirebilirsiniz.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={handleDownloadSqlSchema}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer shadow-xs"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>SQL Şemasını İndir (.sql)</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
           {/* Connection Test & Config Box */}
           <div className="bg-white dark:bg-[#0c1220] rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
