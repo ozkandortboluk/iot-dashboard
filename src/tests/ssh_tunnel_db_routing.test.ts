@@ -95,4 +95,19 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
 
     expect(resolved).toBe('postgresql://postgres:secretPass@127.0.0.1:5433/iot_db');
   });
+
+  it('5. Production VPS mode: ignores lingering saved SSH tunnel config and forces timescaledb:5432', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    delete process.env.DB_SSH_TUNNEL_ENABLED;
+    delete process.env.ENABLE_SSH_TUNNEL;
+
+    expect(sshTunnelService.getConfig()).toBeNull();
+    expect(sshTunnelService.isConnected()).toBe(false);
+    expect(isSshTunnelConfigured()).toBe(false);
+
+    process.env.SQL_HOST = 'timescaledb';
+    const resolved = resolvePostgresConnectionString();
+    expect(resolved).toContain('timescaledb:5432');
+  });
 });

@@ -5,6 +5,18 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
+import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
+
+export function isSshTunnelAllowed(): boolean {
+  if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
+    return true;
+  }
+  if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
+    return false;
+  }
+  const env = resolveRuntimeEnvironment();
+  return env !== 'vps';
+}
 
 export interface SSHTunnelConfig {
   sshHost: string;
@@ -118,6 +130,9 @@ class SSHTunnelService {
   }
 
   private loadSavedConfig() {
+    if (!isSshTunnelAllowed()) {
+      return;
+    }
     try {
       if (fs.existsSync(CONFIG_FILE)) {
         const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
@@ -189,10 +204,16 @@ class SSHTunnelService {
   }
 
   public isConnected(): boolean {
+    if (!isSshTunnelAllowed()) {
+      return false;
+    }
     return this.status === 'connected';
   }
 
   public getConfig(): SSHTunnelConfig | null {
+    if (!isSshTunnelAllowed()) {
+      return null;
+    }
     return this.activeConfig;
   }
 
