@@ -65,6 +65,59 @@ export function isSshTunnelAllowed(): boolean {
 }
 
 /**
+ * Checks whether an SSH Tunnel configuration exists (saved config file or active configuration)
+ */
+export function isSshTunnelConfigured(): boolean {
+  if (process.env.DB_SSH_TUNNEL_REQUIRED === 'true') {
+    return true;
+  }
+  try {
+    return Boolean(sshTunnelService.getConfig()?.sshHost);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Determines whether SSH Tunnel is required for PostgreSQL connection in the current environment.
+ * True when SSH tunnel is allowed in environment AND (explicitly required or configured for a remote host).
+ * Does NOT block local/cloud PostgreSQL development connections that do not use SSH tunnel.
+ */
+export function isSshTunnelRequired(targetUrl?: string): boolean {
+  if (!isSshTunnelAllowed()) {
+    return false;
+  }
+
+  if (process.env.DB_SSH_TUNNEL_REQUIRED === 'true') {
+    return true;
+  }
+
+  const hasSshConfig = isSshTunnelConfigured();
+  if (!hasSshConfig) {
+    return false;
+  }
+
+  if (targetUrl) {
+    const hostMatch = targetUrl.match(/@([^:/]+)(?::\d+)?/);
+    if (hostMatch) {
+      const host = hostMatch[1].toLowerCase();
+      const isLoopbackOrLocal =
+        host === '127.0.0.1' ||
+        host === 'localhost' ||
+        host === 'timescaledb' ||
+        host === 'nexus_timescaledb' ||
+        host === 'postgres' ||
+        host === 'db';
+      if (isLoopbackOrLocal) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
  * Safely parses and URL-encodes special or non-ASCII characters in PostgreSQL connection strings
  * (e.g. unencoded 'ş', 'ğ', 'ü', '@', etc. in passwords)
  */
@@ -254,45 +307,56 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
   // Ensure user and password in candidateUrl are properly URL encoded
   candidateUrl = sanitizeAndEncodePostgresUrl(candidateUrl);
 
-  // 7. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort ONLY if SSH Tunnel is explicitly allowed AND active
-  if (isSshTunnelAllowed() && sshTunnelService.isConnected()) {
-    const localPort = sshTunnelService.getLocalPort();
-    if (candidateUrl) {
-      try {
-        const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
-        if (match) {
-          let rest = match[3];
-          rest = rest.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
-          candidateUrl = `${match[1]}127.0.0.1:${localPort}${rest}`;
-        } else {
+  // 7. Dynamic SSH Tunnel Routing: Reroute DB connections to 127.0.0.1:localPort when SSH Tunnel is active,
+  // or safely wait in DB_UNAVAILABLE when SSH Tunnel is required for remote host but disconnected.
+  if (isSshTunnelAllowed()) {
+    if (sshTunnelService.isConnected()) {
+      const localPort = sshTunnelService.getLocalPort();
+      if (candidateUrl) {
+        try {
+          const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
+          if (match) {
+            let rest = match[3];
+            rest = rest.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+            candidateUrl = `${match[1]}127.0.0.1:${localPort}${rest}`;
+          } else {
+            candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
+          }
+          if (lastLoggedSshTunnelPort !== localPort) {
+            lastLoggedSshTunnelPort = localPort;
+            systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
+          }
+        } catch {
           candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
         }
-        if (lastLoggedSshTunnelPort !== localPort) {
-          lastLoggedSshTunnelPort = localPort;
-          systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
-        }
-      } catch {
-        candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
+      } else {
+        // Build connection string targeting the SSH tunnel local forwarded port
+        try {
+          const vaultDb = systemSecretsService.getDatabaseConfig();
+          const user = vaultDb.user || process.env.SQL_USER || process.env.DB_USER || process.env.POSTGRES_USER || 'postgres';
+          let pass = vaultDb.password || systemSecretsService.getDatabasePassword() || process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || '';
+          if (!pass && fs.existsSync('/run/secrets/db_password')) {
+            try { pass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim(); } catch {}
+          }
+          const dbName = vaultDb.database || process.env.DB_NAME || process.env.POSTGRES_DB || process.env.SQL_DB_NAME || 'iot_dashboard';
+          const encUser = encodeURIComponent(user);
+          const encPass = pass ? encodeURIComponent(pass) : '';
+          const auth = encPass ? `${encUser}:${encPass}` : encUser;
+          candidateUrl = `postgresql://${auth}@127.0.0.1:${localPort}/${dbName}`;
+          if (lastLoggedSshTunnelPort !== localPort) {
+            lastLoggedSshTunnelPort = localPort;
+            systemLogger.info('database', `SSH Tüneli aktif: Veritabanı bağlantı adresi 127.0.0.1:${localPort} olarak otomatik yapılandırıldı.`);
+          }
+        } catch {}
       }
-    } else {
-      // Build connection string targeting the SSH tunnel local forwarded port
-      try {
-        const vaultDb = systemSecretsService.getDatabaseConfig();
-        const user = vaultDb.user || process.env.SQL_USER || process.env.DB_USER || process.env.POSTGRES_USER || 'postgres';
-        let pass = vaultDb.password || systemSecretsService.getDatabasePassword() || process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || '';
-        if (!pass && fs.existsSync('/run/secrets/db_password')) {
-          try { pass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim(); } catch {}
-        }
-        const dbName = vaultDb.database || process.env.DB_NAME || process.env.POSTGRES_DB || process.env.SQL_DB_NAME || 'iot_dashboard';
-        const encUser = encodeURIComponent(user);
-        const encPass = pass ? encodeURIComponent(pass) : '';
-        const auth = encPass ? `${encUser}:${encPass}` : encUser;
-        candidateUrl = `postgresql://${auth}@127.0.0.1:${localPort}/${dbName}`;
-        if (lastLoggedSshTunnelPort !== localPort) {
-          lastLoggedSshTunnelPort = localPort;
-          systemLogger.info('database', `SSH Tüneli aktif: Veritabanı bağlantı adresi 127.0.0.1:${localPort} olarak otomatik yapılandırıldı.`);
-        }
-      } catch {}
+    } else if (isSshTunnelRequired(candidateUrl)) {
+      // SSH Tunnel is required for this remote PostgreSQL connection, but tunnel is not connected yet!
+      // Refuse to fall back to direct remote VPS IP/host to prevent ECONNREFUSED log spam and port 5432 probing.
+      if (lastLoggedSshTunnelPort !== -1) {
+        lastLoggedSshTunnelPort = -1;
+        systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
+      }
+      return '';
     }
   } else {
     lastLoggedSshTunnelPort = null;

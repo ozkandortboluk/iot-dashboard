@@ -15,6 +15,7 @@ import {
   recycleSharedPgPool,
   resolvePostgresConnectionString,
   getPostgresSslOption,
+  isSshTunnelRequired,
 } from "./database/connection.js";
 import fs from 'node:fs';
 import path from 'node:path';
@@ -471,7 +472,14 @@ class LocalDatabase {
       if (!url) {
         this.postgresRepo.setPool(null);
         this.postgresRepo.setConnected(false);
-        if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
+        const sshRequired = isSshTunnelRequired();
+        if (sshRequired) {
+          this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+          if (this.lastLoggedPostgresError !== 'WAITING_SSH_TUNNEL') {
+            this.lastLoggedPostgresError = 'WAITING_SSH_TUNNEL';
+            systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
+          }
+        } else if (process.env.NODE_ENV === 'production' || isPgExplicitlyConfigured) {
           this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
           if (this.lastLoggedPostgresError !== 'EMPTY_URL') {
             this.lastLoggedPostgresError = 'EMPTY_URL';

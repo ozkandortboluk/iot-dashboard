@@ -192,6 +192,10 @@ class SSHTunnelService {
     return this.status === 'connected';
   }
 
+  public getConfig(): SSHTunnelConfig | null {
+    return this.activeConfig;
+  }
+
   public getLocalPort(): number {
     return this.activeConfig?.localPort || DEFAULT_SSH_LOCAL_PORT;
   }

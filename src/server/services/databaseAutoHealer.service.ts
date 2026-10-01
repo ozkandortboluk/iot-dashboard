@@ -2,6 +2,7 @@ import { systemLogger } from './systemLogger.service.js';
 import { DatabaseState, type DatabaseEngineType } from '../../types.js';
 import { SchemaAuditor, type SchemaHealingResult } from '../database/schemaAuditor.js';
 import { CANONICAL_SCHEMA_METADATA, getCanonicalTableCreationOrder } from '../database/canonicalSchema.js';
+import { isSshTunnelRequired } from '../database/connection.js';
 
 let activeAutoHealerInstance: DatabaseAutoHealer | null = null;
 
@@ -103,6 +104,7 @@ export class DatabaseAutoHealer {
   private isHealingInProgress = false;
   private lastRepairedAt: string | null = null;
   private healingHistory: string[] = [];
+  private lastAutoHealerWarning: string | null = null;
 
   constructor(dbInstance: any) {
     this.dbInstance = dbInstance;
@@ -441,7 +443,14 @@ export class DatabaseAutoHealer {
     try {
       if (!pool) {
         status = 'down';
-        if (process.env.NODE_ENV === 'production') {
+        const sshRequired = isSshTunnelRequired();
+        if (sshRequired) {
+          this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+          if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL') {
+            this.lastAutoHealerWarning = 'WAITING_SSH_TUNNEL';
+            systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
+          }
+        } else if (process.env.NODE_ENV === 'production') {
           this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
         }
         return {
@@ -458,6 +467,7 @@ export class DatabaseAutoHealer {
           healingEvents: this.healingHistory.slice(-10),
         };
       }
+      this.lastAutoHealerWarning = null;
 
       // 1. Check pool saturation
       if (poolStats.waitingCount > 15) {
@@ -559,7 +569,20 @@ export class DatabaseAutoHealer {
       status = 'down';
       latencyMs = -1;
       const errMsg = err?.message || String(err);
-      systemLogger.warn('database', `Veritabanı sağlık kontrolü başarısız: ${errMsg}. Yerel bellek veritabanı aktif tutuluyor.`);
+      const sshRequired = isSshTunnelRequired();
+
+      if (sshRequired) {
+        this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+        if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL') {
+          this.lastAutoHealerWarning = 'WAITING_SSH_TUNNEL';
+          systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
+        }
+      } else {
+        if (this.lastAutoHealerWarning !== errMsg) {
+          this.lastAutoHealerWarning = errMsg;
+          systemLogger.warn('database', `Veritabanı sağlık kontrolü başarısız: ${errMsg}. Yerel bellek veritabanı aktif tutuluyor.`);
+        }
+      }
 
       // Trip repo connection flag so queries cleanly fall back to memory
       this.dbInstance.postgresRepo.setConnected(false);
@@ -567,7 +590,7 @@ export class DatabaseAutoHealer {
         this.dbInstance.data.databaseSettings.isPostgresConnected = false;
         this.dbInstance.data.databaseSettings.isSchemaHealthy = false;
       }
-      if (process.env.NODE_ENV === 'production') {
+      if (process.env.NODE_ENV === 'production' || sshRequired) {
         this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
       }
     } finally {
