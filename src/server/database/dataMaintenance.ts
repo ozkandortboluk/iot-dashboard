@@ -118,7 +118,7 @@ export class DataMaintenanceService {
 
       // 2. Scan NOT NULL violations
       for (const col of tableDef.columns) {
-        if (col.nullable === false) {
+        if (!col.nullable) {
           try {
             const nullCountRes = await poolOrClient.query(`
               SELECT COUNT(*)::int AS cnt 

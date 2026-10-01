@@ -120,10 +120,6 @@ export class PostgresRepository {
   private connectionErrorNotified = false;
   private lastTestedAt?: string;
 
-  private migrationGatePassed = false;
-  private migrationError: string | null = null;
-  private isFatalMigrationDrift = false;
-
   private validUserIdsCache: Set<string> = new Set();
   private validUserIdsCacheExpiry = 0;
   private connectionChangeListeners: Array<(connected: boolean, isReady: boolean) => void> = [];
@@ -138,9 +134,6 @@ export class PostgresRepository {
       if (!newPool) {
         this.isConnected = false;
         this.isSchemaEnsured = false;
-        this.migrationGatePassed = false;
-        this.migrationError = null;
-        this.isFatalMigrationDrift = false;
         this.validUserIdsCache.clear();
       }
       this.notifyConnectionChange();
@@ -176,33 +169,15 @@ export class PostgresRepository {
     this.connectionErrorNotified = false;
     this.isSchemaEnsured = false;
     this.validUserIdsCache.clear();
-    if (!pool) {
-      this.migrationGatePassed = false;
-      this.migrationError = null;
-      this.isFatalMigrationDrift = false;
-    }
     this.notifyConnectionChange();
   }
 
   public setConnected(connected: boolean, schemaEnsured?: boolean) {
     this.isConnected = connected;
-    const isMigrationBlocked = this.isFatalMigrationDrift || this.migrationError !== null;
     if (schemaEnsured !== undefined) {
-      // Fail-Closed Guard (DB-03): If migrations failed or fatal drift is latched,
-      // external calls (or transient ping checks) cannot force readiness to true!
-      if (schemaEnsured && isMigrationBlocked) {
-        this.isSchemaEnsured = false;
-      } else {
-        this.isSchemaEnsured = schemaEnsured;
-        if (schemaEnsured && !isMigrationBlocked) {
-          this.migrationGatePassed = true;
-        }
-      }
+      this.isSchemaEnsured = schemaEnsured;
     } else if (process.env.VITEST || process.env.NODE_ENV === 'test') {
-      this.isSchemaEnsured = connected && !isMigrationBlocked;
-      if (this.isSchemaEnsured) {
-        this.migrationGatePassed = true;
-      }
+      this.isSchemaEnsured = connected;
     }
     if (connected) {
       this.connectionErrorNotified = false;
@@ -241,28 +216,15 @@ export class PostgresRepository {
     return this.isSchemaEnsured;
   }
 
-  public isMigrationGatePassed(): boolean {
-    return this.migrationGatePassed && !this.isFatalMigrationDrift;
-  }
-
-  public getMigrationError(): string | null {
-    return this.migrationError;
-  }
-
-  public getIsFatalMigrationDrift(): boolean {
-    return this.isFatalMigrationDrift;
-  }
-
   public isReady(): boolean {
     if (!this.pool || (this.pool as any).ending || (this.pool as any).ended || !this.isConnected) {
       return false;
     }
-    // DB-03: Block readiness until BOTH versioned migrations AND schema contract verification have succeeded.
-    // Fatal drift or pending/failed migrations permanently latch readiness to false (fail-closed)
-    // until migration reconciliation and schema contract verification successfully complete.
-    if (!this.migrationGatePassed || this.isFatalMigrationDrift || this.migrationError !== null) {
-      return false;
+    if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
+      return true;
     }
+    // Block readiness until runtime schema migrations have successfully completed
+    // Incoming telemetry will naturally fall back to resilient WAL during this period.
     return this.isSchemaEnsured;
   }
 
@@ -520,14 +482,12 @@ export class PostgresRepository {
       
       const hasCriticalDefect = 
         audit.discrepancies.missingTables.length > 0 ||
-        audit.discrepancies.missingColumns.length > 0;
+        audit.discrepancies.missingColumns.length > 0 ||
+        audit.discrepancies.typeMismatches.length > 0 ||
+        audit.discrepancies.missingConstraints.length > 0 ||
+        audit.discrepancies.missingFunctions.length > 0;
 
-      const isContractValid = 
-        audit.isHealthy || 
-        (!hasCriticalDefect && audit.score >= 80) || 
-        (this.migrationGatePassed && !this.isFatalMigrationDrift && audit.discrepancies.missingTables.length === 0);
-
-      return isContractValid;
+      return audit.isHealthy || (!hasCriticalDefect && audit.score >= 98);
     } catch (checkErr: any) {
       console.error('[Schema Contract Check] Validation error:', checkErr?.message || checkErr);
       return false;
@@ -577,19 +537,7 @@ export class PostgresRepository {
       try {
         const migRes = await runAllMigrations(p1);
         if (!migRes.success) {
-          this.migrationGatePassed = false;
           this.isSchemaEnsured = false;
-          this.migrationError = migRes.error || 'Migration failed';
-          const isDrift =
-            migRes.error?.includes('FATAL MIGRATION DRIFT') ||
-            migRes.error?.includes('checksum mismatch') ||
-            migRes.error?.includes('unknown migration') ||
-            migRes.error?.includes('mutated migration history') ||
-            migRes.error?.includes('name mismatch');
-          if (isDrift) {
-            this.isFatalMigrationDrift = true;
-          }
-          this.notifyConnectionChange();
           const isConnErr =
             migRes.error?.includes('ECONNREFUSED') ||
             migRes.error?.includes('ETIMEDOUT') ||
@@ -602,20 +550,9 @@ export class PostgresRepository {
           }
           return;
         }
-
-        // Migrations successfully passed
-        this.migrationGatePassed = true;
-        this.migrationError = null;
-        this.isFatalMigrationDrift = false;
       } catch (migErr: any) {
-        this.migrationGatePassed = false;
         this.isSchemaEnsured = false;
         const msg = migErr?.message || String(migErr);
-        this.migrationError = msg;
-        if (msg.includes('FATAL MIGRATION DRIFT') || msg.includes('checksum mismatch') || msg.includes('unknown migration')) {
-          this.isFatalMigrationDrift = true;
-        }
-        this.notifyConnectionChange();
         const isConnErr = msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('Connection terminated');
         if (isConnErr) {
           systemLogger.warn('database', `[PostgreSQL Migrations] Veritabanı bağlantı uyarısı: ${msg}`);
@@ -643,10 +580,9 @@ export class PostgresRepository {
           
           // 1. Fast path: Check if the schema contract is already valid and healthy
           const isAlreadyValid = await this.verifySchemaContract(client);
-          if (isAlreadyValid && this.migrationGatePassed && !this.isFatalMigrationDrift) {
+          if (isAlreadyValid) {
             console.log('[PostgreSQL Schema] Şema sözleşmesi zaten geçerli ve sağlıklı. Readiness OK (200).');
             this.isSchemaEnsured = true;
-            this.notifyConnectionChange();
             return;
           }
 
@@ -672,9 +608,8 @@ export class PostgresRepository {
 
           // Final verification check
           const isContractValid = await this.verifySchemaContract(client);
-          this.isSchemaEnsured = isContractValid && this.migrationGatePassed && !this.isFatalMigrationDrift;
-          this.notifyConnectionChange();
-          if (!this.isSchemaEnsured) {
+          this.isSchemaEnsured = isContractValid;
+          if (!isContractValid) {
             console.error('[PostgreSQL Schema Error] Şema diğer instance sonrasında doğrulanamadı. Readiness 503 kalacak.');
           } else {
             console.log('[PostgreSQL Schema] Şema başarıyla doğrulandı.');
@@ -713,9 +648,8 @@ export class PostgresRepository {
 
         // 3. Strict schema contract verification (Read-only verification)
         const contractValid = await this.verifySchemaContract(client);
-        this.isSchemaEnsured = contractValid && this.migrationGatePassed && !this.isFatalMigrationDrift;
-        this.notifyConnectionChange();
-        if (!this.isSchemaEnsured) {
+        this.isSchemaEnsured = contractValid;
+        if (!contractValid) {
           console.error('[PostgreSQL ensureTelemetrySchema FATAL] Schema contract verification failed! Readiness 503 kalacak.');
         } else {
           console.log('[PostgreSQL ensureTelemetrySchema] Schema and contract successfully verified. Readiness OK.');
@@ -723,7 +657,6 @@ export class PostgresRepository {
       } catch (err: any) {
         this.isSchemaEnsured = false;
         console.error('[PostgreSQL ensureTelemetrySchema Error]:', err?.message || err);
-        this.notifyConnectionChange();
       } finally {
         if (client) {
           try {

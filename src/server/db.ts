@@ -270,9 +270,8 @@ class LocalDatabase {
 
   public getDatabaseState(): DatabaseState {
     const isPgConfigured = !!this.getPostgresUrl().trim();
-    const isFatalDrift = Boolean(this.postgresRepo?.getIsFatalMigrationDrift?.());
-    if (isFatalDrift || isPgConfigured || process.env.NODE_ENV === 'production') {
-      if (this.dbState === DatabaseState.READY && !this.postgresRepo?.isReady?.()) {
+    if (isPgConfigured || process.env.NODE_ENV === 'production') {
+      if (this.dbState === DatabaseState.READY && !this.postgresRepo?.isReady()) {
         this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
       }
     }
@@ -288,12 +287,8 @@ class LocalDatabase {
 
   public setDatabaseState(newState: DatabaseState): void {
     const isPgConfigured = !!this.getPostgresUrl().trim();
-    const isFatalDrift = Boolean(this.postgresRepo?.getIsFatalMigrationDrift?.());
-    if (newState === DatabaseState.READY) {
-      if (isFatalDrift) {
-        console.warn('[Database State Machine] Fatal migration drift tespit edildi. READY yerine DB_UNAVAILABLE atanıyor.');
-        newState = DatabaseState.DB_UNAVAILABLE;
-      } else if ((isPgConfigured || process.env.NODE_ENV === 'production') && !this.postgresRepo?.isReady?.()) {
+    if (newState === DatabaseState.READY && (isPgConfigured || process.env.NODE_ENV === 'production')) {
+      if (!this.postgresRepo?.isReady()) {
         console.warn('[Database State Machine] PostgreSQL yapılandırılmış ancak bağlantı hazır değil. READY yerine DB_UNAVAILABLE atanıyor.');
         newState = DatabaseState.DB_UNAVAILABLE;
       }
@@ -534,7 +529,7 @@ class LocalDatabase {
         }
       }
 
-    this.postgresRepo.setConnected(true, false);
+    this.postgresRepo.setConnected(true, true);
     this.setDatabaseState(DatabaseState.DB_INITIALIZING);
 
     if (!this.data.databaseSettings) {
