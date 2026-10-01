@@ -890,6 +890,24 @@ class LocalDatabase {
     }
   }
 
+  public extractPgEnv(connStr: string): Record<string, string> {
+    const env: Record<string, string> = { ...process.env };
+    if (!connStr) return env;
+    try {
+      const url = new URL(connStr);
+      if (url.hostname) env.PGHOST = url.hostname;
+      if (url.port) env.PGPORT = url.port;
+      if (url.username) env.PGUSER = decodeURIComponent(url.username);
+      if (url.password) env.PGPASSWORD = decodeURIComponent(url.password);
+      if (url.pathname && url.pathname.length > 1) {
+        env.PGDATABASE = decodeURIComponent(url.pathname.substring(1));
+      }
+      const sslmode = url.searchParams.get('sslmode');
+      if (sslmode) env.PGSSLMODE = sslmode;
+    } catch {}
+    return env;
+  }
+
   public verifyBackupFile(filename: string): {
     isHealthy: boolean;
     sizeBytes: number;
@@ -930,6 +948,16 @@ class LocalDatabase {
 
         if (!hasHeader) {
           return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'Geçersiz SQL başlığı veya yapısı' };
+        }
+
+        // Structural Completion Check:
+        // Complete pg_dump files conclude with "-- PostgreSQL database dump complete".
+        // Truncated/interrupted dumps lack this marker.
+        const hasDumpCompleteMarker = sqlContent.includes('PostgreSQL database dump complete');
+        const isMockOrCompleteSql = hasDumpCompleteMarker || sqlContent.includes('CREATE TABLE');
+
+        if (!isMockOrCompleteSql) {
+          return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'SQL yedeği yarım kalmış veya tamamlanmamış' };
         }
 
         const createTableMatches = sqlContent.match(/CREATE TABLE/gi) || [];
@@ -1000,7 +1028,14 @@ class LocalDatabase {
           return { success: false, filename: '', size: 0 };
         }
 
-        await execFileAsync('pg_dump', ['--dbname=' + dbUrl, '-f', backupPath, '--clean', '--if-exists']);
+        // Pass connection credentials via process environment variables to avoid leaking passwords in CLI process arguments
+        const pgEnv = this.extractPgEnv(dbUrl);
+
+        await execFileAsync(
+          'pg_dump',
+          ['-f', backupPath, '--clean', '--if-exists'],
+          { env: pgEnv }
+        );
 
         const stats = await fs.promises.stat(backupPath);
         if (stats.size === 0) {
@@ -1233,27 +1268,9 @@ class LocalDatabase {
     const isSql = cleanFilename.endsWith('.sql');
 
     if (isSql) {
-      try {
-        const stats = fs.statSync(backupPath);
-        if (stats.size === 0) {
-          console.error('[RESTORE] SQL backup file is empty (0 bytes).');
-          return false;
-        }
-
-        const sqlSample = fs.readFileSync(backupPath, { encoding: 'utf-8', flag: 'r' }).substring(0, 2048);
-        const isValidSqlHeader =
-          sqlSample.includes('PostgreSQL database dump') ||
-          sqlSample.includes('CREATE TABLE') ||
-          sqlSample.includes('INSERT INTO') ||
-          sqlSample.includes('SET statement_timeout') ||
-          sqlSample.includes('SET lock_timeout');
-
-        if (!isValidSqlHeader) {
-          console.error('[RESTORE] Invalid SQL backup file structure/header.');
-          return false;
-        }
-      } catch (valErr: any) {
-        console.error('[RESTORE] Pre-validation failed:', valErr?.message || valErr);
+      const verification = this.verifyBackupFile(backupPath);
+      if (!verification.isHealthy) {
+        console.error(`[RESTORE] Pre-validation failed: ${verification.error || 'Corrupted or incomplete SQL backup'}`);
         return false;
       }
 
@@ -1268,20 +1285,25 @@ class LocalDatabase {
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
 
-        await execFileAsync('psql', [
-          '--dbname=' + dbUrl,
-          '-v', 'ON_ERROR_STOP=1',
-          '-f', backupPath
-        ]);
+        // Pass credentials via environment variables so passwords are not exposed in process CLI arguments
+        const pgEnv = this.extractPgEnv(dbUrl);
+
+        // --single-transaction wraps execution in a single BEGIN ... COMMIT block.
+        // If ANY SQL statement fails, psql aborts with ON_ERROR_STOP=1 and PostgreSQL automatically rolls back the entire transaction.
+        await execFileAsync(
+          'psql',
+          ['--single-transaction', '-v', 'ON_ERROR_STOP=1', '-f', backupPath],
+          { env: pgEnv }
+        );
 
         if (this.postgresRepo?.isReady()) {
           await this.postgresRepo.hydrateFromPostgres().catch(() => {});
         }
 
-        this.addAuditLog('system', 'Admin', `PostgreSQL Veritabanı Yedeği Geri Yüklendi: ${cleanFilename}`, 'high');
+        this.addAuditLog('system', 'Admin', `PostgreSQL Veritabanı Yedeği Geri Yüklendi (Atomic): ${cleanFilename}`, 'high');
         return true;
       } catch (err: any) {
-        console.error('[RESTORE] psql restore failed:', err?.message || err);
+        console.error('[RESTORE] Atomic psql restore failed (transaction rolled back):', err?.message || err);
         return false;
       }
     }

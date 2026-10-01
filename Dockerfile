@@ -36,8 +36,8 @@ RUN apt-get update && \
 # Copy package definition and lockfile
 COPY package*.json ./
 
-# Install production dependencies
-RUN npm install --omit=dev --legacy-peer-deps
+# Install production dependencies deterministically via npm ci
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # Copy built bundle and runtime assets from builder
 COPY --from=builder /app/dist ./dist

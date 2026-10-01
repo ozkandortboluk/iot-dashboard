@@ -233,4 +233,32 @@ INSERT INTO devices VALUES ('dev_01', 'Test Device');
       // If pg_dump is not installed in the local preview runner, skipping runtime binary assertion is expected
     }
   });
+
+  it('8. Verify extractPgEnv parses connection URL into PG environment variables', () => {
+    const sampleUrl = 'postgres://iot_user:SecretP%40ss123@timescaledb:5432/iot_dashboard?sslmode=disable';
+    const env = db.extractPgEnv(sampleUrl);
+
+    expect(env.PGHOST).toBe('timescaledb');
+    expect(env.PGPORT).toBe('5432');
+    expect(env.PGUSER).toBe('iot_user');
+    expect(env.PGPASSWORD).toBe('SecretP@ss123');
+    expect(env.PGDATABASE).toBe('iot_dashboard');
+    expect(env.PGSSLMODE).toBe('disable');
+  });
+
+  it('9. Rejects truncated or interrupted SQL dumps lacking completion footer', () => {
+    const truncatedFilename = `pg_backup_truncated_${Date.now()}.sql`;
+    const truncatedPath = path.join(backupDir, truncatedFilename);
+    // Missing "-- PostgreSQL database dump complete" and no tables
+    const truncatedContent = `-- PostgreSQL database dump
+SET statement_timeout = 0;
+-- Interrupted abruptly due to network failure or SIGKILL
+`;
+    fs.writeFileSync(truncatedPath, truncatedContent, 'utf8');
+    createdBackupFiles.push(truncatedFilename);
+
+    const verification = db.verifyBackupFile(truncatedFilename);
+    expect(verification.isHealthy).toBe(false);
+    expect(verification.error).toContain('yarım kalmış');
+  });
 });

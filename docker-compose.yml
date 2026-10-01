@@ -92,7 +92,7 @@ services:
       - nexus_net
 
   adminer:
-    image: adminer:latest
+    image: adminer:4.8.1
     container_name: nexus_adminer
     restart: unless-stopped
     # Security: Restrict Adminer to localhost interface only to prevent public web exposure
