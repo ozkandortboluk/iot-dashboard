@@ -242,6 +242,14 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     canonicalSourceHash: '0e857f6764432240026b348ddf12ec16',
     historicalChecksums: [
       {
+        checksum: '6e66bd99169703bc42bc5679ef422eaa',
+        hashAlgorithm: 'sha256-legacy-v1',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0e857f6764432240026b348ddf12ec16',
+        provenanceStatus: 'observed',
+        notes: 'Historical VPS DB checksum',
+      },
+      {
         checksum: 'b9e1d8b9a460834f2e7e03ddef8dc196',
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
