@@ -1,6 +1,6 @@
 # NexusNode IoT — Yapılacak işler
 
-[Kurallar](kurallar.md) · [Tamamlanan işlemler](tamamlanan_islemler.md) · [Ortak notlar ve denetim geçmişi](notlar.md)
+[Project Map](project-map.md) · [Working](working.md) · [Kurallar](kurallar.md) · [Tamamlanan işlemler](tamamlanan_islemler.md)
 
 ## Kullanıcı istekleri
 

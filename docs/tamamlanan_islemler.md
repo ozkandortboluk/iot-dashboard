@@ -1,6 +1,6 @@
 # NexusNode IoT — Tamamlanan işlemler
 
-[Kurallar](kurallar.md) · [Açık işler](PROJECT_ROADMAP.md) · [Ortak notlar ve denetim geçmişi](notlar.md)
+[Project Map](project-map.md) · [Working](working.md) · [Kurallar](kurallar.md) · [Açık işler](PROJECT_ROADMAP.md)
 
 2026-09-30 tarihinde mevcut roadmap’ten taşındı. Bu işlem yeni kod denetimi değildir; aşağıdaki onay kapsamları ve test sınırları korunmuştur. Regresyonda aynı görev kimliği açık işlere geri taşınır.
 

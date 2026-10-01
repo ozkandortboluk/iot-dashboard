@@ -1,62 +1,32 @@
-# Project Guidelines & Autonomous Developer Rules
+# Gemini / Google AI Studio Bootstrap
 
-## KURAL 1: Anlamlı ve Planlı Sürümleme Politikası (Selective Semantic Versioning)
+Bu dosya kısa tutulur. **Ana kuralların kaynağı `AGENTS.md` dosyasıdır; burada kopyalanmaz.**
 
-1. **Küçük Değişikliklerde Sürüm Yükseltme Yapılmaz**:
-   - Her küçük UI düzeltmesi, CSS/stil rötuşu, ufak hata giderimi (bugfix) veya tekil refaktör için **ayrı bir sürüm numarası yükseltilmez**.
-   - Küçük düzeltmeler ve ara ayarlamalar, sürüm yükseltilmesi gereken anlamlı kilometre taşlarının (büyük özellikler, yeni modüller, mimari güncellemeler veya konsolide yayınlar) altına iliştirilir.
-2. **Sürüm Yükseltme Kriterleri**:
-   - Sürüm yükseltme yalnızca aşağıdaki durumlarda gerçekleştirilir:
-     - **PATCH bump (`x.y.Z`)**: Kritik güvenlik yamaları veya toplu/konsolide hata düzeltme paketleri yayınlandığında.
-     - **MINOR bump (`x.Y.0`)**: Yeni bir özellik, yeni bir API uç noktası, yeni bir görünüm veya kapsamlı işlevsellik eklendiğinde.
-     - **MAJOR bump (`X.0.0`)**: Geriye dönük uyumsuz köklü mimari veya veritabanı şema değişikliklerinde.
-3. **Senkronize Sürüm Güncelleme**:
-   - Bir sürüm yükseltildiğinde `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları birbiriyle tam senkron tutulur.
-   - `CHANGELOG.md` gereksiz mikro-girdilerle şişirilmez; yapılan işler sade, derli toplu ve anlamlı başlıklar altında özetlenir.
-4. **Bileşenlerde Sabit Sürüm Metni Bulunamaz**:
-   - Tüm UI bileşenleri sürüm bilgisini `src/config/version.ts` dosyasından içe aktarır.
+Google AI Studio / Gemini her yeni görevde kullanıcı ayrıca hatırlatmasa bile şu akışı uygular:
 
----
+1. `AGENTS.md` kurallarını uygula.
+2. `docs/project-map.md` üzerinden görev için en küçük ilgili modülü/problem rotasını bul.
+3. `docs/working.md` içinde aktif claim veya Codex revizyonu var mı kontrol et.
+4. Roadmap görevi varsa `docs/PROJECT_ROADMAP.md` içinde yalnız ilgili maddeyi oku.
+5. Yazmadan önce `docs/working.md` Active Claims alanında `AI-STUDIO` sahipliği bırak.
+6. Tüm repository'yi varsayılan olarak tarama; önce yalnız ilgili kaynak dosyalarını incele. Kanıt gerektirirse kapsamı kontrollü genişlet.
+7. Kod değişikliğini ve göreve uygun testleri tamamla.
+8. Roadmap'te yalnız AI Studio uygulama durumunu güncelle. Codex onay kutusunu işaretleme.
+9. `docs/working.md` içine commit SHA + değişen dosyalar + test sonucu + kısa özet + Codex'in kontrol edeceği noktalarla `AI Studio → Codex` handoff bırak.
+10. İş bitince aktif claim'i kaldır.
 
-## KURAL 2: Yardım & Bilgi Merkezi Canlı Kod Örnekleri (Yardım & Bilgi Merkezi)
+## Öncelik
 
-1. **Her Zaman Çalışır Kod Blokları (`HelpView.tsx`)**:
-   - "Yardım & Bilgi Merkezi" (`HelpView.tsx`), donanım geliştiricileri ve sistem entegratörleri için 100% çalışan, sözdizimi doğrulanmış ve üretime hazır kod bloklarını korumaya devam eder:
-     - **ESP32 & NodeMCU (ESP8266) HTTP Telemetri Gönderimi ve Downlink Komut Yanıtı**
-     - **ESP32 Periyodik Heartbeat / Ping (`/api/telemetry/ping`)**
-     - **ESP32 / ESP8266 Canlı WebSocket İstemcisi**
-     - **Kompakt Virgülle Ayrılmış Hızlı Veri Akışı (`/api/v1/telemetry`)**
-     - **JSON Telemetri Yükleme (`/api/telemetry`)**
-     - **Cihaz Çıkış Kontrol API'si (`/api/devices/:id/control`)**
-     - **Python IoT Ajanı ve Node.js / cURL Entegrasyon Scriptleri**
-2. **API Güncellemelerinde Senkronizasyon**:
-   - Sistemde yeni bir API uç noktası, telemetri formatı veya protokol eklendiğinde `HelpView.tsx` içindeki örnek kodlar güncellenir.
+- `☑ ☐ ☑` durumundaki Codex revizyonları öncelikli düzeltmedir.
+- `P0` güvenlik ve tenant izolasyonu, ardından `P1` çalışan uygulama/veri bütünlüğü gelir.
+- Mevcut kabul edilmiş alt kapsam sebepsiz yeniden yazılmaz.
+- Aynı teknik sorun için ikinci bağımsız roadmap maddesi oluşturulmaz.
 
----
+## Yasaklar
 
-## KURAL 3: Test Verisi İzolasyonu ve Production Seeding Koruması
+- Sırf bağlam toplamak için tüm `src/`, tüm testler, tüm roadmap veya changelog okunmaz.
+- `docs/working.md` içinde başka ajanın aktif sahip olduğu dosya paralel değiştirilmez.
+- Parola, token, private key veya gerçek secret dokümanlara/loglara yazılmaz.
+- Çalıştırılmayan test başarılı gösterilmez.
 
-1. **Sabit Kimlik Bilgilerinin Kılavuz/Prompt Dosyalarında Bulunmaması**:
-   - `AGENTS.md`, `GEMINI.md` veya proje kök dokümanlarında asla sabit kullanıcı şifreleri, statik API anahtarları veya canlı hesap bilgileri tutulmaz.
-2. **Test Verileri Yalnızca CI Fixture'larında Yer Alır**:
-   - Test kullanıcıları, sahte cihazlar ve simülasyon parametreleri yalnızca `tests/`, `e2e/` veya CI test fixture ortamlarında tutulmalıdır.
-3. **Production Seeding Kesin Olarak Kapalıdır**:
-   - Üretim ortamında (`NODE_ENV === 'production'`) veritabanına otomatik demo veya test verisi tohumlama (seeding) yapılması kesin olarak engellenir.
-   - Canlı üretim veritabanına yalnızca operatör tarafından yetkilendirilmiş gerçek kullanıcı ve cihaz kayıtları girebilir.
-
----
-
-## KURAL 4: Yol Haritası (Roadmap) 3 Kutu Durum Takip Sistemi ve Denetim Döngüsü
-
-1. **3 Kutu Durum Anlamları**:
-   - `☐ ☐ ☐` → Henüz yapılmadı (Açık iş kalemi).
-   - `☑ ☐ ☐` → AI Studio uyguladı, Codex incelemesi bekleniyor.
-   - `☑ ☐ ☑` → Codex inceledi ve düzeltme / revizyon istedi (3. kutu denetçinin düzeltme beklediğini, AI Studio'nun bu maddeye tekrar bakması gerektiğini belirtir).
-   - `☑ ☑ ☐` → Codex onayladı (Kabul kriterleri başarıyla karşılandı).
-
-2. **Düzeltme ve Tarihçe Koruma Kuralı**:
-   - Codex düzeltme istediğinde AI Studio'nun ilk kutucuktaki işareti asla silinmez; 3. kutu işaretlenerek `☑ ☐ ☑` durumuna getirilir. Bu sayede "AI Studio bunu uyguladı" geçmişi korunurken "Codex düzeltme istiyor" durumu net biçimde görünür.
-   - AI Studio istenen düzeltmeyi yaptıktan sonra durumu `☑ ☐ ☑` → `☑ ☐ ☐` yapar (3. kutu temizlenir, Codex'in yeniden denetlemesi beklenir).
-   - Codex yeniden kontrol edip onay verdiğinde durum `☑ ☑ ☐` olarak tescillenir.
-   - AI Studio, 3. kutusu işaretli (`☑ ☐ ☑`) olan tüm maddeleri öncelikli düzeltme bekleyen işler olarak ele alır ve bu maddeleri eksiksiz inceler/düzeltir.
-
+Çakışma halinde: `AGENTS.md` → `docs/kurallar.md` → ilgili roadmap maddesi sırası geçerlidir.

@@ -1,5 +1,16 @@
 # NexusNode IoT — Denetim ve ortak çalışma kuralları
 
+## Çoklu ajan, context bütçesi ve başlangıç protokolü
+
+- Tüm ajanlar için ana davranış sözleşmesi kökteki `AGENTS.md` dosyasıdır. `GEMINI.md` yalnız AI Studio/Gemini bootstrap dosyasıdır ve bağımsız kural seti oluşturmaz.
+- Her görevde önce `docs/project-map.md` ile ilgili modül/problem rotası bulunur, ardından `docs/working.md` aktif claim/handoff durumu kontrol edilir.
+- Repository varsayılan olarak baştan sona taranmaz. İlk inceleme yalnız görevin gerektirdiği dosyalarla sınırlıdır; mevcut kanıt yetersizse kapsam kontrollü genişletilir.
+- Roadmap görevi biliniyorsa `PROJECT_ROADMAP.md` dosyasının tamamı yerine ilgili görev maddesi ve gerekli yakın bağlam okunur. `tamamlanan_islemler.md` yalnız geçmiş/regresyon/kimlik kontrolü gerektiğinde açılır.
+- Yazmadan önce `working.md > Active Claims` alanına ajan, task, base SHA, kapsam ve dokunulacak dosyalar yazılır. Bu kayıt soft lock kabul edilir; başka ajanın aktif sahip olduğu aynı dosya paralel düzenlenmez.
+- Uygulama sonunda aktif claim kaldırılır ve ilgili yönlü handoff'a commit SHA, değişen dosyalar, test sonucu, kısa özet, review isteği ve blocker yazılır.
+- Mimari rota, ana servis/route/repository yeri veya aktif kaynak ağacı değişirse `project-map.md` güncellenir. Küçük UI/CSS/metin değişiklikleri haritayı gereksiz yere değiştirmez.
+- `working.md` geçici RAM'dir: sonuçlanan notlar temizlenir; kalıcı karar/kanıt roadmap veya tamamlananlara taşınır.
+
 - **P0:** güvenlik açığı/erişim veya müşteri izolasyonu ihlali; önce kapatılır.
 - **P1:** uygulamanın açılması, giriş, gerçek veri kalıcılığı, cihaz çalışması ve kurtarma. Çalışan uygulamayı korumak her değişiklik için zorunlu kabul şartıdır.
 - **P2:** güvenilirlik, performans, kullanılabilirlik ve mevcut özelliklerin tamamlanması.
@@ -20,27 +31,29 @@
 - AI Studio düzeltmeyi yaptıktan sonra durum: `☑ ☐ ☑` → `☑ ☐ ☐` (3. kutu kaldırılır) → Codex yeniden kontrol eder → `☑ ☑ ☐`.
 - **Kritik ayrım:** Codex'in her düzeltme talebi tam ret değildir. Temel/başarısız uygulama = `☐ ☐ ☐`; mevcut ve büyük ölçüde doğru uygulamada hedefli revizyon = `☑ ☐ ☑`.
 - AI Studio yaptığı işi ve kanıtını yazdıktan sonra **yalnız ilk kutuyu** işaretler (`☑ ☐ ☐`); ikinci kutuyu kendi kendine işaretlemez. Codex denetleyip onaylarsa ikinci kutuyu işaretler (`☑ ☑ ☐`).
-- Henüz denetlenmemiş bir `☑ ☐ ☐` madde sırf bekliyor diye sıfırlanmaz. Önceden onaylı iş bozulmuşsa kutular yeniden açılır. Her ret/regresyon için SHA, gerekçe, istenen düzeltme ve tekrar kabul testi `docs/notlar.md` dosyasına ve ilgili göreve yazılır.
+- Henüz denetlenmemiş bir `☑ ☐ ☐` madde sırf bekliyor diye sıfırlanmaz. Önceden onaylı iş bozulmuşsa kutular yeniden açılır. Her ret/regresyon için SHA, gerekçe, istenen düzeltme ve tekrar kabul testi `docs/working.md` dosyasına ve ilgili göreve yazılır.
 - İkinci kutu yalnız belirtilen kabul kapsamının onayıdır. Kod varlığı, birim test, gerçek DB testi ve saha kanıtı ayrı belirtilir; yapılmayan test yapılmış sayılmaz.
 - Tamamlanan maddeler silinmez. Regresyonda aynı kimlik tekrar açılır; eski kanıt, yeni SHA ve gerekçe eklenir. Aynı metnin birebir tekrarları kaynak başlıkları birleştirilerek tekilleştirilmiştir.
 - Önce grubun yeni bulgusu çözülür; aynı kapsamdaki eski kayıt ayrı ikinci iş yaratmaz. Eski sürüm/ortam ifadeleri güncel kanıtla birlikte okunur. Eski tek kutulu `[x]` kayıtları tarihsel uygulama bildirimi olarak `☑ ☐ ☐` biçiminde korunur; uygulayıcının kimliği geçmiş kayıttan ayrıca doğrulanmış sayılmaz. Önceki denetimde açık güncel doğrulama kanıtı bulunan dar kapsamlı kayıtlar `☑ ☑ ☐` olabilir. Bu biçim dönüşümü yeni bir kod/saha denetimi değildir.
 - Her değişiklik küçük ve gözden geçirilebilir olmalı. Güvenlik bypass’ı açarak test/giriş sorunu çözülmez. Canlı DB’ye deneme verisi, test hesabı veya denetim amaçlı yıkıcı işlem uygulanmaz.
-- Google AI Studio görev kimliğini, ilgili commit SHA’sını, kısa uygulama/test sonucunu ve Codex’ten beklediği yanıtı `docs/notlar.md` içindeki **AI Studio** alanına yazar. Codex yanıtını **Codex** alanına yazar, kabul ölçütünü kontrol edip ilgili görevde ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
+- Google AI Studio görev kimliğini, ilgili commit SHA’sını, kısa uygulama/test sonucunu ve Codex’ten beklediği yanıtı `docs/working.md` içindeki **AI Studio** alanına yazar. Codex yanıtını **Codex** alanına yazar, kabul ölçütünü kontrol edip ilgili görevde ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
 - Her yeni kod commit’inde diff + çağıran/çağrılan kod + schema/API/WS/cihaz örnekleri kontrol edilir. Yalnız değişen satıra bakılmaz. Main’de tamamlandı demek için düzeltme main’de bulunmalıdır.
 - Yazmadan önce güncel HEAD ve dosya blob SHA tekrar okunur; AI Studio’nun eşzamanlı notları korunur. Conflict durumunda dosya yeniden okunup birleştirilir. Yalnız doküman değişikliğinde yeni bulgu yoksa yeni denetim commit’i üretilmez.
 
 ## Dosya düzeni ve taşıma döngüsü
 
-- `docs/kurallar.md`: Denetim, öncelik, üç kutu ve kabul kurallarının kaynağıdır. Her çalışma başında okunur.
+- `AGENTS.md`: Tüm ajanların kısa ve zorunlu davranış sözleşmesidir; her görevde uygulanır.
+- `docs/project-map.md`: Proje navigasyonu ve problem rotalarıdır; kaynak kod otoritesi değildir.
+- `docs/kurallar.md`: Denetim, öncelik, üç kutu ve kabul kurallarının ayrıntılı kaynağıdır; görev roadmap/denetim akışına dokunuyorsa ilgili bölümleri okunur.
 - `docs/PROJECT_ROADMAP.md`: En üstte açık kullanıcı istekleri; altında konu grupları, yapılacaklar ve kabul şartları bulunur. `☐ ☐ ☐`, `☑ ☐ ☐` ve `☑ ☐ ☑` burada kalır.
 - `docs/tamamlanan_islemler.md`: Codex kabulü tamamlanan `☑ ☑ ☐` görevler, aynı kimlik ve kanıtıyla taşınır. AI Studio’nun ilk kutuyu işaretlemesi tek başına taşıma gerekçesi değildir.
 - **Kısmi tamamlama / alt kapsam taşıma kuralı:** Tek görev birden fazla bağımsız kabul alt konusu içeriyorsa, Codex tarafından kanıtla tamamlanan alt konular roadmap’te tekrar tutulmaz. Görev bütünü açık kalabilir; doğrulanmış alt kapsam `tamamlanan_islemler.md` içinde aynı kanonik kimlik altında **“kısmen tamamlandı”** kaydıyla, tamamlanan kapsam ve kanıtı belirtilerek tutulur. Roadmap’te aynı kimlik altında yalnız henüz yapılmamış, doğrulanmamış veya revizyon isteyen kısımlar kalır.
 - Kısmi taşıma yeni görev kimliği üretmez ve aynı konuyu iki aktif göreve bölmez. `USR-*` bir mevcut kanonik göreve bağlıysa (`USR-02 → RUN-04` gibi), tamamlanan alt kapsam tamamlananlar dosyasında bu ilişkiyle birlikte yazılır; roadmap’in kullanıcı isteği satırı yalnız **kalan açık kapsamı** özetleyecek şekilde güncellenir.
 - Tamamlanan alt kapsam tekrar roadmap’e açıklama/başarı geçmişi olarak kopyalanmaz. Regresyon olursa yalnız bozulan alt kapsam aynı kanonik görev altında roadmap’e geri açılır; önceki tamamlanma kanıtı tamamlananlar dosyasında tarihsel kayıt olarak korunur.
-- `docs/notlar.md`: Yalnız iki geçici iletişim alanı bulunur: **AI Studio** ve **Codex**. Denetim geçmişi veya uzun rapor deposu olarak kullanılmaz; kalıcı karar ve kabul kanıtları görev dosyalarında, önceki sürümler Git geçmişinde korunur.
+- `docs/working.md`: **Active Claims**, **AI Studio → Codex** ve **Codex → AI Studio** geçici alanlarını içerir. Aktif sahiplik ve kısa handoff dışında rapor deposu olarak kullanılmaz; kalıcı karar ve kabul kanıtları görev dosyalarında, önceki sürümler Git geçmişinde korunur.
 - Her görev güncel kayıt olarak yalnız bir yerde bulunur: açık iş roadmap’te, onaylanmış iş tamamlananlarda. Bir madde kapanınca önce tamamlananlara kimliği/kanıtıyla aktarılır, ardından roadmap’ten kaldırılır; bu taşıma geçmişi silmek değildir.
 - Tamamlanan iş bozulursa aynı kimlikle roadmap’e geri taşınır; yeni duruma göre kutular açılır. Tamamlananlar dosyasında eski onay/regresyon tarihi not olarak korunur; iki aktif görev kaydı oluşturulmaz.
-- İşe başlamadan dört dosya birlikte okunur. Kurallar roadmap içine tekrar kopyalanmaz; rapor/ortak notlar açık iş listesini şişirmez.
+- İşe başlarken tüm büyük dokümanlar topluca okunmaz. `AGENTS.md` → `project-map.md` → `working.md` zorunlu küçük başlangıçtır; ardından yalnız ilgili roadmap maddesi/kural bölümü ve gerekli kaynak dosyalar açılır. Kurallar roadmap içine tekrar kopyalanmaz; rapor/ortak notlar açık iş listesini şişirmez.
 - Dosya taşıması uygulama denetimi veya yeni onay değildir; mevcut durum ve kabul kapsamı korunur. Canlı test yapılmadıysa yapılmış sayılmaz.
 - Her yazmadan önce değiştirilecek dosyaların güncel blob SHA’sı ve HEAD okunur. Karşı tarafın yeni uygulama veya notları üzerine yazılmaz; eşzamanlı düzenleme varsa yeniden birleştirilir.
 
@@ -58,11 +71,11 @@
 - Öncelik güvenlik ve çalışan uygulama şartlarına göre verilir. Kullanıcı isteği mevcut P0/P1 güvenlik/çalışma engellerini otomatik olarak geçmez.
 - İstek değişirse yeni kapsam ve kabul şartları aynı kimlik altında güncellenir; önceki karar Git geçmişinde korunur. İstek gerçekten ayrı bir işse yeni kimlik verilir.
 - USR maddesi `☑ ☑ ☐` ile kapanınca görev ve kullanıcının kaynak isteği birlikte tamamlananlar dosyasına taşınır; roadmap’in üst alanı da yalnız açık istekleri gösterir. Regresyonda aynı kimlikle geri açılır.
-- Göreve aktarılan geçici kullanıcı notu notlar.md’den temizlenebilir. Kısa yanıt/engel kendi AI Studio veya Codex alanına yazılır; kalıcı istek ve kontrol işi roadmap’te kalır.
+- Göreve aktarılan geçici kullanıcı notu working.md’den temizlenebilir. Kısa yanıt/engel kendi AI Studio veya Codex alanına yazılır; kalıcı istek ve kontrol işi roadmap’te kalır.
 
-## İki alanlı yaz-boz ve sıfırlama kuralı
+## Active Claims, iki yönlü handoff ve sıfırlama kuralı
 
-- `docs/notlar.md` yalnız **AI Studio** ve **Codex** başlıklarını içerir. Her taraf kendi alanına kısa not yazar; boş alan “Yanıt bekleyen not yok.” biçiminde kalır.
+- `docs/working.md` geçici olarak **Active Claims**, **AI Studio → Codex** ve **Codex → AI Studio** alanlarını içerir. Her taraf kendi handoff alanına kısa not yazar; aktif claim yoksa “Aktif claim yok.” biçiminde kalır.
 - Bir not mümkün olduğunca görev kimliği, tam veya kısa SHA, sonuç/engel ve beklenen sonraki adımdan oluşur. Yalnız yeni soruyu veya düzeltme isteğini açıklayan ayrıntı tutulur; uzun diff, tekrarlanan test çıktısı ve eski raporlar eklenmez.
 - Codex, AI Studio’nun notuna yanıt verdiyse ilgili **AI Studio** notunu temizleyebilir. AI Studio, Codex’in notuna yanıt verdiyse ilgili **Codex** notunu temizleyebilir. Karşı alanı yalnız okumak, notun yanıtlandığı anlamına gelmez.
 - Her denetim sonunda yanıtlanan veya sonuçlanmış eski kayıtlar temizlenir; yeni tur için yalnız güncel yanıt/soru ve kalan engeller bırakılır. Yanıtlanmamış konu sırf yeni denetim yapıldı diye kaybolmaz; kısa tek bir bekleyen not olarak korunur.
