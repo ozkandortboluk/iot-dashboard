@@ -166,6 +166,40 @@ describe('DB-03 & DB-04: Fail-Closed Migration Readiness Gate and Session Integr
       expect(db.postgresRepo.isReady()).toBe(true);
       expect(db.getDatabaseState()).toBe(DatabaseState.READY);
     });
+    it('6. DISABLE_AUTO_MIGRATION === true MUST NOT bypass fatal drift or unpassed migration gate', () => {
+      const originalFlag = process.env.DISABLE_AUTO_MIGRATION;
+      try {
+        process.env.DISABLE_AUTO_MIGRATION = 'true';
+        const mockPool = createMockPool();
+        db.postgresRepo.setPool(mockPool);
+        (db.postgresRepo as any).isConnected = true;
+        (db.postgresRepo as any).isSchemaEnsured = true;
+
+        // Negative Case A: Fatal drift latched
+        (db.postgresRepo as any).migrationGatePassed = false;
+        (db.postgresRepo as any).isFatalMigrationDrift = true;
+        (db.postgresRepo as any).migrationError = 'Fatal checksum drift';
+        expect(db.postgresRepo.isReady()).toBe(false);
+
+        // Negative Case B: Migration error present
+        (db.postgresRepo as any).isFatalMigrationDrift = false;
+        (db.postgresRepo as any).migrationError = 'Migration failed';
+        expect(db.postgresRepo.isReady()).toBe(false);
+
+        // Negative Case C: Migration gate not passed
+        (db.postgresRepo as any).migrationError = null;
+        (db.postgresRepo as any).migrationGatePassed = false;
+        expect(db.postgresRepo.isReady()).toBe(false);
+
+        // Positive Case: Both migration gate passed and schema ensured
+        (db.postgresRepo as any).migrationGatePassed = true;
+        (db.postgresRepo as any).isFatalMigrationDrift = false;
+        (db.postgresRepo as any).migrationError = null;
+        expect(db.postgresRepo.isReady()).toBe(true);
+      } finally {
+        process.env.DISABLE_AUTO_MIGRATION = originalFlag;
+      }
+    });
   });
 
   describe('DB-04: user_sessions Schema Contract & Zero-Data-Loss Audit Equality', () => {
@@ -290,10 +324,29 @@ describe('DB-03 & DB-04: Fail-Closed Migration Readiness Gate and Session Integr
       expect(healResult.errors.some((e) => e.includes('users.name'))).toBe(true);
     });
 
-    it('3. upgrade reconciliation of legacy sessions safely generates token_hash and maintains session viability', async () => {
-      const executedSqls: string[] = [];
+    it('3. upgrade reconciliation of legacy sessions safely generates token_hash in migration 021 and AutoHealer runs zero DDL on sessions', async () => {
+      // 1. Test Migration 021 safely reconciles legacy user_sessions without data deletion
+      const migrationExecutedSqls: string[] = [];
+      const mockMigrationClient: any = {
+        query: vi.fn().mockImplementation(async (sql: string) => {
+          migrationExecutedSqls.push(sql);
+          return { rows: [] };
+        }),
+      };
+
+      const { migration021 } = await import('../server/database/migrations/021_hash_device_and_session_tokens.js');
+      await migration021.up(mockMigrationClient);
+
+      // Verify that non-destructive legacy session hashing reconciliation SQL was executed by Migration 021
+      const sessionUpdate = migrationExecutedSqls.find((q) => q.includes('token_hash = encode(sha256(token::bytea)'));
+      expect(sessionUpdate).toBeDefined();
+      expect(sessionUpdate).toContain('UPDATE user_sessions');
+      expect(migrationExecutedSqls.some((q) => q.includes('DELETE FROM user_sessions;'))).toBe(false);
+
+      // 2. Test that subsequent Auto-Healer cycles do NOT issue DDL or data mutations against user_sessions
+      const healerExecutedSqls: string[] = [];
       const queryFn = vi.fn().mockImplementation(async (sql: string) => {
-        executedSqls.push(sql);
+        healerExecutedSqls.push(sql);
         if (sql.includes('information_schema.tables')) {
           return { rows: Object.keys(CANONICAL_SCHEMA_METADATA.tables).map((t) => ({ table_name: t })) };
         }
@@ -312,16 +365,14 @@ describe('DB-03 & DB-04: Fail-Closed Migration Readiness Gate and Session Integr
         })),
       };
 
-      // Run verifyAndRepairTables from AutoHealer
       (db as any).getPgPool = () => mockPool;
+      // Run two consecutive rounds of verifyAndRepairTables from AutoHealer
+      await db.autoHealer.verifyAndRepairTables();
       await db.autoHealer.verifyAndRepairTables();
 
-      // Verify that non-destructive legacy session hashing reconciliation SQL was executed
-      const sessionUpdate = executedSqls.find((q) => q.includes('token_hash = encode(sha256(token::bytea)'));
-      expect(sessionUpdate).toBeDefined();
-      expect(sessionUpdate).toContain('UPDATE user_sessions');
-      // Verify no blind DELETE FROM user_sessions was executed
-      expect(executedSqls.some((q) => q.includes('DELETE FROM user_sessions;'))).toBe(false);
+      // Ensure no ALTER TABLE user_sessions or UPDATE user_sessions was executed by AutoHealer
+      const healerSessionAlters = healerExecutedSqls.filter((q) => q.includes('user_sessions') && (q.includes('ALTER TABLE') || q.includes('UPDATE')));
+      expect(healerSessionAlters).toHaveLength(0);
     });
 
     it('4. Auth lifecycle: login -> authenticated session verification -> logout cleanly functions with token hashing', async () => {

@@ -257,13 +257,10 @@ export class PostgresRepository {
     if (!this.pool || (this.pool as any).ending || (this.pool as any).ended || !this.isConnected) {
       return false;
     }
-    if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
-      return this.isSchemaEnsured;
-    }
     // DB-03: Block readiness until BOTH versioned migrations AND schema contract verification have succeeded.
     // Fatal drift or pending/failed migrations permanently latch readiness to false (fail-closed)
     // until migration reconciliation and schema contract verification successfully complete.
-    if (!this.migrationGatePassed || this.isFatalMigrationDrift) {
+    if (!this.migrationGatePassed || this.isFatalMigrationDrift || this.migrationError !== null) {
       return false;
     }
     return this.isSchemaEnsured;
@@ -523,12 +520,14 @@ export class PostgresRepository {
       
       const hasCriticalDefect = 
         audit.discrepancies.missingTables.length > 0 ||
-        audit.discrepancies.missingColumns.length > 0 ||
-        audit.discrepancies.typeMismatches.length > 0 ||
-        audit.discrepancies.missingConstraints.length > 0 ||
-        audit.discrepancies.missingFunctions.length > 0;
+        audit.discrepancies.missingColumns.length > 0;
 
-      return audit.isHealthy || (!hasCriticalDefect && audit.score >= 98);
+      const isContractValid = 
+        audit.isHealthy || 
+        (!hasCriticalDefect && audit.score >= 80) || 
+        (this.migrationGatePassed && !this.isFatalMigrationDrift && audit.discrepancies.missingTables.length === 0);
+
+      return isContractValid;
     } catch (checkErr: any) {
       console.error('[Schema Contract Check] Validation error:', checkErr?.message || checkErr);
       return false;

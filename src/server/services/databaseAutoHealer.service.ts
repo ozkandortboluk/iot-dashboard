@@ -262,44 +262,6 @@ export class DatabaseAutoHealer {
           }
         }
 
-        if (existing.has('user_sessions')) {
-          const colRes = await client.query(`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' AND table_name = 'user_sessions';
-          `);
-          const sessionCols = new Set(colRes.rows.map((r: any) => r.column_name));
-          if (!sessionCols.has('expires_at')) {
-            await client.query(`
-              ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days');
-              UPDATE user_sessions SET expires_at = CURRENT_TIMESTAMP + INTERVAL '7 days' WHERE expires_at IS NULL;
-              CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
-            `);
-            recordDatabaseHealingEvent('user_sessions.expires_at kolonu otomatik onarıldı ve eklendi.', { table: 'user_sessions', column: 'expires_at' }, 'warn');
-          }
-          await client.query(`
-            ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
-            -- DB-04: Ensure user_sessions.token is nullable in accordance with canonical schema
-            ALTER TABLE user_sessions ALTER COLUMN token DROP NOT NULL;
-            ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token_hash VARCHAR(128);
-            ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token_prefix VARCHAR(32);
-            -- Drop legacy strict token uniqueness if present (sessions now indexed by token_hash)
-            DO $$
-            BEGIN
-              IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token') THEN
-                ALTER TABLE user_sessions DROP CONSTRAINT unq_user_sessions_token;
-              END IF;
-            END $$;
-            CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash);
-            -- Non-destructive reconciliation of legacy unhashed session records (Zero Data Loss)
-            UPDATE user_sessions
-            SET 
-              token_hash = encode(sha256(token::bytea), 'hex'),
-              token_prefix = substring(token from 1 for 10)
-            WHERE (token_hash IS NULL OR token_hash = '') AND token IS NOT NULL AND token <> '';
-          `).catch(() => {});
-        }
-
         if (existing.has('device_ws_messages_dedup')) {
           const colRes = await client.query(`
             SELECT column_name 
