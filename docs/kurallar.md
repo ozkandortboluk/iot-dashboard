@@ -3,12 +3,12 @@
 ## Çoklu ajan, context bütçesi ve başlangıç protokolü
 
 - Tüm ajanlar için ana davranış sözleşmesi kökteki `AGENTS.md` dosyasıdır. `GEMINI.md` yalnız AI Studio/Gemini bootstrap dosyasıdır ve bağımsız kural seti oluşturmaz.
-- Her görevde önce `docs/project-map.md` ile ilgili modül/problem rotası bulunur, ardından `docs/working.md` aktif claim/handoff durumu kontrol edilir.
+- Her görevde önce `docs/project-map.md` router'ından **tek ilgili `docs/maps/*.md`** seçilir; yalnız o alt harita okunduktan sonra `docs/working.md` claim/handoff durumu kontrol edilir.
 - Repository varsayılan olarak baştan sona taranmaz. İlk inceleme yalnız görevin gerektirdiği dosyalarla sınırlıdır; mevcut kanıt yetersizse kapsam kontrollü genişletilir.
 - Roadmap görevi biliniyorsa `PROJECT_ROADMAP.md` dosyasının tamamı yerine ilgili görev maddesi ve gerekli yakın bağlam okunur. `tamamlanan_islemler.md` yalnız geçmiş/regresyon/kimlik kontrolü gerektiğinde açılır.
 - Yazmadan önce `working.md > Active Claims` alanına ajan, task, base SHA, kapsam ve dokunulacak dosyalar yazılır. Bu kayıt soft lock kabul edilir; başka ajanın aktif sahip olduğu aynı dosya paralel düzenlenmez.
 - Uygulama sonunda aktif claim kaldırılır ve ilgili yönlü handoff'a commit SHA, değişen dosyalar, test sonucu, kısa özet, review isteği ve blocker yazılır.
-- Mimari rota, ana servis/route/repository yeri veya aktif kaynak ağacı değişirse `project-map.md` güncellenir. Küçük UI/CSS/metin değişiklikleri haritayı gereksiz yere değiştirmez.
+- Yeni route/service/repository/ana component/worker/API-protokol/özellik akışı eklenir-taşınır veya çağrı zinciri değişirse ilgili `docs/maps/*.md` aynı değişiklikte güncellenir; yeni problem alanı oluşursa `project-map.md` router'ı da güncellenir. Küçük UI/CSS/metin değişiklikleri haritayı gereksiz yere değiştirmez.
 - `working.md` geçici RAM'dir: sonuçlanan notlar temizlenir; kalıcı karar/kanıt roadmap veya tamamlananlara taşınır.
 
 - **P0:** güvenlik açığı/erişim veya müşteri izolasyonu ihlali; önce kapatılır.
@@ -36,14 +36,15 @@
 - Tamamlanan maddeler silinmez. Regresyonda aynı kimlik tekrar açılır; eski kanıt, yeni SHA ve gerekçe eklenir. Aynı metnin birebir tekrarları kaynak başlıkları birleştirilerek tekilleştirilmiştir.
 - Önce grubun yeni bulgusu çözülür; aynı kapsamdaki eski kayıt ayrı ikinci iş yaratmaz. Eski sürüm/ortam ifadeleri güncel kanıtla birlikte okunur. Eski tek kutulu `[x]` kayıtları tarihsel uygulama bildirimi olarak `☑ ☐ ☐` biçiminde korunur; uygulayıcının kimliği geçmiş kayıttan ayrıca doğrulanmış sayılmaz. Önceki denetimde açık güncel doğrulama kanıtı bulunan dar kapsamlı kayıtlar `☑ ☑ ☐` olabilir. Bu biçim dönüşümü yeni bir kod/saha denetimi değildir.
 - Her değişiklik küçük ve gözden geçirilebilir olmalı. Güvenlik bypass’ı açarak test/giriş sorunu çözülmez. Canlı DB’ye deneme verisi, test hesabı veya denetim amaçlı yıkıcı işlem uygulanmaz.
-- Google AI Studio görev kimliğini, ilgili commit SHA’sını, kısa uygulama/test sonucunu ve Codex’ten beklediği yanıtı `docs/working.md` içindeki **AI Studio** alanına yazar. Codex yanıtını **Codex** alanına yazar, kabul ölçütünü kontrol edip ilgili görevde ikinci veya üçüncü kutuyu kanıta göre günceller; ilk kutu uygulama geçmişini korur. Başarısız/çalıştırılmamış testler açıkça kalır.
+- Google AI Studio kısa claim/handoff'u `docs/working.md` içindeki **AI Studio → Codex** alanına; Codex yanıtını **Codex → AI Studio** alanına yazar. Kalıcı kabul/ret ve test kanıtı ilgili görevde tutulur; başarısız/çalıştırılmamış testler açıkça kalır.
 - Her yeni kod commit’inde diff + çağıran/çağrılan kod + schema/API/WS/cihaz örnekleri kontrol edilir. Yalnız değişen satıra bakılmaz. Main’de tamamlandı demek için düzeltme main’de bulunmalıdır.
 - Yazmadan önce güncel HEAD ve dosya blob SHA tekrar okunur; AI Studio’nun eşzamanlı notları korunur. Conflict durumunda dosya yeniden okunup birleştirilir. Yalnız doküman değişikliğinde yeni bulgu yoksa yeni denetim commit’i üretilmez.
 
 ## Dosya düzeni ve taşıma döngüsü
 
 - `AGENTS.md`: Tüm ajanların kısa ve zorunlu davranış sözleşmesidir; her görevde uygulanır.
-- `docs/project-map.md`: Proje navigasyonu ve problem rotalarıdır; kaynak kod otoritesi değildir.
+- `docs/project-map.md`: Küçük problem router'ıdır; yalnız doğru `docs/maps/*.md` dosyasına yönlendirir, kaynak kod otoritesi değildir.
+- `docs/maps/*.md`: Alan bazlı kısa dosya/akış/test haritalarıdır; yalnız ilgili alan gerektiğinde okunur.
 - `docs/kurallar.md`: Denetim, öncelik, üç kutu ve kabul kurallarının ayrıntılı kaynağıdır; görev roadmap/denetim akışına dokunuyorsa ilgili bölümleri okunur.
 - `docs/PROJECT_ROADMAP.md`: En üstte açık kullanıcı istekleri; altında konu grupları, yapılacaklar ve kabul şartları bulunur. `☐ ☐ ☐`, `☑ ☐ ☐` ve `☑ ☐ ☑` burada kalır.
 - `docs/tamamlanan_islemler.md`: Codex kabulü tamamlanan `☑ ☑ ☐` görevler, aynı kimlik ve kanıtıyla taşınır. AI Studio’nun ilk kutuyu işaretlemesi tek başına taşıma gerekçesi değildir.
@@ -53,7 +54,7 @@
 - `docs/working.md`: **Active Claims**, **AI Studio → Codex** ve **Codex → AI Studio** geçici alanlarını içerir. Aktif sahiplik ve kısa handoff dışında rapor deposu olarak kullanılmaz; kalıcı karar ve kabul kanıtları görev dosyalarında, önceki sürümler Git geçmişinde korunur.
 - Her görev güncel kayıt olarak yalnız bir yerde bulunur: açık iş roadmap’te, onaylanmış iş tamamlananlarda. Bir madde kapanınca önce tamamlananlara kimliği/kanıtıyla aktarılır, ardından roadmap’ten kaldırılır; bu taşıma geçmişi silmek değildir.
 - Tamamlanan iş bozulursa aynı kimlikle roadmap’e geri taşınır; yeni duruma göre kutular açılır. Tamamlananlar dosyasında eski onay/regresyon tarihi not olarak korunur; iki aktif görev kaydı oluşturulmaz.
-- İşe başlarken tüm büyük dokümanlar topluca okunmaz. `AGENTS.md` → `project-map.md` → `working.md` zorunlu küçük başlangıçtır; ardından yalnız ilgili roadmap maddesi/kural bölümü ve gerekli kaynak dosyalar açılır. Kurallar roadmap içine tekrar kopyalanmaz; rapor/ortak notlar açık iş listesini şişirmez.
+- İşe başlarken büyük dokümanlar topluca okunmaz. Küçük akış: `project-map.md` → tek ilgili `maps/*.md` → `working.md`; ardından yalnız ilgili roadmap maddesi/kural bölümü ve gerekli kaynak dosyalar açılır. Kurallar roadmap içine tekrar kopyalanmaz.
 - Dosya taşıması uygulama denetimi veya yeni onay değildir; mevcut durum ve kabul kapsamı korunur. Canlı test yapılmadıysa yapılmış sayılmaz.
 - Her yazmadan önce değiştirilecek dosyaların güncel blob SHA’sı ve HEAD okunur. Karşı tarafın yeni uygulama veya notları üzerine yazılmaz; eşzamanlı düzenleme varsa yeniden birleştirilir.
 
