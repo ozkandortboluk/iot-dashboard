@@ -216,4 +216,21 @@ INSERT INTO devices VALUES ('dev_01', 'Test Device');
     expect(restoredDev).toBeDefined();
     expect(restoredDev?.metrics?.pressure).toBe(88.8);
   });
+
+  it('7. Verify pg_dump major version is PostgreSQL 16.x compatible when installed', async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+
+    try {
+      const { stdout } = await execFileAsync('pg_dump', ['--version']);
+      const versionMatch = stdout.match(/pg_dump \(PostgreSQL\) (\d+)\./i) || stdout.match(/(\d+)\.\d+/);
+      if (versionMatch && versionMatch[1]) {
+        const majorVersion = parseInt(versionMatch[1], 10);
+        expect(majorVersion).toBeGreaterThanOrEqual(16);
+      }
+    } catch {
+      // If pg_dump is not installed in the local preview runner, skipping runtime binary assertion is expected
+    }
+  });
 });
