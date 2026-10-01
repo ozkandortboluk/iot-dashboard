@@ -1,6 +1,7 @@
 import { Router, type Response, type Request } from 'express';
 import { db } from '../db.js';
 import { DatabaseState } from '../../types.js';
+import { systemLogger } from '../services/systemLogger.service.js';
 import { broadcast, terminateSessionSocket, terminateUserSockets } from '../services/websocket.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { authenticateUser, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -210,8 +211,19 @@ router.post('/login', async (req, res) => {
   try {
     const result = await db.authenticate(emailRes.normalized, String(password));
     if (!result) {
+      systemLogger.warn('auth', `Başarısız oturum açma denemesi: ${emailRes.normalized} (IP: ${clientIp})`, {
+        email: emailRes.normalized,
+        ip: clientIp,
+      });
       return res.status(401).json({ error: 'Hatalı e-posta adresi veya şifre.' });
     }
+
+    systemLogger.info('auth', `Başarılı kullanıcı girişi: ${result.user.name} (${result.user.email}) - Rol: ${result.user.role}`, {
+      userId: result.user.id,
+      email: result.user.email,
+      role: result.user.role,
+      ip: clientIp,
+    });
 
     // Set HttpOnly, Secure session cookie
     setSessionCookie(res, result.token);

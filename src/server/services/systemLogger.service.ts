@@ -315,7 +315,23 @@ class SystemLoggerService {
       this.queueFilePersistence(event);
     }
 
+    // Notify live log listeners (e.g. WebSocket broadcast)
+    for (const listener of this.logListeners) {
+      try {
+        listener(event);
+      } catch {}
+    }
+
     return event;
+  }
+
+  private logListeners: Array<(event: SystemEvent) => void> = [];
+
+  public onLog(listener: (event: SystemEvent) => void): () => void {
+    this.logListeners.push(listener);
+    return () => {
+      this.logListeners = this.logListeners.filter((l) => l !== listener);
+    };
   }
 
   public info(category: SystemEventCategory, message: string, details?: any, source?: string): SystemEvent {

@@ -1,6 +1,7 @@
 import { db } from '../db.js';
 import { broadcast } from './websocket.js';
 import { rateLimiterService } from './rateLimiter.service.js';
+import { systemLogger } from './systemLogger.service.js';
 import type { Device, TelemetryReading } from '../../types.js';
 import type { ParsedMetric } from '../utils/telemetry.parser.js';
 
@@ -130,6 +131,13 @@ export class PhysicalTelemetryService {
         ? 'QUEUED_FOR_RETRY'
         : 'LOCAL_BUFFER',
     };
+
+    systemLogger.info(
+      'telemetry',
+      `Saha telemetri paketi alındı: ${device.name} (${device.id}) - ${metricsToProcess.length} metrik kayıt edildi.`,
+      { deviceId: device.id, tenantId: device.tenantId, metricsCount: metricsToProcess.length, status: writeAck.status },
+      'physical_telemetry_service'
+    );
 
     return {
       addedReadings,

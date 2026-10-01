@@ -147,7 +147,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
 
     // 2. Production build and dependency isolation
     expect(content).toMatch(/npm run build/i);
-    expect(content).toMatch(/npm install --omit=dev/i);
+    expect(content).toMatch(/npm (install|ci) --omit=dev/i);
 
     // 3. Environment & Port Configuration
     expect(content).toMatch(/ENV NODE_ENV=production/i);

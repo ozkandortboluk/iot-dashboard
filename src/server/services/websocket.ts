@@ -657,6 +657,11 @@ export function initWebSocketServer(server: http.Server) {
     broadcast(event, payload);
   });
 
+  // Subscribe systemLogger live events to real-time WebSocket broadcast
+  systemLogger.onLog((event) => {
+    broadcast('system:event', event);
+  });
+
   // Centralized periodic device watchdog status checker (Fixed 10s cadence, independent of UI/API queries)
   if (watchdogInterval) clearInterval(watchdogInterval);
   watchdogInterval = setInterval(async () => {

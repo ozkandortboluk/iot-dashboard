@@ -511,15 +511,21 @@ export const SystemLogsView: React.FC = () => {
             >
               <option value="all">Tüm Kategoriler</option>
               <option value="server">Server / Sunucu</option>
-              <option value="api">API İstekleri</option>
+              <option value="http">HTTP İstekleri</option>
+              <option value="api">API Çağrıları</option>
               <option value="database">Veritabanı / PostgreSQL</option>
-              <option value="websocket">WebSocket</option>
-              <option value="telemetry">Telemetri</option>
-              <option value="auth">Kimlik / Yetki</option>
-              <option value="client">Web Arayüz / İstemci</option>
+              <option value="device">Cihaz İşlemleri</option>
+              <option value="telemetry">Telemetri Akışı</option>
+              <option value="alarm">Alarlar & Kurallar</option>
+              <option value="automation">Otomasyonlar</option>
+              <option value="websocket">WebSocket Bağlantıları</option>
+              <option value="auth">Kimlik & Oturum</option>
+              <option value="security">Güvenlik / Firewall</option>
               <option value="auto_repair">Otomatik Onarım</option>
-              <option value="security">Güvenlik</option>
-              <option value="backup">Yedekleme</option>
+              <option value="backup">Yedekleme & Restore</option>
+              <option value="ota">OTA Güncellemeleri</option>
+              <option value="worker">Arka Plan İşçileri</option>
+              <option value="client">Web Arayüz / İstemci</option>
             </select>
 
             {/* Auto Refresh Interval */}
@@ -530,6 +536,7 @@ export const SystemLogsView: React.FC = () => {
               title="Otomatik Yenileme Sıklığı"
             >
               <option value="0">Canlı: Kapalı</option>
+              <option value="1000">Canlı: 1 Saniye (Anlık)</option>
               <option value="3000">Canlı: 3 Saniye</option>
               <option value="5000">Canlı: 5 Saniye</option>
               <option value="10000">Canlı: 10 Saniye</option>

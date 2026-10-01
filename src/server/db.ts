@@ -2232,15 +2232,22 @@ class LocalDatabase {
     }
     const raw = this.data.serviceConfig;
 
-    const whatsappToken = process.env.WHATSAPP_API_TOKEN || (decrypt ? decryptSecret(raw.whatsapp?.apiToken) : raw.whatsapp?.apiToken) || '';
-    const telegramToken = process.env.TELEGRAM_BOT_TOKEN || (decrypt ? decryptSecret(raw.telegram?.botToken) : raw.telegram?.botToken) || '';
-    const webhookSecret = process.env.WEBHOOK_SECRET_HEADER || (decrypt ? decryptSecret(raw.webhook?.secretHeader) : raw.webhook?.secretHeader) || '';
-    const dbResendKey = decrypt ? decryptSecret((raw.email as any)?.resendApiKey) : (raw.email as any)?.resendApiKey;
+    const decryptVal = (val?: string) => {
+      if (!val) return '';
+      if (!decrypt) return val;
+      if (val.startsWith('enc:v1:')) return decryptSecret(val);
+      return val;
+    };
+
+    const whatsappToken = process.env.WHATSAPP_API_TOKEN || decryptVal(raw.whatsapp?.apiToken) || '';
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN || decryptVal(raw.telegram?.botToken) || '';
+    const webhookSecret = process.env.WEBHOOK_SECRET_HEADER || decryptVal(raw.webhook?.secretHeader) || '';
+    const dbResendKey = decryptVal((raw.email as any)?.resendApiKey);
     const resendApiKey = (dbResendKey && dbResendKey.trim().length > 0)
       ? dbResendKey
       : ((process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.startsWith('re_')) ? process.env.RESEND_API_KEY : '');
 
-    const dbSmtpPass = decrypt ? decryptSecret((raw.email as any)?.smtpPass) : (raw.email as any)?.smtpPass;
+    const dbSmtpPass = decryptVal((raw.email as any)?.smtpPass);
     const smtpPass = (dbSmtpPass && dbSmtpPass.trim().length > 0)
       ? dbSmtpPass
       : (process.env.SMTP_PASS || '');

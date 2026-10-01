@@ -65,11 +65,33 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(decryptSecret(undefined)).toBe('');
     });
 
-    it('should correctly mask secrets with maskSecret without exposing full value', () => {
-      expect(maskSecret('short')).toBe('••••••••hort');
-      expect(maskSecret('re_1234567890abcdef')).toBe('••••••••cdef');
-      expect(maskSecret('')).toBe('');
-      expect(maskSecret(undefined)).toBe('');
+    it('should correctly mask secrets with maskSecret without exposing full value or triggering migration warnings', () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn');
+      const originalEnv = process.env.NODE_ENV;
+
+      try {
+        process.env.NODE_ENV = 'production';
+
+        // 1. Plaintext masking in production MUST NOT trigger [Security Migration] warning
+        const maskedPlaintext = maskSecret('re_1234567890abcdef');
+        expect(maskedPlaintext).toBe('••••••••cdef');
+        expect(consoleWarnSpy).not.toHaveBeenCalledWith(expect.stringContaining('[Security Migration]'));
+
+        // 2. Encrypted secret masking MUST decrypt and mask correctly
+        const rawSecret = 'TelegramBotToken_xyz9876';
+        const encrypted = encryptSecret(rawSecret);
+        const maskedEncrypted = maskSecret(encrypted);
+        expect(maskedEncrypted).toBe('••••••••9876');
+
+        // 3. Edge cases
+        expect(maskSecret('short')).toBe('••••••••hort');
+        expect(maskSecret('123')).toBe('••••••••');
+        expect(maskSecret('')).toBe('');
+        expect(maskSecret(undefined)).toBe('');
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+        consoleWarnSpy.mockRestore();
+      }
     });
 
     it('should correctly identify masked secrets with isMaskedSecret', () => {

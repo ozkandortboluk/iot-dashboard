@@ -347,24 +347,56 @@ app.use('/api/server', serverStatusRouter);
 app.use('/api/server-status', serverStatusRouter);
 app.use('/api/system/secrets', secretsRouter);
 
-// Diagnostic HTTP status observer for 5xx responses across the system
+// Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
-    if (res.statusCode >= 500 && !req.path.startsWith('/api/system-logs')) {
-      const duration = Date.now() - start;
+    // Avoid circular logger loops or excessive health probe noise unless error
+    const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
+    const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
+
+    if (isSystemLogPath) return;
+
+    const duration = Date.now() - start;
+    const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
+    const traceId = (req as any).traceId;
+    const userId = (req as any).user?.id || (req as any).userId;
+
+    const logDetails = {
+      method: req.method,
+      url: req.originalUrl,
+      statusCode: res.statusCode,
+      ip: clientIp,
+      durationMs: duration,
+      traceId,
+      userId,
+      userAgent: req.headers['user-agent'],
+    };
+
+    if (res.statusCode >= 500) {
       systemLogger.error(
-        'server',
+        'http',
         `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-        {
-          method: req.method,
-          url: req.originalUrl,
-          statusCode: res.statusCode,
-          ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
-          durationMs: duration,
-        },
-        'http_response_watcher'
+        logDetails,
+        'express_http_observer'
       );
+    } else if (res.statusCode >= 400) {
+      systemLogger.warn(
+        'http',
+        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+        logDetails,
+        'express_http_observer'
+      );
+    } else {
+      // 2xx and 3xx responses (Skip silent health probes unless slow > 500ms)
+      if (!isHealthProbe || duration > 500) {
+        systemLogger.info(
+          'http',
+          `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+          logDetails,
+          'express_http_observer'
+        );
+      }
     }
   });
   next();

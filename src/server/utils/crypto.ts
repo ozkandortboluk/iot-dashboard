@@ -286,14 +286,14 @@ export function decryptSecret(cipherText?: string, options?: DecryptSecretOption
   // Not starting with 'enc:v1:' (Plaintext legacy value)
   if (options?.allowLegacyPlaintext) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn(`[Security Migration] Şifrelenmemiş (plaintext) secret kontrollü migration ile okundu (${options.context || 'generic'}). Vault'a şifrelenmeli.`);
+      console.warn(`[Security Migration] Şifrelenmemiş (plaintext) secret kontrollü migration ile okundu (${options.context || 'legacy_migration'}). Vault'a şifrelenmeli.`);
     }
     return cipherText;
   }
 
   // In production: Reject unencrypted plaintext values
   if (process.env.NODE_ENV === 'production') {
-    console.error(`[Security Violation] Şifrelenmemiş (plaintext) secret algılandı ve reddedildi (${options?.context || 'generic'}). Tüm secretlar 'enc:v1:' formatında olmalıdır.`);
+    console.error(`[Security Violation] Şifrelenmemiş (plaintext) secret algılandı ve reddedildi (${options?.context || 'legacy_unencrypted_secret'}). Tüm secretlar 'enc:v1:' formatında olmalıdır.`);
     return '';
   }
 
@@ -307,7 +307,13 @@ export function decryptSecret(cipherText?: string, options?: DecryptSecretOption
  */
 export function maskSecret(secret?: string): string {
   if (!secret || !secret.trim()) return '';
-  const raw = decryptSecret(secret, { allowLegacyPlaintext: true }).trim();
+  const trimmed = secret.trim();
+
+  let raw = trimmed;
+  if (trimmed.startsWith('enc:v1:')) {
+    raw = decryptSecret(trimmed).trim();
+  }
+
   if (!raw) return '';
   if (raw.length <= 4) {
     return '••••••••';
