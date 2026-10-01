@@ -30,7 +30,7 @@ export interface TypeMismatchDiscrepancy {
 export interface ConstraintDiscrepancy {
   table: string;
   constraintName: string;
-  constraintType: 'PRIMARY KEY' | 'UNIQUE' | 'FOREIGN KEY' | 'CHECK' | 'NOT NULL' | 'DEFAULT';
+  constraintType: 'PRIMARY KEY' | 'UNIQUE' | 'FOREIGN KEY' | 'CHECK' | 'NOT NULL' | 'DEFAULT' | 'DROP_NOT_NULL';
   details: string;
   suggestedFixSql: string;
   status?: 'MISSING' | 'MISMATCH';
@@ -587,6 +587,17 @@ export class SchemaAuditor {
               suggestedFixSql: nnFixSql,
             });
             humanReadableMessages.push(`⚠️ Eksik NOT NULL kısıtı: ${tableName}.${colDef.name}`);
+          } else if (colDef.nullable === true && liveCol.is_nullable === 'NO' && !colDef.primaryKey) {
+            // DB-04: Reconcile overly rigid NOT NULL constraint on a canonical nullable column (e.g. user_sessions.token)
+            const dropNnFixSql = `ALTER TABLE "${tableName}" ALTER COLUMN "${colDef.name}" DROP NOT NULL;`;
+            missingConstraints.push({
+              table: tableName,
+              constraintName: `drop_nn_${tableName}_${colDef.name}`,
+              constraintType: 'DROP_NOT_NULL',
+              details: `Kolon ${tableName}.${colDef.name} kanonik şemada nullable tanımlı ancak canlı veritabanında NOT NULL kısıtlı`,
+              suggestedFixSql: dropNnFixSql,
+            });
+            humanReadableMessages.push(`⚠️ Uyumsuz NOT NULL kısıtı: ${tableName}.${colDef.name} kanonik olarak nullable olmalı`);
           }
 
           // Check DEFAULT constraint with strict expression normalization against pg_get_expr(adbin, adrelid)
@@ -1439,14 +1450,28 @@ export class SchemaAuditor {
             console.warn(`[AutoHeal] Orphan check failed for ${missingConstraint.constraintName}:`, orphanErr);
           }
         }
+      } else if (missingConstraint.constraintType === 'DROP_NOT_NULL') {
+        try {
+          await poolOrClient.query(missingConstraint.suggestedFixSql);
+          actionsTaken.push(`Kanonik sözleşme ile uyum sağlandı: ${missingConstraint.details}`);
+        } catch (dropErr: any) {
+          console.warn(`[AutoHeal] DROP NOT NULL failed for ${missingConstraint.table}.${missingConstraint.constraintName}:`, dropErr?.message);
+        }
       } else if (missingConstraint.constraintType === 'NOT NULL') {
         const colNameMatch = missingConstraint.details.match(/Kolon .*?\.(\w+) NOT NULL/);
         if (colNameMatch && colNameMatch[1]) {
           const localCol = colNameMatch[1];
           try {
-            // If canonical schema specifies a default value, backfill NULL records safely without data loss
             const tableDef = CANONICAL_SCHEMA_METADATA.tables[missingConstraint.table];
             const colDef = tableDef?.columns?.find(c => c.name === localCol);
+
+            // DB-04 Strict Zero-Data-Loss Enforcement:
+            // Only perform NOT NULL verification if canonical schema explicitly defines colDef.nullable === false!
+            if (!colDef || colDef.nullable !== false) {
+              continue; // Column is nullable in canonical schema; do not block repair or fail audit!
+            }
+
+            // If canonical schema specifies a default value, backfill NULL records safely without data loss
             if (colDef && colDef.defaultValue) {
               try {
                 await poolOrClient.query(`

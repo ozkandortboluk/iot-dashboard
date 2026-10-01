@@ -279,12 +279,24 @@ export class DatabaseAutoHealer {
           }
           await client.query(`
             ALTER TABLE user_sessions ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+            -- DB-04: Ensure user_sessions.token is nullable in accordance with canonical schema
+            ALTER TABLE user_sessions ALTER COLUMN token DROP NOT NULL;
+            ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token_hash VARCHAR(128);
+            ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token_prefix VARCHAR(32);
+            -- Drop legacy strict token uniqueness if present (sessions now indexed by token_hash)
             DO $$
             BEGIN
-              IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token') THEN
-                ALTER TABLE user_sessions ADD CONSTRAINT unq_user_sessions_token UNIQUE (token);
+              IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unq_user_sessions_token') THEN
+                ALTER TABLE user_sessions DROP CONSTRAINT unq_user_sessions_token;
               END IF;
             END $$;
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash);
+            -- Non-destructive reconciliation of legacy unhashed session records (Zero Data Loss)
+            UPDATE user_sessions
+            SET 
+              token_hash = encode(sha256(token::bytea), 'hex'),
+              token_prefix = substring(token from 1 for 10)
+            WHERE (token_hash IS NULL OR token_hash = '') AND token IS NOT NULL AND token <> '';
           `).catch(() => {});
         }
 
@@ -551,20 +563,30 @@ export class DatabaseAutoHealer {
       }
 
       // 5. Evaluate final overall status:
-      // STRICT RULE: If schema verification failed, NEVER show as healthy!
-      if (!isSchemaVerifiedHealthy) {
+      // STRICT RULE for DB-03: If migrations failed or fatal drift exists, NEVER show as healthy or recovering!
+      const isMigrationReady = typeof this.dbInstance.postgresRepo?.isMigrationGatePassed === 'function'
+        ? this.dbInstance.postgresRepo.isMigrationGatePassed()
+        : true;
+
+      if (!isMigrationReady || !isSchemaVerifiedHealthy) {
         status = 'degraded';
       } else if (latencyMs >= 0 && latencyMs < 2000 && hungCleared === 0) {
         status = 'healthy';
       } else if (status === 'recovering' || status === 'degraded') {
-        if (latencyMs >= 0 && latencyMs < 2000 && isSchemaVerifiedHealthy) {
+        if (latencyMs >= 0 && latencyMs < 2000 && isSchemaVerifiedHealthy && isMigrationReady) {
           status = 'healthy';
         }
       }
 
       // Ensure repo state and databaseSettings reflect true verified state
-      const isPgReady = status === 'healthy' || status === 'recovering';
+      // Auto-Healer or SELECT 1 MUST NEVER elevate fatal migration drift / unverified state to READY!
+      const isPgReady = status === 'healthy' && isMigrationReady && isSchemaVerifiedHealthy;
       this.dbInstance.postgresRepo.setConnected(true, isPgReady);
+      if (!isPgReady && (process.env.NODE_ENV === 'production' || this.dbInstance.getActiveEngine() === 'postgres')) {
+        if (this.dbInstance.getDatabaseState() === DatabaseState.READY) {
+          this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+        }
+      }
       if (this.dbInstance.data.databaseSettings) {
         this.dbInstance.data.databaseSettings.isPostgresConnected = true;
         this.dbInstance.data.databaseSettings.isSchemaHealthy = isSchemaVerifiedHealthy;

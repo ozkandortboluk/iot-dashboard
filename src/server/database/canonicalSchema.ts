@@ -428,7 +428,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'last_offline_notified_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'output_definitions', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
         { name: 'capabilities', type: 'JSONB', nullable: false, defaultValue: "'[]'::jsonb" },
-        { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
+        { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
+        { name: 'updated_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
       indexes: [
         { name: 'idx_devices_tenant_id', columns: ['tenant_id'] },
@@ -437,7 +438,9 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'idx_devices_api_key_hash', columns: ['api_key_hash'] },
         { name: 'idx_devices_hardware_model', columns: ['hardware_model'] },
         { name: 'idx_devices_role_key', columns: ['role_key'] },
-        { name: 'idx_devices_last_seen', columns: ['last_seen DESC'] }
+        { name: 'idx_devices_last_seen', columns: ['last_seen DESC'] },
+        { name: 'idx_devices_last_telemetry_at', columns: ['last_telemetry_at'] },
+        { name: 'idx_devices_last_heartbeat_at', columns: ['last_heartbeat_at'] }
       ],
       rlsEnabled: true,
       rlsPolicies: [
@@ -519,6 +522,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'unit', type: 'VARCHAR(16)', nullable: false },
         { name: 'status_level', type: 'VARCHAR(32)', nullable: false, defaultValue: "'normal'" },
         { name: 'sequence', type: 'BIGINT', nullable: true },
+        { name: 'boot_id', type: 'VARCHAR(64)', nullable: true, defaultValue: "'default'" },
+        { name: 'idempotency_key', type: 'VARCHAR(192)', nullable: true },
         { name: 'source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'physical'" },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
       ],
@@ -575,6 +580,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'unit', type: 'VARCHAR(16)', nullable: false },
         { name: 'status_level', type: 'VARCHAR(32)', nullable: false, defaultValue: "'normal'" },
         { name: 'sequence', type: 'BIGINT', nullable: true },
+        { name: 'boot_id', type: 'VARCHAR(64)', nullable: true, defaultValue: "'default'" },
+        { name: 'idempotency_key', type: 'VARCHAR(192)', nullable: true },
         { name: 'source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'simulator'" },
         { name: 'simulation_run_id', type: 'VARCHAR(128)', nullable: true },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
@@ -860,24 +867,35 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'customer_id', type: 'VARCHAR(64)', nullable: true },
         { name: 'device_id', type: 'VARCHAR(64)', nullable: true, references: { table: 'devices', column: 'id', onDelete: 'CASCADE' } },
         { name: 'user_id', type: 'VARCHAR(64)', nullable: true },
-        { name: 'command_type', type: 'VARCHAR(64)', nullable: false },
+        { name: 'command', type: 'VARCHAR(64)', nullable: true },
         { name: 'command_name', type: 'VARCHAR(64)', nullable: true },
+        { name: 'command_type', type: 'VARCHAR(64)', nullable: false, defaultValue: "'GENERAL_COMMAND'" },
         { name: 'output_id', type: 'VARCHAR(64)', nullable: true },
+        { name: 'target_pin', type: 'VARCHAR(32)', nullable: true },
+        { name: 'target_state', type: 'VARCHAR(32)', nullable: true },
+        { name: 'value', type: 'DOUBLE PRECISION', nullable: true },
         { name: 'value_payload', type: 'TEXT', nullable: true },
         { name: 'parameters', type: 'JSONB', nullable: false, defaultValue: "'{}'::jsonb" },
+        { name: 'result', type: 'JSONB', nullable: true },
         { name: 'source', type: 'VARCHAR(32)', nullable: false, defaultValue: "'manual'" },
         { name: 'status', type: 'VARCHAR(32)', nullable: false, defaultValue: "'pending'" },
-        { name: 'sent_by', type: 'VARCHAR(64)', nullable: true },
-        { name: 'idempotency_key', type: 'VARCHAR(128)', nullable: true },
+        { name: 'priority', type: 'INT', nullable: true, defaultValue: '1' },
+        { name: 'ttl_seconds', type: 'INT', nullable: true, defaultValue: '60' },
         { name: 'timeout_seconds', type: 'INT', nullable: false, defaultValue: '300' },
+        { name: 'requires_ack', type: 'BOOLEAN', nullable: true, defaultValue: 'TRUE' },
         { name: 'retry_count', type: 'INT', nullable: false, defaultValue: '0' },
         { name: 'max_retries', type: 'INT', nullable: false, defaultValue: '3' },
+        { name: 'idempotency_key', type: 'VARCHAR(128)', nullable: true },
+        { name: 'sent_by', type: 'VARCHAR(64)', nullable: true },
+        { name: 'created_by', type: 'VARCHAR(128)', nullable: true },
         { name: 'sent_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'dispatched_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'acknowledged_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
-        { name: 'executed_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'applied_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
+        { name: 'executed_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'error_message', type: 'TEXT', nullable: true },
-        { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' }
+        { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
+        { name: 'expires_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true }
       ],
       indexes: [
         { name: 'idx_device_commands_device_time', columns: ['device_id', 'created_at DESC'] },
@@ -1383,7 +1401,11 @@ CREATE TABLE IF NOT EXISTS devices (
     last_message_at TIMESTAMP WITH TIME ZONE,
     output_definitions JSONB DEFAULT '[]'::jsonb,
     capabilities JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    last_telemetry_at TIMESTAMP WITH TIME ZONE,
+    last_heartbeat_at TIMESTAMP WITH TIME ZONE,
+    last_offline_notified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices(tenant_id);
@@ -1393,6 +1415,8 @@ CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices(api_key_hash);
 CREATE INDEX IF NOT EXISTS idx_devices_hardware_model ON devices(hardware_model);
 CREATE INDEX IF NOT EXISTS idx_devices_role_key ON devices(role_key);
 CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_devices_last_telemetry_at ON devices(last_telemetry_at);
+CREATE INDEX IF NOT EXISTS idx_devices_last_heartbeat_at ON devices(last_heartbeat_at);
 
 -- 2.3 DEVICE WEBSOCKET MESSAGES DEDUPLICATION
 CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (
@@ -1439,6 +1463,8 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    boot_id VARCHAR(64) DEFAULT 'default',
+    idempotency_key VARCHAR(192),
     source VARCHAR(32) DEFAULT 'physical',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
@@ -1484,6 +1510,8 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    boot_id VARCHAR(64) DEFAULT 'default',
+    idempotency_key VARCHAR(192),
     source VARCHAR(32) DEFAULT 'simulator',
     simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -1582,6 +1610,8 @@ CREATE TABLE IF NOT EXISTS active_alarms (
     incident_id VARCHAR(128),
     last_evaluated_at TIMESTAMP WITH TIME ZONE,
     message TEXT NOT NULL,
+    note TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1696,24 +1726,35 @@ CREATE TABLE IF NOT EXISTS device_commands (
     customer_id VARCHAR(64),
     device_id VARCHAR(64),
     user_id VARCHAR(64),
-    command_type VARCHAR(64) NOT NULL,
+    command VARCHAR(64),
     command_name VARCHAR(64),
+    command_type VARCHAR(64) NOT NULL DEFAULT 'GENERAL_COMMAND',
     output_id VARCHAR(64),
+    target_pin VARCHAR(32),
+    target_state VARCHAR(32),
+    value DOUBLE PRECISION,
     value_payload TEXT,
     parameters JSONB DEFAULT '{}'::jsonb,
+    result JSONB,
     source VARCHAR(32) DEFAULT 'manual',
     status VARCHAR(32) DEFAULT 'pending',
-    sent_by VARCHAR(64),
-    idempotency_key VARCHAR(128),
+    priority INT DEFAULT 1,
+    ttl_seconds INT DEFAULT 60,
     timeout_seconds INT DEFAULT 300,
+    requires_ack BOOLEAN DEFAULT TRUE,
     retry_count INT DEFAULT 0,
     max_retries INT DEFAULT 3,
+    idempotency_key VARCHAR(128),
+    sent_by VARCHAR(64),
+    created_by VARCHAR(128),
     sent_at TIMESTAMP WITH TIME ZONE,
+    dispatched_at TIMESTAMP WITH TIME ZONE,
     acknowledged_at TIMESTAMP WITH TIME ZONE,
-    executed_at TIMESTAMP WITH TIME ZONE,
     applied_at TIMESTAMP WITH TIME ZONE,
+    executed_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_commands_device_time ON device_commands(device_id, created_at DESC);
@@ -1743,9 +1784,12 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_logs_channel ON dispatch_logs(channel);
 CREATE INDEX IF NOT EXISTS idx_dispatch_logs_status ON dispatch_logs(status);
 CREATE INDEX IF NOT EXISTS idx_dispatch_logs_sent_at ON dispatch_logs(sent_at DESC);
 
--- 2.13 USER SESSIONS
+-- 2.14 USER SESSIONS
 CREATE TABLE IF NOT EXISTS user_sessions (
-    token VARCHAR(128) PRIMARY KEY,
+    id VARCHAR(64) PRIMARY KEY,
+    token_hash VARCHAR(128),
+    token_prefix VARCHAR(32),
+    token VARCHAR(128),
     user_id VARCHAR(64),
     user_role VARCHAR(32) DEFAULT 'operator',
     user_email VARCHAR(128),
@@ -1754,10 +1798,11 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
 
--- 2.14 DASHBOARD LAYOUTS
+-- 2.15 DASHBOARD LAYOUTS
 CREATE TABLE IF NOT EXISTS dashboard_layouts (
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64),
@@ -1774,7 +1819,7 @@ BEFORE UPDATE ON dashboard_layouts
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.15 FIRMWARES (OTA Repository)
+-- 2.16 FIRMWARES (OTA Repository)
 CREATE TABLE IF NOT EXISTS firmwares (
     id VARCHAR(64) PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
@@ -1805,7 +1850,7 @@ BEFORE UPDATE ON firmwares
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.16 OTA DEPLOYMENT JOBS
+-- 2.17 OTA DEPLOYMENT JOBS
 CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
     id VARCHAR(64) PRIMARY KEY,
     firmware_id VARCHAR(64),
@@ -1843,7 +1888,7 @@ BEFORE UPDATE ON ota_deployment_jobs
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.17 SCHEMA MIGRATIONS
+-- 2.18 SCHEMA MIGRATIONS
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version VARCHAR(32) PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
@@ -1855,6 +1900,35 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at ON schema_migrations(applied_at DESC);
+
+-- 2.19 SERVICE TOKENS
+CREATE TABLE IF NOT EXISTS service_tokens (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    token_prefix VARCHAR(32) NOT NULL,
+    token_hash VARCHAR(128) NOT NULL UNIQUE,
+    user_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    is_revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_tokens_token_hash ON service_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_tenant_id ON service_tokens(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_user_id ON service_tokens(user_id);
+
+-- 2.20 SYSTEM SETTINGS
+CREATE TABLE IF NOT EXISTS system_settings (
+    key VARCHAR(64) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at ON system_settings(updated_at DESC);
 
 -- 3. CONTINUOUS AGGREGATES & ANALYTICAL VIEWS
 DO $$

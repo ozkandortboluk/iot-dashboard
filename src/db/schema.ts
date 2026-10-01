@@ -86,6 +86,9 @@ export const devices = pgTable('devices', {
   recentIntervals: jsonb('recent_intervals').default([]).notNull(),
   websocketConnected: boolean('websocket_connected').default(false).notNull(),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
+  lastTelemetryAt: timestamp('last_telemetry_at', { withTimezone: true }),
+  lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+  lastOfflineNotifiedAt: timestamp('last_offline_notified_at', { withTimezone: true }),
   outputDefinitions: jsonb('output_definitions').default([]).notNull(),
   capabilities: jsonb('capabilities').default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -98,16 +101,16 @@ export const devices = pgTable('devices', {
   hardwareModelIdx: index('idx_devices_hardware_model').on(table.hardwareModel),
   roleKeyIdx: index('idx_devices_role_key').on(table.roleKey),
   lastSeenIdx: index('idx_devices_last_seen').on(table.lastSeen),
+  lastTelemetryIdx: index('idx_devices_last_telemetry_at').on(table.lastTelemetryAt),
+  lastHeartbeatIdx: index('idx_devices_last_heartbeat_at').on(table.lastHeartbeatAt),
 }));
 
 // 3. Device WebSocket Messages Deduplication Table
 export const deviceWsMessagesDedup = pgTable('device_ws_messages_dedup', {
   deviceId: varchar('device_id', { length: 64 }).notNull(),
   messageId: varchar('message_id', { length: 128 }).notNull(),
-  msgId: varchar('msg_id', { length: 128 }),
   messageType: varchar('message_type', { length: 32 }).default('telemetry').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.deviceId, table.messageId] }),
@@ -118,14 +121,11 @@ export const deviceWsMessagesDedup = pgTable('device_ws_messages_dedup', {
 export const telemetryPackets = pgTable('telemetry_packets', {
   id: varchar('id', { length: 128 }).primaryKey(),
   deviceId: varchar('device_id', { length: 64 }).notNull(),
-  tenantId: varchar('tenant_id', { length: 64 }).default('usr_admin'),
-  customerId: varchar('customer_id', { length: 64 }).default('usr_admin'),
   bootId: varchar('boot_id', { length: 64 }).default('default').notNull(),
   sequence: bigint('sequence', { mode: 'number' }).notNull(),
   idempotencyKey: varchar('idempotency_key', { length: 192 }),
   metricCount: integer('metric_count').default(0).notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   deviceBootSeqUnq: index('unq_telemetry_device_boot_sequence').on(table.deviceId, table.bootId, table.sequence),
   devSeqIdx: index('idx_telemetry_packets_dev_seq').on(table.deviceId, table.sequence),
@@ -211,14 +211,6 @@ export const thresholdRules = pgTable('threshold_rules', {
   hysteresis: doublePrecision('hysteresis').default(1.0).notNull(),
   minBreachDurationSec: integer('min_breach_duration_sec').default(10).notNull(),
   repeatIntervalSec: integer('repeat_interval_sec').default(300).notNull(),
-  cooldownPeriodSec: integer('cooldown_period_sec').default(300),
-  notifyApp: boolean('notify_app').default(true),
-  notifyEmail: boolean('notify_email').default(true),
-  notifyWhatsapp: boolean('notify_whatsapp').default(false),
-  notifyTelegram: boolean('notify_telegram').default(false),
-  notifySms: boolean('notify_sms').default(false),
-  notifyWebhook: boolean('notify_webhook').default(false),
-  webhookUrl: text('webhook_url'),
   notificationChannels: jsonb('notification_channels').default(['app', 'email']).notNull(),
   activeHours: varchar('active_hours', { length: 64 }).default('00:00-23:59').notNull(),
   recipients: jsonb('recipients').default([]).notNull(),
@@ -433,22 +425,18 @@ export const dispatchLogs = pgTable('dispatch_logs', {
 
 // 15. User Sessions Table
 export const userSessions = pgTable('user_sessions', {
-  id: varchar('id', { length: 64 }),
-  token: varchar('token', { length: 256 }).primaryKey(),
+  id: varchar('id', { length: 64 }).primaryKey(),
+  tokenHash: varchar('token_hash', { length: 128 }),
+  tokenPrefix: varchar('token_prefix', { length: 32 }),
+  token: varchar('token', { length: 128 }),
   userId: varchar('user_id', { length: 64 }),
   userRole: varchar('user_role', { length: 32 }).default('operator'),
   userEmail: varchar('user_email', { length: 128 }),
   userName: varchar('user_name', { length: 128 }),
-  email: varchar('email', { length: 128 }),
-  role: varchar('role', { length: 32 }),
-  tenantId: varchar('tenant_id', { length: 64 }),
-  ip: varchar('ip', { length: 45 }),
-  ipAddress: varchar('ip_address', { length: 45 }),
-  userAgent: text('user_agent'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  lastActiveAt: timestamp('last_active_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
+  tokenHashIdx: index('idx_user_sessions_token_hash').on(table.tokenHash),
   userIdx: index('idx_user_sessions_user_id').on(table.userId),
   expiresIdx: index('idx_user_sessions_expires_at').on(table.expiresAt),
 }));
@@ -457,10 +445,8 @@ export const userSessions = pgTable('user_sessions', {
 export const dashboardLayouts = pgTable('dashboard_layouts', {
   id: varchar('id', { length: 64 }).primaryKey(),
   userId: varchar('user_id', { length: 64 }),
-  tenantId: varchar('tenant_id', { length: 64 }),
   title: varchar('title', { length: 128 }).notNull(),
   widgetsJson: jsonb('widgets_json').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   userIdx: index('idx_dashboard_layouts_user').on(table.userId),
@@ -537,6 +523,35 @@ export const schemaMigrations = pgTable('schema_migrations', {
   appliedAtIdx: index('idx_schema_migrations_applied_at').on(table.appliedAt),
 }));
 
+// 20. Service Tokens Table
+export const serviceTokens = pgTable('service_tokens', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  name: varchar('name', { length: 128 }).notNull(),
+  tokenPrefix: varchar('token_prefix', { length: 32 }).notNull(),
+  tokenHash: varchar('token_hash', { length: 128 }).notNull().unique(),
+  userId: varchar('user_id', { length: 64 }).notNull(),
+  tenantId: varchar('tenant_id', { length: 64 }).notNull(),
+  scopes: jsonb('scopes').default([]).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  isRevoked: boolean('is_revoked').default(false).notNull(),
+}, (table) => ({
+  tokenHashIdx: index('idx_service_tokens_token_hash').on(table.tokenHash),
+  tenantIdx: index('idx_service_tokens_tenant_id').on(table.tenantId),
+  userIdx: index('idx_service_tokens_user_id').on(table.userId),
+}));
+
+// 21. System Settings Table
+export const systemSettings = pgTable('system_settings', {
+  key: varchar('key', { length: 64 }).primaryKey(),
+  value: jsonb('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  updatedAtIdx: index('idx_system_settings_updated_at').on(table.updatedAt),
+}));
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   devices: many(devices),
@@ -600,6 +615,8 @@ export function verifyDrizzleSchemaAlignment(): {
     'firmwares',
     'ota_deployment_jobs',
     'schema_migrations',
+    'service_tokens',
+    'system_settings',
   ];
 
   const canonicalTables = Object.keys(CANONICAL_SCHEMA_METADATA.tables);

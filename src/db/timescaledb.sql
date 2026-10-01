@@ -31,9 +31,11 @@ CREATE TABLE IF NOT EXISTS devices (
     previous_tenant_name VARCHAR(128),
     ownership_transferred_at TIMESTAMP WITH TIME ZONE,
     name VARCHAR(128) NOT NULL,
-    device_type VARCHAR(32) NOT NULL,
-    api_key VARCHAR(128) UNIQUE NOT NULL,
-    status VARCHAR(32) DEFAULT 'online',
+    device_type VARCHAR(64) NOT NULL DEFAULT 'custom',
+    api_key VARCHAR(256),
+    api_key_prefix VARCHAR(32),
+    api_key_hash VARCHAR(128),
+    status VARCHAR(32) DEFAULT 'offline',
     location VARCHAR(256),
     ip_address VARCHAR(45),
     mac_address VARCHAR(32),
@@ -42,7 +44,11 @@ CREATE TABLE IF NOT EXISTS devices (
     encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
     metrics JSONB DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    last_telemetry_at TIMESTAMP WITH TIME ZONE,
+    last_heartbeat_at TIMESTAMP WITH TIME ZONE,
+    last_offline_notified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 3. Telemetry Table (Hypertable Base)
@@ -57,6 +63,8 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    boot_id VARCHAR(64) DEFAULT 'default',
+    idempotency_key VARCHAR(192),
     source VARCHAR(32) DEFAULT 'physical',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
@@ -281,6 +289,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     repeat_count INT DEFAULT 0,
     current_value DOUBLE PRECISION,
     threshold_value DOUBLE PRECISION,
+    event_key VARCHAR(256),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

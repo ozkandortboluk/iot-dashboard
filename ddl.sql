@@ -81,52 +81,17 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- Canonical Root Administrator (usr_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_admin',
-    'Sistem Yöneticisi',
-    'admin@nexusnode.io',
-    '$2a$10$B50m1l26vD8LhJqZ8XyqA.v2a00qQGq7cR/8v4M7sF2D3Q4s7rD9K',
-    'admin',
-    'Merkez Yönetim',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
--- Canonical Permanent Test Administrator (usr_test_admin)
-INSERT INTO users (id, name, email, password_hash, role, company_name, status, created_at)
-VALUES (
-    'usr_test_admin',
-    'Kanonik Test Yöneticisi',
-    'test@nexusnodeiot.com.tr',
-    '$2a$10$7Z/Q46Zg9rU.e5Jk9V7xquLzP4yL.M4ZfU.c4C4zD4p9qE1aE1i.m',
-    'admin',
-    'NexusNode Test Laboratuvarı',
-    'active',
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
-
 -- 2.2 DEVICES
 CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) DEFAULT 'usr_admin',
     user_id VARCHAR(64) DEFAULT 'usr_admin',
-    assigned_user_id VARCHAR(64),
-    created_by_user_id VARCHAR(64),
-    previous_tenant_id VARCHAR(64),
-    previous_tenant_name VARCHAR(128),
-    ownership_transferred_at TIMESTAMP WITH TIME ZONE,
     name VARCHAR(128) NOT NULL,
     device_type VARCHAR(64) NOT NULL DEFAULT 'custom',
     role_key VARCHAR(64) DEFAULT 'device',
     api_key VARCHAR(256),
     api_key_prefix VARCHAR(32),
     api_key_hash VARCHAR(128),
-    previous_api_key_hash VARCHAR(128),
     api_key_expires_at TIMESTAMP WITH TIME ZONE,
     api_key_revoked BOOLEAN DEFAULT FALSE,
     api_key_last_used_at TIMESTAMP WITH TIME ZONE,
@@ -161,9 +126,11 @@ CREATE TABLE IF NOT EXISTS devices (
     last_message_at TIMESTAMP WITH TIME ZONE,
     output_definitions JSONB DEFAULT '[]'::jsonb,
     capabilities JSONB DEFAULT '[]'::jsonb,
-    supported_outputs JSONB DEFAULT '[]'::jsonb,
-    supported_commands JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    last_telemetry_at TIMESTAMP WITH TIME ZONE,
+    last_heartbeat_at TIMESTAMP WITH TIME ZONE,
+    last_offline_notified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices(tenant_id);
@@ -173,31 +140,8 @@ CREATE INDEX IF NOT EXISTS idx_devices_api_key_hash ON devices(api_key_hash);
 CREATE INDEX IF NOT EXISTS idx_devices_hardware_model ON devices(hardware_model);
 CREATE INDEX IF NOT EXISTS idx_devices_role_key ON devices(role_key);
 CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC);
-
--- Canonical Permanent Test Device (dev_test_01)
-INSERT INTO devices (
-    id, tenant_id, customer_id, user_id, name, device_type, role_key,
-    api_key, api_key_hash, status, rate_limit_per_min, encryption_method,
-    heartbeat_timeout_seconds, expected_interval_seconds, created_at
-)
-VALUES (
-    'dev_test_01',
-    'usr_test_admin',
-    'usr_test_admin',
-    'usr_test_admin',
-    'Kanonik Saha Test Cihazı (ESP32)',
-    'ESP32',
-    'production_sensor',
-    'dev_key_test_0000000000000000',
-    'a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3',
-    'online',
-    300,
-    'AES-256-GCM',
-    60,
-    10,
-    CURRENT_TIMESTAMP
-)
-ON CONFLICT (id) DO NOTHING;
+CREATE INDEX IF NOT EXISTS idx_devices_last_telemetry_at ON devices(last_telemetry_at);
+CREATE INDEX IF NOT EXISTS idx_devices_last_heartbeat_at ON devices(last_heartbeat_at);
 
 -- 2.3 DEVICE WEBSOCKET MESSAGES DEDUPLICATION
 CREATE TABLE IF NOT EXISTS device_ws_messages_dedup (
@@ -237,8 +181,6 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    user_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -246,22 +188,20 @@ CREATE TABLE IF NOT EXISTS telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    boot_id VARCHAR(64) DEFAULT 'default',
+    idempotency_key VARCHAR(192),
     source VARCHAR(32) DEFAULT 'physical',
-    environment VARCHAR(32) DEFAULT 'production',
-    simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_device_time ON telemetry_readings(tenant_id, device_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_device_time ON telemetry_readings(customer_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_tenant_time ON telemetry_readings(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_customer_time ON telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_metric_time ON telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_readings(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_packet ON telemetry_readings(packet_id);
-CREATE INDEX IF NOT EXISTS idx_telemetry_source_env ON telemetry_readings(source, environment);
+CREATE INDEX IF NOT EXISTS idx_telemetry_source ON telemetry_readings(source);
 
 -- TimescaleDB Hypertable Setup & Columnar Compression for telemetry_readings
 DO $$
@@ -275,8 +215,8 @@ BEGIN
             timescaledb.compress_orderby = 'created_at DESC'
         );
         
-        PERFORM add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_exists => TRUE);
-        PERFORM add_retention_policy('telemetry_readings', INTERVAL '90 days', if_not_exists => TRUE);
+        PERFORM add_compression_policy('telemetry_readings', INTERVAL '14 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('telemetry_readings', INTERVAL '365 days', if_not_exists => TRUE);
     END IF;
 EXCEPTION
     WHEN OTHERS THEN
@@ -288,8 +228,6 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     id VARCHAR(128) NOT NULL,
     packet_id VARCHAR(128),
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    customer_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
-    user_id VARCHAR(64) NOT NULL DEFAULT 'usr_admin',
     device_id VARCHAR(64),
     device_name VARCHAR(128) NOT NULL,
     metric VARCHAR(64) NOT NULL,
@@ -297,17 +235,16 @@ CREATE TABLE IF NOT EXISTS simulation_telemetry_readings (
     unit VARCHAR(16) NOT NULL,
     status_level VARCHAR(32) DEFAULT 'normal',
     sequence BIGINT,
+    boot_id VARCHAR(64) DEFAULT 'default',
+    idempotency_key VARCHAR(192),
     source VARCHAR(32) DEFAULT 'simulator',
-    environment VARCHAR(32) DEFAULT 'sandbox',
     simulation_run_id VARCHAR(128),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (id, created_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_device_time ON simulation_telemetry_readings(tenant_id, device_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_device_time ON simulation_telemetry_readings(customer_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_tenant_time ON simulation_telemetry_readings(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sim_telemetry_customer_time ON simulation_telemetry_readings(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_device_time ON simulation_telemetry_readings(device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_metric_time ON simulation_telemetry_readings(metric, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sim_telemetry_time ON simulation_telemetry_readings(created_at DESC);
@@ -398,6 +335,8 @@ CREATE TABLE IF NOT EXISTS active_alarms (
     incident_id VARCHAR(128),
     last_evaluated_at TIMESTAMP WITH TIME ZONE,
     message TEXT NOT NULL,
+    note TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -459,6 +398,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     repeat_count INT DEFAULT 0,
     current_value DOUBLE PRECISION,
     threshold_value DOUBLE PRECISION,
+    event_key VARCHAR(256),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -467,6 +407,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_device ON notifications(device_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_event_key ON notifications (event_key) WHERE event_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 
 -- 2.11 AUDIT LOGS
@@ -476,8 +417,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     tenant_id VARCHAR(64) DEFAULT 'usr_admin',
     user_name VARCHAR(128),
     action VARCHAR(256) NOT NULL,
-    resource_type VARCHAR(64) DEFAULT 'system',
-    resource_id VARCHAR(64),
+    resource_type VARCHAR(128) DEFAULT 'system',
+    resource_id VARCHAR(128),
     details JSONB,
     ip_address VARCHAR(45),
     severity VARCHAR(32) DEFAULT 'low',
@@ -510,24 +451,35 @@ CREATE TABLE IF NOT EXISTS device_commands (
     customer_id VARCHAR(64),
     device_id VARCHAR(64),
     user_id VARCHAR(64),
-    command_type VARCHAR(64) NOT NULL,
+    command VARCHAR(64),
     command_name VARCHAR(64),
+    command_type VARCHAR(64) NOT NULL DEFAULT 'GENERAL_COMMAND',
     output_id VARCHAR(64),
+    target_pin VARCHAR(32),
+    target_state VARCHAR(32),
+    value DOUBLE PRECISION,
     value_payload TEXT,
     parameters JSONB DEFAULT '{}'::jsonb,
+    result JSONB,
     source VARCHAR(32) DEFAULT 'manual',
     status VARCHAR(32) DEFAULT 'pending',
-    sent_by VARCHAR(64),
-    idempotency_key VARCHAR(128),
+    priority INT DEFAULT 1,
+    ttl_seconds INT DEFAULT 60,
     timeout_seconds INT DEFAULT 300,
+    requires_ack BOOLEAN DEFAULT TRUE,
     retry_count INT DEFAULT 0,
     max_retries INT DEFAULT 3,
+    idempotency_key VARCHAR(128),
+    sent_by VARCHAR(64),
+    created_by VARCHAR(128),
     sent_at TIMESTAMP WITH TIME ZONE,
+    dispatched_at TIMESTAMP WITH TIME ZONE,
     acknowledged_at TIMESTAMP WITH TIME ZONE,
-    executed_at TIMESTAMP WITH TIME ZONE,
     applied_at TIMESTAMP WITH TIME ZONE,
+    executed_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_commands_device_time ON device_commands(device_id, created_at DESC);
@@ -557,9 +509,12 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_logs_channel ON dispatch_logs(channel);
 CREATE INDEX IF NOT EXISTS idx_dispatch_logs_status ON dispatch_logs(status);
 CREATE INDEX IF NOT EXISTS idx_dispatch_logs_sent_at ON dispatch_logs(sent_at DESC);
 
--- 2.13 USER SESSIONS
+-- 2.14 USER SESSIONS
 CREATE TABLE IF NOT EXISTS user_sessions (
-    token VARCHAR(128) PRIMARY KEY,
+    id VARCHAR(64) PRIMARY KEY,
+    token_hash VARCHAR(128),
+    token_prefix VARCHAR(32),
+    token VARCHAR(128),
     user_id VARCHAR(64),
     user_role VARCHAR(32) DEFAULT 'operator',
     user_email VARCHAR(128),
@@ -568,10 +523,11 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
 
--- 2.14 DASHBOARD LAYOUTS
+-- 2.15 DASHBOARD LAYOUTS
 CREATE TABLE IF NOT EXISTS dashboard_layouts (
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64),
@@ -588,7 +544,7 @@ BEFORE UPDATE ON dashboard_layouts
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.15 FIRMWARES (OTA Repository)
+-- 2.16 FIRMWARES (OTA Repository)
 CREATE TABLE IF NOT EXISTS firmwares (
     id VARCHAR(64) PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
@@ -619,7 +575,7 @@ BEFORE UPDATE ON firmwares
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.16 OTA DEPLOYMENT JOBS
+-- 2.17 OTA DEPLOYMENT JOBS
 CREATE TABLE IF NOT EXISTS ota_deployment_jobs (
     id VARCHAR(64) PRIMARY KEY,
     firmware_id VARCHAR(64),
@@ -657,7 +613,7 @@ BEFORE UPDATE ON ota_deployment_jobs
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_updated_at_timestamp();
 
--- 2.17 SCHEMA MIGRATIONS
+-- 2.18 SCHEMA MIGRATIONS
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version VARCHAR(32) PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
@@ -669,6 +625,35 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_schema_migrations_applied_at ON schema_migrations(applied_at DESC);
+
+-- 2.19 SERVICE TOKENS
+CREATE TABLE IF NOT EXISTS service_tokens (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    token_prefix VARCHAR(32) NOT NULL,
+    token_hash VARCHAR(128) NOT NULL UNIQUE,
+    user_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    is_revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_tokens_token_hash ON service_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_tenant_id ON service_tokens(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_user_id ON service_tokens(user_id);
+
+-- 2.20 SYSTEM SETTINGS
+CREATE TABLE IF NOT EXISTS system_settings (
+    key VARCHAR(64) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at ON system_settings(updated_at DESC);
 
 -- 3. CONTINUOUS AGGREGATES & ANALYTICAL VIEWS
 DO $$
@@ -689,6 +674,10 @@ BEGIN
             end_offset => INTERVAL '1 day',
             schedule_interval => INTERVAL '1 hour',
             if_not_exists => TRUE);
+
+        -- Tier 3: 5-Year Downsampled Continuous Aggregate Retention Policies
+        PERFORM add_retention_policy('telemetry_hourly_summary', INTERVAL '730 days', if_not_exists => TRUE);
+        PERFORM add_retention_policy('telemetry_daily_summary', INTERVAL '1825 days', if_not_exists => TRUE);
     ELSE
         EXECUTE 'CREATE OR REPLACE VIEW telemetry_hourly_summary AS SELECT date_trunc(''hour'', created_at) AS bucket, device_id, metric, min(metric_value) AS min_val, max(metric_value) AS max_val, avg(metric_value) AS avg_val, count(*) AS reading_count FROM telemetry_readings WHERE source = ''physical'' OR source IS NULL GROUP BY date_trunc(''hour'', created_at), device_id, metric;';
 
@@ -741,8 +730,8 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status;
 
 -- 4. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE simulation_telemetry_readings ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN ALTER TABLE telemetry_readings ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN OTHERS THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE simulation_telemetry_readings ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN OTHERS THEN NULL; END $$;
 ALTER TABLE threshold_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE active_alarms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
@@ -847,4 +836,3 @@ EXCEPTION
     WHEN OTHERS THEN
         RAISE NOTICE 'RLS policies notice: %', SQLERRM;
 END $$;
-
