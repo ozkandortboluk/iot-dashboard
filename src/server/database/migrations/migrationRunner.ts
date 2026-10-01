@@ -289,6 +289,14 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     canonicalSourceHash: 'e6724a333463011a02ceac3fcd658adb',
     historicalChecksums: [
       {
+        checksum: 'bea98449cb9685e0b76e3c2aca2bc950',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: 'e6724a333463011a02ceac3fcd658adb',
+        provenanceStatus: 'observed',
+        notes: 'Historical DB checksum from VPS / development environment',
+      },
+      {
         checksum: 'dc0d75695b724d9c9da4be11038e462a',
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
@@ -328,6 +336,14 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     canonicalSourceHash: '0904d821349234f3359d4260dd619792',
     historicalChecksums: [
       {
+        checksum: '48c42baff3bba0341e7cc5d26ccfc23f',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '0904d821349234f3359d4260dd619792',
+        provenanceStatus: 'observed',
+        notes: 'Historical DB checksum from VPS / development environment',
+      },
+      {
         checksum: '734e3a1e087cd0b5c08e0068d2c5b84d',
         hashAlgorithm: 'sha256-legacy-v1',
         verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
@@ -366,6 +382,14 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     name: 'comprehensive_schema_synchronization_and_column_healing',
     canonicalSourceHash: '1fc305cc9422d0b10941338b1c79f626',
     historicalChecksums: [
+      {
+        checksum: 'fbc3510aa83e6b62e1caa1562f38003f',
+        hashAlgorithm: 'sha256-legacy-v2',
+        verifiedGitCommitOrTag: 'ca7b679b12c1ac3f04b602181a86fe7c05945697',
+        sourceArtifactHash: '1fc305cc9422d0b10941338b1c79f626',
+        provenanceStatus: 'observed',
+        notes: 'Historical DB checksum from VPS / development environment',
+      },
       {
         checksum: 'ee459d95a229dbc48ab79092e4eb2880',
         hashAlgorithm: 'sha256-legacy-v1',
