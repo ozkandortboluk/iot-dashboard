@@ -219,6 +219,23 @@ class SystemLoggerService {
       };
     }
 
+    // Suppress noisy static asset / favicon requests from polluting system logs
+    const pathToCheck = (message + ' ' + (typeof details === 'object' ? (details?.url || details?.path || '') : details || '')).toLowerCase();
+    if (
+      pathToCheck.includes('/favicon.svg') ||
+      pathToCheck.includes('/favicon.ico') ||
+      pathToCheck.includes('/site.webmanifest')
+    ) {
+      return {
+        id: `suppressed_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        level,
+        category,
+        message,
+        source,
+      };
+    }
+
     // Check minimum level threshold
     const levelWeight = LEVEL_WEIGHTS[level] || 1;
     const minWeight = LEVEL_WEIGHTS[this.minLevel] || 1;
@@ -315,23 +332,7 @@ class SystemLoggerService {
       this.queueFilePersistence(event);
     }
 
-    // Notify live log listeners (e.g. WebSocket broadcast)
-    for (const listener of this.logListeners) {
-      try {
-        listener(event);
-      } catch {}
-    }
-
     return event;
-  }
-
-  private logListeners: Array<(event: SystemEvent) => void> = [];
-
-  public onLog(listener: (event: SystemEvent) => void): () => void {
-    this.logListeners.push(listener);
-    return () => {
-      this.logListeners = this.logListeners.filter((l) => l !== listener);
-    };
   }
 
   public info(category: SystemEventCategory, message: string, details?: any, source?: string): SystemEvent {

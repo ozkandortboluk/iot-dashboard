@@ -204,6 +204,12 @@ const server = http.createServer(app);
 // Global Middleware & Body Parsers
 app.use(cookieParser());
 
+// Long-term immutable caching headers for static favicon & manifest assets to prevent repeated 304 polling
+app.use(['/favicon.svg', '/favicon.ico', '/site.webmanifest'], (req, res, next) => {
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  next();
+});
+
 // Early request body size guard for public endpoints to prevent memory parsing DoS
 app.use('/api/system-logs/client-error', (req, res, next) => {
   const contentLength = parseInt(req.headers['content-length'] || '0', 10);
@@ -347,56 +353,24 @@ app.use('/api/server', serverStatusRouter);
 app.use('/api/server-status', serverStatusRouter);
 app.use('/api/system/secrets', secretsRouter);
 
-// Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
+// Diagnostic HTTP status observer for 5xx responses across the system
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
-    // Avoid circular logger loops or excessive health probe noise unless error
-    const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
-    const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
-
-    if (isSystemLogPath) return;
-
-    const duration = Date.now() - start;
-    const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
-    const traceId = (req as any).traceId;
-    const userId = (req as any).user?.id || (req as any).userId;
-
-    const logDetails = {
-      method: req.method,
-      url: req.originalUrl,
-      statusCode: res.statusCode,
-      ip: clientIp,
-      durationMs: duration,
-      traceId,
-      userId,
-      userAgent: req.headers['user-agent'],
-    };
-
-    if (res.statusCode >= 500) {
+    if (res.statusCode >= 500 && !req.path.startsWith('/api/system-logs')) {
+      const duration = Date.now() - start;
       systemLogger.error(
-        'http',
+        'server',
         `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-        logDetails,
-        'express_http_observer'
+        {
+          method: req.method,
+          url: req.originalUrl,
+          statusCode: res.statusCode,
+          ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+          durationMs: duration,
+        },
+        'http_response_watcher'
       );
-    } else if (res.statusCode >= 400) {
-      systemLogger.warn(
-        'http',
-        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-        logDetails,
-        'express_http_observer'
-      );
-    } else {
-      // 2xx and 3xx responses (Skip silent health probes unless slow > 500ms)
-      if (!isHealthProbe || duration > 500) {
-        systemLogger.info(
-          'http',
-          `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-          logDetails,
-          'express_http_observer'
-        );
-      }
     }
   });
   next();
