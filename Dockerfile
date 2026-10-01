@@ -23,6 +23,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
+# Install postgresql-client for native pg_dump and psql backups and restores
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy package definition and lockfile
 COPY package*.json ./
 

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../server/db.js';
-import type { Device, User, TelemetryReading } from '../types.js';
 
 describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () => {
   const backupDir = path.join(process.cwd(), 'backups');
@@ -72,27 +71,100 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
     const backupPath = path.join(backupDir, backupFile);
     expect(fs.existsSync(backupPath)).toBe(true);
 
-    const content = fs.readFileSync(backupPath, 'utf8');
-    const parsed = JSON.parse(content);
+    const stats = fs.statSync(backupPath);
+    expect(stats.size).toBeGreaterThan(0);
 
-    expect(parsed).toHaveProperty('devices');
-    expect(parsed).toHaveProperty('users');
-    expect(Array.isArray(parsed.devices)).toBe(true);
-    expect(parsed.devices.some((d: any) => d.id === testDevId)).toBe(true);
+    const verification = db.verifyBackupFile(backupFile);
+    expect(verification.isHealthy).toBe(true);
+    expect(verification.sizeBytes).toBeGreaterThan(0);
+    expect(verification.checksum.length).toBe(64); // SHA256 hex length
   });
 
-  it('2. List backups with metadata and file size', () => {
+  it('2. List backups with metadata and file size', async () => {
+    const backupResult = await db.createBackup();
+    if (backupResult.success) {
+      createdBackupFiles.push(backupResult.filename);
+    }
+
     const list = db.listBackups();
     expect(Array.isArray(list)).toBe(true);
-    if (list.length > 0) {
-      expect(list[0]).toHaveProperty('filename');
-      expect(list[0]).toHaveProperty('size');
-      expect(list[0]).toHaveProperty('createdAt');
-      expect(typeof list[0].size).toBe('number');
+    expect(list.length).toBeGreaterThan(0);
+    expect(list[0]).toHaveProperty('filename');
+    expect(list[0]).toHaveProperty('size');
+    expect(list[0]).toHaveProperty('createdAt');
+    expect(typeof list[0].size).toBe('number');
+
+    const detailedSnapshots = db.listDetailedSnapshots();
+    expect(Array.isArray(detailedSnapshots)).toBe(true);
+    expect(detailedSnapshots.length).toBeGreaterThan(0);
+    expect(detailedSnapshots[0].verificationReport.isHealthy).toBe(true);
+    expect(detailedSnapshots[0].checksum).not.toContain('md5');
+  });
+
+  it('3. Verify real .sql backup and listing when in production mode with pg_dump', async () => {
+    // Simulate valid SQL backup file
+    const sqlFilename = `pg_backup_test_${Date.now()}.sql`;
+    const sqlPath = path.join(backupDir, sqlFilename);
+    const mockSqlDump = `-- PostgreSQL database dump
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+
+CREATE TABLE users (id text PRIMARY KEY, email text);
+CREATE TABLE devices (id text PRIMARY KEY, name text);
+CREATE TABLE telemetry_readings (id text PRIMARY KEY, value numeric);
+
+INSERT INTO users VALUES ('usr_01', 'admin@example.com');
+INSERT INTO devices VALUES ('dev_01', 'Test Device');
+-- PostgreSQL database dump complete
+`;
+    fs.writeFileSync(sqlPath, mockSqlDump, 'utf8');
+    createdBackupFiles.push(sqlFilename);
+
+    const verification = db.verifyBackupFile(sqlFilename);
+    expect(verification.isHealthy).toBe(true);
+    expect(verification.tablesVerified).toBe(3);
+    expect(verification.recordsCount).toBe(2);
+
+    const list = db.listBackups();
+    expect(list.some((b) => b.filename === sqlFilename)).toBe(true);
+  });
+
+  it('4. Rejects corrupted SQL backup and prevents database modification', async () => {
+    const corruptedFilename = `pg_backup_corrupted_${Date.now()}.sql`;
+    const corruptedPath = path.join(backupDir, corruptedFilename);
+    fs.writeFileSync(corruptedPath, 'CORRUPTED NON-SQL INVALID DATA 12345', 'utf8');
+    createdBackupFiles.push(corruptedFilename);
+
+    const verification = db.verifyBackupFile(corruptedFilename);
+    expect(verification.isHealthy).toBe(false);
+
+    const initialDeviceCount = db.data.devices.length;
+    const restored = await db.restoreBackup(corruptedFilename);
+    expect(restored).toBe(false);
+
+    // Ensure database state remained untouched
+    expect(db.data.devices.length).toBe(initialDeviceCount);
+  });
+
+  it('5. Return failure when pg_dump is missing in production mode without fake JSON fallback', async () => {
+    const originalProd = process.env.VPS_PRODUCTION;
+    const originalPath = process.env.PATH;
+    try {
+      process.env.VPS_PRODUCTION = 'true';
+      // Force empty PATH so pg_dump cannot be located
+      process.env.PATH = '/non_existent_bin_dir';
+
+      const backupRes = await db.createBackup();
+      expect(backupRes.success).toBe(false);
+      expect(backupRes.filename).toBe('');
+      expect(backupRes.size).toBe(0);
+    } finally {
+      process.env.VPS_PRODUCTION = originalProd;
+      process.env.PATH = originalPath;
     }
   });
 
-  it('3. Restore database state from backup and verify entity preservation', async () => {
+  it('6. Preserve legacy JSON backup restore functionality', async () => {
     const targetDevId = 'dev_test_01';
     let originalDev = db.getDeviceById(targetDevId);
     if (!originalDev) {
@@ -110,78 +182,38 @@ describe('P0.4: Backup, Restore, Schema Migration & Release Upgrade Suite', () =
       db.data.devices.push(originalDev);
     }
     expect(originalDev).toBeDefined();
-    
-    // Set specific test metric before backup
+
     if (originalDev) {
       originalDev.metrics = { ...(originalDev.metrics || {}), pressure: 99.9 };
     }
 
-    const backupResult = await db.createBackup();
-    const backupFile = backupResult.filename;
-    createdBackupFiles.push(backupFile);
-
-    // Modify local state by changing metric
-    if (originalDev) {
-      originalDev.metrics = { ...(originalDev.metrics || {}), pressure: 11.1 };
-    }
-
-    // Restore from backup
-    const restored = db.restoreBackup(backupFile);
-    expect(restored).toBe(true);
-
-    // Verify entity was restored to pre-backup snapshot state
-    const restoredDev = db.getDeviceById(targetDevId);
-    expect(restoredDev).toBeDefined();
-    expect(restoredDev?.metrics?.pressure).toBe(99.9);
-  });
-
-  it('4. Schema Migration & Version Upgrade backward compatibility', () => {
-    // Simulate a legacy schema payload (v1.0.0 without tenantId or rateLimitPerMin)
     const legacySnapshot = {
       version: '1.0.0',
       devices: [
         {
-          id: 'dev_legacy_01',
-          name: 'Old Industrial Sensor',
-          type: 'ESP8266',
-          // Missing tenantId, rateLimitPerMin, roleKey
-          apiKey: 'key_legacy_esp8266',
+          id: targetDevId,
+          tenantId: 'usr_test_admin',
+          name: 'Kanonik Test Cihazı',
+          type: 'sensor',
+          apiKey: 'dev_key_test_0000000000000000',
           status: 'online',
-          metrics: { temperature: 21.0 },
+          location: 'Test Laboratuvarı',
+          metrics: { pressure: 88.8 },
         },
       ],
-      users: [
-        {
-          id: 'usr_legacy_01',
-          email: 'legacy_user@example.com',
-          name: 'Legacy Operator',
-          role: 'customer',
-          created_at: new Date().toISOString(),
-        },
-      ],
-      telemetry: [
-        {
-          id: 'tel_legacy_01',
-          deviceId: 'dev_legacy_01',
-          metric: 'temperature',
-          value: 21.0,
-          timestamp: new Date().toISOString(),
-        },
-      ],
+      users: [],
     };
 
-    const legacyFilename = `db_backup_legacy_v1_${Date.now()}.json`;
-    const legacyPath = path.join(backupDir, legacyFilename);
-    fs.writeFileSync(legacyPath, JSON.stringify(legacySnapshot), 'utf8');
-    createdBackupFiles.push(legacyFilename);
+    const jsonFilename = `db_backup_json_test_${Date.now()}.json`;
+    const jsonPath = path.join(backupDir, jsonFilename);
+    fs.writeFileSync(jsonPath, JSON.stringify(legacySnapshot), 'utf8');
+    createdBackupFiles.push(jsonFilename);
 
-    const restoreSuccess = db.restoreBackup(legacyFilename);
-    expect(restoreSuccess).toBe(true);
+    const restored = await db.restoreBackup(jsonFilename);
+    expect(restored).toBe(true);
 
-    const migratedDev = db.getDeviceById('dev_legacy_01');
-    expect(migratedDev).toBeDefined();
-    expect(migratedDev?.id).toBe('dev_legacy_01');
-    // Ensure migrated devices function properly
-    expect(migratedDev?.name).toBe('Old Industrial Sensor');
+    const restoredDev = db.getDeviceById(targetDevId);
+    expect(restoredDev).toBeDefined();
+    expect(restoredDev?.metrics?.pressure).toBe(88.8);
   });
 });

@@ -561,12 +561,12 @@ databaseRouter.get('/backups', authenticateUser, requireAdmin, (req, res) => {
   res.json({ backups: db.listBackups() });
 });
 
-databaseRouter.post('/restore', authenticateUser, requireAdmin, (req, res) => {
+databaseRouter.post('/restore', authenticateUser, requireAdmin, async (req, res) => {
   const { filename } = req.body;
   if (!filename) {
     return res.status(400).json({ error: 'Yedek dosya adı belirtilmedi.' });
   }
-  const ok = db.restoreBackup(filename);
+  const ok = await db.restoreBackup(filename);
   if (ok) {
     res.json({ message: 'Veritabanı yedeği başarıyla geri yüklendi.' });
   } else {

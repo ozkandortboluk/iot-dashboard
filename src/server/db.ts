@@ -890,6 +890,90 @@ class LocalDatabase {
     }
   }
 
+  public verifyBackupFile(filename: string): {
+    isHealthy: boolean;
+    sizeBytes: number;
+    checksum: string;
+    tablesVerified: number;
+    recordsCount: number;
+    error?: string;
+  } {
+    this.ensureBackupDir();
+    const cleanFilename = path.basename(filename);
+    const backupPath = path.isAbsolute(filename)
+      ? filename
+      : fs.existsSync(filename)
+      ? filename
+      : path.join(this.BACKUP_DIR, cleanFilename);
+
+    if (!fs.existsSync(backupPath)) {
+      return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: 'Dosya bulunamadı' };
+    }
+
+    try {
+      const stats = fs.statSync(backupPath);
+      if (stats.size === 0) {
+        return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: 'Dosya boş' };
+      }
+
+      const fileBuffer = fs.readFileSync(backupPath);
+      const checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+      if (cleanFilename.endsWith('.sql')) {
+        const sqlContent = fileBuffer.toString('utf-8');
+        const hasHeader =
+          sqlContent.includes('PostgreSQL database dump') ||
+          sqlContent.includes('CREATE TABLE') ||
+          sqlContent.includes('INSERT INTO') ||
+          sqlContent.includes('SET statement_timeout') ||
+          sqlContent.includes('SET lock_timeout');
+
+        if (!hasHeader) {
+          return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'Geçersiz SQL başlığı veya yapısı' };
+        }
+
+        const createTableMatches = sqlContent.match(/CREATE TABLE/gi) || [];
+        const insertMatches = sqlContent.match(/INSERT INTO/gi) || [];
+        const tablesVerified = createTableMatches.length;
+        const recordsCount = insertMatches.length;
+
+        return {
+          isHealthy: true,
+          sizeBytes: stats.size,
+          checksum,
+          tablesVerified,
+          recordsCount,
+        };
+      } else if (cleanFilename.endsWith('.json')) {
+        const jsonContent = fileBuffer.toString('utf-8');
+        const parsed = JSON.parse(jsonContent);
+
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'Geçersiz JSON formatı' };
+        }
+
+        const arrayKeys = Object.keys(parsed).filter((k) => Array.isArray(parsed[k]));
+        const tablesVerified = arrayKeys.length;
+        let recordsCount = 0;
+        for (const k of arrayKeys) {
+          recordsCount += (parsed[k] as any[]).length;
+        }
+
+        return {
+          isHealthy: true,
+          sizeBytes: stats.size,
+          checksum,
+          tablesVerified,
+          recordsCount,
+        };
+      }
+
+      return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'Desteklenmeyen dosya türü' };
+    } catch (err: any) {
+      return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: err?.message || 'Yedek doğrulama hatası' };
+    }
+  }
+
   public async createBackup(): Promise<{ success: boolean; filename: string; size: number }> {
     this.ensureBackupDir();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -897,43 +981,42 @@ class LocalDatabase {
     if (this.isPostgresProductionMode()) {
       const filename = `pg_backup_${timestamp}.sql`;
       const backupPath = path.join(this.BACKUP_DIR, filename);
-      const dbUrl = process.env.DATABASE_URL;
-      
+      const dbUrl = resolvePostgresConnectionString();
+
       if (!dbUrl) {
-         console.error('[BACKUP] DATABASE_URL is not set for pg_dump');
-         return { success: false, filename: '', size: 0 };
+        console.error('[BACKUP] Connection URL could not be resolved for pg_dump');
+        return { success: false, filename: '', size: 0 };
       }
 
       try {
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
-        
-        // Ensure pg_dump is available in the environment before executing
+
         try {
           await execFileAsync('pg_dump', ['--version']);
         } catch (missingErr) {
-          console.warn('[BACKUP] pg_dump is not installed in this environment. Falling back to simple JSON metadata backup.');
-          const fallbackFilename = `db_metadata_backup_${timestamp}.json`;
-          const fallbackPath = path.join(this.BACKUP_DIR, fallbackFilename);
-          const serialized = JSON.stringify(this.data, null, 2);
-          await fs.promises.writeFile(fallbackPath, serialized, 'utf-8');
-          this.pruneBackups();
-          const stats = await fs.promises.stat(fallbackPath);
-          return { success: true, filename: fallbackFilename, size: stats.size };
+          console.error('[BACKUP] pg_dump is not available in environment. Failing PostgreSQL backup.');
+          return { success: false, filename: '', size: 0 };
         }
 
-        await execFileAsync('pg_dump', ['--dbname', dbUrl, '-f', backupPath]);
-        
-        this.pruneBackups();
+        await execFileAsync('pg_dump', ['--dbname=' + dbUrl, '-f', backupPath, '--clean', '--if-exists']);
+
         const stats = await fs.promises.stat(backupPath);
+        if (stats.size === 0) {
+          throw new Error('pg_dump produced an empty file');
+        }
+
+        this.pruneBackups();
         return { success: true, filename, size: stats.size };
-      } catch (err) {
-        console.error('[BACKUP] pg_dump failed:', err);
+      } catch (err: any) {
+        console.error('[BACKUP] pg_dump failed:', err?.message || err);
+        if (fs.existsSync(backupPath)) {
+          try { await fs.promises.unlink(backupPath); } catch {}
+        }
         return { success: false, filename: '', size: 0 };
       }
     }
-
 
     const filename = `db_backup_${timestamp}.json`;
     const backupPath = path.join(this.BACKUP_DIR, filename);
@@ -941,8 +1024,7 @@ class LocalDatabase {
     try {
       const serialized = JSON.stringify(this.data, null, 2);
       await fs.promises.writeFile(backupPath, serialized, 'utf-8');
-      
-      // Keep only last 10 backups
+
       this.pruneBackups();
 
       return {
@@ -1032,17 +1114,14 @@ class LocalDatabase {
     const backupRes = await this.createBackup();
 
     if (!backupRes.success || !backupRes.filename) {
-      throw new Error('Snapshot dosyası oluşturulamadı.');
+      throw new Error('Snapshot dosyası oluşturulamadı (PostgreSQL dump veya dosya yazma hatası).');
     }
 
-    const backupPath = path.join(this.BACKUP_DIR, backupRes.filename);
-    let checksum = '';
-    try {
-      const fileBuffer = await fs.promises.readFile(backupPath);
-      checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-    } catch {}
+    const verification = this.verifyBackupFile(backupRes.filename);
 
-    const totalRecordsCount = (this.data.devices?.length || 0) + (this.data.users?.length || 0) + (this.data.rules?.length || 0) + (this.data.activeAlarms?.length || 0);
+    if (!verification.isHealthy) {
+      throw new Error(`Oluşturulan yedek dosyası doğrulanamadı: ${verification.error || 'Bozuk veya geçersiz dosya'}`);
+    }
 
     const snapshotItem: BackupSnapshotItem = {
       id: `snap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1050,18 +1129,17 @@ class LocalDatabase {
       sizeBytes: backupRes.size,
       createdAt: new Date().toISOString(),
       triggerType,
-      status: config.autoVerifySnapshots ? 'verified' : 'completed',
+      status: 'verified',
       hypertableIncluded: config.includeHypertables,
-      totalRecordsCount,
-      checksum,
+      totalRecordsCount: verification.recordsCount,
+      checksum: verification.checksum,
       verificationReport: {
         isHealthy: true,
-        tablesVerified: 12,
+        tablesVerified: verification.tablesVerified,
         verifiedAt: new Date().toISOString(),
       },
     };
 
-    // Update lastBackupAt & nextBackupAt
     const now = new Date();
     const nextDate = new Date(now.getTime() + (config.frequencyHours || 24) * 3600 * 1000);
     this.updateScheduledBackupConfig({
@@ -1069,7 +1147,7 @@ class LocalDatabase {
       nextBackupAt: nextDate.toISOString(),
     });
 
-    this.addAuditLog('system', 'Admin', `Yedek Snapshot Tetiklendi [${triggerType.toUpperCase()}]: ${backupRes.filename} (${Math.round(backupRes.size / 1024)} KB)`, 'high');
+    this.addAuditLog('system', 'Admin', `Yedek Snapshot Tetiklendi [${triggerType.toUpperCase()}]: ${backupRes.filename} (${Math.round(backupRes.size / 1024)} KB, ${verification.tablesVerified} tablo)`, 'high');
     return snapshotItem;
   }
 
@@ -1101,25 +1179,26 @@ class LocalDatabase {
 
   public listDetailedSnapshots(): BackupSnapshotItem[] {
     const rawBackups = this.listBackups();
-    const config = this.getScheduledBackupConfig();
 
     return rawBackups.map((b, idx) => {
-      const isSql = b.filename.endsWith('.sql');
-      const isScheduled = b.filename.includes('scheduled') || idx % 2 === 0;
+      const verification = this.verifyBackupFile(b.filename);
+      const isScheduled = b.filename.includes('scheduled');
+
       return {
         id: `snap_${b.createdAt}_${idx}`,
         filename: b.filename,
         sizeBytes: b.size,
         createdAt: b.createdAt,
         triggerType: isScheduled ? 'scheduled' : 'manual',
-        status: 'verified',
+        status: verification.isHealthy ? 'verified' : 'failed',
         hypertableIncluded: true,
-        totalRecordsCount: isSql ? 15000 : (this.data.devices?.length || 0) * 150 + 500,
-        checksum: `sha256_${crypto.createHash('md5').update(b.filename + b.createdAt).digest('hex')}`,
+        totalRecordsCount: verification.recordsCount,
+        checksum: verification.checksum,
         verificationReport: {
-          isHealthy: true,
-          tablesVerified: 12,
-          verifiedAt: b.createdAt,
+          isHealthy: verification.isHealthy,
+          tablesVerified: verification.tablesVerified,
+          verifiedAt: new Date().toISOString(),
+          error: verification.error,
         },
       };
     });
@@ -1140,40 +1219,106 @@ class LocalDatabase {
     }
   }
 
-  public restoreBackup(filename: string): boolean {
+  public async restoreBackup(filename: string): Promise<boolean> {
     this.ensureBackupDir();
+    const cleanFilename = path.basename(filename);
     const backupPath = path.isAbsolute(filename)
       ? filename
       : fs.existsSync(filename)
       ? filename
-      : path.join(this.BACKUP_DIR, path.basename(filename));
+      : path.join(this.BACKUP_DIR, cleanFilename);
 
     if (!fs.existsSync(backupPath)) return false;
+
+    const isSql = cleanFilename.endsWith('.sql');
+
+    if (isSql) {
+      try {
+        const stats = fs.statSync(backupPath);
+        if (stats.size === 0) {
+          console.error('[RESTORE] SQL backup file is empty (0 bytes).');
+          return false;
+        }
+
+        const sqlSample = fs.readFileSync(backupPath, { encoding: 'utf-8', flag: 'r' }).substring(0, 2048);
+        const isValidSqlHeader =
+          sqlSample.includes('PostgreSQL database dump') ||
+          sqlSample.includes('CREATE TABLE') ||
+          sqlSample.includes('INSERT INTO') ||
+          sqlSample.includes('SET statement_timeout') ||
+          sqlSample.includes('SET lock_timeout');
+
+        if (!isValidSqlHeader) {
+          console.error('[RESTORE] Invalid SQL backup file structure/header.');
+          return false;
+        }
+      } catch (valErr: any) {
+        console.error('[RESTORE] Pre-validation failed:', valErr?.message || valErr);
+        return false;
+      }
+
+      const dbUrl = resolvePostgresConnectionString();
+      if (!dbUrl) {
+        console.error('[RESTORE] Cannot resolve PostgreSQL connection URL.');
+        return false;
+      }
+
+      try {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execFileAsync = promisify(execFile);
+
+        await execFileAsync('psql', [
+          '--dbname=' + dbUrl,
+          '-v', 'ON_ERROR_STOP=1',
+          '-f', backupPath
+        ]);
+
+        if (this.postgresRepo?.isReady()) {
+          await this.postgresRepo.hydrateFromPostgres().catch(() => {});
+        }
+
+        this.addAuditLog('system', 'Admin', `PostgreSQL Veritabanı Yedeği Geri Yüklendi: ${cleanFilename}`, 'high');
+        return true;
+      } catch (err: any) {
+        console.error('[RESTORE] psql restore failed:', err?.message || err);
+        return false;
+      }
+    }
 
     try {
       const content = fs.readFileSync(backupPath, 'utf-8');
       const parsed = JSON.parse(content);
-      if (parsed && typeof parsed === 'object') {
-        let commands = parsed.commands || this.data.commands || [];
-        if (parsed.commands && this.data.commands) {
-          const parsedIds = new Set(parsed.commands.map((c: any) => c.id || c.commandId));
-          const inFlight = this.data.commands.filter((c: any) => !parsedIds.has(c.id) && !parsedIds.has(c.commandId));
-          commands = [...parsed.commands, ...inFlight];
-        }
-        let devices = parsed.devices || this.data.devices || [];
-        if (parsed.devices && this.data.devices) {
-          const parsedDevIds = new Set(parsed.devices.map((d: any) => d.id));
-          const activeDevs = this.data.devices.filter((d: any) => !parsedDevIds.has(d.id));
-          devices = [...parsed.devices, ...activeDevs];
-        }
-        this.data = { ...this.data, ...parsed, commands, devices };
-        this.saveData(this.data);
-        this.addAuditLog('system', 'Admin', `Veritabanı Yedeği Geri Yüklendi: ${path.basename(filename)}`, 'high');
-        return true;
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        console.error('[RESTORE] Invalid JSON backup format.');
+        return false;
       }
-      return false;
-    } catch (err) {
-      console.error('Failed to restore backup:', err);
+
+      let commands = parsed.commands || this.data.commands || [];
+      if (parsed.commands && this.data.commands) {
+        const parsedIds = new Set(parsed.commands.map((c: any) => c.id || c.commandId));
+        const inFlight = this.data.commands.filter((c: any) => !parsedIds.has(c.id) && !parsedIds.has(c.commandId));
+        commands = [...parsed.commands, ...inFlight];
+      }
+      let devices = parsed.devices || this.data.devices || [];
+      if (parsed.devices && this.data.devices) {
+        const parsedDevIds = new Set(parsed.devices.map((d: any) => d.id));
+        const activeDevs = this.data.devices.filter((d: any) => !parsedDevIds.has(d.id));
+        devices = [...parsed.devices, ...activeDevs];
+      }
+
+      this.data = { ...this.data, ...parsed, commands, devices };
+      this.saveData(this.data);
+
+      if (this.postgresRepo?.isReady()) {
+        await this.syncAllToPostgres().catch(() => {});
+      }
+
+      this.addAuditLog('system', 'Admin', `Veritabanı Yedeği Geri Yüklendi: ${cleanFilename}`, 'high');
+      return true;
+    } catch (err: any) {
+      console.error('Failed to restore backup:', err?.message || err);
       return false;
     }
   }
