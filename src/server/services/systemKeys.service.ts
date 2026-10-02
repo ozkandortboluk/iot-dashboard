@@ -97,63 +97,104 @@ export class SystemKeysService {
   }
 
   /**
-   * Resolves current JWT_SECRET / SESSION_SECRET status without mutating anything.
+   * Resolves current JWT_SECRET / SESSION_SECRET status.
+   * In production, Central Security Vault is the SINGLE CANONICAL SOURCE.
+   * If a legacy source exists, it is migrated one-way into Vault and legacy plaintext files are scrubbed.
    */
   public resolveJwtSecret(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Central Security Vault
+    // 1. Central Security Vault (CANONICAL SOURCE)
     const vaultJwt = systemSecretsService.getSecret('authentication.jwt_secret') || systemSecretsService.getSecret('jwt_secret');
     if (vaultJwt && !isWeak(vaultJwt)) {
       return { value: vaultJwt, source: 'vault' };
     }
 
-    // 2. Env vars (if strong)
-    const envVal = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
-    if (envVal && !isWeak(envVal)) {
-      return { value: envVal, source: 'env' };
-    }
+    // 2. Check legacy sources for ONE-WAY migration into Vault
+    let candidateVal = '';
+    let legacySource: 'docker_secret' | 'env' | 'secrets_file' | 'data_file' | '' = '';
+    let legacyFilePath = '';
 
-    // 3. Docker Secrets
     const dockerPaths = ['/run/secrets/jwt_secret', '/run/secrets/session_secret'];
     for (const p of dockerPaths) {
       try {
         if (fs.existsSync(p)) {
           const val = fs.readFileSync(p, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'docker_secret', sourcePath: p };
+          if (val && !isWeak(val)) {
+            candidateVal = val;
+            legacySource = 'docker_secret';
+            legacyFilePath = p;
+            break;
+          }
         }
       } catch {}
     }
 
-    // 4. secrets/ directory
-    const secretsPaths = [
-      path.join(SECRETS_DIR, 'jwt_secret'),
-      path.join(SECRETS_DIR, 'session_secret'),
-    ];
-    for (const p of secretsPaths) {
-      try {
-        if (fs.existsSync(p)) {
-          const val = fs.readFileSync(p, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: p };
-        }
-      } catch {}
+    if (!candidateVal) {
+      const envVal = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
+      if (envVal && !isWeak(envVal)) {
+        candidateVal = envVal;
+        legacySource = 'env';
+      }
     }
 
-    // 5. data/ directory fallback
-    const dataPaths = [
-      path.join(DATA_DIR, '.jwt_secret'),
-      path.join(DATA_DIR, '.session_secret'),
-    ];
-    for (const p of dataPaths) {
-      try {
-        if (fs.existsSync(p)) {
-          const val = fs.readFileSync(p, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: p };
-        }
-      } catch {}
+    if (!candidateVal) {
+      const secretsPaths = [
+        path.join(SECRETS_DIR, 'jwt_secret'),
+        path.join(SECRETS_DIR, 'session_secret'),
+      ];
+      for (const p of secretsPaths) {
+        try {
+          if (fs.existsSync(p)) {
+            const val = fs.readFileSync(p, 'utf8').trim();
+            if (val && !isWeak(val)) {
+              candidateVal = val;
+              legacySource = 'secrets_file';
+              legacyFilePath = p;
+              break;
+            }
+          }
+        } catch {}
+      }
     }
 
-    // 6. Weak env value fallback if present
-    if (envVal) {
-      return { value: envVal, source: 'env' };
+    if (!candidateVal) {
+      const dataPaths = [
+        path.join(DATA_DIR, '.jwt_secret'),
+        path.join(DATA_DIR, '.session_secret'),
+      ];
+      for (const p of dataPaths) {
+        try {
+          if (fs.existsSync(p)) {
+            const val = fs.readFileSync(p, 'utf8').trim();
+            if (val && !isWeak(val)) {
+              candidateVal = val;
+              legacySource = 'data_file';
+              legacyFilePath = p;
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // One-way migration into Central Security Vault
+    if (candidateVal && !isWeak(candidateVal)) {
+      systemLogger.info('security', `[Security Migration] JWT secret (${legacySource}) Vault kasasına aktarılıyor.`);
+      systemSecretsService.setSecret('authentication.jwt_secret', candidateVal, {
+        category: 'authentication',
+        label: 'JWT Secret',
+        description: 'Oturum ve API token imzalama anahtarı (Migrated)',
+      }).then(() => {
+        // Scrub legacy plaintext file after verified write to Vault
+        if (legacyFilePath && fs.existsSync(legacyFilePath) && !legacyFilePath.startsWith('/run/secrets/')) {
+          try { fs.unlinkSync(legacyFilePath); } catch {}
+        }
+      }).catch(() => {});
+
+      return { value: candidateVal, source: 'vault' };
+    }
+
+    if (candidateVal) {
+      return { value: candidateVal, source: 'env' };
     }
 
     return { value: '', source: 'missing' };
@@ -161,15 +202,26 @@ export class SystemKeysService {
 
   /**
    * Resolves current ENCRYPTION_KEY status without mutating anything.
+   * Preferred: Docker Secret /run/secrets/encryption_key or environment variable.
+   * In production, local file fallback (data/.vault_key or secrets/encryption_key) is STRICTLY FORBIDDEN.
    */
   public resolveEncryptionKey(): { value: string; source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Env var (if strong)
+    // 1. Docker Secret (Preferred in production)
+    const dockerPath = '/run/secrets/encryption_key';
+    try {
+      if (fs.existsSync(dockerPath)) {
+        const val = fs.readFileSync(dockerPath, 'utf8').trim();
+        if (val && !isWeak(val)) return { value: val, source: 'docker_secret', sourcePath: dockerPath };
+      }
+    } catch {}
+
+    // 2. Environment variable
     const envVal = (process.env.ENCRYPTION_KEY || '').trim();
     if (envVal && !isWeak(envVal)) {
       return { value: envVal, source: 'env' };
     }
 
-    // 2. Custom path env
+    // 3. Custom path env
     const customPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
     if (customPath) {
       try {
@@ -180,27 +232,17 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 3. Docker Secret
-    const dockerPath = '/run/secrets/encryption_key';
-    try {
-      if (fs.existsSync(dockerPath)) {
-        const val = fs.readFileSync(dockerPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'docker_secret', sourcePath: dockerPath };
-      }
-    } catch {}
-
-    // 4. secrets/ directory
-    const secretPath = path.join(SECRETS_DIR, 'encryption_key');
-    try {
-      if (fs.existsSync(secretPath)) {
-        const val = fs.readFileSync(secretPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: secretPath };
-      }
-    } catch {}
-
-    // 5. Strict production boundary: Do NOT read local fallback file data/.vault_key in production!
+    // 4. Strict production boundary: Do NOT read local fallback files in production!
     const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     if (!isProd) {
+      const secretPath = path.join(SECRETS_DIR, 'encryption_key');
+      try {
+        if (fs.existsSync(secretPath)) {
+          const val = fs.readFileSync(secretPath, 'utf8').trim();
+          if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: secretPath };
+        }
+      } catch {}
+
       const dataPath = path.join(DATA_DIR, '.vault_key');
       try {
         if (fs.existsSync(dataPath)) {
@@ -210,7 +252,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 6. Weak env value fallback if present
+    // 5. Weak env value fallback if present (causes validation rejection)
     if (envVal) {
       return { value: envVal, source: 'env' };
     }
@@ -219,63 +261,106 @@ export class SystemKeysService {
   }
 
   /**
-   * Resolves current OTA_SIGNING_KEY status without mutating anything.
+   * Resolves current OTA_SIGNING_KEY status.
+   * In production, Central Security Vault is the SINGLE CANONICAL SOURCE.
+   * If a legacy source exists, it is migrated one-way into Vault and legacy plaintext files are scrubbed.
    */
   public resolveOtaSigningKey(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Central Security Vault
+    // 1. Central Security Vault (CANONICAL SOURCE)
     const vaultOta = systemSecretsService.getSecret('ota.signing_key') || systemSecretsService.getSecret('ota_signing_key');
     if (vaultOta) {
       return { value: vaultOta, source: 'vault' };
     }
 
-    // 2. Env var
-    const envVal = (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
-    if (envVal) {
-      return { value: envVal, source: 'env' };
-    }
+    // 2. Check legacy sources for ONE-WAY migration into Vault
+    let candidateVal = '';
+    let legacySource: 'docker_secret' | 'env' | 'secrets_file' | 'data_file' | '' = '';
+    let legacyFilePath = '';
 
-    // 3. Custom path
-    const customPath = process.env.OTA_SIGNING_PRIVATE_KEY_PATH;
-    if (customPath) {
-      try {
-        if (fs.existsSync(customPath)) {
-          const val = fs.readFileSync(customPath, 'utf8').trim();
-          if (val) return { value: val, source: 'secrets_file', sourcePath: customPath };
-        }
-      } catch {}
-    }
-
-    // 4. Docker Secret
     const dockerPath = '/run/secrets/ota_signing_key';
     try {
       if (fs.existsSync(dockerPath)) {
         const val = fs.readFileSync(dockerPath, 'utf8').trim();
-        if (val) return { value: val, source: 'docker_secret', sourcePath: dockerPath };
+        if (val) {
+          candidateVal = val;
+          legacySource = 'docker_secret';
+          legacyFilePath = dockerPath;
+        }
       }
     } catch {}
 
-    // 5. secrets/ directory
-    const secretPaths = [
-      path.join(SECRETS_DIR, 'ota_signing_key'),
-      path.join(SECRETS_DIR, 'ota_signing_key.pem'),
-    ];
-    for (const p of secretPaths) {
+    if (!candidateVal) {
+      const envVal = (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
+      if (envVal) {
+        candidateVal = envVal;
+        legacySource = 'env';
+      }
+    }
+
+    if (!candidateVal) {
+      const customPath = process.env.OTA_SIGNING_PRIVATE_KEY_PATH;
+      if (customPath && fs.existsSync(customPath)) {
+        try {
+          const val = fs.readFileSync(customPath, 'utf8').trim();
+          if (val) {
+            candidateVal = val;
+            legacySource = 'secrets_file';
+            legacyFilePath = customPath;
+          }
+        } catch {}
+      }
+    }
+
+    if (!candidateVal) {
+      const secretPaths = [
+        path.join(SECRETS_DIR, 'ota_signing_key'),
+        path.join(SECRETS_DIR, 'ota_signing_key.pem'),
+      ];
+      for (const p of secretPaths) {
+        try {
+          if (fs.existsSync(p)) {
+            const val = fs.readFileSync(p, 'utf8').trim();
+            if (val) {
+              candidateVal = val;
+              legacySource = 'secrets_file';
+              legacyFilePath = p;
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (!candidateVal) {
+      const dataPath = path.join(DATA_DIR, '.ota_signing_key');
       try {
-        if (fs.existsSync(p)) {
-          const val = fs.readFileSync(p, 'utf8').trim();
-          if (val) return { value: val, source: 'secrets_file', sourcePath: p };
+        if (fs.existsSync(dataPath)) {
+          const val = fs.readFileSync(dataPath, 'utf8').trim();
+          if (val) {
+            candidateVal = val;
+            legacySource = 'data_file';
+            legacyFilePath = dataPath;
+          }
         }
       } catch {}
     }
 
-    // 6. data/ directory
-    const dataPath = path.join(DATA_DIR, '.ota_signing_key');
-    try {
-      if (fs.existsSync(dataPath)) {
-        const val = fs.readFileSync(dataPath, 'utf8').trim();
-        if (val) return { value: val, source: 'data_file', sourcePath: dataPath };
-      }
-    } catch {}
+    // One-way migration into Central Security Vault
+    if (candidateVal) {
+      systemLogger.info('security', `[Security Migration] OTA private key (${legacySource}) Vault kasasına aktarılıyor.`);
+      systemSecretsService.setSecret('ota.signing_key', candidateVal, {
+        category: 'ota',
+        label: 'OTA Imzalama Özel Anahtarı',
+        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
+      }).then(() => {
+        // Scrub legacy plaintext private key file after verified write to Vault
+        if (legacyFilePath && fs.existsSync(legacyFilePath) && !legacyFilePath.startsWith('/run/secrets/')) {
+          try { fs.unlinkSync(legacyFilePath); } catch {}
+        }
+      }).catch(() => {});
+
+      return { value: candidateVal, source: 'vault' };
+    }
 
     return { value: '', source: 'missing' };
   }
@@ -340,7 +425,8 @@ export class SystemKeysService {
   /**
    * Generates ONLY MISSING keys, strictly preserving existing keys!
    * - If a key already exists and is valid, it is NEVER modified or overwritten.
-   * - Newly generated keys are saved to `secrets/` and/or `data/` and applied to `process.env`.
+   * - In production, application keys (JWT, OTA) are saved EXCLUSIVELY to Security Vault.
+   * - Plaintext files (data/.jwt_secret, data/.ota_signing_key) are NOT created and any legacy copies are scrubbed.
    */
   public generateMissingKeys(): GeneratedKeyResult {
     this.ensureDirectoriesExist();
@@ -348,6 +434,8 @@ export class SystemKeysService {
     const currentJwt = this.resolveJwtSecret();
     const currentEnc = this.resolveEncryptionKey();
     const currentOta = this.resolveOtaSigningKey();
+
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
 
     const newlyGenerated: GeneratedKeyResult['newlyGenerated'] = {};
     const preservedKeys: GeneratedKeyResult['preservedKeys'] = {
@@ -357,7 +445,7 @@ export class SystemKeysService {
     };
     const savedLocations: string[] = [];
 
-    // 1. JWT_SECRET
+    // 1. JWT_SECRET — Vault-Only (No plaintext files on disk)
     if (currentJwt.value && !isWeak(currentJwt.value)) {
       preservedKeys.jwtSecret = true;
       systemLogger.info('security', `[SystemKeys] Mevcut JWT_SECRET korundu (${currentJwt.source}). Yeniden üretilmedi.`);
@@ -369,56 +457,63 @@ export class SystemKeysService {
           description: 'Oturum ve API token imzalama anahtarı',
         }).catch(() => {});
       }
+      // Scrub any legacy plaintext files on disk
+      try {
+        const legacy1 = path.join(SECRETS_DIR, 'jwt_secret');
+        const legacy2 = path.join(DATA_DIR, '.jwt_secret');
+        if (fs.existsSync(legacy1)) fs.unlinkSync(legacy1);
+        if (fs.existsSync(legacy2)) fs.unlinkSync(legacy2);
+      } catch {}
     } else {
       const generatedJwt = crypto.randomBytes(32).toString('hex');
       newlyGenerated.jwtSecret = generatedJwt;
       process.env.JWT_SECRET = generatedJwt;
       process.env.SESSION_SECRET = generatedJwt;
 
+      // Save strictly to Central Security Vault
       systemSecretsService.setSecret('authentication.jwt_secret', generatedJwt, {
         category: 'authentication',
         label: 'JWT Secret',
         description: 'Oturum ve API token imzalama anahtarı',
       }).catch(() => {});
 
-      const secretFile = path.join(SECRETS_DIR, 'jwt_secret');
-      const dataFile = path.join(DATA_DIR, '.jwt_secret');
+      // Scrub any legacy plaintext files to enforce Vault-only storage
       try {
-        fs.writeFileSync(secretFile, generatedJwt, { encoding: 'utf8', mode: 0o600 });
-        savedLocations.push('secrets/jwt_secret');
+        const legacy1 = path.join(SECRETS_DIR, 'jwt_secret');
+        const legacy2 = path.join(DATA_DIR, '.jwt_secret');
+        if (fs.existsSync(legacy1)) fs.unlinkSync(legacy1);
+        if (fs.existsSync(legacy2)) fs.unlinkSync(legacy2);
       } catch {}
-      try {
-        fs.writeFileSync(dataFile, generatedJwt, { encoding: 'utf8', mode: 0o600 });
-        savedLocations.push('data/.jwt_secret');
-      } catch {}
-      systemLogger.info('security', '[SystemKeys] Yeni kriptografik JWT_SECRET üretildi ve Vault kasasına kaydedildi.');
+
+      savedLocations.push('Security Vault (authentication.jwt_secret)');
+      systemLogger.info('security', '[SystemKeys] Yeni kriptografik JWT_SECRET üretildi ve doğrudan Vault kasasına kaydedildi.');
     }
 
-    // 2. ENCRYPTION_KEY
+    // 2. ENCRYPTION_KEY — Root Key (Outside Vault)
     if (currentEnc.value && !isWeak(currentEnc.value)) {
       preservedKeys.encryptionKey = true;
       systemLogger.info('security', `[SystemKeys] Mevcut ENCRYPTION_KEY korundu (${currentEnc.source}). Yeniden üretilmedi.`);
     } else {
-      const generatedEnc = crypto.randomBytes(32).toString('hex');
-      newlyGenerated.encryptionKey = generatedEnc;
-      process.env.ENCRYPTION_KEY = generatedEnc;
+      if (isProd) {
+        systemLogger.critical('security', '[SystemKeys] Üretim ortamında ENCRYPTION_KEY otomatik üretilip dosyaya yazılamaz. Docker Secret (/run/secrets/encryption_key) veya ortam değişkeni tanımlanmalıdır.');
+      } else {
+        // Development / Test bootstrap only
+        const generatedEnc = crypto.randomBytes(32).toString('hex');
+        newlyGenerated.encryptionKey = generatedEnc;
+        process.env.ENCRYPTION_KEY = generatedEnc;
 
-      const secretFile = path.join(SECRETS_DIR, 'encryption_key');
-      const dataFile = path.join(DATA_DIR, '.vault_key');
-      try {
-        fs.writeFileSync(secretFile, generatedEnc, { encoding: 'utf8', mode: 0o600 });
-        savedLocations.push('secrets/encryption_key');
-      } catch {}
-      try {
-        fs.writeFileSync(dataFile, generatedEnc, { encoding: 'utf8', mode: 0o600 });
-        savedLocations.push('data/.vault_key');
-      } catch {}
+        const dataFile = path.join(DATA_DIR, '.vault_key');
+        try {
+          fs.writeFileSync(dataFile, generatedEnc, { encoding: 'utf8', mode: 0o600 });
+          savedLocations.push('data/.vault_key');
+        } catch {}
 
-      resetEncryptionKeyCache();
-      systemLogger.info('security', '[SystemKeys] Yeni kriptografik ENCRYPTION_KEY üretildi ve Vault sıfırlandı.');
+        resetEncryptionKeyCache();
+        systemLogger.info('security', '[SystemKeys] Geliştirme modu: Yeni yerel ENCRYPTION_KEY üretildi ve data/.vault_key dosyasına yazıldı.');
+      }
     }
 
-    // 3. OTA_SIGNING_KEY
+    // 3. OTA_SIGNING_KEY — Vault-Only Private Key
     if (currentOta.value && currentOta.value.length > 30) {
       preservedKeys.otaSigningKey = true;
       systemLogger.info('security', `[SystemKeys] Mevcut OTA_SIGNING_KEY korundu (${currentOta.source}). Yeniden üretilmedi.`);
@@ -430,6 +525,13 @@ export class SystemKeysService {
           description: 'Ed25519 firmware paketi imzalama özel anahtarı',
         }).catch(() => {});
       }
+      // Scrub any legacy plaintext private key files
+      try {
+        const privFile = path.join(SECRETS_DIR, 'ota_signing_key.pem');
+        const dataPrivFile = path.join(DATA_DIR, '.ota_signing_key');
+        if (fs.existsSync(privFile)) fs.unlinkSync(privFile);
+        if (fs.existsSync(dataPrivFile)) fs.unlinkSync(dataPrivFile);
+      } catch {}
     } else {
       try {
         const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
@@ -440,42 +542,46 @@ export class SystemKeysService {
         newlyGenerated.otaSigningKey = privateKey;
         newlyGenerated.otaPublicKey = publicKey;
 
+        // Save private key strictly to Central Security Vault
         systemSecretsService.setSecret('ota.signing_key', privateKey, {
           category: 'ota',
           label: 'OTA Imzalama Özel Anahtarı',
           description: 'Ed25519 firmware paketi imzalama özel anahtarı',
         }).catch(() => {});
 
-        const privFile = path.join(SECRETS_DIR, 'ota_signing_key.pem');
-        const pubFile = path.join(SECRETS_DIR, 'ota_signing_key.pub');
-        const dataPrivFile = path.join(DATA_DIR, '.ota_signing_key');
-
+        // Scrub any legacy plaintext private key files
         try {
-          fs.writeFileSync(privFile, privateKey, { encoding: 'utf8', mode: 0o600 });
-          savedLocations.push('secrets/ota_signing_key.pem');
+          const privFile = path.join(SECRETS_DIR, 'ota_signing_key.pem');
+          const dataPrivFile = path.join(DATA_DIR, '.ota_signing_key');
+          if (fs.existsSync(privFile)) fs.unlinkSync(privFile);
+          if (fs.existsSync(dataPrivFile)) fs.unlinkSync(dataPrivFile);
+        } catch {}
+
+        // Public key is non-sensitive and can be saved for firmware build flashing
+        try {
+          const pubFile = path.join(SECRETS_DIR, 'ota_signing_key.pub');
           fs.writeFileSync(pubFile, publicKey, { encoding: 'utf8', mode: 0o644 });
           savedLocations.push('secrets/ota_signing_key.pub');
         } catch {}
-        try {
-          fs.writeFileSync(dataPrivFile, privateKey, { encoding: 'utf8', mode: 0o600 });
-        } catch {}
 
-        process.env.OTA_SIGNING_PRIVATE_KEY_PATH = privFile;
-        systemLogger.info('security', '[SystemKeys] Yeni Ed25519 OTA imzalama anahtarı üretildi ve Vault kasasına kaydedildi.');
+        savedLocations.push('Security Vault (ota.signing_key)');
+        systemLogger.info('security', '[SystemKeys] Yeni Ed25519 OTA imzalama anahtarı üretildi ve doğrudan Vault kasasına kaydedildi.');
       } catch (err: any) {
         systemLogger.warn('security', `OTA anahtarı üretilirken hata: ${err?.message || err}`);
       }
     }
 
-    // 4. Update .env if present and writable
-    this.updateEnvFileWithGeneratedKeys(newlyGenerated);
+    // 4. Update .env if present, writable, and NOT in production
+    if (!isProd) {
+      this.updateEnvFileWithGeneratedKeys(newlyGenerated);
+    }
 
     // 5. Generate formatted .env snippet for copying
     const envSnippet = this.generateExportableEnvSnippet();
 
     return {
       success: true,
-      message: 'Gerekli güvenlik anahtarları başarıyla doğrulandı ve üretildi.',
+      message: 'Gerekli güvenlik anahtarları başarıyla doğrulandı ve Vault kasasına kaydedildi.',
       newlyGenerated,
       preservedKeys,
       envSnippet,
@@ -484,19 +590,13 @@ export class SystemKeysService {
   }
 
   private updateEnvFileWithGeneratedKeys(keys: GeneratedKeyResult['newlyGenerated']): void {
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) return; // Never write secrets into .env in production
+
     try {
       if (!fs.existsSync(ENV_FILE)) return;
       let envContent = fs.readFileSync(ENV_FILE, 'utf8');
       let modified = false;
-
-      if (keys.jwtSecret) {
-        if (/^JWT_SECRET=/m.test(envContent)) {
-          envContent = envContent.replace(/^JWT_SECRET=.*$/m, `JWT_SECRET=${keys.jwtSecret}`);
-        } else {
-          envContent += `\nJWT_SECRET=${keys.jwtSecret}\n`;
-        }
-        modified = true;
-      }
 
       if (keys.encryptionKey) {
         if (/^ENCRYPTION_KEY=/m.test(envContent)) {
@@ -509,7 +609,7 @@ export class SystemKeysService {
 
       if (modified) {
         fs.writeFileSync(ENV_FILE, envContent, 'utf8');
-        systemLogger.info('security', '[SystemKeys] Kök .env dosyası yeni anahtarlarla güncellendi.');
+        systemLogger.info('security', '[SystemKeys] Geliştirme modu: Kök .env dosyası güncellendi.');
       }
     } catch {}
   }
@@ -544,7 +644,7 @@ export class SystemKeysService {
 
   /**
    * For VPS CLI export (`npm run show-keys`):
-   * Inspects all active keys and returns their full details and .env configuration.
+   * Strictly privileged CLI utility. Forbidden in HTTP request context.
    */
   public getFullExportDetails(): {
     jwtSecret: { value: string; source: string; isConfigured: boolean };
@@ -552,6 +652,11 @@ export class SystemKeysService {
     otaSigningKey: { hasPrivateKey: boolean; source: string; isConfigured: boolean };
     envSnippet: string;
   } {
+    // Security Guard: Prevent invoking this function from any Express request context
+    if (typeof (globalThis as any).__IS_EXPRESS_REQUEST_ACTIVE__ !== 'undefined') {
+      throw new Error('[Security Violation] getFullExportDetails cannot be called in HTTP request context.');
+    }
+
     const jwt = this.resolveJwtSecret();
     const enc = this.resolveEncryptionKey();
     const ota = this.resolveOtaSigningKey();

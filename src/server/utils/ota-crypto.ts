@@ -102,6 +102,19 @@ export function getEd25519KeyPair(): KeyPair {
         const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
         const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
 
+        // One-way migration into Central Security Vault
+        systemSecretsService.setSecret('ota.signing_key', privateKeyPem, {
+          category: 'ota',
+          label: 'OTA Imzalama Özel Anahtarı',
+          description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
+          isSensitive: true,
+          updatedBy: 'legacy_file_migration',
+        }).then(() => {
+          if (!secretPath.startsWith('/run/secrets/')) {
+            try { fs.unlinkSync(secretPath); } catch {}
+          }
+        }).catch(() => {});
+
         cachedKeyPair = {
           keyId: activeKeyId,
           privateKeyPem,
@@ -123,10 +136,12 @@ export function getEd25519KeyPair(): KeyPair {
       const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
       const publicKeyHex = publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
 
-      if (!fs.existsSync(SECRETS_DIR)) {
-        fs.mkdirSync(SECRETS_DIR, { recursive: true, mode: 0o700 });
-      }
-      fs.writeFileSync(path.join(SECRETS_DIR, 'ota_signing_key.pem'), privateKeyPem, { encoding: 'utf8', mode: 0o600 });
+      systemSecretsService.setSecret('ota.signing_key', privateKeyPem, {
+        category: 'ota',
+        label: 'OTA Imzalama Özel Anahtarı',
+        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Bootstrap)',
+        isSensitive: true,
+      }).catch(() => {});
 
       cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
       return cachedKeyPair;

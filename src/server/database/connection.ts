@@ -176,6 +176,49 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
   const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
   const envHost = (process.env.SQL_HOST || process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST || '').trim();
 
+  // 1. Custom / explicitly provided URL parameter (e.g. from tests or explicit caller argument)
+  if (customUrl && typeof customUrl === 'string') {
+    const trimmed = customUrl.trim();
+    if ((trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://')) && !trimmed.includes('••••••••')) {
+      const isLoopbackInProd = isProduction && (trimmed.includes('@localhost') || trimmed.includes('@127.0.0.1'));
+      if (isLoopbackInProd && envHost) {
+        try {
+          const match = trimmed.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
+          if (match) {
+            const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+            candidateUrl = `${match[1]}${envHost}:${port}${match[3]}`;
+          } else {
+            candidateUrl = trimmed;
+          }
+        } catch {
+          candidateUrl = trimmed;
+        }
+      } else {
+        candidateUrl = trimmed;
+      }
+    }
+  }
+
+  // 2. Central Security Vault database configuration (CANONICAL APPLICATION SOURCE)
+  if (!candidateUrl) {
+    try {
+      const vaultDb = systemSecretsService.getDatabaseConfig();
+      if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
+        let targetHost = vaultDb.host;
+        let targetPort: string | number = vaultDb.port || 5432;
+        if (isProduction && (targetHost === 'localhost' || targetHost === '127.0.0.1') && envHost) {
+          targetHost = envHost;
+          targetPort = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || targetPort;
+        }
+        const encUser = encodeURIComponent(vaultDb.user || 'postgres');
+        const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
+        const auth = encPass ? `${encUser}:${encPass}` : encUser;
+        const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
+        candidateUrl = `postgresql://${auth}@${targetHost}:${targetPort}/${vaultDb.database}${sslParam}`;
+      }
+    } catch {}
+  }
+
   // Helper to build connection string from structured environment variables
   const buildFromEnvStructured = (): string => {
     if (!envHost) return '';
@@ -202,54 +245,32 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     return `postgresql://${auth}@${envHost}:${port}/${dbName}`;
   };
 
-  // 1. Explicit connection string environment variable (e.g. DATABASE_URL)
-  const envUrl = (
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRESQL_URL ||
-    process.env.PG_URL ||
-    ''
-  ).trim();
+  // 3. Explicit connection string environment variable (e.g. DATABASE_URL)
+  if (!candidateUrl) {
+    const envUrl = (
+      process.env.DATABASE_URL ||
+      process.env.POSTGRES_URL ||
+      process.env.POSTGRESQL_URL ||
+      process.env.PG_URL ||
+      ''
+    ).trim();
 
-  if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
-    candidateUrl = envUrl;
+    if (envUrl && (envUrl.startsWith('postgres://') || envUrl.startsWith('postgresql://')) && !envUrl.includes('••••••••')) {
+      candidateUrl = envUrl;
+    }
   }
 
-  // 2. Production Docker environment precedence: deployment env DB host takes precedence over stale stored customUrl
+  // 4. Production Docker environment precedence: deployment env DB host takes precedence over stale stored customUrl
   if (!candidateUrl && isProduction && envHost) {
     candidateUrl = buildFromEnvStructured();
   }
 
-  // 3. Custom / stored URL (e.g. from db.json or UI settings)
-  if (!candidateUrl && customUrl && typeof customUrl === 'string') {
-    const trimmed = customUrl.trim();
-    if ((trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://')) && !trimmed.includes('••••••••')) {
-      const isLoopbackInProd = isProduction && (trimmed.includes('@localhost') || trimmed.includes('@127.0.0.1'));
-      if (isLoopbackInProd && envHost) {
-        // Stale localhost/127.0.0.1 in production VPS -> override host with deployment DB_HOST (e.g. timescaledb)
-        try {
-          const match = trimmed.match(/^(postgres(?:ql)?:\/\/[^@]+@)([^:/]+)(?::\d+)?(\/.*)$/);
-          if (match) {
-            const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
-            candidateUrl = `${match[1]}${envHost}:${port}${match[3]}`;
-          } else {
-            candidateUrl = buildFromEnvStructured() || trimmed;
-          }
-        } catch {
-          candidateUrl = buildFromEnvStructured() || trimmed;
-        }
-      } else {
-        candidateUrl = trimmed;
-      }
-    }
-  }
-
-  // 4. Structured environment variables in non-production environments
+  // 5. Structured environment variables in non-production environments
   if (!candidateUrl && envHost) {
     candidateUrl = buildFromEnvStructured();
   }
 
-  // 5. Runtime Secret Store (.db_config.json)
+  // 6. Runtime Secret Store (.db_config.json)
   if (!candidateUrl) {
     try {
       const secretPath = path.resolve(process.cwd(), 'data', '.db_config.json');
@@ -284,22 +305,26 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     } catch {}
   }
 
-  // 6. System Secrets Vault database configuration
-  if (!candidateUrl) {
+  // 7. Inject password from Central Security Vault if URL is missing credentials
+  if (candidateUrl) {
     try {
-      const vaultDb = systemSecretsService.getDatabaseConfig();
-      if (vaultDb.isConfigured && vaultDb.host && vaultDb.database) {
-        let targetHost = vaultDb.host;
-        let targetPort: string | number = vaultDb.port || 5432;
-        if (isProduction && (targetHost === 'localhost' || targetHost === '127.0.0.1') && envHost) {
-          targetHost = envHost;
-          targetPort = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || targetPort;
+      const match = candidateUrl.match(/^(postgres(?:ql)?:\/\/)(?:([^:@]+)(?::([^@]*))?@)?([^/?#]+)(\/[^?#]*)?(\?.*)?$/i);
+      if (match) {
+        const proto = match[1];
+        const user = match[2] || 'iot_user';
+        const existingPass = match[3];
+        const hostPort = match[4];
+        const pathname = match[5] || '/iot_dashboard';
+        const search = match[6] || '';
+
+        if (!existingPass || existingPass === '' || existingPass.includes('••••')) {
+          const vaultPass = systemSecretsService.getDatabasePassword();
+          if (vaultPass) {
+            const encUser = encodeURIComponent(decodeURIComponent(user));
+            const encPass = encodeURIComponent(vaultPass);
+            candidateUrl = `${proto}${encUser}:${encPass}@${hostPort}${pathname}${search}`;
+          }
         }
-        const encUser = encodeURIComponent(vaultDb.user || 'postgres');
-        const encPass = vaultDb.password ? encodeURIComponent(vaultDb.password) : '';
-        const auth = encPass ? `${encUser}:${encPass}` : encUser;
-        const sslParam = vaultDb.sslMode && vaultDb.sslMode !== 'disable' ? `?sslmode=${vaultDb.sslMode}` : '';
-        candidateUrl = `postgresql://${auth}@${targetHost}:${targetPort}/${vaultDb.database}${sslParam}`;
       }
     } catch {}
   }

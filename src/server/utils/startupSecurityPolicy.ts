@@ -212,6 +212,11 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
 
   // 2. JWT / Session Secret Validation (SEC-13 / OLD-113)
   let sessionSecret = (process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
+  if (!sessionSecret) {
+    try {
+      sessionSecret = (systemSecretsService.getJwtSecret() || '').trim();
+    } catch {}
+  }
   if (!sessionSecret && !process.env.NO_SECRET_FILES) {
     // Check mounted Docker secrets or dedicated app secrets
     try {

@@ -327,11 +327,14 @@ export class SetupService {
       }, 'setup_wizard').catch(() => {});
 
       // Synchronize databaseSettings into persistent db.json store
+      // SEC-07: Passwords must NEVER be stored in plaintext in db.json!
+      // The real password is kept exclusively inside Central Security Vault (database.password).
       try {
         if (!db.data.databaseSettings) {
           db.data.databaseSettings = { activeEngine: 'postgres' };
         }
-        db.data.databaseSettings.postgresUrl = this.buildConnectionString(config);
+        const passwordlessConfig = { ...config, password: '' };
+        db.data.databaseSettings.postgresUrl = this.buildConnectionString(passwordlessConfig);
         db.saveData(db.data, true);
       } catch {}
     } catch (err: any) {

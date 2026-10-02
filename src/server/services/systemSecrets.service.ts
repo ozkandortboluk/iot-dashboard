@@ -387,11 +387,29 @@ export class SystemSecretsService {
     const fromVault = this.getSecret('database.password');
     if (fromVault) return fromVault;
 
-    // Fallback to runtime setup service or environment
+    // Auto-migrate from legacy Docker secret or environment into Central Security Vault
+    let candidate = '';
+    const dockerSecretPath = '/run/secrets/db_password';
     try {
-      const runtimePass = process.env.POSTGRES_PASSWORD;
-      if (runtimePass) return runtimePass;
+      if (fs.existsSync(dockerSecretPath)) {
+        candidate = fs.readFileSync(dockerSecretPath, 'utf8').trim();
+      }
     } catch {}
+
+    if (!candidate && process.env.POSTGRES_PASSWORD) {
+      candidate = process.env.POSTGRES_PASSWORD.trim();
+    }
+
+    if (candidate) {
+      systemLogger.info('security', '[Security Migration] PostgreSQL parolası tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
+      this.setSecret('database.password', candidate, {
+        category: 'database',
+        label: 'PostgreSQL Password',
+        isSensitive: true,
+        updatedBy: 'auto_migration',
+      }).catch(() => {});
+      return candidate;
+    }
 
     return '';
   }
@@ -456,13 +474,41 @@ export class SystemSecretsService {
   public getJwtSecret(): string {
     const fromVault = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret');
     if (fromVault) return fromVault;
-    return (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
+
+    const rawEnv = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
+    if (rawEnv) {
+      systemLogger.info('security', '[Security Migration] JWT_SECRET ortam değişkeni tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
+      this.setSecret('authentication.jwt_secret', rawEnv, {
+        category: 'authentication',
+        label: 'JWT Secret',
+        description: 'Oturum ve API token imzalama anahtarı (Migrated)',
+        isSensitive: true,
+        updatedBy: 'auto_migration',
+      }).catch(() => {});
+      return rawEnv;
+    }
+
+    return '';
   }
 
   public getOtaSigningKey(): string {
     const fromVault = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key');
     if (fromVault) return fromVault;
-    return (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
+
+    const rawEnv = (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
+    if (rawEnv) {
+      systemLogger.info('security', '[Security Migration] OTA imzalama anahtarı ortam değişkeni tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
+      this.setSecret('ota.signing_key', rawEnv, {
+        category: 'ota',
+        label: 'OTA Imzalama Özel Anahtarı',
+        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
+        isSensitive: true,
+        updatedBy: 'auto_migration',
+      }).catch(() => {});
+      return rawEnv;
+    }
+
+    return '';
   }
 
   // ============================================================================
