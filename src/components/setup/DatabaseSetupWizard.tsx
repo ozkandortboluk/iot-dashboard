@@ -1126,37 +1126,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                           </>
                         )}
                       </button>
-
-                      {generatedKeysResult?.envSnippet && (
-                        <button
-                          type="button"
-                          onClick={() => copyKeyToClipboard(generatedKeysResult.envSnippet, 'all_env')}
-                          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-medium transition cursor-pointer"
-                        >
-                          {copiedKey === 'all_env' ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-300 font-bold">Kopyalandı!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>📋 Tüm .env Bloğunu Kopyala</span>
-                            </>
-                          )}
-                        </button>
-                      )}
                     </div>
 
                     {generatedKeysResult && (
                       <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl text-xs space-y-2">
                         <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-[11px]">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>Güvenlik anahtarları başarıyla doğrulandı ve sunucuya kaydedildi!</span>
+                          <span>Güvenlik anahtarları başarıyla doğrulandı ve Security Vault kasasına kaydedildi!</span>
                         </div>
                         <p className="text-[10px] text-slate-300">
-                          Mevcut anahtarlarınız korundu. Üretilen anahtarlar <code className="text-emerald-300">secrets/</code> ve <code className="text-emerald-300">.env</code> dosyalarına kaydedildi.
-                          Dilediğiniz an VPS sunucunuzda terminalden <code className="text-indigo-300 font-bold">npm run show-keys</code> komutunu çalıştırarak bu anahtarları görüntüleyebilirsiniz.
+                          Mevcut anahtarlarınız korundu. Tüm uygulama anahtarları (JWT, OTA vb.) AES-256-GCM ile şifrelenerek doğrudan Security Vault kasasında saklanır; diskte veya ortam değişkenlerinde düz metin olarak barındırılmaz.
                         </p>
                       </div>
                     )}

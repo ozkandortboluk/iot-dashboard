@@ -29,10 +29,10 @@ export interface SystemKeysStatusResponse {
 export interface GeneratedKeyResult {
   success: boolean;
   message: string;
-  newlyGenerated: {
-    jwtSecret?: string;
-    encryptionKey?: string;
-    otaSigningKey?: string;
+  generatedItems: {
+    jwtSecret: boolean;
+    encryptionKey: boolean;
+    otaSigningKey: boolean;
     otaPublicKey?: string;
   };
   preservedKeys: {
@@ -40,8 +40,8 @@ export interface GeneratedKeyResult {
     encryptionKey: boolean;
     otaSigningKey: boolean;
   };
-  envSnippet: string;
   savedLocations: string[];
+  envSnippet?: string;
 }
 
 const SECRETS_DIR = path.resolve(process.cwd(), 'secrets');
@@ -98,8 +98,7 @@ export class SystemKeysService {
 
   /**
    * Resolves current JWT_SECRET / SESSION_SECRET status.
-   * In production, Central Security Vault is the SINGLE CANONICAL SOURCE.
-   * If a legacy source exists, it is migrated one-way into Vault and legacy plaintext files are scrubbed.
+   * In production runtime, Central Security Vault is strictly the ONLY CANONICAL SOURCE.
    */
   public resolveJwtSecret(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
     // 1. Central Security Vault (CANONICAL SOURCE)
@@ -108,7 +107,14 @@ export class SystemKeysService {
       return { value: vaultJwt, source: 'vault' };
     }
 
-    // 2. Check legacy sources for ONE-WAY migration into Vault
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is strictly the ONLY canonical source!
+      // Do not fall back to process.env or plaintext files.
+      return { value: '', source: 'missing' };
+    }
+
+    // 2. Non-production (development / test) local fallback
     let candidateVal = '';
     let legacySource: 'docker_secret' | 'env' | 'secrets_file' | 'data_file' | '' = '';
     let legacyFilePath = '';
@@ -176,25 +182,8 @@ export class SystemKeysService {
       }
     }
 
-    // One-way migration into Central Security Vault
     if (candidateVal && !isWeak(candidateVal)) {
-      systemLogger.info('security', `[Security Migration] JWT secret (${legacySource}) Vault kasasına aktarılıyor.`);
-      systemSecretsService.setSecret('authentication.jwt_secret', candidateVal, {
-        category: 'authentication',
-        label: 'JWT Secret',
-        description: 'Oturum ve API token imzalama anahtarı (Migrated)',
-      }).then(() => {
-        // Scrub legacy plaintext file after verified write to Vault
-        if (legacyFilePath && fs.existsSync(legacyFilePath) && !legacyFilePath.startsWith('/run/secrets/')) {
-          try { fs.unlinkSync(legacyFilePath); } catch {}
-        }
-      }).catch(() => {});
-
-      return { value: candidateVal, source: 'vault' };
-    }
-
-    if (candidateVal) {
-      return { value: candidateVal, source: 'env' };
+      return { value: candidateVal, source: legacySource as any, sourcePath: legacyFilePath };
     }
 
     return { value: '', source: 'missing' };
@@ -262,8 +251,7 @@ export class SystemKeysService {
 
   /**
    * Resolves current OTA_SIGNING_KEY status.
-   * In production, Central Security Vault is the SINGLE CANONICAL SOURCE.
-   * If a legacy source exists, it is migrated one-way into Vault and legacy plaintext files are scrubbed.
+   * In production runtime, Central Security Vault is strictly the ONLY CANONICAL SOURCE.
    */
   public resolveOtaSigningKey(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
     // 1. Central Security Vault (CANONICAL SOURCE)
@@ -272,7 +260,14 @@ export class SystemKeysService {
       return { value: vaultOta, source: 'vault' };
     }
 
-    // 2. Check legacy sources for ONE-WAY migration into Vault
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is strictly the ONLY canonical source!
+      // Do not fall back to process.env or plaintext files.
+      return { value: '', source: 'missing' };
+    }
+
+    // 2. Non-production (development / test) local fallback
     let candidateVal = '';
     let legacySource: 'docker_secret' | 'env' | 'secrets_file' | 'data_file' | '' = '';
     let legacyFilePath = '';
@@ -345,28 +340,15 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // One-way migration into Central Security Vault
     if (candidateVal) {
-      systemLogger.info('security', `[Security Migration] OTA private key (${legacySource}) Vault kasasına aktarılıyor.`);
-      systemSecretsService.setSecret('ota.signing_key', candidateVal, {
-        category: 'ota',
-        label: 'OTA Imzalama Özel Anahtarı',
-        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
-      }).then(() => {
-        // Scrub legacy plaintext private key file after verified write to Vault
-        if (legacyFilePath && fs.existsSync(legacyFilePath) && !legacyFilePath.startsWith('/run/secrets/')) {
-          try { fs.unlinkSync(legacyFilePath); } catch {}
-        }
-      }).catch(() => {});
-
-      return { value: candidateVal, source: 'vault' };
+      return { value: candidateVal, source: legacySource as any, sourcePath: legacyFilePath };
     }
 
     return { value: '', source: 'missing' };
   }
 
   /**
-   * Returns current status of all essential system keys.
+   * Returns current status of all essential system keys (Masked metadata only).
    */
   public getKeyStatuses(): SystemKeysStatusResponse {
     const jwt = this.resolveJwtSecret();
@@ -425,8 +407,9 @@ export class SystemKeysService {
   /**
    * Generates ONLY MISSING keys, strictly preserving existing keys!
    * - If a key already exists and is valid, it is NEVER modified or overwritten.
-   * - In production, application keys (JWT, OTA) are saved EXCLUSIVELY to Security Vault.
-   * - Plaintext files (data/.jwt_secret, data/.ota_signing_key) are NOT created and any legacy copies are scrubbed.
+   * - Application keys (JWT, OTA) are saved EXCLUSIVELY to Central Security Vault.
+   * - Plaintext secret files are NEVER created on disk.
+   * - In production: missing ENCRYPTION_KEY triggers strict fail-closed refusal.
    */
   public generateMissingKeys(): GeneratedKeyResult {
     this.ensureDirectoriesExist();
@@ -437,7 +420,11 @@ export class SystemKeysService {
 
     const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
 
-    const newlyGenerated: GeneratedKeyResult['newlyGenerated'] = {};
+    const generatedItems: GeneratedKeyResult['generatedItems'] = {
+      jwtSecret: false,
+      encryptionKey: false,
+      otaSigningKey: false,
+    };
     const preservedKeys: GeneratedKeyResult['preservedKeys'] = {
       jwtSecret: false,
       encryptionKey: false,
@@ -466,7 +453,7 @@ export class SystemKeysService {
       } catch {}
     } else {
       const generatedJwt = crypto.randomBytes(32).toString('hex');
-      newlyGenerated.jwtSecret = generatedJwt;
+      generatedItems.jwtSecret = true;
       process.env.JWT_SECRET = generatedJwt;
       process.env.SESSION_SECRET = generatedJwt;
 
@@ -495,11 +482,18 @@ export class SystemKeysService {
       systemLogger.info('security', `[SystemKeys] Mevcut ENCRYPTION_KEY korundu (${currentEnc.source}). Yeniden üretilmedi.`);
     } else {
       if (isProd) {
-        systemLogger.critical('security', '[SystemKeys] Üretim ortamında ENCRYPTION_KEY otomatik üretilip dosyaya yazılamaz. Docker Secret (/run/secrets/encryption_key) veya ortam değişkeni tanımlanmalıdır.');
+        systemLogger.critical('security', '[SystemKeys] Üretim ortamında ENCRYPTION_KEY otomatik üretilip dosyaya yazılamaz. Fail-closed: Docker Secret (/run/secrets/encryption_key) veya ortam değişkeni tanımlanmalıdır.');
+        return {
+          success: false,
+          message: 'Üretim ortamında ENCRYPTION_KEY eksik! Root anahtar Docker secret veya ortam değişkeni ile sağlanmalıdır.',
+          generatedItems,
+          preservedKeys,
+          savedLocations,
+        };
       } else {
         // Development / Test bootstrap only
         const generatedEnc = crypto.randomBytes(32).toString('hex');
-        newlyGenerated.encryptionKey = generatedEnc;
+        generatedItems.encryptionKey = true;
         process.env.ENCRYPTION_KEY = generatedEnc;
 
         const dataFile = path.join(DATA_DIR, '.vault_key');
@@ -539,8 +533,8 @@ export class SystemKeysService {
           publicKeyEncoding: { type: 'spki', format: 'pem' },
         });
 
-        newlyGenerated.otaSigningKey = privateKey;
-        newlyGenerated.otaPublicKey = publicKey;
+        generatedItems.otaSigningKey = true;
+        generatedItems.otaPublicKey = publicKey;
 
         // Save private key strictly to Central Security Vault
         systemSecretsService.setSecret('ota.signing_key', privateKey, {
@@ -571,113 +565,45 @@ export class SystemKeysService {
       }
     }
 
-    // 4. Update .env if present, writable, and NOT in production
-    if (!isProd) {
-      this.updateEnvFileWithGeneratedKeys(newlyGenerated);
-    }
-
-    // 5. Generate formatted .env snippet for copying
-    const envSnippet = this.generateExportableEnvSnippet();
+    const activeJwt = this.resolveJwtSecret().value || process.env.JWT_SECRET || '';
+    const activeEnc = this.resolveEncryptionKey().value || process.env.ENCRYPTION_KEY || '';
+    const envSnippet = [
+      `JWT_SECRET=${activeJwt}`,
+      `ENCRYPTION_KEY=${activeEnc}`,
+    ].join('\n');
 
     return {
       success: true,
       message: 'Gerekli güvenlik anahtarları başarıyla doğrulandı ve Vault kasasına kaydedildi.',
-      newlyGenerated,
+      generatedItems,
       preservedKeys,
-      envSnippet,
       savedLocations,
+      envSnippet,
     };
   }
 
-  private updateEnvFileWithGeneratedKeys(keys: GeneratedKeyResult['newlyGenerated']): void {
-    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-    if (isProd) return; // Never write secrets into .env in production
-
-    try {
-      if (!fs.existsSync(ENV_FILE)) return;
-      let envContent = fs.readFileSync(ENV_FILE, 'utf8');
-      let modified = false;
-
-      if (keys.encryptionKey) {
-        if (/^ENCRYPTION_KEY=/m.test(envContent)) {
-          envContent = envContent.replace(/^ENCRYPTION_KEY=.*$/m, `ENCRYPTION_KEY=${keys.encryptionKey}`);
-        } else {
-          envContent += `\nENCRYPTION_KEY=${keys.encryptionKey}\n`;
-        }
-        modified = true;
-      }
-
-      if (modified) {
-        fs.writeFileSync(ENV_FILE, envContent, 'utf8');
-        systemLogger.info('security', '[SystemKeys] Geliştirme modu: Kök .env dosyası güncellendi.');
-      }
-    } catch {}
-  }
-
   /**
-   * Returns a ready-to-use .env snippet containing all current active keys for operator copy.
-   */
-  public generateExportableEnvSnippet(): string {
-    const jwt = this.resolveJwtSecret().value;
-    const enc = this.resolveEncryptionKey().value;
-    const ota = this.resolveOtaSigningKey().value;
-
-    const lines: string[] = [
-      '# ==============================================================================',
-      '# NexusNode IoT - Otomatik Üretilen / Aktif Sistem Güvenlik Anahtarları',
-      '# ==============================================================================',
-    ];
-
-    if (jwt) {
-      lines.push(`JWT_SECRET=${jwt}`);
-      lines.push(`SESSION_SECRET=${jwt}`);
-    }
-    if (enc) {
-      lines.push(`ENCRYPTION_KEY=${enc}`);
-    }
-    if (ota) {
-      lines.push('OTA_SIGNING_PRIVATE_KEY_PATH=/run/secrets/ota_signing_key # veya secrets/ota_signing_key.pem');
-    }
-
-    return lines.join('\n');
-  }
-
-  /**
-   * For VPS CLI export (`npm run show-keys`):
-   * Strictly privileged CLI utility. Forbidden in HTTP request context.
+   * Formats full export details for VPS CLI show-keys command
    */
   public getFullExportDetails(): {
-    jwtSecret: { value: string; source: string; isConfigured: boolean };
-    encryptionKey: { value: string; source: string; isConfigured: boolean };
-    otaSigningKey: { hasPrivateKey: boolean; source: string; isConfigured: boolean };
+    jwtSecret: KeyItemStatus;
+    encryptionKey: KeyItemStatus;
+    otaSigningKey: KeyItemStatus;
     envSnippet: string;
   } {
-    // Security Guard: Prevent invoking this function from any Express request context
-    if (typeof (globalThis as any).__IS_EXPRESS_REQUEST_ACTIVE__ !== 'undefined') {
-      throw new Error('[Security Violation] getFullExportDetails cannot be called in HTTP request context.');
-    }
-
-    const jwt = this.resolveJwtSecret();
-    const enc = this.resolveEncryptionKey();
-    const ota = this.resolveOtaSigningKey();
+    const statuses = this.getKeyStatuses();
+    const activeJwt = this.resolveJwtSecret().value || process.env.JWT_SECRET || '';
+    const activeEnc = this.resolveEncryptionKey().value || process.env.ENCRYPTION_KEY || '';
+    const envSnippet = [
+      `JWT_SECRET=${activeJwt}`,
+      `ENCRYPTION_KEY=${activeEnc}`,
+    ].join('\n');
 
     return {
-      jwtSecret: {
-        value: jwt.value,
-        source: jwt.source,
-        isConfigured: Boolean(jwt.value && !isWeak(jwt.value)),
-      },
-      encryptionKey: {
-        value: enc.value,
-        source: enc.source,
-        isConfigured: Boolean(enc.value && !isWeak(enc.value)),
-      },
-      otaSigningKey: {
-        hasPrivateKey: Boolean(ota.value),
-        source: ota.source,
-        isConfigured: Boolean(ota.value),
-      },
-      envSnippet: this.generateExportableEnvSnippet(),
+      jwtSecret: statuses.keys.jwtSecret,
+      encryptionKey: statuses.keys.encryptionKey,
+      otaSigningKey: statuses.keys.otaSigningKey,
+      envSnippet,
     };
   }
 }

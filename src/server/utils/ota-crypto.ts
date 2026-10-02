@@ -58,16 +58,16 @@ export function getEd25519KeyPair(): KeyPair {
   if (cachedKeyPair) return cachedKeyPair;
 
   const activeKeyId = process.env.OTA_SIGNING_KEY_ID || 'root_ed25519_v1';
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
 
-  // 1. Check direct PEM string from AES-256-GCM Vault or environment secret
-  const rawEnvOrVaultKey = systemSecretsService.getOtaSigningKey() ||
-    process.env.OTA_SIGNING_PRIVATE_KEY ||
-    systemSecretsService.getSecret('ota.signing_private_key') ||
-    systemSecretsService.getSecret('ota_signing_private_key');
+  // 1. Check direct PEM string from AES-256-GCM Vault (CANONICAL RUNTIME SOURCE)
+  const rawVaultKey = systemSecretsService.getOtaSigningKey() ||
+    systemSecretsService.getSecret('ota.signing_key') ||
+    systemSecretsService.getSecret('ota_signing_key');
 
-  if (rawEnvOrVaultKey) {
+  if (rawVaultKey) {
     try {
-      const privateKeyPem = rawEnvOrVaultKey.replace(/\\n/g, '\n');
+      const privateKeyPem = rawVaultKey.replace(/\\n/g, '\n');
       const privKeyObj = crypto.createPrivateKey(privateKeyPem);
       const pubKeyObj = crypto.createPublicKey(privKeyObj);
       const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
@@ -75,16 +75,17 @@ export function getEd25519KeyPair(): KeyPair {
       cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
       return cachedKeyPair;
     } catch (err: any) {
-      console.error('[OTA Crypto] OTA imzalama özel anahtarı ayrıştırılamadı:', err.message);
+      console.error('[OTA Crypto] Vault OTA imzalama özel anahtarı ayrıştırılamadı:', err.message);
     }
   }
 
-  // 2. Check secret file paths in strict order of security priority:
-  //    a) /run/secrets/ota_signing_key (Standard Docker Secret / Kubernetes Secret)
-  //    b) /run/secrets/ota_private_key
-  //    c) Custom path defined in OTA_SIGNING_PRIVATE_KEY_PATH
-  //    d) Protected project secret ./secrets/ota_signing_key.pem
-  //    e) Legacy persistent storage ./uploads/keys/ed25519_private.pem
+  // In production runtime, Security Vault is strictly the ONLY canonical source!
+  // Refuse fallback to process.env or plaintext disk files.
+  if (isProd) {
+    throw new Error('[OTA Crypto] Üretim ortamında OTA imzalama özel anahtarı tanımlanmamış veya Vault kasasında bulunamadı.');
+  }
+
+  // 2. Non-production development & test fallback: check candidate files or env
   const candidateSecretPaths = [
     '/run/secrets/ota_signing_key',
     '/run/secrets/ota_private_key',
@@ -92,6 +93,19 @@ export function getEd25519KeyPair(): KeyPair {
     path.join(SECRETS_DIR, 'ota_signing_key.pem'),
     path.join(KEYS_DIR, 'ed25519_private.pem'),
   ].filter((p): p is string => Boolean(p));
+
+  const rawEnvKey = process.env.OTA_SIGNING_PRIVATE_KEY;
+  if (rawEnvKey) {
+    try {
+      const privateKeyPem = rawEnvKey.replace(/\\n/g, '\n');
+      const privKeyObj = crypto.createPrivateKey(privateKeyPem);
+      const pubKeyObj = crypto.createPublicKey(privKeyObj);
+      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
+      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
+      cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
+      return cachedKeyPair;
+    } catch {}
+  }
 
   for (const secretPath of candidateSecretPaths) {
     if (fs.existsSync(secretPath)) {

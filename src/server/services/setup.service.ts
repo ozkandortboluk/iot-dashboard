@@ -115,7 +115,81 @@ export class SetupService {
       return null;
     }
     try {
-      // 1. Check Docker Secrets first (production standard)
+      const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+
+      // 1. Check protected server-side runtime configuration file (.db_config.json)
+      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+        const raw = fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          this.isCompletedState = Boolean(parsed.isCompleted);
+          this.completedAtDate = parsed.completedAt || null;
+
+          let pass = '';
+          // LEGACY MIGRATION: If legacy plaintext password exists in .db_config.json,
+          // migrate immediately to encrypted Vault and scrub from disk
+          if (parsed.password && typeof parsed.password === 'string' && !parsed.password.includes('••••')) {
+            pass = parsed.password;
+            systemLogger.warn('security', '[Security Migration] .db_config.json içinde eski plaintext şifre tespit edildi. Güvenli Vault kasasına taşınıyor.');
+            systemSecretsService.setSecret('database.password', parsed.password, {
+              category: 'database',
+              label: 'PostgreSQL Password',
+              isSensitive: true,
+              updatedBy: 'legacy_migration',
+            }).catch(() => {});
+
+            // Scrub password from disk immediately
+            try {
+              const scrubbed = { ...parsed };
+              delete scrubbed.password;
+              scrubbed.hasPassword = true;
+              scrubbed.passwordRef = 'vault:database.password';
+              scrubbed.updatedAt = new Date().toISOString();
+              fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
+            } catch {}
+          } else {
+            // In normal operation, retrieve password securely from Central Security Vault
+            pass = systemSecretsService.getDatabasePassword();
+          }
+
+          if (!pass && fs.existsSync(DOCKER_SECRET_PASSWORD_PATH)) {
+            pass = fs.readFileSync(DOCKER_SECRET_PASSWORD_PATH, 'utf8').trim();
+          }
+          if (!pass && !isProdEnv && process.env.POSTGRES_PASSWORD) {
+            pass = process.env.POSTGRES_PASSWORD;
+          }
+
+          this.runtimeConfig = {
+            host: parsed.host || 'timescaledb',
+            port: Number(parsed.port) || 5432,
+            database: parsed.database || 'iot_dashboard',
+            user: parsed.user || 'iot_user',
+            password: pass,
+            sslMode: parsed.sslMode || 'disable',
+            rejectUnauthorized: parsed.rejectUnauthorized ?? (parsed.sslMode && parsed.sslMode !== 'disable'),
+          };
+          return this.runtimeConfig;
+        }
+      }
+
+      // 2. Check protected system secrets vault (AES-256-GCM encrypted - CANONICAL RUNTIME SOURCE)
+      const vaultDb = systemSecretsService.getDatabaseConfig();
+      if (vaultDb.isConfigured && vaultDb.host) {
+        const isInternalHost = ['localhost', '127.0.0.1', 'timescaledb', 'nexus_timescaledb', 'postgres', 'db'].includes(vaultDb.host.toLowerCase());
+        const rejectUnauthorized = isProdEnv && !isInternalHost ? true : (vaultDb.sslMode ? vaultDb.sslMode !== 'disable' : false);
+        this.runtimeConfig = {
+          host: vaultDb.host,
+          port: vaultDb.port,
+          database: vaultDb.database,
+          user: vaultDb.user,
+          password: vaultDb.password,
+          sslMode: (vaultDb.sslMode as any) || 'disable',
+          rejectUnauthorized,
+        };
+        return this.runtimeConfig;
+      }
+
+      // 3. Check Docker Secrets (production deployment standard)
       if (fs.existsSync(DOCKER_SECRET_DATABASE_URL_PATH)) {
         const secretUrl = fs.readFileSync(DOCKER_SECRET_DATABASE_URL_PATH, 'utf8').trim();
         if (secretUrl) {
@@ -134,78 +208,8 @@ export class SetupService {
         }
       }
 
-      // 2. Check protected server-side runtime configuration file (.db_config.json)
-      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
-        const raw = fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          this.isCompletedState = Boolean(parsed.isCompleted);
-          this.completedAtDate = parsed.completedAt || null;
-
-          // LEGACY MIGRATION: If legacy plaintext password exists in .db_config.json,
-          // migrate immediately to encrypted Vault and scrub from disk
-          if (parsed.password && typeof parsed.password === 'string' && !parsed.password.includes('••••')) {
-            systemLogger.warn('security', '[Security Migration] .db_config.json içinde eski plaintext şifre tespit edildi. Güvenli Vault kasasına taşınıyor.');
-            systemSecretsService.setSecret('database.password', parsed.password, {
-              category: 'database',
-              label: 'PostgreSQL Password',
-              isSensitive: true,
-              updatedBy: 'legacy_migration',
-            }).catch(() => {});
-
-            // Scrub password from disk
-            try {
-              const scrubbed = { ...parsed };
-              delete scrubbed.password;
-              scrubbed.hasPassword = true;
-              scrubbed.passwordRef = 'vault:database.password';
-              scrubbed.updatedAt = new Date().toISOString();
-              fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
-            } catch {}
-          }
-
-          // Resolve real password from Vault, Docker secret, or env
-          let pass = systemSecretsService.getDatabasePassword();
-          if (!pass && fs.existsSync(DOCKER_SECRET_PASSWORD_PATH)) {
-            pass = fs.readFileSync(DOCKER_SECRET_PASSWORD_PATH, 'utf8').trim();
-          }
-          if (!pass && process.env.POSTGRES_PASSWORD) {
-            pass = process.env.POSTGRES_PASSWORD;
-          }
-
-          this.runtimeConfig = {
-            host: parsed.host || 'timescaledb',
-            port: Number(parsed.port) || 5432,
-            database: parsed.database || 'iot_dashboard',
-            user: parsed.user || 'iot_user',
-            password: pass,
-            sslMode: parsed.sslMode || 'disable',
-            rejectUnauthorized: parsed.rejectUnauthorized ?? (parsed.sslMode && parsed.sslMode !== 'disable'),
-          };
-          return this.runtimeConfig;
-        }
-      }
-
-      // 3. Check protected system secrets vault (AES-256-GCM encrypted)
-      const vaultDb = systemSecretsService.getDatabaseConfig();
-      if (vaultDb.isConfigured && vaultDb.host) {
-        const isInternalHost = ['localhost', '127.0.0.1', 'timescaledb', 'nexus_timescaledb', 'postgres', 'db'].includes(vaultDb.host.toLowerCase());
-        const isProdEnv = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-        const rejectUnauthorized = isProdEnv && !isInternalHost ? true : (vaultDb.sslMode ? vaultDb.sslMode !== 'disable' : false);
-        this.runtimeConfig = {
-          host: vaultDb.host,
-          port: vaultDb.port,
-          database: vaultDb.database,
-          user: vaultDb.user,
-          password: vaultDb.password,
-          sslMode: (vaultDb.sslMode as any) || 'disable',
-          rejectUnauthorized,
-        };
-        return this.runtimeConfig;
-      }
-
-      // 3. Fallback to process.env.DATABASE_URL
-      if (process.env.DATABASE_URL) {
+      // 4. Non-production fallback to process.env.DATABASE_URL
+      if (!isProdEnv && process.env.DATABASE_URL) {
         try {
           const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
           const isDisable = process.env.DATABASE_URL.includes('sslmode=disable');
@@ -222,8 +226,8 @@ export class SetupService {
         } catch {}
       }
 
-      // 4. Fallback to individual POSTGRES_* env vars or Docker standard defaults
-      if (process.env.POSTGRES_HOST || process.env.POSTGRES_USER || process.env.POSTGRES_PASSWORD) {
+      // 5. Non-production fallback to individual POSTGRES_* env vars or Docker standard defaults
+      if (!isProdEnv && (process.env.POSTGRES_HOST || process.env.POSTGRES_USER || process.env.POSTGRES_PASSWORD)) {
         this.runtimeConfig = {
           host: process.env.POSTGRES_HOST || 'timescaledb',
           port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
@@ -235,13 +239,13 @@ export class SetupService {
         return this.runtimeConfig;
       }
 
-      // 5. Fallback to db.data.databaseSettings.postgresUrl (persisted in db.json)
+      // 6. Fallback to db.data.databaseSettings.postgresUrl (persisted in db.json without password)
       try {
         const storedUrl = db.data?.databaseSettings?.postgresUrl;
         if (storedUrl && (storedUrl.startsWith('postgres://') || storedUrl.startsWith('postgresql://'))) {
           const parsed = new URL(storedUrl.replace(/^postgres(ql)?:\/\//i, 'http://'));
           const isDisable = storedUrl.includes('sslmode=disable');
-          const pass = decodeURIComponent(parsed.password || '') || process.env.POSTGRES_PASSWORD || '';
+          const pass = systemSecretsService.getDatabasePassword() || decodeURIComponent(parsed.password || '') || (!isProdEnv ? process.env.POSTGRES_PASSWORD || '' : '');
           this.runtimeConfig = {
             host: parsed.hostname || 'timescaledb',
             port: parseInt(parsed.port || '5432', 10),
@@ -899,9 +903,10 @@ export class SetupService {
 
     // SSRF and hostname security validation
     this.validateDatabaseHost(config.host, config.port);
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     const effectiveConfig: DatabaseConfigPayload = {
       ...config,
-      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
+      password: config.password || systemSecretsService.getDatabasePassword() || this.runtimeConfig?.password || (!isProd ? process.env.POSTGRES_PASSWORD || '' : ''),
     };
     const connStr = this.buildConnectionString(effectiveConfig);
     const startTime = Date.now();
@@ -1030,9 +1035,10 @@ export class SetupService {
       throw new Error('Kurulum zaten tamamlanmış. Yetkisiz yeniden yapılandırma engellendi.');
     }
 
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     const effectiveConfig: DatabaseConfigPayload = {
       ...config,
-      password: config.password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
+      password: config.password || systemSecretsService.getDatabasePassword() || this.runtimeConfig?.password || (!isProd ? process.env.POSTGRES_PASSWORD || '' : ''),
     };
 
     // 1. Verify connection first

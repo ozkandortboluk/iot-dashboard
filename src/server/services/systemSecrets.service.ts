@@ -387,31 +387,14 @@ export class SystemSecretsService {
     const fromVault = this.getSecret('database.password');
     if (fromVault) return fromVault;
 
-    // Auto-migrate from legacy Docker secret or environment into Central Security Vault
-    let candidate = '';
-    const dockerSecretPath = '/run/secrets/db_password';
-    try {
-      if (fs.existsSync(dockerSecretPath)) {
-        candidate = fs.readFileSync(dockerSecretPath, 'utf8').trim();
-      }
-    } catch {}
-
-    if (!candidate && process.env.POSTGRES_PASSWORD) {
-      candidate = process.env.POSTGRES_PASSWORD.trim();
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      return '';
     }
 
-    if (candidate) {
-      systemLogger.info('security', '[Security Migration] PostgreSQL parolası tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
-      this.setSecret('database.password', candidate, {
-        category: 'database',
-        label: 'PostgreSQL Password',
-        isSensitive: true,
-        updatedBy: 'auto_migration',
-      }).catch(() => {});
-      return candidate;
-    }
-
-    return '';
+    // Non-production (development / test) local fallback
+    return (process.env.POSTGRES_PASSWORD || '').trim();
   }
 
   public getDatabaseConfig(): {
@@ -453,6 +436,12 @@ export class SystemSecretsService {
       return fromVault;
     }
 
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      return '';
+    }
+
     const fromEnv = (process.env.RESEND_API_KEY || '').trim();
     if (fromEnv && fromEnv.startsWith('re_')) {
       return fromEnv;
@@ -464,7 +453,14 @@ export class SystemSecretsService {
   public getSmtpPassword(): string {
     const fromVault = this.getSecret('email.smtpPass');
     if (fromVault) return fromVault;
-    return process.env.SMTP_PASS || '';
+
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      return '';
+    }
+
+    return (process.env.SMTP_PASS || '').trim();
   }
 
   // ============================================================================
@@ -475,40 +471,164 @@ export class SystemSecretsService {
     const fromVault = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret');
     if (fromVault) return fromVault;
 
-    const rawEnv = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
-    if (rawEnv) {
-      systemLogger.info('security', '[Security Migration] JWT_SECRET ortam değişkeni tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
-      this.setSecret('authentication.jwt_secret', rawEnv, {
-        category: 'authentication',
-        label: 'JWT Secret',
-        description: 'Oturum ve API token imzalama anahtarı (Migrated)',
-        isSensitive: true,
-        updatedBy: 'auto_migration',
-      }).catch(() => {});
-      return rawEnv;
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      return '';
     }
 
-    return '';
+    return (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
   }
 
   public getOtaSigningKey(): string {
     const fromVault = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key');
     if (fromVault) return fromVault;
 
-    const rawEnv = (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
-    if (rawEnv) {
-      systemLogger.info('security', '[Security Migration] OTA imzalama anahtarı ortam değişkeni tespit edildi, tekil canonical Vault kasasına aktarılıyor.');
-      this.setSecret('ota.signing_key', rawEnv, {
-        category: 'ota',
-        label: 'OTA Imzalama Özel Anahtarı',
-        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
-        isSensitive: true,
-        updatedBy: 'auto_migration',
-      }).catch(() => {});
-      return rawEnv;
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (isProd) {
+      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      return '';
     }
 
-    return '';
+    return (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
+  }
+
+  /**
+   * Explicit one-way migration for legacy plaintext sources into Central Security Vault.
+   * Reads legacy source, validates, encrypts into Vault, verifies from Vault, and scrubs legacy plaintext.
+   */
+  public async migrateLegacySecrets(): Promise<{ migratedCount: number; keys: string[] }> {
+    const migratedKeys: string[] = [];
+
+    // 1. DB password from legacy Docker secret or environment
+    if (!this.getSecret('database.password')) {
+      let candidate = '';
+      const dockerSecretPath = '/run/secrets/db_password';
+      try {
+        if (fs.existsSync(dockerSecretPath)) candidate = fs.readFileSync(dockerSecretPath, 'utf8').trim();
+      } catch {}
+      if (!candidate && process.env.POSTGRES_PASSWORD) {
+        candidate = process.env.POSTGRES_PASSWORD.trim();
+      }
+      if (candidate) {
+        await this.setSecret('database.password', candidate, {
+          category: 'database',
+          label: 'PostgreSQL Password',
+          isSensitive: true,
+          updatedBy: 'legacy_migration',
+        });
+        if (this.getSecret('database.password') === candidate) {
+          migratedKeys.push('database.password');
+          systemLogger.info('security', '[Migration] PostgreSQL parolası Vault kasasına başarıyla aktarıldı ve doğrulandı.');
+        }
+      }
+    }
+
+    // 2. JWT Secret from legacy files or environment
+    if (!this.getSecret('authentication.jwt_secret') && !this.getSecret('jwt_secret')) {
+      let candidate = '';
+      let legacyFilePath = '';
+      const fileCandidates = [
+        path.join(process.cwd(), 'secrets', 'jwt_secret'),
+        path.join(process.cwd(), 'data', '.jwt_secret'),
+        path.join(process.cwd(), 'secrets', 'session_secret'),
+        path.join(process.cwd(), 'data', '.session_secret'),
+      ];
+      for (const p of fileCandidates) {
+        if (fs.existsSync(p)) {
+          try {
+            const v = fs.readFileSync(p, 'utf8').trim();
+            if (v && v.length >= 16) {
+              candidate = v;
+              legacyFilePath = p;
+              break;
+            }
+          } catch {}
+        }
+      }
+      if (!candidate && process.env.JWT_SECRET) {
+        candidate = process.env.JWT_SECRET.trim();
+      }
+      if (candidate && candidate.length >= 16) {
+        await this.setSecret('authentication.jwt_secret', candidate, {
+          category: 'authentication',
+          label: 'JWT Secret',
+          isSensitive: true,
+          updatedBy: 'legacy_migration',
+        });
+        if (this.getSecret('authentication.jwt_secret') === candidate) {
+          migratedKeys.push('authentication.jwt_secret');
+          if (legacyFilePath && fs.existsSync(legacyFilePath)) {
+            try { fs.unlinkSync(legacyFilePath); } catch {}
+          }
+          systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+        }
+      }
+    }
+
+    // 3. OTA Private Key from legacy files or environment
+    if (!this.getSecret('ota.signing_key') && !this.getSecret('ota_signing_key')) {
+      let candidate = '';
+      let legacyFilePath = '';
+      const fileCandidates = [
+        path.join(process.cwd(), 'secrets', 'ota_signing_key.pem'),
+        path.join(process.cwd(), 'data', '.ota_signing_key'),
+        path.join(process.cwd(), 'uploads', 'keys', 'ed25519_private.pem'),
+      ];
+      for (const p of fileCandidates) {
+        if (fs.existsSync(p)) {
+          try {
+            const v = fs.readFileSync(p, 'utf8').trim();
+            if (v && v.includes('PRIVATE KEY')) {
+              candidate = v;
+              legacyFilePath = p;
+              break;
+            }
+          } catch {}
+        }
+      }
+      if (!candidate && process.env.OTA_SIGNING_PRIVATE_KEY) {
+        candidate = process.env.OTA_SIGNING_PRIVATE_KEY.trim();
+      }
+      if (candidate) {
+        await this.setSecret('ota.signing_key', candidate, {
+          category: 'ota',
+          label: 'OTA Imzalama Özel Anahtarı',
+          isSensitive: true,
+          updatedBy: 'legacy_migration',
+        });
+        if (this.getSecret('ota.signing_key') === candidate) {
+          migratedKeys.push('ota.signing_key');
+          if (legacyFilePath && fs.existsSync(legacyFilePath)) {
+            try { fs.unlinkSync(legacyFilePath); } catch {}
+          }
+          systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+        }
+      }
+    }
+
+    // 4. Email credentials from legacy environment
+    if (!this.getSecret('email.resendApiKey') && process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.startsWith('re_')) {
+      await this.setSecret('email.resendApiKey', process.env.RESEND_API_KEY.trim(), {
+        category: 'email',
+        label: 'Resend API Key',
+        isSensitive: true,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('email.resendApiKey');
+    }
+
+    if (!this.getSecret('email.smtpPass') && process.env.SMTP_PASS) {
+      await this.setSecret('email.smtpPass', process.env.SMTP_PASS.trim(), {
+        category: 'email',
+        label: 'SMTP Password',
+        isSensitive: true,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('email.smtpPass');
+    }
+
+    return { migratedCount: migratedKeys.length, keys: migratedKeys };
   }
 
   // ============================================================================
