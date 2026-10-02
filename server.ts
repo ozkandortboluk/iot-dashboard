@@ -336,6 +336,7 @@ app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/database', databaseRouter);
+app.use('/api/database/timescale', timescaleRouter);
 app.use('/api/timescale', timescaleRouter);
 app.use('/api/simulator', simulatorRouter);
 app.use('/api/firmwares', firmwareRouter);
