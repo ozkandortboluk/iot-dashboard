@@ -57,30 +57,19 @@ describe('System Keys Automatic Generation & Preservation Service', () => {
     expect(details.envSnippet).toBeTruthy();
   });
 
-  it('supports cryptographic key rotation with keyId and version history tracking', async () => {
+  it('preserves key metadata and ensures stability without unexpected rotation', async () => {
     // 1. Initial state
     await systemKeysService.generateMissingKeys();
     const initialStatus = systemKeysService.getKeyStatuses();
-    expect(initialStatus.keys.jwtSecret.rotatable).toBe(true);
+    expect(initialStatus.keys.jwtSecret.isConfigured).toBe(true);
+    expect(initialStatus.keys.jwtSecret.rotatable).toBe(false);
+    expect(initialStatus.keys.otaSigningKey.rotatable).toBe(false);
 
-    // 2. Rotate JWT secret
-    const rotateJwt = await systemKeysService.rotateJwtSecret('test_admin');
-    expect(rotateJwt.success).toBe(true);
-    expect(rotateJwt.version).toBeGreaterThan(1);
-    expect(rotateJwt.newKeyId).toContain('jwt_v');
-
-    // 3. Verify updated status reflects new keyId and version
-    const updatedStatus = systemKeysService.getKeyStatuses();
-    expect(updatedStatus.keys.jwtSecret.keyId).toBe(rotateJwt.newKeyId);
-    expect(updatedStatus.keys.jwtSecret.version).toBe(rotateJwt.version);
-
-    // 4. Rotate OTA signing key
-    const rotateOta = await systemKeysService.rotateOtaSigningKey('test_admin');
-    expect(rotateOta.success).toBe(true);
-    expect(rotateOta.newKeyId).toContain('root_ed25519_v');
-    expect(rotateOta.publicKeyPem).toContain('BEGIN PUBLIC KEY');
-
-    const updatedOtaStatus = systemKeysService.getKeyStatuses();
-    expect(updatedOtaStatus.keys.otaSigningKey.keyId).toBe(rotateOta.newKeyId);
+    // 2. Calling generateMissingKeys again must strictly preserve existing keys
+    const secondPass = await systemKeysService.generateMissingKeys();
+    expect(secondPass.preservedKeys.jwtSecret).toBe(true);
+    expect(secondPass.preservedKeys.otaSigningKey).toBe(true);
+    expect(secondPass.generatedItems.jwtSecret).toBe(false);
+    expect(secondPass.generatedItems.otaSigningKey).toBe(false);
   });
 });

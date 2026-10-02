@@ -76,6 +76,20 @@ function mask(val: string): string {
   return `${val.substring(0, 4)}...${val.substring(val.length - 4)}`;
 }
 
+function isProductionVpsEnvironment(): boolean {
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(
+    process.env.K_SERVICE ||
+    process.env.K_REVISION ||
+    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.AIS_PREVIEW === 'true' ||
+    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
+    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
+  ) && !isVpsProd;
+  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+}
+
 export class SystemKeysService {
   private static instance: SystemKeysService;
 
@@ -110,7 +124,7 @@ export class SystemKeysService {
       return { value: vaultJwt, source: 'vault' };
     }
 
-    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    const isProd = isProductionVpsEnvironment();
     if (isProd) {
       // In production runtime: Security Vault is strictly the ONLY canonical source!
       // Do not fall back to process.env or plaintext files.
@@ -194,11 +208,13 @@ export class SystemKeysService {
 
   /**
    * Resolves current ENCRYPTION_KEY status without mutating anything.
-   * Preferred: Docker Secret /run/secrets/encryption_key or environment variable.
-   * In production, local file fallback (data/.vault_key or secrets/encryption_key) is STRICTLY FORBIDDEN.
+   * PRODUCTION POLICY: Strictly and exclusively /run/secrets/encryption_key (Docker Secret).
+   * In production, all fallbacks (environment variables, local files, custom paths) are strictly rejected.
    */
   public resolveEncryptionKey(): { value: string; source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Docker Secret (Preferred in production)
+    const isProd = isProductionVpsEnvironment();
+
+    // 1. Docker Secret (/run/secrets/encryption_key)
     const dockerPath = '/run/secrets/encryption_key';
     try {
       if (fs.existsSync(dockerPath)) {
@@ -207,6 +223,12 @@ export class SystemKeysService {
       }
     } catch {}
 
+    if (isProd) {
+      // In production, no fallback is permitted: fail-closed!
+      return { value: '', source: 'missing' };
+    }
+
+    // Non-production (development / test / local) fallbacks:
     // 2. Environment variable
     const envVal = (process.env.ENCRYPTION_KEY || '').trim();
     if (envVal && !isWeak(envVal)) {
@@ -224,27 +246,23 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 4. Strict production boundary: Do NOT read local fallback files in production!
-    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-    if (!isProd) {
-      const secretPath = path.join(SECRETS_DIR, 'encryption_key');
-      try {
-        if (fs.existsSync(secretPath)) {
-          const val = fs.readFileSync(secretPath, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: secretPath };
-        }
-      } catch {}
+    // 4. Development local files
+    const secretPath = path.join(SECRETS_DIR, 'encryption_key');
+    try {
+      if (fs.existsSync(secretPath)) {
+        const val = fs.readFileSync(secretPath, 'utf8').trim();
+        if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: secretPath };
+      }
+    } catch {}
 
-      const dataPath = path.join(DATA_DIR, '.vault_key');
-      try {
-        if (fs.existsSync(dataPath)) {
-          const val = fs.readFileSync(dataPath, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: dataPath };
-        }
-      } catch {}
-    }
+    const dataPath = path.join(DATA_DIR, '.vault_key');
+    try {
+      if (fs.existsSync(dataPath)) {
+        const val = fs.readFileSync(dataPath, 'utf8').trim();
+        if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: dataPath };
+      }
+    } catch {}
 
-    // 5. Weak env value fallback if present (causes validation rejection)
     if (envVal) {
       return { value: envVal, source: 'env' };
     }
@@ -263,7 +281,7 @@ export class SystemKeysService {
       return { value: vaultOta, source: 'vault' };
     }
 
-    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    const isProd = isProductionVpsEnvironment();
     if (isProd) {
       // In production runtime: Security Vault is strictly the ONLY canonical source!
       // Do not fall back to process.env or plaintext files.
@@ -372,7 +390,7 @@ export class SystemKeysService {
       description: 'Kullanıcı oturumları ve API token imzalama anahtarı (HMAC-SHA256).',
       keyId: jwtRec?.keyId || (jwt.source === 'vault' ? 'jwt_v1' : undefined),
       version: jwtRec?.version || (jwt.source === 'vault' ? 1 : undefined),
-      rotatable: jwt.source === 'vault',
+      rotatable: false,
     };
 
     const encItem: KeyItemStatus = {
@@ -400,7 +418,7 @@ export class SystemKeysService {
       description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Ed25519).',
       keyId: otaRec?.keyId || (ota.source === 'vault' ? 'root_ed25519_v1' : undefined),
       version: otaRec?.version || (ota.source === 'vault' ? 1 : undefined),
-      rotatable: ota.source === 'vault',
+      rotatable: false,
     };
 
     let missingCount = 0;
@@ -433,7 +451,7 @@ export class SystemKeysService {
     const currentEnc = this.resolveEncryptionKey();
     const currentOta = this.resolveOtaSigningKey();
 
-    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    const isProd = isProductionVpsEnvironment();
 
     const generatedItems: GeneratedKeyResult['generatedItems'] = {
       jwtSecret: false,
@@ -479,6 +497,18 @@ export class SystemKeysService {
         description: 'Oturum ve API token imzalama anahtarı',
       });
 
+      // Verify Vault persistence
+      const verifiedJwt = systemSecretsService.getSecret('authentication.jwt_secret');
+      if (!verifiedJwt) {
+        return {
+          success: false,
+          message: 'JWT_SECRET Vault kasasına kaydedilemedi.',
+          generatedItems,
+          preservedKeys,
+          savedLocations,
+        };
+      }
+
       // Scrub any legacy plaintext files to enforce Vault-only storage
       try {
         const legacy1 = path.join(SECRETS_DIR, 'jwt_secret');
@@ -497,10 +527,10 @@ export class SystemKeysService {
       systemLogger.info('security', `[SystemKeys] Mevcut ENCRYPTION_KEY korundu (${currentEnc.source}). Yeniden üretilmedi.`);
     } else {
       if (isProd) {
-        systemLogger.critical('security', '[SystemKeys] Üretim ortamında ENCRYPTION_KEY otomatik üretilip dosyaya yazılamaz. Fail-closed: Docker Secret (/run/secrets/encryption_key) veya ortam değişkeni tanımlanmalıdır.');
+        systemLogger.critical('security', '[SystemKeys] Üretim ortamında ENCRYPTION_KEY otomatik üretilip dosyaya yazılamaz. Fail-closed: Docker Secret (/run/secrets/encryption_key) tanımlanmalıdır.');
         return {
           success: false,
-          message: 'Üretim ortamında ENCRYPTION_KEY eksik! Root anahtar Docker secret veya ortam değişkeni ile sağlanmalıdır.',
+          message: 'Üretim ortamında ENCRYPTION_KEY eksik! Root anahtar Docker secret (/run/secrets/encryption_key) ile sağlanmalıdır.',
           generatedItems,
           preservedKeys,
           savedLocations,
@@ -558,6 +588,18 @@ export class SystemKeysService {
           description: 'Ed25519 firmware paketi imzalama özel anahtarı',
         });
 
+        // Verify Vault persistence
+        const verifiedOta = systemSecretsService.getSecret('ota.signing_key');
+        if (!verifiedOta) {
+          return {
+            success: false,
+            message: 'OTA_SIGNING_KEY Vault kasasına kaydedilemedi.',
+            generatedItems,
+            preservedKeys,
+            savedLocations,
+          };
+        }
+
         // Scrub any legacy plaintext private key files
         try {
           const privFile = path.join(SECRETS_DIR, 'ota_signing_key.pem');
@@ -577,6 +619,13 @@ export class SystemKeysService {
         systemLogger.info('security', '[SystemKeys] Yeni Ed25519 OTA imzalama anahtarı üretildi ve doğrudan Vault kasasına kaydedildi.');
       } catch (err: any) {
         systemLogger.warn('security', `OTA anahtarı üretilirken hata: ${err?.message || err}`);
+        return {
+          success: false,
+          message: `OTA anahtarı Vault kasasına kaydedilemedi: ${err?.message || err}`,
+          generatedItems,
+          preservedKeys,
+          savedLocations,
+        };
       }
     }
 
@@ -594,61 +643,6 @@ export class SystemKeysService {
       preservedKeys,
       savedLocations,
       envSnippet,
-    };
-  }
-
-  /**
-   * Rotates JWT_SECRET, assigning a new keyId and archiving previous secret in Vault previousVersions
-   */
-  public async rotateJwtSecret(operatorName = 'admin'): Promise<{ success: boolean; oldKeyId?: string; newKeyId: string; version: number }> {
-    const newSecret = crypto.randomBytes(32).toString('hex');
-    const existingRec = systemSecretsService.getSecretRecord('authentication.jwt_secret') || systemSecretsService.getSecretRecord('jwt_secret');
-    const nextVer = (existingRec?.version || 1) + 1;
-    const newKeyId = `jwt_v${nextVer}`;
-
-    const result = await systemSecretsService.rotateSecret('authentication.jwt_secret', newSecret, {
-      keyId: newKeyId,
-      description: `Oturum ve API token imzalama anahtarı (${newKeyId})`,
-      updatedBy: operatorName,
-    });
-
-    process.env.JWT_SECRET = newSecret;
-    process.env.SESSION_SECRET = newSecret;
-
-    systemLogger.info('security', `[SystemKeys] JWT_SECRET başarıyla döndürüldü: ${result.newKeyId} (v${result.version})`);
-    return result;
-  }
-
-  /**
-   * Rotates OTA_SIGNING_KEY, assigning a new keyId, saving new public key, and archiving previous key in Vault
-   */
-  public async rotateOtaSigningKey(operatorName = 'admin'): Promise<{ success: boolean; oldKeyId?: string; newKeyId: string; version: number; publicKeyPem: string }> {
-    this.ensureDirectoriesExist();
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-
-    const existingRec = systemSecretsService.getSecretRecord('ota.signing_key') || systemSecretsService.getSecretRecord('ota_signing_key');
-    const nextVer = (existingRec?.version || 1) + 1;
-    const newKeyId = `root_ed25519_v${nextVer}`;
-
-    const result = await systemSecretsService.rotateSecret('ota.signing_key', privateKey, {
-      keyId: newKeyId,
-      description: `Ed25519 firmware paketi imzalama özel anahtarı (${newKeyId})`,
-      updatedBy: operatorName,
-    });
-
-    // Save non-sensitive public key for firmware compile/flash tooling
-    try {
-      const pubFile = path.join(SECRETS_DIR, 'ota_signing_key.pub');
-      fs.writeFileSync(pubFile, publicKey, { encoding: 'utf8', mode: 0o644 });
-    } catch {}
-
-    systemLogger.info('security', `[SystemKeys] OTA_SIGNING_KEY başarıyla döndürüldü: ${newKeyId} (v${result.version})`);
-    return {
-      ...result,
-      publicKeyPem: publicKey,
     };
   }
 

@@ -182,9 +182,12 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     expect(composeContent).toMatch(/app:/);
     expect(composeContent).toMatch(/build:/);
     expect(composeContent).toMatch(/timescaledb:[\s\S]*service_healthy/);
-    expect(composeContent).toMatch(/ENCRYPTION_KEY:/);
+    expect(composeContent).toMatch(/encryption_key/);
     expect(composeContent).toMatch(/DB_HOST:/);
     expect(composeContent).toMatch(/\/api\/health\/live/);
+    // Security: App environment must NOT contain plaintext application secrets
+    expect(composeContent).not.toMatch(/JWT_SECRET:/);
+    expect(composeContent).not.toMatch(/OTA_SIGNING_PRIVATE_KEY:/);
 
     // Service 3: proxy (Nginx)
     expect(composeContent).toMatch(/proxy:/);

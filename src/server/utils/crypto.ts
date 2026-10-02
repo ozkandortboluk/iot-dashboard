@@ -49,24 +49,54 @@ export function resetEncryptionKeyCache(): void {
   keySourceDescription = 'none';
 }
 
+function isProductionVpsEnvironment(): boolean {
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(
+    process.env.K_SERVICE ||
+    process.env.K_REVISION ||
+    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.AIS_PREVIEW === 'true' ||
+    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
+    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
+  ) && !isVpsProd;
+  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+}
+
 /**
- * Resolves the 256-bit (32-byte) AES master key from strictly non-predictable sources:
- * 1. Environment variable: process.env.ENCRYPTION_KEY
- * 2. Production Docker Secret: /run/secrets/encryption_key or dedicated secrets mount: secrets/encryption_key
- * 3. File path: process.env.ENCRYPTION_KEY_PATH or process.env.ENCRYPTION_KEY_FILE
- * 4. Local standalone key file: data/.vault_key (strictly isolated from DB, gitignored, mode 0600 - dev/test only)
- *
- * CRITICAL SECURITY CONSTRAINTS:
- * - NO predictable or hardcoded fallback keys.
- * - In production: if no key is supplied via env, Docker secret, or dedicated secrets mount, returns null and marks Vault as UNCONFIGURED.
- * - In development/test: if no key exists, generates a cryptographic 32-byte random key and stores it in data/.vault_key (0600).
+ * Resolves the 256-bit (32-byte) AES master key:
+ * - PRODUCTION POLICY: STRICTLY AND ONLY /run/secrets/encryption_key (Docker Secret).
+ *   All fallbacks (environment variables, local files, custom paths, auto-generation) are rejected.
+ *   If /run/secrets/encryption_key is absent or empty in production, returns null (fail-closed).
+ * - DEVELOPMENT / TEST / PREVIEW ONLY: allows fallback to local files or temporary bootstrap key.
  */
 export function resolveEncryptionKey(): Buffer | null {
   if (cachedKeyBuffer) {
     return cachedKeyBuffer;
   }
 
-  // 1. Single Authoritative Production Policy: Docker Secret (/run/secrets/encryption_key)
+  const isProd = isProductionVpsEnvironment();
+
+  if (isProd) {
+    // Single Authoritative Production Policy: Docker Secret (/run/secrets/encryption_key)
+    try {
+      if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
+        const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
+        if (secretRaw) {
+          cachedKeyBuffer = derive32ByteKey(secretRaw);
+          keySourceDescription = 'docker_secret:/run/secrets/encryption_key';
+          return cachedKeyBuffer;
+        }
+      }
+    } catch {}
+
+    // In production, no fallback is permitted: fail-closed!
+    keySourceDescription = 'missing';
+    return null;
+  }
+
+  // Non-production (development / test / local) only:
+  // 1. Docker Secret if mounted
   try {
     if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
       const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
@@ -78,7 +108,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
-  // 2. Dedicated production secrets mount (secrets/encryption_key)
+  // 2. Dedicated development secrets mount (secrets/encryption_key)
   try {
     if (fs.existsSync(DEDICATED_SECRETS_KEY_PATH)) {
       const secretRaw = fs.readFileSync(DEDICATED_SECRETS_KEY_PATH, 'utf8').trim();
@@ -105,7 +135,7 @@ export function resolveEncryptionKey(): Buffer | null {
     } catch {}
   }
 
-  // 4. Secondary fallback: process.env.ENCRYPTION_KEY
+  // 4. Development environment variable: process.env.ENCRYPTION_KEY
   const envKey = (process.env.ENCRYPTION_KEY || '').trim();
   if (envKey) {
     cachedKeyBuffer = derive32ByteKey(envKey);
@@ -113,20 +143,7 @@ export function resolveEncryptionKey(): Buffer | null {
     return cachedKeyBuffer;
   }
 
-  // ==========================================================================
-  // PRODUCTION SECURITY BOUNDARY:
-  // In production (NODE_ENV=production or VPS_PRODUCTION=true), the encryption key
-  // MUST NOT be generated or co-located inside the shared data volume (data/.vault_key).
-  // It MUST be supplied via ENCRYPTION_KEY environment variable or a dedicated
-  // Docker secret mount (/run/secrets/encryption_key).
-  // If not configured, returns null (causing fail-closed startup or explicit vault error).
-  // ==========================================================================
-  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
-  if (isProd) {
-    return null;
-  }
-
-  // 4. Standalone protected vault key file (data/.vault_key) for dev / local / test only
+  // 5. Standalone protected vault key file (data/.vault_key) for dev / test only
   try {
     if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
       const localRaw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
@@ -138,7 +155,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
-  // 5. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key (DEVELOPMENT / TEST ONLY)
+  // 6. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key (DEVELOPMENT / TEST ONLY)
   try {
     const dataDir = path.dirname(LOCAL_VAULT_KEY_PATH);
     if (!fs.existsSync(dataDir)) {
@@ -191,13 +208,16 @@ export function getVaultStatus(): {
   message?: string;
 } {
   const isConfigured = isVaultConfigured();
+  const isProd = isProductionVpsEnvironment();
   return {
     configured: isConfigured,
     source: keySourceDescription,
-    isProduction: process.env.NODE_ENV === 'production',
+    isProduction: isProd,
     message: isConfigured
       ? 'Secret Vault AES-256-GCM şifreleme anahtarı aktif.'
-      : 'Secret Vault yapılandırılmamış: ENCRYPTION_KEY veya /run/secrets/encryption_key tanımlanmalıdır.',
+      : isProd
+        ? 'Secret Vault yapılandırılmamış: Üretim ortamında /run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.'
+        : 'Secret Vault geliştirme modunda yapılandırılmamış.',
   };
 }
 

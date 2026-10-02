@@ -242,28 +242,24 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     );
   }
 
-  // 3. Vault Encryption Key Entropy Validation (SEC-13 / OLD-115)
-  let encKey = (process.env.ENCRYPTION_KEY || '').trim();
-  if (!encKey && !process.env.NO_SECRET_FILES) {
-    const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
-    try {
-      if (keyPath && fs.existsSync(keyPath)) {
-        encKey = fs.readFileSync(keyPath, 'utf8').trim();
-      } else if (fs.existsSync('/run/secrets/encryption_key')) {
-        encKey = fs.readFileSync('/run/secrets/encryption_key', 'utf8').trim();
-      } else if (fs.existsSync('secrets/encryption_key')) {
-        encKey = fs.readFileSync('secrets/encryption_key', 'utf8').trim();
-      }
-    } catch {}
-  }
+  // 3. Vault Encryption Key Validation (Single Production Policy: /run/secrets/encryption_key)
+  let encKey = '';
+  try {
+    if (fs.existsSync('/run/secrets/encryption_key')) {
+      encKey = fs.readFileSync('/run/secrets/encryption_key', 'utf8').trim();
+    } else if (process.env.VITEST) {
+      // In Vitest test harness where /run/secrets/encryption_key is not mounted on the test host
+      encKey = (process.env.ENCRYPTION_KEY || '').trim();
+    }
+  } catch {}
 
   if (!encKey || encKey.trim() === '') {
     errors.push(
-      `[CRITICAL POLICY] Üretim ortamında ENCRYPTION_KEY (Vault şifreleme anahtarı) tanımlanmamıştır (SEC-13 / OLD-115).`
+      `[CRITICAL POLICY] Üretim ortamında Vault root encryption key (/run/secrets/encryption_key) bulunamadı (SEC-13 / OLD-115). Uygulama fail-closed olarak durduruldu.`
     );
   } else if (isDefaultSecret(encKey) || encKey.trim().length < 16) {
     errors.push(
-      `[CRITICAL POLICY] Üretim ortamında varsayılan/örnek Vault şifreleme anahtarı (ENCRYPTION_KEY) kullanımı engellenmiştir (SEC-13 / OLD-115).`
+      `[CRITICAL POLICY] Üretim ortamında /run/secrets/encryption_key içindeki root key yetersiz entropiye sahip veya varsayılan değer içeriyor (SEC-13 / OLD-115).`
     );
   }
 

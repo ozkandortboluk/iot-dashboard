@@ -500,17 +500,26 @@ if (db.getDatabaseState() === DatabaseState.READY) {
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
-  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(
+    process.env.K_SERVICE ||
+    process.env.K_REVISION ||
+    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.AIS_PREVIEW === 'true' ||
+    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
+    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
+  ) && !isVpsProd;
+  const isProd = (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+
   if (isProd) {
     const vaultStatus = getVaultStatus();
     if (!vaultStatus.configured) {
       console.error(`====================================================`);
       console.error(`[FATAL SECURITY ERROR] Secret Vault Şifreleme Anahtarı Eksik!`);
-      console.error(`Üretim (Production) modunda ENCRYPTION_KEY ortam değişkeni veya`);
-      console.error(`/run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.`);
-      console.error(`Şifreli veriler ile anahtarın aynı veri hacmi (volume) içinde bulunması engellenmiştir.`);
+      console.error(`Üretim (Production) modunda /run/secrets/encryption_key Docker Secret dosyası tanımlanmalıdır.`);
       console.error(`====================================================`);
-      systemLogger.critical('security', 'Üretim ortamında Secret Vault anahtarı (ENCRYPTION_KEY / Docker secret) eksik olduğu için sunucu başlatılamadı.');
+      systemLogger.critical('security', 'Üretim ortamında Secret Vault anahtarı (/run/secrets/encryption_key) eksik olduğu için sunucu fail-closed olarak durduruldu.');
       process.exit(1);
     } else {
       console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);

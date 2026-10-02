@@ -244,7 +244,9 @@ export class SystemSecretsService {
   }
 
   /**
-   * Synchronizes with PostgreSQL system_settings table if connected
+   * Persists local vault snapshot to PostgreSQL system_settings as a secondary backup.
+   * Local Vault (data/.system_secrets.json) is strictly the ONLY authoritative store.
+   * PostgreSQL never overwrites local vault.
    */
   public async syncWithPostgres(postgresRepo: any): Promise<void> {
     if (!postgresRepo || typeof postgresRepo.isReady !== 'function' || !postgresRepo.isReady()) {
@@ -252,26 +254,12 @@ export class SystemSecretsService {
     }
 
     try {
-      // 1. Try reading from PostgreSQL
-      const dbVault = await postgresRepo.getSystemSetting('vault_system_secrets');
-      if (dbVault && typeof dbVault === 'object' && dbVault.secrets) {
-        let hasNewFromDb = false;
-        for (const [key, item] of Object.entries(dbVault.secrets as Record<string, StoredSecretRecord>)) {
-          const current = this.inMemorySecrets.get(key);
-          if (!current || (item.updatedAt && (!current.updatedAt || new Date(item.updatedAt) > new Date(current.updatedAt)))) {
-            this.inMemorySecrets.set(key, item);
-            hasNewFromDb = true;
-          }
-        }
-        if (hasNewFromDb) {
-          this.saveToLocalVault();
-        }
-      } else if (this.inMemorySecrets.size > 0) {
-        // Persist local secrets to newly connected PostgreSQL
+      if (this.inMemorySecrets.size > 0) {
+        // One-way backup mirror to PostgreSQL (Local Vault remains strictly authoritative)
         await this.persistToPostgres(postgresRepo);
       }
     } catch (err: any) {
-      systemLogger.warn('security', `PostgreSQL secret senkronizasyon uyarısı: ${err?.message || err}`);
+      systemLogger.warn('security', `PostgreSQL secret yedekleme uyarısı: ${err?.message || err}`);
     }
   }
 

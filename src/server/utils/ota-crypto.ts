@@ -45,6 +45,20 @@ export function setMockKeyPairForTesting(mockPair: KeyPair | null): void {
   cachedKeyPair = mockPair;
 }
 
+function isProductionVpsEnvironment(): boolean {
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(
+    process.env.K_SERVICE ||
+    process.env.K_REVISION ||
+    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.AIS_PREVIEW === 'true' ||
+    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
+    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
+  ) && !isVpsProd;
+  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+}
+
 /**
  * Gets the active Ed25519 signing keypair from Docker secrets or protected configuration.
  *
@@ -58,7 +72,7 @@ export function getEd25519KeyPair(): KeyPair {
   if (cachedKeyPair) return cachedKeyPair;
 
   const activeKeyId = process.env.OTA_SIGNING_KEY_ID || 'root_ed25519_v1';
-  const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  const isProd = isProductionVpsEnvironment();
 
   // 1. Check direct PEM string from AES-256-GCM Vault (CANONICAL RUNTIME SOURCE)
   const rawVaultKey = systemSecretsService.getOtaSigningKey() ||
