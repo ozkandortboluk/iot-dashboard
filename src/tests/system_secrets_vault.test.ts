@@ -312,5 +312,15 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
         process.env.NODE_ENV = originalEnv;
       }
     });
+
+    it('should include systemKeys metadata in getPublicSecretsState with zero-loss preservation status', () => {
+      const state = systemSecretsService.getPublicSecretsState();
+      expect(state).toHaveProperty('systemKeys');
+      expect(state.systemKeys).toHaveProperty('allConfigured');
+      expect(state.systemKeys).toHaveProperty('vaultConfigured');
+      expect(state.systemKeys?.keys).toHaveProperty('jwtSecret');
+      expect(state.systemKeys?.keys).toHaveProperty('encryptionKey');
+      expect(state.systemKeys?.keys).toHaveProperty('otaSigningKey');
+    });
   });
 });

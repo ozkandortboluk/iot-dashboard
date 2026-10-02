@@ -15,6 +15,11 @@ import {
   Info,
   Server,
   Send,
+  Fingerprint,
+  Cpu,
+  LockKeyhole,
+  ArrowDownToLine,
+  CheckCircle,
 } from 'lucide-react';
 import { apiFetch as fetch } from '../../lib/apiFetch';
 
@@ -76,14 +81,48 @@ interface SystemSecretsState {
     maskedValue: string;
     updatedAt?: string;
   }>;
+  systemKeys?: {
+    allConfigured: boolean;
+    vaultConfigured: boolean;
+    vaultSource: string;
+    keys: {
+      jwtSecret: {
+        keyName: string;
+        isConfigured: boolean;
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        inVault: boolean;
+        maskedValue: string;
+        description: string;
+      };
+      encryptionKey: {
+        keyName: string;
+        isConfigured: boolean;
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        inVault: boolean;
+        maskedValue: string;
+        description: string;
+      };
+      otaSigningKey: {
+        keyName: string;
+        isConfigured: boolean;
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        inVault: boolean;
+        maskedValue: string;
+        description: string;
+      };
+    };
+  };
 }
 
 export const SystemSecretsPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'database' | 'email' | 'notifications' | 'custom'>('database');
+  const [activeTab, setActiveTab] = useState<'keys' | 'database' | 'email' | 'notifications' | 'custom'>('keys');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [secretsState, setSecretsState] = useState<SystemSecretsState | null>(null);
+  const [migratingKeys, setMigratingKeys] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<{ success: boolean; message: string; migratedCount?: number } | null>(null);
 
   // Form State
   const [dbForm, setDbForm] = useState({
@@ -175,11 +214,43 @@ export const SystemSecretsPanel: React.FC = () => {
         });
 
         setCustomSecrets(data.customSecrets || []);
+        setSecretsState(data);
       }
     } catch (err: any) {
       setErrorMessage('Secret kasa bilgileri yüklenemedi: ' + (err?.message || err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMigrateKeys = async () => {
+    try {
+      setMigratingKeys(true);
+      setMigrationResult(null);
+      const res = await fetch('/api/system/secrets/migrate-keys', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMigrationResult({
+          success: true,
+          message: data.message || 'Mevcut üretim anahtarları Vault kasasına aktarıldı ve doğrulandı.',
+          migratedCount: data.migratedCount,
+        });
+        await fetchSecrets();
+      } else {
+        setMigrationResult({
+          success: false,
+          message: data.error || 'Anahtar aktarımı tamamlanamadı.',
+        });
+      }
+    } catch (err: any) {
+      setMigrationResult({
+        success: false,
+        message: 'Aktarım sırasında hata oluştu: ' + (err?.message || err),
+      });
+    } finally {
+      setMigratingKeys(false);
     }
   };
 
@@ -365,6 +436,21 @@ export const SystemSecretsPanel: React.FC = () => {
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 px-6 gap-2 bg-slate-50/20 dark:bg-slate-900/20 overflow-x-auto">
         <button
+          onClick={() => setActiveTab('keys')}
+          className={`py-3 px-4 text-xs font-semibold border-b-2 transition flex items-center gap-2 shrink-0 ${
+            activeTab === 'keys'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+          }`}
+        >
+          <Key className="w-4 h-4" />
+          <span>Kritik Sistem Anahtarları & Kasa Durumu</span>
+          {secretsState?.systemKeys && (!secretsState.systemKeys.keys.jwtSecret.inVault || !secretsState.systemKeys.keys.otaSigningKey.inVault) && (
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title="Kasaya aktarılmayı bekleyen mevcut anahtar var" />
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('database')}
           className={`py-3 px-4 text-xs font-semibold border-b-2 transition flex items-center gap-2 shrink-0 ${
             activeTab === 'database'
@@ -423,6 +509,255 @@ export const SystemSecretsPanel: React.FC = () => {
 
       {/* Tab Contents */}
       <div className="p-6">
+        {/* TAB 0: Kritik Sistem Anahtarları & Sıfır Veri Kaybı */}
+        {activeTab === 'keys' && (
+          <div className="space-y-6">
+            {/* Zero-Loss Banner */}
+            <div className="p-4 bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0 mt-0.5">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Sıfır Veri Kaybı & Mevcut Anahtarları Koruma Politikası</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                      Geriye Dönük %100 Uyumlu
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                    Üretimdeki aktif sisteminizde mevcut çalışan <strong>JWT oturum anahtarları</strong>, sahadaki ESP32/ESP8266 IoT cihazlarınızın kabul ettiği <strong>Ed25519 firmware imza anahtarları</strong> ve <strong>PostgreSQL veritabanı parolanız</strong> asla silinmez ya da yeniden üretilmez. "Kasaya Güvenle Aktar" işlemi, sisteminizdeki mevcut çalışan anahtarları birebir alarak AES-256-GCM ile şifreler ve Vault kasasına kilitler.
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <button
+                  onClick={handleMigrateKeys}
+                  disabled={migratingKeys}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold rounded-xl transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {migratingKeys ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Aktarılıyor...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowDownToLine className="w-4 h-4" />
+                      <span>Mevcut Anahtarları Kasaya Aktar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Migration Result Notification */}
+            {migrationResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center gap-2.5 ${
+                  migrationResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+                }`}
+              >
+                {migrationResult.success ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                )}
+                <span>{migrationResult.message}</span>
+              </div>
+            )}
+
+            {/* 4 Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card 1: JWT Secret */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                        <Fingerprint className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">JWT_SECRET / SESSION_SECRET</h5>
+                        <p className="text-[11px] text-slate-500">Kullanıcı Oturumları & API İmzası</p>
+                      </div>
+                    </div>
+                    {secretsState?.systemKeys?.keys.jwtSecret.inVault ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Kasada Korumada
+                      </span>
+                    ) : secretsState?.systemKeys?.keys.jwtSecret.isConfigured ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                        <Info className="w-3 h-3" />
+                        Ortam Dosyasından Korunuyor
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Eksik
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 p-2.5 bg-slate-100 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="text-slate-400">Maskeli Değer:</span>
+                    <span>{secretsState?.systemKeys?.keys.jwtSecret.maskedValue || '••••••••••••••••'}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  🛡️ <strong>Güvence:</strong> Mevcut kullanıcı oturumları ve mobil/web API tokenları geçersiz kalmaz.
+                </p>
+              </div>
+
+              {/* Card 2: OTA Signing Key */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
+                        <Cpu className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">OTA_SIGNING_KEY (Ed25519)</h5>
+                        <p className="text-[11px] text-slate-500">Firmware İmzalama Özel Anahtarı</p>
+                      </div>
+                    </div>
+                    {secretsState?.systemKeys?.keys.otaSigningKey.inVault ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Kasada Korumada
+                      </span>
+                    ) : secretsState?.systemKeys?.keys.otaSigningKey.isConfigured ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                        <Info className="w-3 h-3" />
+                        Ortam Dosyasından Korunuyor
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Eksik
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 p-2.5 bg-slate-100 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="text-slate-400">Maskeli Değer:</span>
+                    <span>{secretsState?.systemKeys?.keys.otaSigningKey.maskedValue || '(Ed25519 Özel Anahtarı)'}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  🛡️ <strong>Güvence:</strong> Sahadaki tüm ESP32/ESP8266 cihazlarının kabul ettiği imza anahtarıdır. Asla değiştirilmez, cihazlar güncelleme almaya devam eder.
+                </p>
+              </div>
+
+              {/* Card 3: PostgreSQL Password */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
+                        <Database className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">POSTGRES_PASSWORD</h5>
+                        <p className="text-[11px] text-slate-500">PostgreSQL & TimescaleDB Parolası</p>
+                      </div>
+                    </div>
+                    {secretsState?.database.source === 'vault' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Kasada Korumada
+                      </span>
+                    ) : secretsState?.database.hasPassword ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                        <Info className="w-3 h-3" />
+                        Safe URL Modu
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Tanımlanmamış
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 p-2.5 bg-slate-100 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="text-slate-400">Maskeli Değer:</span>
+                    <span>{secretsState?.database.passwordMasked || '••••••••'}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  🛡️ <strong>Güvence:</strong> <code className="font-mono">db.json</code> içinde şifresiz safe URL tutulur. Gerçek parola kasa üzerinden enjekte edilir.
+                </p>
+              </div>
+
+              {/* Card 4: Master Encryption Key */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+                        <LockKeyhole className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">ENCRYPTION_KEY</h5>
+                        <p className="text-[11px] text-slate-500">Root Master Kasa Anahtarı</p>
+                      </div>
+                    </div>
+                    {secretsState?.systemKeys?.vaultConfigured ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Root Key Aktif
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Eksik (Fail-Closed)
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 p-2.5 bg-slate-100 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="text-slate-400">Kaynak:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {secretsState?.systemKeys?.vaultSource || 'Tanımlanmış'}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  🛡️ <strong>Güvence:</strong> Kasayı açan master anahtardır. Güvenlik standardı gereği Docker Secret veya volume dışı ortam değişkeninde tutulur.
+                </p>
+              </div>
+            </div>
+
+            {/* Verification Checklist */}
+            <div className="p-4 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-200/60 dark:border-slate-800/60 rounded-2xl">
+              <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-2 flex items-center gap-1.5">
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                <span>Sistem Bütünlüğü & Çelişki Önleme Kontrolleri</span>
+              </h5>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>Sahadaki ESP32 / ESP8266 firmware güncellemeleri bozulmaz.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>Aktif kullanıcı oturumları ve token'lar düşmez.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>PostgreSQL veritabanı bağlantısı kesilmez ve erişim sürer.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span>Kasa boş olsa dahi tek tıkla mevcut ortam anahtarları içeri alınır.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 1: PostgreSQL & TimescaleDB */}
         {activeTab === 'database' && (
           <div className="space-y-5">

@@ -439,3 +439,41 @@ secretsRouter.post('/test-email', authenticateUser, requireAdmin, async (req: Re
   }
 });
 
+/**
+ * POST /api/system/secrets/migrate-keys
+ * Safely imports existing production keys and secrets from environment and legacy files
+ * into Central Security Vault (AES-256-GCM) with ZERO key re-generation and ZERO data loss.
+ * Strictly requires Admin authentication & authorization with IP rate limiting.
+ */
+secretsRouter.post('/migrate-keys', authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+  if (!checkVaultRateLimit(req, res, 'migrate_keys', 10)) return;
+
+  const authReq = req as unknown as AuthenticatedRequest;
+  const user = authReq.user;
+  const operatorName = user ? `${user.name || user.email} (${user.id})` : 'admin';
+
+  try {
+    const result = await systemSecretsService.migrateLegacySecrets();
+    systemLogger.info('security', `Admin operatörü (${operatorName}) tarafından mevcut sistem anahtarları Vault kasasına aktarıldı (${result.migratedCount} adet anahtar).`);
+
+    const updatedState = systemSecretsService.getPublicSecretsState();
+
+    return res.json({
+      success: true,
+      message: result.migratedCount > 0
+        ? `${result.migratedCount} adet mevcut üretim anahtarı (değerleri korunarak) Vault kasasına başarıyla aktarıldı.`
+        : 'Tüm mevcut sistem anahtarları zaten Vault kasasında güvenle korunmaktadır. Hiçbir anahtar değiştirilmedi.',
+      migratedCount: result.migratedCount,
+      keys: result.keys,
+      data: updatedState,
+    });
+  } catch (err: any) {
+    const cleanErr = sanitizeLogString(err?.message || 'Sistem anahtarları kasaya aktarılamadı.');
+    systemLogger.error('security', `Kasa aktarım hatası: ${cleanErr}`);
+    return res.status(500).json({
+      success: false,
+      error: cleanErr,
+    });
+  }
+});
+

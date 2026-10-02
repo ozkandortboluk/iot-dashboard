@@ -42,6 +42,10 @@ services:
       NODE_ENV: production
       PORT: 3000
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      OTA_SIGNING_PRIVATE_KEY: ${OTA_SIGNING_PRIVATE_KEY:-}
       # Runtime secrets (database credentials, API keys) are managed securely via the AES-256-GCM Vault
       # (data/.system_secrets.json or /run/secrets/db_password). No raw passwords are leaked in environment.
       DB_HOST: ${DB_HOST:-timescaledb}

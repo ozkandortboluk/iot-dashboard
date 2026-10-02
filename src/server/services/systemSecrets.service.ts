@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret, sanitizeLogString as sanitizeLogUtil } from '../utils/crypto.js';
+import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret, sanitizeLogString as sanitizeLogUtil, getVaultStatus } from '../utils/crypto.js';
 import { systemLogger } from './systemLogger.service.js';
 
 export type SecretCategory =
@@ -91,11 +91,32 @@ export interface PublicNotificationSecretsSummary {
   };
 }
 
+export interface PublicSystemKeyItemSummary {
+  keyName: string;
+  isConfigured: boolean;
+  source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+  inVault: boolean;
+  maskedValue: string;
+  description: string;
+}
+
+export interface PublicSystemKeysSummary {
+  allConfigured: boolean;
+  vaultConfigured: boolean;
+  vaultSource: string;
+  keys: {
+    jwtSecret: PublicSystemKeyItemSummary;
+    encryptionKey: PublicSystemKeyItemSummary;
+    otaSigningKey: PublicSystemKeyItemSummary;
+  };
+}
+
 export interface PublicSystemSecretsState {
   database: PublicDatabaseSecretsSummary;
   email: PublicEmailSecretsSummary;
   notifications: PublicNotificationSecretsSummary;
   customSecrets: PublicSecretItemSummary[];
+  systemKeys?: PublicSystemKeysSummary;
   updatedAt?: string;
 }
 
@@ -500,16 +521,41 @@ export class SystemSecretsService {
   public async migrateLegacySecrets(): Promise<{ migratedCount: number; keys: string[] }> {
     const migratedKeys: string[] = [];
 
-    // 1. DB password from legacy Docker secret or environment
+    // 1. DB password & connection from legacy Docker secret, .db_config.json, or environment
     if (!this.getSecret('database.password')) {
       let candidate = '';
       const dockerSecretPath = '/run/secrets/db_password';
       try {
         if (fs.existsSync(dockerSecretPath)) candidate = fs.readFileSync(dockerSecretPath, 'utf8').trim();
       } catch {}
+
+      const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
+      if (!candidate && fs.existsSync(dbConfigPath)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
+          if (raw.password && typeof raw.password === 'string' && !raw.password.includes('••••')) {
+            candidate = raw.password.trim();
+          }
+        } catch {}
+      }
+
+      if (!candidate && process.env.DATABASE_URL) {
+        try {
+          const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
+          if (parsed.password) {
+            candidate = decodeURIComponent(parsed.password).trim();
+          }
+        } catch {}
+      }
+
       if (!candidate && process.env.POSTGRES_PASSWORD) {
         candidate = process.env.POSTGRES_PASSWORD.trim();
       }
+
+      if (!candidate && process.env.DB_PASSWORD) {
+        candidate = process.env.DB_PASSWORD.trim();
+      }
+
       if (candidate) {
         await this.setSecret('database.password', candidate, {
           category: 'database',
@@ -521,6 +567,56 @@ export class SystemSecretsService {
           migratedKeys.push('database.password');
           systemLogger.info('security', '[Migration] PostgreSQL parolası Vault kasasına başarıyla aktarıldı ve doğrulandı.');
         }
+      }
+    }
+
+    // 1.1 Migrate database coordinates if in .db_config.json or environment
+    const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
+    if (fs.existsSync(dbConfigPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
+        if (raw.host && !this.getSecret('database.host')) {
+          await this.setSecret('database.host', String(raw.host), { category: 'database', label: 'PostgreSQL Host', isSensitive: false, updatedBy: 'legacy_migration' });
+          migratedKeys.push('database.host');
+        }
+        if (raw.port && !this.getSecret('database.port')) {
+          await this.setSecret('database.port', String(raw.port), { category: 'database', label: 'PostgreSQL Port', isSensitive: false, updatedBy: 'legacy_migration' });
+          migratedKeys.push('database.port');
+        }
+        if (raw.database && !this.getSecret('database.database')) {
+          await this.setSecret('database.database', String(raw.database), { category: 'database', label: 'PostgreSQL Database', isSensitive: false, updatedBy: 'legacy_migration' });
+          migratedKeys.push('database.database');
+        }
+        if (raw.user && !this.getSecret('database.user')) {
+          await this.setSecret('database.user', String(raw.user), { category: 'database', label: 'PostgreSQL User', isSensitive: false, updatedBy: 'legacy_migration' });
+          migratedKeys.push('database.user');
+        }
+        if (raw.sslMode && !this.getSecret('database.sslMode')) {
+          await this.setSecret('database.sslMode', String(raw.sslMode), { category: 'database', label: 'PostgreSQL SSL Mode', isSensitive: false, updatedBy: 'legacy_migration' });
+          migratedKeys.push('database.sslMode');
+        }
+      } catch {}
+    }
+
+    if (!this.getSecret('database.host') && (process.env.POSTGRES_HOST || process.env.DB_HOST)) {
+      const hostVal = (process.env.POSTGRES_HOST || process.env.DB_HOST || '').trim();
+      if (hostVal) {
+        await this.setSecret('database.host', hostVal, { category: 'database', label: 'PostgreSQL Host', isSensitive: false, updatedBy: 'legacy_migration' });
+        migratedKeys.push('database.host');
+      }
+    }
+    if (!this.getSecret('database.database') && (process.env.POSTGRES_DB || process.env.DB_NAME)) {
+      const dbVal = (process.env.POSTGRES_DB || process.env.DB_NAME || '').trim();
+      if (dbVal) {
+        await this.setSecret('database.database', dbVal, { category: 'database', label: 'PostgreSQL Database', isSensitive: false, updatedBy: 'legacy_migration' });
+        migratedKeys.push('database.database');
+      }
+    }
+    if (!this.getSecret('database.user') && (process.env.POSTGRES_USER || process.env.DB_USER)) {
+      const userVal = (process.env.POSTGRES_USER || process.env.DB_USER || '').trim();
+      if (userVal) {
+        await this.setSecret('database.user', userVal, { category: 'database', label: 'PostgreSQL User', isSensitive: false, updatedBy: 'legacy_migration' });
+        migratedKeys.push('database.user');
       }
     }
 
@@ -548,6 +644,9 @@ export class SystemSecretsService {
       }
       if (!candidate && process.env.JWT_SECRET) {
         candidate = process.env.JWT_SECRET.trim();
+      }
+      if (!candidate && process.env.SESSION_SECRET) {
+        candidate = process.env.SESSION_SECRET.trim();
       }
       if (candidate && candidate.length >= 16) {
         await this.setSecret('authentication.jwt_secret', candidate, {
@@ -626,6 +725,44 @@ export class SystemSecretsService {
         updatedBy: 'legacy_migration',
       });
       migratedKeys.push('email.smtpPass');
+    }
+
+    // 5. Notifications credentials from legacy environment
+    if (!this.getSecret('notifications.telegram.botToken') && process.env.TELEGRAM_BOT_TOKEN) {
+      await this.setSecret('notifications.telegram.botToken', process.env.TELEGRAM_BOT_TOKEN.trim(), {
+        category: 'notifications',
+        label: 'Telegram Bot Token',
+        isSensitive: true,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('notifications.telegram.botToken');
+    }
+    if (!this.getSecret('notifications.telegram.chatId') && process.env.TELEGRAM_CHAT_ID) {
+      await this.setSecret('notifications.telegram.chatId', process.env.TELEGRAM_CHAT_ID.trim(), {
+        category: 'notifications',
+        label: 'Telegram Chat ID',
+        isSensitive: false,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('notifications.telegram.chatId');
+    }
+    if (!this.getSecret('notifications.whatsapp.apiToken') && process.env.WHATSAPP_API_TOKEN) {
+      await this.setSecret('notifications.whatsapp.apiToken', process.env.WHATSAPP_API_TOKEN.trim(), {
+        category: 'notifications',
+        label: 'WhatsApp API Token',
+        isSensitive: true,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('notifications.whatsapp.apiToken');
+    }
+    if (!this.getSecret('notifications.webhook.secretHeader') && process.env.WEBHOOK_SECRET_HEADER) {
+      await this.setSecret('notifications.webhook.secretHeader', process.env.WEBHOOK_SECRET_HEADER.trim(), {
+        category: 'notifications',
+        label: 'Webhook Secret Header',
+        isSensitive: true,
+        updatedBy: 'legacy_migration',
+      });
+      migratedKeys.push('notifications.webhook.secretHeader');
     }
 
     return { migratedCount: migratedKeys.length, keys: migratedKeys };
@@ -768,11 +905,58 @@ export class SystemSecretsService {
       }
     }
 
+    // 5. System Keys & Zero-Loss Vault Status
+    const vaultStatus = getVaultStatus();
+    const hasVaultJwt = this.inMemorySecrets.has('authentication.jwt_secret') || this.inMemorySecrets.has('jwt_secret');
+    const rawJwt = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret') || process.env.JWT_SECRET || process.env.SESSION_SECRET || '';
+    const jwtSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultJwt ? 'vault' : rawJwt ? 'environment' : 'missing';
+
+    const hasVaultOta = this.inMemorySecrets.has('ota.signing_key') || this.inMemorySecrets.has('ota_signing_key');
+    const rawOta = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key') || process.env.OTA_SIGNING_PRIVATE_KEY || '';
+    const otaSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultOta ? 'vault' : rawOta ? 'environment' : 'missing';
+
+    const encKeySource: 'vault' | 'environment' | 'secrets_file' | 'missing' = vaultStatus.configured
+      ? (vaultStatus.source.includes('docker') || vaultStatus.source.includes('secrets') ? 'secrets_file' : 'environment')
+      : 'missing';
+
+    const systemKeysSummary: PublicSystemKeysSummary = {
+      allConfigured: Boolean(vaultStatus.configured && (hasVaultJwt || rawJwt) && (hasVaultOta || rawOta)),
+      vaultConfigured: vaultStatus.configured,
+      vaultSource: vaultStatus.source,
+      keys: {
+        jwtSecret: {
+          keyName: 'JWT_SECRET',
+          isConfigured: Boolean(rawJwt),
+          source: jwtSource,
+          inVault: hasVaultJwt,
+          maskedValue: rawJwt ? maskSecret(rawJwt) : '(Tanımlanmamış)',
+          description: 'Kullanıcı oturumları ve API tokenları imzalama anahtarı (Oturumlar %100 korunur).',
+        },
+        encryptionKey: {
+          keyName: 'ENCRYPTION_KEY',
+          isConfigured: vaultStatus.configured,
+          source: encKeySource,
+          inVault: false, // Root key stays outside vault
+          maskedValue: vaultStatus.configured ? '••••••••' : '(Tanımlanmamış)',
+          description: 'Tüm kasayı AES-256-GCM ile açan ana şifreleme anahtarı (Root Master Key).',
+        },
+        otaSigningKey: {
+          keyName: 'OTA_SIGNING_KEY',
+          isConfigured: Boolean(rawOta),
+          source: otaSource,
+          inVault: hasVaultOta,
+          maskedValue: rawOta ? '(Ed25519 Özel Anahtar Mevcut)' : '(Tanımlanmamış)',
+          description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Sahadaki cihazlar %100 korunur).',
+        },
+      },
+    };
+
     return {
       database: databaseSummary,
       email: emailSummary,
       notifications: notificationsSummary,
       customSecrets: customList,
+      systemKeys: systemKeysSummary,
       updatedAt: new Date().toISOString(),
     };
   }
