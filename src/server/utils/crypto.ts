@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 export function hashPassword(password: string): string {
   return bcrypt.hashSync(password, 10);
@@ -47,20 +48,6 @@ let keySourceDescription = 'none';
 export function resetEncryptionKeyCache(): void {
   cachedKeyBuffer = null;
   keySourceDescription = 'none';
-}
-
-function isProductionVpsEnvironment(): boolean {
-  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
-  const isCloudRunSandbox = Boolean(
-    process.env.K_SERVICE ||
-    process.env.K_REVISION ||
-    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
-    process.env.GOOGLE_CLOUD_PROJECT ||
-    process.env.AIS_PREVIEW === 'true' ||
-    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
-    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
-  ) && !isVpsProd;
-  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
 }
 
 /**

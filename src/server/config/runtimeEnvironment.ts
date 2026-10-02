@@ -69,6 +69,25 @@ export function isVps(): boolean {
   return resolveRuntimeEnvironment() === 'vps';
 }
 
+/**
+ * Determines whether the active process is running in a real production VPS host.
+ * Returns true only when NODE_ENV is production (or VPS_PRODUCTION=true) AND outside
+ * the Google Cloud Run / AI Studio preview sandbox environment.
+ */
+export function isProductionVpsEnvironment(): boolean {
+  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
+  const isCloudRunSandbox = Boolean(
+    process.env.K_SERVICE ||
+    process.env.K_REVISION ||
+    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.AIS_PREVIEW === 'true' ||
+    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
+    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
+  ) && !isVpsProd;
+  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+}
+
 export function isAiStudio(): boolean {
   return resolveRuntimeEnvironment() === 'aistudio';
 }

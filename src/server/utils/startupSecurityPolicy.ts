@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
-import { resetEncryptionKeyCache, resolveEncryptionKey } from './crypto.js';
+import { resetEncryptionKeyCache } from './crypto.js';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 /**
  * Common default, weak, or sample passwords that MUST be strictly blocked in production.
@@ -72,9 +73,7 @@ export interface SecurityPolicyValidationResult {
  * In production (NODE_ENV=production or VPS_PRODUCTION=true), secrets MUST NOT be auto-generated or modified.
  */
 export function ensureRuntimeSecuritySecrets(): void {
-  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
-  const isCloudRunSandbox = Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.CLOUD_RUN_TIMEOUT_SECONDS) && !isVpsProd;
-  const isProd = (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+  const isProd = isProductionVpsEnvironment();
 
   if (isProd) {
     // SEC-13 / RUN-06: Production VPS environments strictly require explicit configuration or mounted Docker secrets.

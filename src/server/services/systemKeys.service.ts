@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
 import { resetEncryptionKeyCache } from '../utils/crypto.js';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 export interface KeyItemStatus {
   keyName: string;
@@ -74,20 +75,6 @@ function mask(val: string): string {
   if (!val) return '';
   if (val.length <= 8) return '****';
   return `${val.substring(0, 4)}...${val.substring(val.length - 4)}`;
-}
-
-function isProductionVpsEnvironment(): boolean {
-  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
-  const isCloudRunSandbox = Boolean(
-    process.env.K_SERVICE ||
-    process.env.K_REVISION ||
-    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
-    process.env.GOOGLE_CLOUD_PROJECT ||
-    process.env.AIS_PREVIEW === 'true' ||
-    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
-    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
-  ) && !isVpsProd;
-  return (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
 }
 
 export class SystemKeysService {

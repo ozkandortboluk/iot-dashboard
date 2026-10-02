@@ -19,6 +19,7 @@ import { startCommandExpiryWorker, stopCommandExpiryWorker } from './src/server/
 import { recycleSharedPgPool } from './src/server/database/connection.js';
 import { getVaultStatus } from './src/server/utils/crypto.js';
 import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from './src/server/utils/startupSecurityPolicy.js';
+import { isProductionVpsEnvironment } from './src/server/config/runtimeEnvironment.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
 
 // Bootstrap runtime security secrets early in dev/test only
@@ -500,17 +501,7 @@ if (db.getDatabaseState() === DatabaseState.READY) {
 
 // Serve Vite in dev mode or static bundled files in production
 async function setupViteOrStatic() {
-  const isVpsProd = process.env.VPS_PRODUCTION === 'true';
-  const isCloudRunSandbox = Boolean(
-    process.env.K_SERVICE ||
-    process.env.K_REVISION ||
-    process.env.CLOUD_RUN_TIMEOUT_SECONDS ||
-    process.env.GOOGLE_CLOUD_PROJECT ||
-    process.env.AIS_PREVIEW === 'true' ||
-    (process.env.APP_URL && /\.run\.app/i.test(process.env.APP_URL)) ||
-    (process.env.DEV_APP_URL && /\.run\.app/i.test(process.env.DEV_APP_URL))
-  ) && !isVpsProd;
-  const isProd = (process.env.NODE_ENV === 'production' || isVpsProd) && !isCloudRunSandbox;
+  const isProd = isProductionVpsEnvironment();
 
   if (isProd) {
     const vaultStatus = getVaultStatus();
