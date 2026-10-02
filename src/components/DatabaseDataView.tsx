@@ -349,7 +349,6 @@ export const DatabaseDataView: React.FC = () => {
 
   // PostgreSQL Configuration & Setup State
   const [engineConfig, setEngineConfig] = useState<DatabaseEngineConfig | null>(null);
-  const [setupGuide, setSetupGuide] = useState<PostgresSetupGuide | null>(null);
   const [inputPostgresUrl, setInputPostgresUrl] = useState<string>(() => {
     // SEC-07: Passwords must NEVER be stored in localStorage. Purge any legacy stored URL.
     try { localStorage.removeItem('nexusnode_last_postgres_url'); } catch {}
@@ -387,10 +386,6 @@ export const DatabaseDataView: React.FC = () => {
   const [switchingEngine, setSwitchingEngine] = useState(false);
   const [switchSuccessMsg, setSwitchSuccessMsg] = useState<string | null>(null);
 
-  // Guide and Inspection Sub-tab
-  const [guideSubTab, setGuideSubTab] = useState<'docker' | 'ubuntu' | 'timescale' | 'schema' | 'calc'>('docker');
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
   // Filters and inspection states
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -405,10 +400,9 @@ export const DatabaseDataView: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [resStats, resEngine, resGuide, resRetention] = await Promise.all([
+      const [resStats, resEngine, resRetention] = await Promise.all([
         fetch('/api/admin/database-stats', { headers: getAuthHeaders() }),
         fetch('/api/database/config', { headers: getAuthHeaders() }),
-        fetch('/api/database/postgres/setup-guide', { headers: getAuthHeaders() }),
         fetch('/api/database/retention', { headers: getAuthHeaders() }),
       ]);
 
@@ -423,10 +417,6 @@ export const DatabaseDataView: React.FC = () => {
         if (engData.rawPostgresUrl && !engData.rawPostgresUrl.includes('••••••••')) {
           setInputPostgresUrl(engData.rawPostgresUrl);
         }
-      }
-      if (resGuide.ok) {
-        const guideData = await resGuide.json();
-        setSetupGuide(guideData);
       }
       if (resRetention.ok) {
         const retData = await resRetention.json();
@@ -800,12 +790,6 @@ export const DatabaseDataView: React.FC = () => {
     }
   }, [activeTab]);
 
-  const handleCopyCode = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
   const handleCopyJson = (data: any) => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     setCopiedText(true);
@@ -823,15 +807,21 @@ export const DatabaseDataView: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleDownloadSqlSchema = () => {
-    if (!setupGuide?.sqlSchema) return;
-    const blob = new Blob([setupGuide.sqlSchema], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'iot_postgres_schema.sql';
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleDownloadSqlSchema = async () => {
+    try {
+      const res = await fetch('/api/database/canonical-schema', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const sqlContent = data.sql || data.schema || '';
+        const blob = new Blob([sqlContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'iot_postgres_schema.sql';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch {}
   };
 
   // Filtered Users List
@@ -1674,20 +1664,6 @@ export const DatabaseDataView: React.FC = () => {
                 <p className="text-[11px] text-slate-400 mt-1">
                   İpucu: Docker / VPS sunucunuz için varsayılan adres şablonu: <code className="font-mono text-slate-600 dark:text-slate-300">postgresql://iot_user:••••••••@timescaledb:5432/iot_dashboard?sslmode=disable</code>
                 </p>
-                <div className="mt-2 p-2.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/30 rounded-lg text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-2">
-                  <Info className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Bağlantı Notu:</strong> Eğer test sonucunda <em>ECONNREFUSED</em> veya <em>timeout</em> alıyorsanız; sunucunuzun <strong>5432</strong> portunun dışarıya açık olduğundan (UFW firewall izni ve Docker <code className="font-mono text-indigo-500">-p 5432:5432</code> port yönlendirmesi) ve <code className="font-mono">pg_hba.conf</code> dosyasında uzaktan bağlantılara izin verildiğinden emin olun.
-                  </span>
-                </div>
-                {inputPostgresUrl.includes('timescaledb') && (
-                  <div className="mt-2 p-2.5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-900/50 rounded-lg text-[11px] text-indigo-900 dark:text-indigo-200 flex items-start gap-2">
-                    <Info className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Docker Compose Ağı ("timescaledb"):</strong> Adresteki <code>timescaledb</code> ana makine adı, sunucunuzda Docker Compose (<code>docker compose up</code>) çalıştırıldığında konteynerler arasındaki dahili köprü ağı üzerinden <strong>otomatik ve anında</strong> bağlanır. Bu bulut ortamından dışarıdan test etmek isterseniz geçici olarak sunucunuzun dış statik IP adresini (örn: <code>91.151.x.x:5432</code>) yazabilirsiniz.
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Test Results Card */}
@@ -1771,217 +1747,6 @@ export const DatabaseDataView: React.FC = () => {
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Step-by-Step Setup Guide Sub-Tabs */}
-          <div className="bg-white dark:bg-[#0c1220] rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-indigo-500" />
-                  Kendi Sunucunuza Kurulum Adımları & Belgeler
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Sunucunuzun tipine göre kurulum adımlarını ve hazır konfigürasyon dosyalarını inceleyin.
-                </p>
-              </div>
-
-              {/* Sub-tabs selector */}
-              <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg text-xs font-medium">
-                {[
-                  { id: 'docker', label: '1. Docker Compose (1 Dk)' },
-                  { id: 'ubuntu', label: '2. Ubuntu/Debian Kurulum' },
-                  { id: 'timescale', label: '3. TimescaleDB (Hypertable)' },
-                  { id: 'schema', label: '4. SQL Tablo Şeması' },
-                  { id: 'calc', label: '5. Maliyet Hesaplayıcı' },
-                ].map((st) => (
-                  <button
-                    key={st.id}
-                    onClick={() => setGuideSubTab(st.id as any)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
-                      guideSubTab === st.id
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sub-Tab 1: Docker Compose */}
-            {guideSubTab === 'docker' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <p className="text-slate-600 dark:text-slate-300">
-                    Sunucunuzda Docker ve Docker Compose yüklüyse, aşağıdaki tek dosya ile <strong>TimescaleDB + pgAdmin4</strong> veritabanı arayüzünü anında ayağa kaldırabilirsiniz:
-                  </p>
-                  <button
-                    onClick={() => handleCopyCode(setupGuide?.dockerCompose || '', 'docker')}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold rounded-md transition cursor-pointer"
-                  >
-                    {copiedKey === 'docker' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKey === 'docker' ? 'Kopyalandı' : 'docker-compose.yml Kopyala'}</span>
-                  </button>
-                </div>
-
-                <pre className="p-4 bg-slate-950 text-slate-200 font-mono text-[11px] rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
-                  {setupGuide?.dockerCompose || 'Yükleniyor...'}
-                </pre>
-
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                    🚀 Terminalde Çalıştırma Komutları:
-                  </span>
-                  <div className="space-y-1 font-mono text-xs text-indigo-600 dark:text-indigo-400">
-                    <div className="p-2 bg-slate-100 dark:bg-slate-900 rounded-md">
-                      mkdir -p ~/iot-database && cd ~/iot-database && nano docker-compose.yml
-                    </div>
-                    <div className="p-2 bg-slate-100 dark:bg-slate-900 rounded-md">
-                      docker compose up -d
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sub-Tab 2: Ubuntu/Debian Native */}
-            {guideSubTab === 'ubuntu' && (
-              <div className="space-y-4 text-xs">
-                <p className="text-slate-600 dark:text-slate-300">
-                  Docker kullanmak istemiyorsanız, Ubuntu 22.04 / 24.04 veya Debian sunucunuza doğrudan PostgreSQL kurmak için aşağıdaki komutları sırasıyla uygulayın:
-                </p>
-
-                <div className="space-y-3">
-                  <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">1. Paketleri Güncelle & PostgreSQL Kur:</span>
-                    <pre className="p-2 bg-slate-950 text-emerald-400 font-mono text-[11px] rounded-md overflow-x-auto">
-                      sudo apt update && sudo apt install -y postgresql postgresql-contrib
-                    </pre>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">2. Kullanıcı & Veritabanı Oluştur:</span>
-                    <pre className="p-2 bg-slate-950 text-emerald-400 font-mono text-[11px] rounded-md overflow-x-auto">
-{`sudo -u postgres psql
-CREATE DATABASE iot_dashboard_db;
-CREATE USER iot_admin WITH ENCRYPTED PASSWORD 'GizliSifreniz123!';
-GRANT ALL PRIVILEGES ON DATABASE iot_dashboard_db TO iot_admin;
-\\q`}
-                    </pre>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">3. Güvenli Uzak Erişim (SSH Tüneli & Yerel Ağ):</span>
-                    <pre className="p-2 bg-slate-950 text-cyan-400 font-mono text-[11px] rounded-md overflow-x-auto">
-{`# Güvenlik İlkesi: Veritabanı portunu (5432) genel internete (0.0.0.0/0) AÇMAYINIZ.
-# Platformun sol menüsündeki "SSH Tüneli" çekmecesini kullanarak Port 22 üzerinden
-# şifreli ve güvenli bir tünel kurunuz.
-
-# Yerel PostgreSQL bağlantısı doğrulaması:
-sudo systemctl status postgresql`}
-                    </pre>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sub-Tab 3: TimescaleDB Hypertable */}
-            {guideSubTab === 'timescale' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <p className="text-slate-600 dark:text-slate-300">
-                    <strong>TimescaleDB</strong> eklentisi ile telemetri verileri otomatik parçalanır (hypertable) ve 7 günden eski kayıtlar <strong>%90+ sıkıştırılarak</strong> disk tasarrufu sağlanır:
-                  </p>
-                  <button
-                    onClick={() => handleCopyCode(setupGuide?.timescaleSql || '', 'timescale')}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold rounded-md transition cursor-pointer"
-                  >
-                    {copiedKey === 'timescale' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKey === 'timescale' ? 'Kopyalandı' : 'SQL Kopyala'}</span>
-                  </button>
-                </div>
-
-                <pre className="p-4 bg-slate-950 text-slate-200 font-mono text-[11px] rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
-                  {setupGuide?.timescaleSql || 'Yükleniyor...'}
-                </pre>
-              </div>
-            )}
-
-            {/* Sub-Tab 4: SQL Schema */}
-            {guideSubTab === 'schema' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <p className="text-slate-600 dark:text-slate-300">
-                    Dashboard sistemi için gerekli tüm tablolar (kullanıcılar, cihazlar, telemetri okumaları, alarmlar, loglar):
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleCopyCode(setupGuide?.sqlSchema || '', 'schema')}
-                      className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-semibold rounded-md transition cursor-pointer"
-                    >
-                      {copiedKey === 'schema' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'schema' ? 'Kopyalandı' : 'SQL Kopyala'}</span>
-                    </button>
-                    <button
-                      onClick={handleDownloadSqlSchema}
-                      className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md transition cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>.sql İndir</span>
-                    </button>
-                  </div>
-                </div>
-
-                <pre className="p-4 bg-slate-950 text-slate-200 font-mono text-[11px] rounded-xl overflow-x-auto leading-relaxed max-h-96 border border-slate-800">
-                  {setupGuide?.sqlSchema || 'Yükleniyor...'}
-                </pre>
-              </div>
-            )}
-
-            {/* Sub-Tab 5: Cost Calculator */}
-            {guideSubTab === 'calc' && (
-              <div className="space-y-4 text-xs">
-                <h4 className="font-bold text-slate-800 dark:text-slate-200">
-                  Aylık Maliyet ve Tasarruf Karşılaştırma Tablosu (100 Cihaz / 1 sn Telemetri Örneği)
-                </h4>
-
-                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-medium">
-                      <tr>
-                        <th className="py-2.5 px-4">Kriter</th>
-                        <th className="py-2.5 px-4 text-amber-600 dark:text-amber-400">Firebase Firestore (Bulut)</th>
-                        <th className="py-2.5 px-4 text-blue-600 dark:text-blue-400 font-bold">Kendi PostgreSQL Sunucunuz</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                      <tr>
-                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">Aylık Telemetri Yazma</td>
-                        <td className="py-3 px-4">260 Milyon İşlem (Yazma)</td>
-                        <td className="py-3 px-4 font-semibold text-blue-600 dark:text-blue-400">Limitsiz (Sabit Disk Hızı)</td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">Aylık Veritabanı Maliyeti</td>
-                        <td className="py-3 px-4 font-bold text-rose-600">~$468.00 / Ay</td>
-                        <td className="py-3 px-4 font-bold text-emerald-600">~$0.00 / Ay (Mevcut VPS)</td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">Zaman Serisi Sıkıştırma</td>
-                        <td className="py-3 px-4 text-slate-400">Yok (Her doküman ham saklanır)</td>
-                        <td className="py-3 px-4 font-semibold text-blue-600 dark:text-blue-400">TimescaleDB ile %92 Sıkıştırma</td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">Veri Sahipliği & Yedekleme</td>
-                        <td className="py-3 px-4 text-slate-400">Google Cloud bağımlı</td>
-                        <td className="py-3 px-4 font-semibold text-emerald-600 dark:text-emerald-400">Tamamen sizin kontrolünüzde</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

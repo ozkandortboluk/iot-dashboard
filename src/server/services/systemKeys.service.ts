@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
+import { systemSecretsService } from './systemSecrets.service.js';
 import { resetEncryptionKeyCache } from '../utils/crypto.js';
 
 export interface KeyItemStatus {
   keyName: string;
   isConfigured: boolean;
-  source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing';
+  source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing';
   sourcePath?: string;
   maskedValue?: string;
   isWeakOrDefault: boolean;
@@ -98,14 +99,20 @@ export class SystemKeysService {
   /**
    * Resolves current JWT_SECRET / SESSION_SECRET status without mutating anything.
    */
-  public resolveJwtSecret(): { value: string; source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Env vars (if strong)
+  public resolveJwtSecret(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
+    // 1. Central Security Vault
+    const vaultJwt = systemSecretsService.getSecret('authentication.jwt_secret') || systemSecretsService.getSecret('jwt_secret');
+    if (vaultJwt && !isWeak(vaultJwt)) {
+      return { value: vaultJwt, source: 'vault' };
+    }
+
+    // 2. Env vars (if strong)
     const envVal = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
     if (envVal && !isWeak(envVal)) {
       return { value: envVal, source: 'env' };
     }
 
-    // 2. Docker Secrets
+    // 3. Docker Secrets
     const dockerPaths = ['/run/secrets/jwt_secret', '/run/secrets/session_secret'];
     for (const p of dockerPaths) {
       try {
@@ -116,7 +123,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 3. secrets/ directory
+    // 4. secrets/ directory
     const secretsPaths = [
       path.join(SECRETS_DIR, 'jwt_secret'),
       path.join(SECRETS_DIR, 'session_secret'),
@@ -130,7 +137,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 4. data/ directory fallback
+    // 5. data/ directory fallback
     const dataPaths = [
       path.join(DATA_DIR, '.jwt_secret'),
       path.join(DATA_DIR, '.session_secret'),
@@ -144,7 +151,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 5. Weak env value fallback if present
+    // 6. Weak env value fallback if present
     if (envVal) {
       return { value: envVal, source: 'env' };
     }
@@ -191,14 +198,17 @@ export class SystemKeysService {
       }
     } catch {}
 
-    // 5. data/.vault_key fallback
-    const dataPath = path.join(DATA_DIR, '.vault_key');
-    try {
-      if (fs.existsSync(dataPath)) {
-        const val = fs.readFileSync(dataPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: dataPath };
-      }
-    } catch {}
+    // 5. Strict production boundary: Do NOT read local fallback file data/.vault_key in production!
+    const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (!isProd) {
+      const dataPath = path.join(DATA_DIR, '.vault_key');
+      try {
+        if (fs.existsSync(dataPath)) {
+          const val = fs.readFileSync(dataPath, 'utf8').trim();
+          if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: dataPath };
+        }
+      } catch {}
+    }
 
     // 6. Weak env value fallback if present
     if (envVal) {
@@ -211,14 +221,20 @@ export class SystemKeysService {
   /**
    * Resolves current OTA_SIGNING_KEY status without mutating anything.
    */
-  public resolveOtaSigningKey(): { value: string; source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    // 1. Env var
+  public resolveOtaSigningKey(): { value: string; source: 'vault' | 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
+    // 1. Central Security Vault
+    const vaultOta = systemSecretsService.getSecret('ota.signing_key') || systemSecretsService.getSecret('ota_signing_key');
+    if (vaultOta) {
+      return { value: vaultOta, source: 'vault' };
+    }
+
+    // 2. Env var
     const envVal = (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
     if (envVal) {
       return { value: envVal, source: 'env' };
     }
 
-    // 2. Custom path
+    // 3. Custom path
     const customPath = process.env.OTA_SIGNING_PRIVATE_KEY_PATH;
     if (customPath) {
       try {
@@ -229,7 +245,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 3. Docker Secret
+    // 4. Docker Secret
     const dockerPath = '/run/secrets/ota_signing_key';
     try {
       if (fs.existsSync(dockerPath)) {
@@ -238,7 +254,7 @@ export class SystemKeysService {
       }
     } catch {}
 
-    // 4. secrets/ directory
+    // 5. secrets/ directory
     const secretPaths = [
       path.join(SECRETS_DIR, 'ota_signing_key'),
       path.join(SECRETS_DIR, 'ota_signing_key.pem'),
@@ -252,7 +268,7 @@ export class SystemKeysService {
       } catch {}
     }
 
-    // 5. data/ directory
+    // 6. data/ directory
     const dataPath = path.join(DATA_DIR, '.ota_signing_key');
     try {
       if (fs.existsSync(dataPath)) {
@@ -345,11 +361,25 @@ export class SystemKeysService {
     if (currentJwt.value && !isWeak(currentJwt.value)) {
       preservedKeys.jwtSecret = true;
       systemLogger.info('security', `[SystemKeys] Mevcut JWT_SECRET korundu (${currentJwt.source}). Yeniden üretilmedi.`);
+      // Auto-migrate to Vault if not yet present in Vault
+      if (currentJwt.source !== 'vault') {
+        systemSecretsService.setSecret('authentication.jwt_secret', currentJwt.value, {
+          category: 'authentication',
+          label: 'JWT Secret',
+          description: 'Oturum ve API token imzalama anahtarı',
+        }).catch(() => {});
+      }
     } else {
       const generatedJwt = crypto.randomBytes(32).toString('hex');
       newlyGenerated.jwtSecret = generatedJwt;
       process.env.JWT_SECRET = generatedJwt;
       process.env.SESSION_SECRET = generatedJwt;
+
+      systemSecretsService.setSecret('authentication.jwt_secret', generatedJwt, {
+        category: 'authentication',
+        label: 'JWT Secret',
+        description: 'Oturum ve API token imzalama anahtarı',
+      }).catch(() => {});
 
       const secretFile = path.join(SECRETS_DIR, 'jwt_secret');
       const dataFile = path.join(DATA_DIR, '.jwt_secret');
@@ -361,7 +391,7 @@ export class SystemKeysService {
         fs.writeFileSync(dataFile, generatedJwt, { encoding: 'utf8', mode: 0o600 });
         savedLocations.push('data/.jwt_secret');
       } catch {}
-      systemLogger.info('security', '[SystemKeys] Yeni kriptografik JWT_SECRET üretildi ve kaydedildi.');
+      systemLogger.info('security', '[SystemKeys] Yeni kriptografik JWT_SECRET üretildi ve Vault kasasına kaydedildi.');
     }
 
     // 2. ENCRYPTION_KEY
@@ -392,6 +422,14 @@ export class SystemKeysService {
     if (currentOta.value && currentOta.value.length > 30) {
       preservedKeys.otaSigningKey = true;
       systemLogger.info('security', `[SystemKeys] Mevcut OTA_SIGNING_KEY korundu (${currentOta.source}). Yeniden üretilmedi.`);
+      // Auto-migrate to Vault if not yet in Vault
+      if (currentOta.source !== 'vault') {
+        systemSecretsService.setSecret('ota.signing_key', currentOta.value, {
+          category: 'ota',
+          label: 'OTA Imzalama Özel Anahtarı',
+          description: 'Ed25519 firmware paketi imzalama özel anahtarı',
+        }).catch(() => {});
+      }
     } else {
       try {
         const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
@@ -401,6 +439,12 @@ export class SystemKeysService {
 
         newlyGenerated.otaSigningKey = privateKey;
         newlyGenerated.otaPublicKey = publicKey;
+
+        systemSecretsService.setSecret('ota.signing_key', privateKey, {
+          category: 'ota',
+          label: 'OTA Imzalama Özel Anahtarı',
+          description: 'Ed25519 firmware paketi imzalama özel anahtarı',
+        }).catch(() => {});
 
         const privFile = path.join(SECRETS_DIR, 'ota_signing_key.pem');
         const pubFile = path.join(SECRETS_DIR, 'ota_signing_key.pub');
@@ -417,7 +461,7 @@ export class SystemKeysService {
         } catch {}
 
         process.env.OTA_SIGNING_PRIVATE_KEY_PATH = privFile;
-        systemLogger.info('security', '[SystemKeys] Yeni Ed25519 OTA imzalama anahtarı üretildi ve kaydedildi.');
+        systemLogger.info('security', '[SystemKeys] Yeni Ed25519 OTA imzalama anahtarı üretildi ve Vault kasasına kaydedildi.');
       } catch (err: any) {
         systemLogger.warn('security', `OTA anahtarı üretilirken hata: ${err?.message || err}`);
       }

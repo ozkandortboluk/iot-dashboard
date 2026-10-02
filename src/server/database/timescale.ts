@@ -406,7 +406,7 @@ export class TimescaleManager {
         for (const chunk of chunksToCompress) {
           try {
             await pool.query(
-              `SELECT compress_chunk(format('%I.%I', $1, $2))`,
+              `SELECT compress_chunk(format('%I.%I', $1::text, $2::text)::regclass)`,
               [chunk.chunk_schema, chunk.chunk_name]
             );
             compressedSuccessCount++;

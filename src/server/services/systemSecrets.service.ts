@@ -3,7 +3,17 @@ import path from 'node:path';
 import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret, sanitizeLogString as sanitizeLogUtil } from '../utils/crypto.js';
 import { systemLogger } from './systemLogger.service.js';
 
-export type SecretCategory = 'database' | 'email' | 'notifications' | 'third_party' | 'custom';
+export type SecretCategory =
+  | 'database'
+  | 'email'
+  | 'notifications'
+  | 'authentication'
+  | 'iot'
+  | 'mqtt'
+  | 'ota'
+  | 'webhook'
+  | 'third_party'
+  | 'custom';
 
 export interface StoredSecretRecord {
   key: string;
@@ -437,6 +447,22 @@ export class SystemSecretsService {
     const fromVault = this.getSecret('email.smtpPass');
     if (fromVault) return fromVault;
     return process.env.SMTP_PASS || '';
+  }
+
+  // ============================================================================
+  // AUTHENTICATION & SECURITY KEYS ACCESSORS & RESOLVERS
+  // ============================================================================
+
+  public getJwtSecret(): string {
+    const fromVault = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret');
+    if (fromVault) return fromVault;
+    return (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
+  }
+
+  public getOtaSigningKey(): string {
+    const fromVault = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key');
+    if (fromVault) return fromVault;
+    return (process.env.OTA_SIGNING_PRIVATE_KEY || '').trim();
   }
 
   // ============================================================================

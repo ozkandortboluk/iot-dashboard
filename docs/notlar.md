@@ -1,3 +1,10 @@
+
+DNS & Teslimat İpuçları YARDIM KISMINA TAŞINABİLİR
+
+
+
+
+
 # NexusNode IoT — Yaz-boz alanı
 
 [Kurallar](kurallar.md) · [Açık işler](PROJECT_ROADMAP.md) · [Tamamlanan işlemler](tamamlanan_islemler.md)

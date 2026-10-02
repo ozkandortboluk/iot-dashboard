@@ -59,8 +59,9 @@ export function getEd25519KeyPair(): KeyPair {
 
   const activeKeyId = process.env.OTA_SIGNING_KEY_ID || 'root_ed25519_v1';
 
-  // 1. Check direct PEM string from environment secret or AES-256-GCM Vault
-  const rawEnvOrVaultKey = process.env.OTA_SIGNING_PRIVATE_KEY ||
+  // 1. Check direct PEM string from AES-256-GCM Vault or environment secret
+  const rawEnvOrVaultKey = systemSecretsService.getOtaSigningKey() ||
+    process.env.OTA_SIGNING_PRIVATE_KEY ||
     systemSecretsService.getSecret('ota.signing_private_key') ||
     systemSecretsService.getSecret('ota_signing_private_key');
 
