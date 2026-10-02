@@ -19,6 +19,7 @@ class SystemLoggerService {
   private configFilePath = path.join(process.cwd(), 'data', 'system_logger_config.json');
   private flushTimeout: NodeJS.Timeout | null = null;
   private pendingFileWrites: string[] = [];
+  private logListeners: Set<(event: SystemEvent) => void> = new Set();
 
   // Toggle & Config state
   private enabled: boolean = true;
@@ -200,6 +201,13 @@ class SystemLoggerService {
     return this.processEvent(level, category, message, details, source);
   }
 
+  public onLog(listener: (event: SystemEvent) => void): () => void {
+    this.logListeners.add(listener);
+    return () => {
+      this.logListeners.delete(listener);
+    };
+  }
+
   public log(
     level: SystemEventLevel,
     category: SystemEventCategory,
@@ -211,23 +219,6 @@ class SystemLoggerService {
     if (!this.enabled && level !== 'critical') {
       return {
         id: `discarded_${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        level,
-        category,
-        message,
-        source,
-      };
-    }
-
-    // Suppress noisy static asset / favicon requests from polluting system logs
-    const pathToCheck = (message + ' ' + (typeof details === 'object' ? (details?.url || details?.path || '') : details || '')).toLowerCase();
-    if (
-      pathToCheck.includes('/favicon.svg') ||
-      pathToCheck.includes('/favicon.ico') ||
-      pathToCheck.includes('/site.webmanifest')
-    ) {
-      return {
-        id: `suppressed_${Date.now()}`,
         timestamp: new Date().toISOString(),
         level,
         category,
@@ -330,6 +321,13 @@ class SystemLoggerService {
     // Schedule async file persistence if enabled
     if (this.logToFile) {
       this.queueFilePersistence(event);
+    }
+
+    // Notify live event subscribers (e.g. WebSocket broadcast)
+    for (const listener of this.logListeners) {
+      try {
+        listener(event);
+      } catch {}
     }
 
     return event;
