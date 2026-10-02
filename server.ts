@@ -8,6 +8,7 @@ import { createServer as createViteServer } from 'vite';
 
 // Services & Database
 import { systemLogger } from './src/server/services/systemLogger.service.js';
+import { systemSecretsService } from './src/server/services/systemSecrets.service.js';
 import { initWebSocketServer } from './src/server/services/websocket.js';
 import { initSimulator } from './src/server/services/simulator.js';
 import { stopWebSocketServer } from './src/server/services/websocket.js';
@@ -513,6 +514,16 @@ async function setupViteOrStatic() {
       process.exit(1);
     } else {
       console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);
+    }
+
+    // Preserve existing production keys: migrate from existing environment/files into Vault without regeneration
+    try {
+      const migrationResult = await systemSecretsService.migrateLegacySecrets();
+      if (migrationResult.migratedCount > 0) {
+        console.log(`[Security Migration] ${migrationResult.migratedCount} mevcut anahtar Vault kasasına taşındı ve korundu (${migrationResult.keys.join(', ')}).`);
+      }
+    } catch (err: any) {
+      console.warn('[Startup] Legacy secrets migration warning:', err?.message || err);
     }
 
     const policyResult = validateProductionSecurityPolicy();

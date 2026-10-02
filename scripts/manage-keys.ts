@@ -1,15 +1,24 @@
 #!/usr/bin/env tsx
 import { systemKeysService } from '../src/server/services/systemKeys.service.js';
+import { systemSecretsService } from '../src/server/services/systemSecrets.service.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-function run() {
+async function run() {
   const args = process.argv.slice(2);
   const shouldGenerate = args.includes('--generate') || args.includes('-g') || args.includes('generate');
 
   console.log('\n==============================================================================');
   console.log('  NexusNode IoT — Sistem Güvenlik Anahtarları Yönetim Konsolu (VPS CLI)');
   console.log('==============================================================================\n');
+
+  // 1. Automatically migrate and preserve any existing production keys into Central Security Vault
+  try {
+    const migration = await systemSecretsService.migrateLegacySecrets();
+    if (migration.migratedCount > 0) {
+      console.log(`[+] Mevcut üretim anahtarları tespit edildi ve Vault kasasına aktarılarak korundu (${migration.keys.join(', ')}).\n`);
+    }
+  } catch {}
 
   if (shouldGenerate) {
     console.log('[+] Eksik anahtarlar taranıyor ve güvenle üretiliyor (Mevcut anahtarlar korunur)...');
@@ -64,6 +73,10 @@ function run() {
   } else {
     console.log('✅ Tüm kritik üretim güvenlik anahtarları hazır ve güvendedir.\n');
   }
+  process.exit(0);
 }
 
-run();
+run().catch((err) => {
+  console.error('[!] Hata:', err?.message || err);
+  process.exit(1);
+});
