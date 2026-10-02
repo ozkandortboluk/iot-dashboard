@@ -14,6 +14,9 @@ export interface KeyItemStatus {
   isWeakOrDefault: boolean;
   requiredForProduction: boolean;
   description: string;
+  keyId?: string;
+  version?: number;
+  rotatable?: boolean;
 }
 
 export interface SystemKeysStatusResponse {
@@ -355,6 +358,9 @@ export class SystemKeysService {
     const enc = this.resolveEncryptionKey();
     const ota = this.resolveOtaSigningKey();
 
+    const jwtRec = systemSecretsService.getSecretRecord('authentication.jwt_secret') || systemSecretsService.getSecretRecord('jwt_secret');
+    const otaRec = systemSecretsService.getSecretRecord('ota.signing_key') || systemSecretsService.getSecretRecord('ota_signing_key');
+
     const jwtItem: KeyItemStatus = {
       keyName: 'JWT_SECRET',
       isConfigured: Boolean(jwt.value && !isWeak(jwt.value)),
@@ -364,6 +370,9 @@ export class SystemKeysService {
       isWeakOrDefault: Boolean(jwt.value && isWeak(jwt.value)),
       requiredForProduction: true,
       description: 'Kullanıcı oturumları ve API token imzalama anahtarı (HMAC-SHA256).',
+      keyId: jwtRec?.keyId || (jwt.source === 'vault' ? 'jwt_v1' : undefined),
+      version: jwtRec?.version || (jwt.source === 'vault' ? 1 : undefined),
+      rotatable: jwt.source === 'vault',
     };
 
     const encItem: KeyItemStatus = {
@@ -375,6 +384,9 @@ export class SystemKeysService {
       isWeakOrDefault: Boolean(enc.value && isWeak(enc.value)),
       requiredForProduction: true,
       description: 'Gizli Kasa (Vault) ve veritabanı parolalarını şifreleme anahtarı (AES-256-GCM).',
+      keyId: 'root_master_key',
+      version: 1,
+      rotatable: false,
     };
 
     const otaItem: KeyItemStatus = {
@@ -386,6 +398,9 @@ export class SystemKeysService {
       isWeakOrDefault: false,
       requiredForProduction: false,
       description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Ed25519).',
+      keyId: otaRec?.keyId || (ota.source === 'vault' ? 'root_ed25519_v1' : undefined),
+      version: otaRec?.version || (ota.source === 'vault' ? 1 : undefined),
+      rotatable: ota.source === 'vault',
     };
 
     let missingCount = 0;
@@ -411,7 +426,7 @@ export class SystemKeysService {
    * - Plaintext secret files are NEVER created on disk.
    * - In production: missing ENCRYPTION_KEY triggers strict fail-closed refusal.
    */
-  public generateMissingKeys(): GeneratedKeyResult {
+  public async generateMissingKeys(): Promise<GeneratedKeyResult> {
     this.ensureDirectoriesExist();
 
     const currentJwt = this.resolveJwtSecret();
@@ -438,11 +453,11 @@ export class SystemKeysService {
       systemLogger.info('security', `[SystemKeys] Mevcut JWT_SECRET korundu (${currentJwt.source}). Yeniden üretilmedi.`);
       // Auto-migrate to Vault if not yet present in Vault
       if (currentJwt.source !== 'vault') {
-        systemSecretsService.setSecret('authentication.jwt_secret', currentJwt.value, {
+        await systemSecretsService.setSecret('authentication.jwt_secret', currentJwt.value, {
           category: 'authentication',
           label: 'JWT Secret',
           description: 'Oturum ve API token imzalama anahtarı',
-        }).catch(() => {});
+        });
       }
       // Scrub any legacy plaintext files on disk
       try {
@@ -458,11 +473,11 @@ export class SystemKeysService {
       process.env.SESSION_SECRET = generatedJwt;
 
       // Save strictly to Central Security Vault
-      systemSecretsService.setSecret('authentication.jwt_secret', generatedJwt, {
+      await systemSecretsService.setSecret('authentication.jwt_secret', generatedJwt, {
         category: 'authentication',
         label: 'JWT Secret',
         description: 'Oturum ve API token imzalama anahtarı',
-      }).catch(() => {});
+      });
 
       // Scrub any legacy plaintext files to enforce Vault-only storage
       try {
@@ -513,11 +528,11 @@ export class SystemKeysService {
       systemLogger.info('security', `[SystemKeys] Mevcut OTA_SIGNING_KEY korundu (${currentOta.source}). Yeniden üretilmedi.`);
       // Auto-migrate to Vault if not yet in Vault
       if (currentOta.source !== 'vault') {
-        systemSecretsService.setSecret('ota.signing_key', currentOta.value, {
+        await systemSecretsService.setSecret('ota.signing_key', currentOta.value, {
           category: 'ota',
           label: 'OTA Imzalama Özel Anahtarı',
           description: 'Ed25519 firmware paketi imzalama özel anahtarı',
-        }).catch(() => {});
+        });
       }
       // Scrub any legacy plaintext private key files
       try {
@@ -537,11 +552,11 @@ export class SystemKeysService {
         generatedItems.otaPublicKey = publicKey;
 
         // Save private key strictly to Central Security Vault
-        systemSecretsService.setSecret('ota.signing_key', privateKey, {
+        await systemSecretsService.setSecret('ota.signing_key', privateKey, {
           category: 'ota',
           label: 'OTA Imzalama Özel Anahtarı',
           description: 'Ed25519 firmware paketi imzalama özel anahtarı',
-        }).catch(() => {});
+        });
 
         // Scrub any legacy plaintext private key files
         try {
@@ -579,6 +594,61 @@ export class SystemKeysService {
       preservedKeys,
       savedLocations,
       envSnippet,
+    };
+  }
+
+  /**
+   * Rotates JWT_SECRET, assigning a new keyId and archiving previous secret in Vault previousVersions
+   */
+  public async rotateJwtSecret(operatorName = 'admin'): Promise<{ success: boolean; oldKeyId?: string; newKeyId: string; version: number }> {
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    const existingRec = systemSecretsService.getSecretRecord('authentication.jwt_secret') || systemSecretsService.getSecretRecord('jwt_secret');
+    const nextVer = (existingRec?.version || 1) + 1;
+    const newKeyId = `jwt_v${nextVer}`;
+
+    const result = await systemSecretsService.rotateSecret('authentication.jwt_secret', newSecret, {
+      keyId: newKeyId,
+      description: `Oturum ve API token imzalama anahtarı (${newKeyId})`,
+      updatedBy: operatorName,
+    });
+
+    process.env.JWT_SECRET = newSecret;
+    process.env.SESSION_SECRET = newSecret;
+
+    systemLogger.info('security', `[SystemKeys] JWT_SECRET başarıyla döndürüldü: ${result.newKeyId} (v${result.version})`);
+    return result;
+  }
+
+  /**
+   * Rotates OTA_SIGNING_KEY, assigning a new keyId, saving new public key, and archiving previous key in Vault
+   */
+  public async rotateOtaSigningKey(operatorName = 'admin'): Promise<{ success: boolean; oldKeyId?: string; newKeyId: string; version: number; publicKeyPem: string }> {
+    this.ensureDirectoriesExist();
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+
+    const existingRec = systemSecretsService.getSecretRecord('ota.signing_key') || systemSecretsService.getSecretRecord('ota_signing_key');
+    const nextVer = (existingRec?.version || 1) + 1;
+    const newKeyId = `root_ed25519_v${nextVer}`;
+
+    const result = await systemSecretsService.rotateSecret('ota.signing_key', privateKey, {
+      keyId: newKeyId,
+      description: `Ed25519 firmware paketi imzalama özel anahtarı (${newKeyId})`,
+      updatedBy: operatorName,
+    });
+
+    // Save non-sensitive public key for firmware compile/flash tooling
+    try {
+      const pubFile = path.join(SECRETS_DIR, 'ota_signing_key.pub');
+      fs.writeFileSync(pubFile, publicKey, { encoding: 'utf8', mode: 0o644 });
+    } catch {}
+
+    systemLogger.info('security', `[SystemKeys] OTA_SIGNING_KEY başarıyla döndürüldü: ${newKeyId} (v${result.version})`);
+    return {
+      ...result,
+      publicKeyPem: publicKey,
     };
   }
 

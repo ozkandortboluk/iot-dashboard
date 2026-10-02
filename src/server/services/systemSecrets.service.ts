@@ -15,6 +15,13 @@ export type SecretCategory =
   | 'third_party'
   | 'custom';
 
+export interface StoredSecretVersion {
+  keyId: string;
+  encryptedValue: string;
+  version: number;
+  retiredAt: string;
+}
+
 export interface StoredSecretRecord {
   key: string;
   category: SecretCategory;
@@ -22,6 +29,9 @@ export interface StoredSecretRecord {
   description?: string;
   encryptedValue: string; // AES-256-GCM ciphertext (enc:v1:...)
   isSensitive: boolean;
+  keyId?: string;
+  version?: number;
+  previousVersions?: StoredSecretVersion[];
   updatedAt: string;
   updatedBy?: string;
 }
@@ -94,10 +104,13 @@ export interface PublicNotificationSecretsSummary {
 export interface PublicSystemKeyItemSummary {
   keyName: string;
   isConfigured: boolean;
-  source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+  source: 'vault' | 'environment' | 'secrets_file' | 'missing' | 'docker_secret' | 'env' | 'data_file';
   inVault: boolean;
   maskedValue: string;
   description: string;
+  keyId?: string;
+  version?: number;
+  rotatable?: boolean;
 }
 
 export interface PublicSystemKeysSummary {
@@ -111,12 +124,24 @@ export interface PublicSystemKeysSummary {
   };
 }
 
+export interface PublicMigrationStatusSummary {
+  status: 'complete' | 'pending' | 'clean';
+  authoritativeSource: string;
+  hasLegacyFiles: boolean;
+  hasUnmigratedEnv: boolean;
+  legacyFilesDetected: string[];
+  unmigratedEnvKeys: string[];
+  vaultKeysCount: number;
+  details: string;
+}
+
 export interface PublicSystemSecretsState {
   database: PublicDatabaseSecretsSummary;
   email: PublicEmailSecretsSummary;
   notifications: PublicNotificationSecretsSummary;
   customSecrets: PublicSecretItemSummary[];
   systemKeys?: PublicSystemKeysSummary;
+  migrationStatus?: PublicMigrationStatusSummary;
   updatedAt?: string;
 }
 
@@ -338,6 +363,8 @@ export class SystemSecretsService {
       description?: string;
       isSensitive?: boolean;
       updatedBy?: string;
+      keyId?: string;
+      version?: number;
     }
   ): Promise<void> {
     if (!this.isLoaded) this.loadFromLocalVault();
@@ -369,6 +396,11 @@ export class SystemSecretsService {
       return;
     }
 
+    const existing = this.inMemorySecrets.get(key);
+    const version = meta.version ?? existing?.version ?? 1;
+    const defaultKeyId = `${key.replace(/[^a-zA-Z0-9]/g, '_')}_v${version}`;
+    const keyId = meta.keyId ?? existing?.keyId ?? defaultKeyId;
+
     const encrypted = encryptSecret(trimmed);
     const record: StoredSecretRecord = {
       key,
@@ -377,6 +409,9 @@ export class SystemSecretsService {
       description: meta.description,
       encryptedValue: encrypted,
       isSensitive: meta.isSensitive ?? true,
+      keyId,
+      version,
+      previousVersions: existing?.previousVersions,
       updatedAt: new Date().toISOString(),
       updatedBy: meta.updatedBy,
     };
@@ -384,6 +419,110 @@ export class SystemSecretsService {
     this.inMemorySecrets.set(key, record);
     this.saveToLocalVault();
     await this.persistToPostgres();
+  }
+
+  /**
+   * Returns full internal record of a secret including version and keyId
+   */
+  public getSecretRecord(key: string): StoredSecretRecord | null {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    return this.inMemorySecrets.get(key) || null;
+  }
+
+  /**
+   * Rotates an existing secret to a new cryptographically generated or provided value.
+   * Archives previous version in previousVersions array for grace periods (e.g. JWT token validation).
+   */
+  public async rotateSecret(
+    key: string,
+    newPlainValue: string,
+    meta?: {
+      keyId?: string;
+      description?: string;
+      updatedBy?: string;
+    }
+  ): Promise<{ success: boolean; oldKeyId?: string; newKeyId: string; version: number }> {
+    if (!this.isLoaded) this.loadFromLocalVault();
+
+    const trimmed = newPlainValue ? newPlainValue.trim() : '';
+    if (!trimmed) {
+      throw new Error('Döndürülecek anahtar değeri boş olamaz.');
+    }
+
+    const existing = this.inMemorySecrets.get(key);
+    const oldVersion = existing?.version || 1;
+    const newVersion = oldVersion + 1;
+    const oldKeyId = existing?.keyId || `${key.replace(/[^a-zA-Z0-9]/g, '_')}_v${oldVersion}`;
+    const newKeyId = meta?.keyId || `${key.replace(/[^a-zA-Z0-9]/g, '_')}_v${newVersion}`;
+
+    const previousVersions: StoredSecretVersion[] = existing?.previousVersions ? [...existing.previousVersions] : [];
+    if (existing?.encryptedValue) {
+      previousVersions.unshift({
+        keyId: oldKeyId,
+        encryptedValue: existing.encryptedValue,
+        version: oldVersion,
+        retiredAt: new Date().toISOString(),
+      });
+      // Keep maximum 5 previous versions for token grace periods
+      if (previousVersions.length > 5) {
+        previousVersions.length = 5;
+      }
+    }
+
+    const encrypted = encryptSecret(trimmed);
+    const updatedRecord: StoredSecretRecord = {
+      key,
+      category: existing?.category || 'custom',
+      label: existing?.label || key,
+      description: meta?.description || existing?.description,
+      encryptedValue: encrypted,
+      isSensitive: existing?.isSensitive ?? true,
+      keyId: newKeyId,
+      version: newVersion,
+      previousVersions,
+      updatedAt: new Date().toISOString(),
+      updatedBy: meta?.updatedBy || 'key_rotation',
+    };
+
+    this.inMemorySecrets.set(key, updatedRecord);
+    this.saveToLocalVault();
+    await this.persistToPostgres();
+
+    systemLogger.info('security', `[KeyRotation] '${key}' anahtarı döndürüldü. Eski: ${oldKeyId} (v${oldVersion}) -> Yeni: ${newKeyId} (v${newVersion})`);
+
+    return {
+      success: true,
+      oldKeyId,
+      newKeyId,
+      version: newVersion,
+    };
+  }
+
+  /**
+   * Retrieves previous decrypted secret versions for grace period token/signature verification
+   */
+  public getPreviousSecrets(key: string): Array<{ keyId: string; value: string; version: number; retiredAt: string }> {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    const item = this.inMemorySecrets.get(key);
+    if (!item || !item.previousVersions || item.previousVersions.length === 0) {
+      return [];
+    }
+
+    const results: Array<{ keyId: string; value: string; version: number; retiredAt: string }> = [];
+    for (const prev of item.previousVersions) {
+      try {
+        const decrypted = decryptSecret(prev.encryptedValue);
+        if (decrypted) {
+          results.push({
+            keyId: prev.keyId,
+            value: decrypted,
+            version: prev.version,
+            retiredAt: prev.retiredAt,
+          });
+        }
+      } catch {}
+    }
+    return results;
   }
 
   /**
@@ -768,6 +907,93 @@ export class SystemSecretsService {
     return { migratedCount: migratedKeys.length, keys: migratedKeys };
   }
 
+  /**
+   * Evaluates the migration status of legacy plaintext secrets.
+   * Authoritative detection of whether legacy plaintext files or unmigrated environment variables remain.
+   */
+  public getMigrationStatus(): PublicMigrationStatusSummary {
+    if (!this.isLoaded) this.loadFromLocalVault();
+
+    const legacyFilesDetected: string[] = [];
+    const unmigratedEnvKeys: string[] = [];
+
+    // 1. Detect legacy plaintext files on disk
+    const legacyFileCandidates = [
+      {
+        name: 'data/.db_config.json',
+        check: () => {
+          const p = path.join(process.cwd(), 'data', '.db_config.json');
+          if (fs.existsSync(p)) {
+            try {
+              const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+              return Boolean(raw.password && typeof raw.password === 'string' && !raw.password.includes('••••'));
+            } catch {}
+          }
+          return false;
+        },
+      },
+      { name: 'secrets/jwt_secret', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'jwt_secret')) },
+      { name: 'data/.jwt_secret', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.jwt_secret')) },
+      { name: 'secrets/session_secret', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'session_secret')) },
+      { name: 'data/.session_secret', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.session_secret')) },
+      { name: 'secrets/ota_signing_key.pem', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'ota_signing_key.pem')) },
+      { name: 'data/.ota_signing_key', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.ota_signing_key')) },
+      { name: 'uploads/keys/ed25519_private.pem', check: () => fs.existsSync(path.join(process.cwd(), 'uploads', 'keys', 'ed25519_private.pem')) },
+    ];
+
+    for (const item of legacyFileCandidates) {
+      if (item.check()) {
+        legacyFilesDetected.push(item.name);
+      }
+    }
+
+    // 2. Detect unmigrated environment variables (present in env, but absent in Vault)
+    if (!this.getSecret('authentication.jwt_secret') && !this.getSecret('jwt_secret')) {
+      if (process.env.JWT_SECRET || process.env.SESSION_SECRET) unmigratedEnvKeys.push('JWT_SECRET');
+    }
+    if (!this.getSecret('ota.signing_key') && !this.getSecret('ota_signing_key')) {
+      if (process.env.OTA_SIGNING_PRIVATE_KEY) unmigratedEnvKeys.push('OTA_SIGNING_PRIVATE_KEY');
+    }
+    if (!this.getSecret('database.password')) {
+      if (process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD) unmigratedEnvKeys.push('POSTGRES_PASSWORD');
+    }
+    if (!this.getSecret('email.resendApiKey')) {
+      if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.startsWith('re_')) unmigratedEnvKeys.push('RESEND_API_KEY');
+    }
+    if (!this.getSecret('email.smtpPass')) {
+      if (process.env.SMTP_PASS) unmigratedEnvKeys.push('SMTP_PASS');
+    }
+
+    const hasLegacyFiles = legacyFilesDetected.length > 0;
+    const hasUnmigratedEnv = unmigratedEnvKeys.length > 0;
+    const vaultKeysCount = this.inMemorySecrets.size;
+
+    let status: 'complete' | 'pending' | 'clean';
+    let details: string;
+
+    if (hasLegacyFiles || hasUnmigratedEnv) {
+      status = 'pending';
+      details = `Kasaya aktarılmayı bekleyen ${legacyFilesDetected.length} adet disk dosyası veya ${unmigratedEnvKeys.length} adet ortam değişkeni tespit edildi.`;
+    } else if (vaultKeysCount > 0) {
+      status = 'complete';
+      details = 'Tüm sistem anahtarları Vault kasasında güvenle saklanmaktadır. Diskte açıkta düz metin dosya bulunmamaktadır.';
+    } else {
+      status = 'clean';
+      details = 'Sistem temiz kasa durumundadır.';
+    }
+
+    return {
+      status,
+      authoritativeSource: 'local_vault (AES-256-GCM data/.system_secrets.json)',
+      hasLegacyFiles,
+      hasUnmigratedEnv,
+      legacyFilesDetected,
+      unmigratedEnvKeys,
+      vaultKeysCount,
+      details,
+    };
+  }
+
   // ============================================================================
   // PUBLIC SUMMARY FOR UI (Zero plaintext passwords/tokens)
   // ============================================================================
@@ -907,10 +1133,12 @@ export class SystemSecretsService {
 
     // 5. System Keys & Zero-Loss Vault Status
     const vaultStatus = getVaultStatus();
+    const jwtRec = this.getSecretRecord('authentication.jwt_secret') || this.getSecretRecord('jwt_secret');
     const hasVaultJwt = this.inMemorySecrets.has('authentication.jwt_secret') || this.inMemorySecrets.has('jwt_secret');
     const rawJwt = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret') || process.env.JWT_SECRET || process.env.SESSION_SECRET || '';
     const jwtSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultJwt ? 'vault' : rawJwt ? 'environment' : 'missing';
 
+    const otaRec = this.getSecretRecord('ota.signing_key') || this.getSecretRecord('ota_signing_key');
     const hasVaultOta = this.inMemorySecrets.has('ota.signing_key') || this.inMemorySecrets.has('ota_signing_key');
     const rawOta = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key') || process.env.OTA_SIGNING_PRIVATE_KEY || '';
     const otaSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultOta ? 'vault' : rawOta ? 'environment' : 'missing';
@@ -931,6 +1159,9 @@ export class SystemSecretsService {
           inVault: hasVaultJwt,
           maskedValue: rawJwt ? maskSecret(rawJwt) : '(Tanımlanmamış)',
           description: 'Kullanıcı oturumları ve API tokenları imzalama anahtarı (Oturumlar %100 korunur).',
+          keyId: jwtRec?.keyId || (hasVaultJwt ? 'jwt_v1' : undefined),
+          version: jwtRec?.version || (hasVaultJwt ? 1 : undefined),
+          rotatable: hasVaultJwt,
         },
         encryptionKey: {
           keyName: 'ENCRYPTION_KEY',
@@ -939,6 +1170,9 @@ export class SystemSecretsService {
           inVault: false, // Root key stays outside vault
           maskedValue: vaultStatus.configured ? '••••••••' : '(Tanımlanmamış)',
           description: 'Tüm kasayı AES-256-GCM ile açan ana şifreleme anahtarı (Root Master Key).',
+          keyId: 'root_master_key',
+          version: 1,
+          rotatable: false, // Root key rotated via external secrets re-encryption
         },
         otaSigningKey: {
           keyName: 'OTA_SIGNING_KEY',
@@ -947,6 +1181,9 @@ export class SystemSecretsService {
           inVault: hasVaultOta,
           maskedValue: rawOta ? '(Ed25519 Özel Anahtar Mevcut)' : '(Tanımlanmamış)',
           description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Sahadaki cihazlar %100 korunur).',
+          keyId: otaRec?.keyId || (hasVaultOta ? 'root_ed25519_v1' : undefined),
+          version: otaRec?.version || (hasVaultOta ? 1 : undefined),
+          rotatable: hasVaultOta,
         },
       },
     };
@@ -957,6 +1194,7 @@ export class SystemSecretsService {
       notifications: notificationsSummary,
       customSecrets: customList,
       systemKeys: systemKeysSummary,
+      migrationStatus: this.getMigrationStatus(),
       updatedAt: new Date().toISOString(),
     };
   }

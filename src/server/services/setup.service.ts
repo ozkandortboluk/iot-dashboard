@@ -1527,7 +1527,7 @@ export class SetupService {
 
     // 3. Ensure system security keys exist (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
     try {
-      systemKeysService.generateMissingKeys();
+      await systemKeysService.generateMissingKeys();
     } catch (keyErr: any) {
       systemLogger.warn('security', `Otomatik anahtar üretimi uyarısı: ${keyErr?.message || keyErr}`);
     }

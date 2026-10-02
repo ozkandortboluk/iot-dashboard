@@ -22,7 +22,7 @@ async function run() {
 
   if (shouldGenerate) {
     console.log('[+] Eksik anahtarlar taranıyor ve güvenle üretiliyor (Mevcut anahtarlar korunur)...');
-    const genResult = systemKeysService.generateMissingKeys();
+    const genResult = await systemKeysService.generateMissingKeys();
     if (genResult.preservedKeys.jwtSecret) {
       console.log('  ℹ️  JWT_SECRET zaten mevcut (Korundu).');
     } else if (genResult.generatedItems.jwtSecret) {

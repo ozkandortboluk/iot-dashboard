@@ -64,9 +64,9 @@ setupRouter.get('/keys-status', requireSetupAuth, (req: Request, res: Response) 
  * Strictly preserves existing keys to avoid data or session corruption.
  * Requires Setup Authentication.
  */
-setupRouter.post('/generate-keys', requireSetupAuth, (req: Request, res: Response) => {
+setupRouter.post('/generate-keys', requireSetupAuth, async (req: Request, res: Response) => {
   try {
-    const result = systemKeysService.generateMissingKeys();
+    const result = await systemKeysService.generateMissingKeys();
     return res.json({
       success: true,
       ...result,

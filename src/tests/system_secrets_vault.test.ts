@@ -322,5 +322,15 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(state.systemKeys?.keys).toHaveProperty('encryptionKey');
       expect(state.systemKeys?.keys).toHaveProperty('otaSigningKey');
     });
+
+    it('should provide authoritative migrationStatus (pending vs complete)', () => {
+      const migration = systemSecretsService.getMigrationStatus();
+      expect(['complete', 'pending', 'clean']).toContain(migration.status);
+      expect(typeof migration.hasLegacyFiles).toBe('boolean');
+      expect(typeof migration.hasUnmigratedEnv).toBe('boolean');
+      expect(Array.isArray(migration.legacyFilesDetected)).toBe(true);
+      expect(Array.isArray(migration.unmigratedEnvKeys)).toBe(true);
+      expect(typeof migration.details).toBe('string');
+    });
   });
 });

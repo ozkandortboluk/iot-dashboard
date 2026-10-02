@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
+import { systemKeysService } from '../services/systemKeys.service.js';
 import { setupService, type DatabaseConfigPayload } from '../services/setup.service.js';
 import { emailService } from '../services/email.service.js';
 import { db } from '../db.js';
@@ -50,6 +51,56 @@ function isValidSecretKey(key?: string): boolean {
 }
 
 /**
+ * Helper to produce UI state unified directly from runtime resolvers (Single Source of Truth)
+ */
+function buildPublicSecretsWithRuntimeKeys() {
+  const state = systemSecretsService.getPublicSecretsState();
+  const runtimeStatuses = systemKeysService.getKeyStatuses();
+  state.systemKeys = {
+    allConfigured: runtimeStatuses.allConfigured,
+    vaultConfigured: runtimeStatuses.keys.encryptionKey.isConfigured,
+    vaultSource: runtimeStatuses.keys.encryptionKey.source,
+    keys: {
+      jwtSecret: {
+        keyName: 'JWT_SECRET',
+        isConfigured: runtimeStatuses.keys.jwtSecret.isConfigured,
+        source: runtimeStatuses.keys.jwtSecret.source,
+        inVault: runtimeStatuses.keys.jwtSecret.source === 'vault',
+        maskedValue: runtimeStatuses.keys.jwtSecret.maskedValue,
+        description: runtimeStatuses.keys.jwtSecret.description,
+        keyId: runtimeStatuses.keys.jwtSecret.keyId,
+        version: runtimeStatuses.keys.jwtSecret.version,
+        rotatable: runtimeStatuses.keys.jwtSecret.rotatable,
+      },
+      encryptionKey: {
+        keyName: 'ENCRYPTION_KEY',
+        isConfigured: runtimeStatuses.keys.encryptionKey.isConfigured,
+        source: runtimeStatuses.keys.encryptionKey.source,
+        inVault: false,
+        maskedValue: runtimeStatuses.keys.encryptionKey.maskedValue,
+        description: runtimeStatuses.keys.encryptionKey.description,
+        keyId: runtimeStatuses.keys.encryptionKey.keyId,
+        version: runtimeStatuses.keys.encryptionKey.version,
+        rotatable: false,
+      },
+      otaSigningKey: {
+        keyName: 'OTA_SIGNING_KEY',
+        isConfigured: runtimeStatuses.keys.otaSigningKey.isConfigured,
+        source: runtimeStatuses.keys.otaSigningKey.source,
+        inVault: runtimeStatuses.keys.otaSigningKey.source === 'vault',
+        maskedValue: runtimeStatuses.keys.otaSigningKey.maskedValue,
+        description: runtimeStatuses.keys.otaSigningKey.description,
+        keyId: runtimeStatuses.keys.otaSigningKey.keyId,
+        version: runtimeStatuses.keys.otaSigningKey.version,
+        rotatable: runtimeStatuses.keys.otaSigningKey.rotatable,
+      },
+    },
+  };
+  state.migrationStatus = systemSecretsService.getMigrationStatus();
+  return state;
+}
+
+/**
  * GET /api/system/secrets
  * Retrieves full public summary of system secrets (ALL SENSITIVE FIELDS MASKED).
  * Strictly requires Admin authentication & authorization.
@@ -63,7 +114,7 @@ secretsRouter.get('/', authenticateUser, requireAdmin, async (req: Request, res:
       await systemSecretsService.syncWithPostgres(db.postgresRepo);
     }
 
-    const state = systemSecretsService.getPublicSecretsState();
+    const state = buildPublicSecretsWithRuntimeKeys();
     return res.json({
       success: true,
       data: state,
@@ -456,7 +507,7 @@ secretsRouter.post('/migrate-keys', authenticateUser, requireAdmin, async (req: 
     const result = await systemSecretsService.migrateLegacySecrets();
     systemLogger.info('security', `Admin operatörü (${operatorName}) tarafından mevcut sistem anahtarları Vault kasasına aktarıldı (${result.migratedCount} adet anahtar).`);
 
-    const updatedState = systemSecretsService.getPublicSecretsState();
+    const updatedState = buildPublicSecretsWithRuntimeKeys();
 
     return res.json({
       success: true,
@@ -470,6 +521,56 @@ secretsRouter.post('/migrate-keys', authenticateUser, requireAdmin, async (req: 
   } catch (err: any) {
     const cleanErr = sanitizeLogString(err?.message || 'Sistem anahtarları kasaya aktarılamadı.');
     systemLogger.error('security', `Kasa aktarım hatası: ${cleanErr}`);
+    return res.status(500).json({
+      success: false,
+      error: cleanErr,
+    });
+  }
+});
+
+/**
+ * POST /api/system/secrets/rotate-key
+ * Rotates an active cryptographic system key (JWT_SECRET or OTA_SIGNING_KEY) in Vault.
+ * Strictly requires Admin authentication, rate limiting, and archives previous key for zero-downtime grace periods.
+ */
+secretsRouter.post('/rotate-key', authenticateUser, requireAdmin, async (req: Request, res: Response) => {
+  if (!checkVaultRateLimit(req, res, 'rotate_key', 5)) return;
+
+  const authReq = req as unknown as AuthenticatedRequest;
+  const user = authReq.user;
+  const operatorName = user ? `${user.name || user.email} (${user.id})` : 'admin';
+
+  const { keyName } = req.body || {};
+  if (!keyName || !['JWT_SECRET', 'OTA_SIGNING_KEY'].includes(keyName)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Geçersiz anahtar adı. Yalnızca JWT_SECRET veya OTA_SIGNING_KEY döndürülebilir.',
+    });
+  }
+
+  try {
+    let rotationResult: { success: boolean; oldKeyId?: string; newKeyId: string; version: number };
+
+    if (keyName === 'JWT_SECRET') {
+      rotationResult = await systemKeysService.rotateJwtSecret(operatorName);
+    } else {
+      rotationResult = await systemKeysService.rotateOtaSigningKey(operatorName);
+    }
+
+    const updatedState = buildPublicSecretsWithRuntimeKeys();
+
+    return res.json({
+      success: true,
+      message: `${keyName} başarıyla yeni sürüme (${rotationResult.newKeyId}, v${rotationResult.version}) döndürüldü. Eski anahtar geriye dönük doğrulama için kasada arşivlendi.`,
+      keyName,
+      oldKeyId: rotationResult.oldKeyId,
+      newKeyId: rotationResult.newKeyId,
+      version: rotationResult.version,
+      data: updatedState,
+    });
+  } catch (err: any) {
+    const cleanErr = sanitizeLogString(err?.message || 'Anahtar döndürme işlemi başarısız oldu.');
+    systemLogger.error('security', `Anahtar döndürme hatası (${keyName}): ${cleanErr}`);
     return res.status(500).json({
       success: false,
       error: cleanErr,

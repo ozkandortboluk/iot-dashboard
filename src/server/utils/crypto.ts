@@ -66,15 +66,7 @@ export function resolveEncryptionKey(): Buffer | null {
     return cachedKeyBuffer;
   }
 
-  // 1. Environment variable override
-  const envKey = (process.env.ENCRYPTION_KEY || '').trim();
-  if (envKey) {
-    cachedKeyBuffer = derive32ByteKey(envKey);
-    keySourceDescription = 'env:ENCRYPTION_KEY';
-    return cachedKeyBuffer;
-  }
-
-  // 2. Production Docker Secret (/run/secrets/encryption_key or /app/secrets/encryption_key)
+  // 1. Single Authoritative Production Policy: Docker Secret (/run/secrets/encryption_key)
   try {
     if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
       const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
@@ -86,6 +78,7 @@ export function resolveEncryptionKey(): Buffer | null {
     }
   } catch {}
 
+  // 2. Dedicated production secrets mount (secrets/encryption_key)
   try {
     if (fs.existsSync(DEDICATED_SECRETS_KEY_PATH)) {
       const secretRaw = fs.readFileSync(DEDICATED_SECRETS_KEY_PATH, 'utf8').trim();
@@ -110,6 +103,14 @@ export function resolveEncryptionKey(): Buffer | null {
         }
       }
     } catch {}
+  }
+
+  // 4. Secondary fallback: process.env.ENCRYPTION_KEY
+  const envKey = (process.env.ENCRYPTION_KEY || '').trim();
+  if (envKey) {
+    cachedKeyBuffer = derive32ByteKey(envKey);
+    keySourceDescription = 'env:ENCRYPTION_KEY';
+    return cachedKeyBuffer;
   }
 
   // ==========================================================================

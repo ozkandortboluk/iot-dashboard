@@ -6,8 +6,9 @@ services:
     shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-iot_user}
-      # Initialization-only secret: Used strictly by TimescaleDB container for initial database bootstrap.
-      POSTGRES_PASSWORD: ${POSTGRES_INIT_PASSWORD:-${POSTGRES_PASSWORD:-}}
+      # Initialization-only secret: Used strictly by TimescaleDB container for initial database cluster bootstrap.
+      # Never injected into or read by the app container.
+      POSTGRES_PASSWORD: ${POSTGRES_INIT_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
     # Security: In production, database is isolated inside nexus_net.
     # To expose port locally for external tools, set POSTGRES_PORT_BIND=127.0.0.1:5432:5432 in .env
@@ -41,13 +42,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-}
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
-      OTA_SIGNING_PRIVATE_KEY: ${OTA_SIGNING_PRIVATE_KEY:-}
-      # Runtime secrets (database credentials, API keys) are managed securely via the AES-256-GCM Vault
-      # (data/.system_secrets.json or /run/secrets/db_password). No raw passwords are leaked in environment.
+      # Security: Root encryption key is provided strictly via Docker Secret (/run/secrets/encryption_key)
+      # Application secrets (database password, JWT secret, session secret, OTA signing key)
+      # are stored exclusively in Central Security Vault (AES-256-GCM encrypted in data/.system_secrets.json).
+      # No plaintext secrets are leaked in app container environment.
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${POSTGRES_DB:-iot_dashboard}

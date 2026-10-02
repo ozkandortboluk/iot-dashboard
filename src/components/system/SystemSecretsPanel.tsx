@@ -89,28 +89,47 @@ interface SystemSecretsState {
       jwtSecret: {
         keyName: string;
         isConfigured: boolean;
-        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing' | 'docker_secret' | 'env' | 'data_file';
         inVault: boolean;
         maskedValue: string;
         description: string;
+        keyId?: string;
+        version?: number;
+        rotatable?: boolean;
       };
       encryptionKey: {
         keyName: string;
         isConfigured: boolean;
-        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing' | 'docker_secret' | 'env' | 'data_file';
         inVault: boolean;
         maskedValue: string;
         description: string;
+        keyId?: string;
+        version?: number;
+        rotatable?: boolean;
       };
       otaSigningKey: {
         keyName: string;
         isConfigured: boolean;
-        source: 'vault' | 'environment' | 'secrets_file' | 'missing';
+        source: 'vault' | 'environment' | 'secrets_file' | 'missing' | 'docker_secret' | 'env' | 'data_file';
         inVault: boolean;
         maskedValue: string;
         description: string;
+        keyId?: string;
+        version?: number;
+        rotatable?: boolean;
       };
     };
+  };
+  migrationStatus?: {
+    status: 'complete' | 'pending' | 'clean';
+    authoritativeSource?: string;
+    hasLegacyFiles: boolean;
+    hasUnmigratedEnv: boolean;
+    legacyFilesDetected: string[];
+    unmigratedEnvKeys: string[];
+    vaultKeysCount: number;
+    details: string;
   };
 }
 
@@ -123,6 +142,9 @@ export const SystemSecretsPanel: React.FC = () => {
   const [secretsState, setSecretsState] = useState<SystemSecretsState | null>(null);
   const [migratingKeys, setMigratingKeys] = useState(false);
   const [migrationResult, setMigrationResult] = useState<{ success: boolean; message: string; migratedCount?: number } | null>(null);
+  const [rotatingKey, setRotatingKey] = useState<string | null>(null);
+  const [rotateConfirmOpen, setRotateConfirmOpen] = useState<{ open: boolean; keyName: 'JWT_SECRET' | 'OTA_SIGNING_KEY'; title: string } | null>(null);
+  const [rotateResult, setRotateResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Form State
   const [dbForm, setDbForm] = useState({
@@ -251,6 +273,39 @@ export const SystemSecretsPanel: React.FC = () => {
       });
     } finally {
       setMigratingKeys(false);
+    }
+  };
+
+  const handleRotateKey = async (keyName: 'JWT_SECRET' | 'OTA_SIGNING_KEY') => {
+    try {
+      setRotatingKey(keyName);
+      setRotateResult(null);
+      const res = await fetch('/api/system/secrets/rotate-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyName }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRotateResult({
+          success: true,
+          message: data.message || `${keyName} başarıyla döndürüldü.`,
+        });
+        await fetchSecrets();
+      } else {
+        setRotateResult({
+          success: false,
+          message: data.error || 'Anahtar döndürülemedi.',
+        });
+      }
+    } catch (err: any) {
+      setRotateResult({
+        success: false,
+        message: 'Döndürme sırasında hata: ' + (err?.message || err),
+      });
+    } finally {
+      setRotatingKey(null);
+      setRotateConfirmOpen(null);
     }
   };
 
@@ -570,6 +625,93 @@ export const SystemSecretsPanel: React.FC = () => {
               </div>
             )}
 
+            {/* Explicit Migration Status: Pending vs Complete */}
+            {secretsState?.migrationStatus && (
+              <div
+                className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                  secretsState.migrationStatus.status === 'pending'
+                    ? 'bg-amber-500/10 dark:bg-amber-500/5 border-amber-500/20 text-amber-900 dark:text-amber-200'
+                    : 'bg-emerald-500/10 dark:bg-emerald-500/5 border-emerald-500/20 text-emerald-900 dark:text-emerald-200'
+                }`}
+              >
+                <div className="flex items-start sm:items-center gap-3">
+                  <div
+                    className={`p-2 rounded-xl shrink-0 ${
+                      secretsState.migrationStatus.status === 'pending'
+                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                        : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {secretsState.migrationStatus.status === 'pending' ? (
+                      <AlertCircle className="w-4 h-4" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold flex items-center gap-2">
+                      <span>
+                        {secretsState.migrationStatus.status === 'pending'
+                          ? 'Kasa Aktarımı Bekliyor (Migration Pending)'
+                          : 'Kasa Aktarımı Tamamlandı (Migration Complete)'}
+                      </span>
+                      <span
+                        className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                          secretsState.migrationStatus.status === 'pending'
+                            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                            : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                        }`}
+                      >
+                        {secretsState.migrationStatus.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-300 mt-0.5">
+                      {secretsState.migrationStatus.details}
+                      {secretsState.migrationStatus.legacyFilesDetected.length > 0 && (
+                        <span className="font-mono text-[11px] block mt-1 text-amber-700 dark:text-amber-300">
+                          Tespit edilen kaynaklar: {secretsState.migrationStatus.legacyFilesDetected.join(', ')}
+                        </span>
+                      )}
+                      {secretsState.migrationStatus.authoritativeSource && (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                          📌 <strong>Tek Yetkili Kaynak:</strong> {secretsState.migrationStatus.authoritativeSource}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {secretsState.migrationStatus.status === 'pending' && (
+                  <button
+                    onClick={handleMigrateKeys}
+                    disabled={migratingKeys}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-semibold rounded-xl text-xs transition shrink-0 cursor-pointer self-start sm:self-center flex items-center gap-1.5"
+                  >
+                    <ArrowDownToLine className="w-3.5 h-3.5" />
+                    <span>Hemen Aktar ve Diski Temizle</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Key Rotation Result Banner */}
+            {rotateResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center gap-2.5 ${
+                  rotateResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+                }`}
+              >
+                {rotateResult.success ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                )}
+                <span>{rotateResult.message}</span>
+              </div>
+            )}
+
             {/* 4 Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Card 1: JWT Secret */}
@@ -582,7 +724,14 @@ export const SystemSecretsPanel: React.FC = () => {
                       </span>
                       <div>
                         <h5 className="text-xs font-bold text-slate-900 dark:text-white">JWT_SECRET / SESSION_SECRET</h5>
-                        <p className="text-[11px] text-slate-500">Kullanıcı Oturumları & API İmzası</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-[11px] text-slate-500">Kullanıcı Oturumları & API İmzası</p>
+                          {secretsState?.systemKeys?.keys.jwtSecret.keyId && (
+                            <span className="font-mono text-[10px] px-1.5 py-0.2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
+                              {secretsState.systemKeys.keys.jwtSecret.keyId}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {secretsState?.systemKeys?.keys.jwtSecret.inVault ? (
@@ -607,9 +756,28 @@ export const SystemSecretsPanel: React.FC = () => {
                     <span>{secretsState?.systemKeys?.keys.jwtSecret.maskedValue || '••••••••••••••••'}</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                  🛡️ <strong>Güvence:</strong> Mevcut kullanıcı oturumları ve mobil/web API tokenları geçersiz kalmaz.
-                </p>
+
+                <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    🛡️ <strong>Güvence:</strong> Oturum anahtarı döndürüldüğünde eski sürüm kasada arşivlenir.
+                  </p>
+                  {secretsState?.systemKeys?.keys.jwtSecret.rotatable && (
+                    <button
+                      type="button"
+                      onClick={() => setRotateConfirmOpen({
+                        open: true,
+                        keyName: 'JWT_SECRET',
+                        title: 'JWT_SECRET Anahtarını Döndür (Rotate)',
+                      })}
+                      disabled={Boolean(rotatingKey)}
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition shrink-0 flex items-center gap-1 cursor-pointer"
+                      title="Yeni bir JWT oturum anahtarı üret ve eskisini arşivle"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${rotatingKey === 'JWT_SECRET' ? 'animate-spin' : ''}`} />
+                      <span>Döndür</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Card 2: OTA Signing Key */}
@@ -622,7 +790,14 @@ export const SystemSecretsPanel: React.FC = () => {
                       </span>
                       <div>
                         <h5 className="text-xs font-bold text-slate-900 dark:text-white">OTA_SIGNING_KEY (Ed25519)</h5>
-                        <p className="text-[11px] text-slate-500">Firmware İmzalama Özel Anahtarı</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-[11px] text-slate-500">Firmware İmzalama Özel Anahtarı</p>
+                          {secretsState?.systemKeys?.keys.otaSigningKey.keyId && (
+                            <span className="font-mono text-[10px] px-1.5 py-0.2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded">
+                              {secretsState.systemKeys.keys.otaSigningKey.keyId}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {secretsState?.systemKeys?.keys.otaSigningKey.inVault ? (
@@ -647,9 +822,28 @@ export const SystemSecretsPanel: React.FC = () => {
                     <span>{secretsState?.systemKeys?.keys.otaSigningKey.maskedValue || '(Ed25519 Özel Anahtarı)'}</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                  🛡️ <strong>Güvence:</strong> Sahadaki tüm ESP32/ESP8266 cihazlarının kabul ettiği imza anahtarıdır. Asla değiştirilmez, cihazlar güncelleme almaya devam eder.
-                </p>
+
+                <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                    🛡️ <strong>Güvence:</strong> Sahadaki cihazlar yeni firmware gelene kadar mevcut anahtarla çalışır.
+                  </p>
+                  {secretsState?.systemKeys?.keys.otaSigningKey.rotatable && (
+                    <button
+                      type="button"
+                      onClick={() => setRotateConfirmOpen({
+                        open: true,
+                        keyName: 'OTA_SIGNING_KEY',
+                        title: 'OTA Ed25519 İmza Anahtarını Döndür (Rotate)',
+                      })}
+                      disabled={Boolean(rotatingKey)}
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg transition shrink-0 flex items-center gap-1 cursor-pointer"
+                      title="Yeni bir Ed25519 imzalama anahtarı üret ve eskisini arşivle"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${rotatingKey === 'OTA_SIGNING_KEY' ? 'animate-spin' : ''}`} />
+                      <span>Döndür</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Card 3: PostgreSQL Password */}
@@ -755,6 +949,56 @@ export const SystemSecretsPanel: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Key Rotation Confirmation Dialog */}
+            {rotateConfirmOpen?.open && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-3 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
+                      <RefreshCw className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                        {rotateConfirmOpen.title}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Bu işlem, <strong>{rotateConfirmOpen.keyName}</strong> için yeni bir yüksek entropili kriptografik anahtar üretecektir. Eski anahtarınız geriye dönük doğrulama için kasada arşivlenmeye devam edecek ve <strong>sıfır kesinti</strong> sağlanacaktır.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl text-[11px] text-amber-800 dark:text-amber-300">
+                    ⚠️ <strong>Önemli:</strong> Döndürme işlemi anında yürürlüğe girer ve denetim loguna kaydedilir.
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setRotateConfirmOpen(null)}
+                      className="px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                    >
+                      Vazgeç
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRotateKey(rotateConfirmOpen.keyName)}
+                      disabled={Boolean(rotatingKey)}
+                      className="px-4 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      {rotatingKey ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Döndürülüyor...</span>
+                        </>
+                      ) : (
+                        <span>Onayla ve Döndür</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

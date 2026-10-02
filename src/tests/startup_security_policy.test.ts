@@ -4,12 +4,18 @@ import {
   isDefaultPassword,
   isDefaultSecret,
 } from '../server/utils/startupSecurityPolicy.js';
+import { systemSecretsService } from '../server/services/systemSecrets.service.js';
 
 describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    try {
+      (systemSecretsService as any).inMemorySecrets?.delete('authentication.jwt_secret');
+      (systemSecretsService as any).inMemorySecrets?.delete('jwt_secret');
+      (systemSecretsService as any).inMemorySecrets?.delete('database.password');
+    } catch {}
   });
 
   afterEach(() => {
