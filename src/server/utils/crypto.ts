@@ -171,11 +171,41 @@ export function resolveEncryptionKey(): Buffer | null {
 /**
  * Derives a strict 32-byte (256-bit) Buffer from a string using SHA-256
  */
-function derive32ByteKey(raw: string): Buffer {
+export function derive32ByteKey(raw: string): Buffer {
   if (/^[a-f0-9]{64}$/i.test(raw)) {
     return Buffer.from(raw, 'hex');
   }
   return crypto.createHash('sha256').update(raw, 'utf8').digest();
+}
+
+/**
+ * Validates a user-supplied encryption key against the active Vault root encryption key.
+ * Uses timingSafeEqual to prevent side-channel timing attacks.
+ */
+export function verifyMasterEncryptionKey(providedKey: string): { valid: boolean; reason?: string } {
+  if (!providedKey || typeof providedKey !== 'string') {
+    return { valid: false, reason: 'Kasa şifreleme anahtarı (Encryption Key) girilmedi.' };
+  }
+  const clean = providedKey.trim();
+  if (clean.length < 8) {
+    return { valid: false, reason: 'Girilen şifreleme anahtarı geçersiz veya çok kısa.' };
+  }
+
+  const activeBuffer = resolveEncryptionKey();
+  if (!activeBuffer) {
+    return { valid: false, reason: 'Sistem Kasa (Vault) şifreleme anahtarı yapılandırılmamış.' };
+  }
+
+  try {
+    const candidateBuffer = derive32ByteKey(clean);
+    if (candidateBuffer.length === activeBuffer.length && crypto.timingSafeEqual(candidateBuffer, activeBuffer)) {
+      return { valid: true };
+    }
+  } catch (err: any) {
+    return { valid: false, reason: err?.message || 'Anahtar doğrulama hatası.' };
+  }
+
+  return { valid: false, reason: 'Girilen Kasa şifreleme anahtarı sistemin aktif kök anahtarı ile eşleşmiyor.' };
 }
 
 /**

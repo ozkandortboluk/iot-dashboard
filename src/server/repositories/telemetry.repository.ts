@@ -1233,6 +1233,16 @@ export class TelemetryRepository {
     return this.db.data.history[deviceId][metric];
   }
 
+  public clearAllTelemetryData(): void {
+    this.latestTelemetryCache = {};
+    this.physicalRetryQueue = [];
+    this.simulationRetryQueue = [];
+    if (this.db?.data) {
+      this.db.data.telemetry = [];
+      this.db.data.history = {};
+    }
+  }
+
   public async getHistoryAsync(deviceId: string, metric: string): Promise<MetricHistory | null> {
     if (!this.db.postgresRepo?.isReady()) {
       return this.getHistory(deviceId, metric);

@@ -20,7 +20,7 @@ describe('Customer Deletion & Dashboard Isolation Integrity', () => {
         tenantId: 'usr_admin',
         title: 'Özel Merkez Yönetim Paneli',
         widgets: [
-          { id: 'w1', type: 'system-status', title: 'Özel Durum', x: 0, y: 0, w: 6, h: 4 }
+          { id: 'w1', type: 'devices_status', title: 'Özel Durum', span: 2, colorScheme: '#6366f1' }
         ],
         updatedAt: new Date().toISOString(),
       };
@@ -48,7 +48,7 @@ describe('Customer Deletion & Dashboard Isolation Integrity', () => {
       tenantId: testCustomerId,
       title: 'Silinecek Müşteri Paneli',
       widgets: [
-        { id: 'w_cust_1', type: 'quick-actions', title: 'Müşteri Aksiyon', x: 0, y: 0, w: 4, h: 3 }
+        { id: 'w_cust_1', type: 'quick_access', title: 'Müşteri Aksiyon', span: 2, colorScheme: '#6366f1' }
       ],
       updatedAt: new Date().toISOString()
     };

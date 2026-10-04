@@ -1374,6 +1374,187 @@ class LocalDatabase {
     }
   }
 
+  public async executeFactoryReset(
+    options: {
+      wipeDevices?: boolean;
+      wipeTelemetry?: boolean;
+      wipeUsers?: boolean;
+      wipeDashboards?: boolean;
+      wipeAlarms?: boolean;
+      wipeAutomations?: boolean;
+      wipeFirmwares?: boolean;
+      wipeServiceTokens?: boolean;
+      wipeDeviceCommands?: boolean;
+      wipeSystemSettings?: boolean;
+      wipeAuditLogs?: boolean;
+      wipeAll?: boolean;
+      wipeToUnconfigured?: boolean;
+    },
+    adminUser = { id: 'usr_admin', name: 'Sistem Yöneticisi' }
+  ) {
+    const isAll = Boolean(options.wipeAll || options.wipeToUnconfigured);
+    let pgResult: any = null;
+
+    // 1. PostgreSQL Wipe Execution
+    if (this.postgresRepo?.isReady()) {
+      pgResult = await this.postgresRepo.executeFactoryReset(options);
+    }
+
+    // 2. In-Memory / LowDB Execution
+    // 2a. Telemetry & Commands
+    if (isAll || options.wipeTelemetry || options.wipeDevices) {
+      this.data.telemetry = [];
+      this.data.history = {};
+      this.telemetryRepository.clearAllTelemetryData();
+      this.data.commands = [];
+      if ((this.data as any).simulationTelemetry) (this.data as any).simulationTelemetry = [];
+    }
+
+    // 2b. Devices & Hierarchy
+    if (isAll || options.wipeDevices) {
+      this.data.devices = [];
+      this.data.sites = [];
+      this.data.zones = [];
+      this.data.deviceGroups = [];
+      this.data.replacementHistory = [];
+    }
+
+    // 2c. Users (If wipeToUnconfigured is true, wipe all users including usr_admin)
+    if (isAll || options.wipeUsers) {
+      if (options.wipeToUnconfigured) {
+        this.data.users = [];
+        this.data.sessions = [];
+        this.data.passwords = {};
+        this.data.tenants = [];
+        this.data.tenantMemberships = [];
+      } else {
+        this.data.users = (this.data.users || []).filter((u: any) => u.id === 'usr_admin');
+        this.data.sessions = (this.data.sessions || []).filter((s: any) => s.userId === 'usr_admin');
+        if (this.data.passwords) {
+          const adminPass = this.data.passwords['usr_admin'];
+          this.data.passwords = { usr_admin: adminPass };
+        }
+        this.data.tenants = [];
+        this.data.tenantMemberships = [];
+      }
+    }
+
+    // 2d. Dashboards
+    if (isAll || options.wipeDashboards) {
+      if (options.wipeToUnconfigured) {
+        this.data.dashboards = [];
+      } else {
+        this.data.dashboards = [
+          {
+            id: 'dash_default',
+            tenantId: 'default',
+            title: 'Varsayılan Sistem Paneli',
+            widgets: [...defaultWidgets],
+            updatedAt: new Date().toISOString(),
+          },
+          {
+            id: 'dash_usr_admin',
+            tenantId: 'usr_admin',
+            title: 'Merkez Yönetim Ana Dashboard',
+            widgets: [...defaultWidgets],
+            updatedAt: new Date().toISOString(),
+          },
+        ];
+      }
+    }
+
+    // 2e. Alarms & Notifications
+    if (isAll || options.wipeAlarms) {
+      this.data.rules = [];
+      this.data.activeAlarms = [];
+      this.data.alarmEvents = [];
+      this.data.notifications = [];
+      this.data.notificationQueue = [];
+      this.data.dispatchLogs = [];
+    }
+
+    // 2f. Automations
+    if (isAll || options.wipeAutomations) {
+      this.data.automations = [];
+    }
+
+    // 2g. Firmwares & OTA
+    if (isAll || options.wipeFirmwares) {
+      this.data.firmwares = [];
+      this.data.otaJobs = [];
+    }
+
+    // 2h. Service Tokens & API Keys
+    if (isAll || options.wipeServiceTokens) {
+      if ((this.data as any).serviceTokens) {
+        (this.data as any).serviceTokens = [];
+      }
+    }
+
+    // 2i. Device Commands
+    if (isAll || options.wipeDeviceCommands) {
+      this.data.commands = [];
+    }
+
+    // 2j. System Settings
+    if (isAll || options.wipeSystemSettings) {
+      this.data.serviceConfig = undefined;
+      this.data.retentionPolicies = {
+        enabled: true,
+        autoCleanupIntervalHours: 24,
+        telemetryDays: 90,
+        resolvedAlarmsDays: 30,
+        readNotificationsDays: 30,
+        auditLogsDays: 90,
+        dispatchLogsDays: 30,
+        deviceCommandsDays: 15,
+      };
+    }
+
+    // 2k. Audit Logs
+    if (isAll || options.wipeAuditLogs) {
+      this.data.auditLogs = [];
+    }
+
+    // Save state to disk atomically
+    this.saveData(this.data, true);
+
+    // Record the factory reset audit log
+    const selectedKeys = Object.entries(options)
+      .filter(([k, v]) => v === true && k !== 'encryptionKey')
+      .map(([k]) => k);
+
+    await this.addAuditLog(
+      adminUser.id,
+      adminUser.name,
+      `Sistem Sıfırlama (Factory Reset) Başarıyla Gerçekleştirildi. Şifreleme Anahtarı ile Doğrulandı. Seçenekler: ${selectedKeys.length ? selectedKeys.join(', ') : 'Varsayılan'}`,
+      'high'
+    );
+
+    // Broadcast WebSocket updates to all clients
+    try {
+      const { broadcast } = await import('./services/websocket.js');
+      broadcast('system:factory_reset', { options, timestamp: new Date().toISOString() });
+      broadcast('devices:updated', this.data.devices);
+      broadcast('users:updated', this.data.users);
+      broadcast('dashboard:layout', this.data.dashboards.find((d: any) => d.id === 'dash_usr_admin'));
+      broadcast('alarms:updated', []);
+      broadcast('notifications:updated', []);
+    } catch {}
+
+    return {
+      success: true,
+      timestamp: new Date().toISOString(),
+      pgResult,
+      summary: {
+        usersRemaining: this.data.users.length,
+        devicesRemaining: this.data.devices.length,
+        dashboardsRemaining: this.data.dashboards.length,
+        rulesRemaining: (this.data.rules || []).length,
+      }
+    };
+  }
+
   public getDatabaseHealth() {
     const stats = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE) : null;
     return {

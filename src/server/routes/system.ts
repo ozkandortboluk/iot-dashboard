@@ -25,6 +25,8 @@ import { emailService } from '../services/email.service.js';
 import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
+import { verifyMasterEncryptionKey } from '../utils/crypto.js';
+import { setupService } from '../services/setup.service.js';
 
 const startTime = Date.now();
 
@@ -365,6 +367,152 @@ systemRouter.post('/system/email-config/test', authenticateUser, requireAdmin, a
     res.status(500).json({ success: false, error: 'Test e-postası gönderilemedi: ' + (err?.message || err) });
   }
 });
+
+// Authoritative Factory Reset & Selective Data Wipe Handlers
+async function handleFactoryReset(req: AuthenticatedRequest, res: any) {
+  try {
+    const adminUser = req.user || { id: 'usr_admin', name: 'Sistem Yöneticisi' };
+    const {
+      encryptionKey,
+      confirmText,
+      wipeDevices,
+      wipeTelemetry,
+      wipeUsers,
+      wipeDashboards,
+      wipeAlarms,
+      wipeAutomations,
+      wipeFirmwares,
+      wipeServiceTokens,
+      wipeDeviceCommands,
+      wipeSystemSettings,
+      wipeAuditLogs,
+      wipeAll,
+      wipeToUnconfigured,
+    } = req.body;
+
+    // 1. Strict Encryption Key Authentication
+    const keyVerification = verifyMasterEncryptionKey(encryptionKey);
+    if (!keyVerification.valid) {
+      await db.addAuditLog(
+        adminUser.id,
+        adminUser.name,
+        `Sistem Sıfırlama Denemesi REDDEDİLDİ: ${keyVerification.reason || 'Geçersiz Kasa Şifreleme Anahtarı'}`,
+        'high'
+      );
+      systemLogger.critical('security', `[FactoryReset] Yetkisiz sıfırlama denemesi: ${keyVerification.reason}`);
+      return res.status(403).json({
+        success: false,
+        error: keyVerification.reason || 'Geçersiz Kasa Şifreleme Anahtarı (Encryption Key).',
+        code: 'INVALID_ENCRYPTION_KEY',
+      });
+    }
+
+    // 2. Validate confirmation text based on reset scope
+    const rawConfirm = (confirmText || '').trim();
+    const trUpper = rawConfirm.toLocaleUpperCase('tr-TR');
+    const enUpper = rawConfirm.toUpperCase();
+
+    if (wipeToUnconfigured) {
+      const validPhrases = [
+        'SIFIRDAN BAŞLAT',
+        'SIFIRDAN BASLAT',
+        'SIFIRDAN KURULUM',
+        'ILK HALINE DONDUR',
+        'İLK HALİNE DÖNDÜR',
+        'SIFIRLA',
+        'SIFIRDAN',
+      ];
+      const isValid = validPhrases.some((p) => p === trUpper || p === enUpper);
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Sistemi tamamen ilk kurulmamış haline döndürmek için onay metnini ("SIFIRDAN KURULUM" veya "SIFIRLA") yazmanız gerekmektedir.',
+          code: 'CONFIRMATION_TEXT_REQUIRED',
+        });
+      }
+    } else if (wipeAll) {
+      const validPhrases = ['FABRİKA AYARLARI', 'FABRIKA AYARLARI', 'SIFIRLA'];
+      const isValid = validPhrases.some((p) => p === trUpper || p === enUpper);
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Tüm sistemi sıfırlamak için onay metnini ("FABRİKA AYARLARI" veya "SIFIRLA") yazmanız gerekmektedir.',
+          code: 'CONFIRMATION_TEXT_REQUIRED',
+        });
+      }
+    }
+
+    // 3. Execute Factory Reset in db (PostgreSQL + In-Memory)
+    const result = await db.executeFactoryReset({
+      wipeDevices: Boolean(wipeDevices || wipeToUnconfigured),
+      wipeTelemetry: Boolean(wipeTelemetry || wipeToUnconfigured),
+      wipeUsers: Boolean(wipeUsers || wipeToUnconfigured),
+      wipeDashboards: Boolean(wipeDashboards || wipeToUnconfigured),
+      wipeAlarms: Boolean(wipeAlarms || wipeToUnconfigured),
+      wipeAutomations: Boolean(wipeAutomations || wipeToUnconfigured),
+      wipeFirmwares: Boolean(wipeFirmwares || wipeToUnconfigured),
+      wipeServiceTokens: Boolean(wipeServiceTokens || wipeToUnconfigured),
+      wipeDeviceCommands: Boolean(wipeDeviceCommands || wipeToUnconfigured),
+      wipeSystemSettings: Boolean(wipeSystemSettings || wipeToUnconfigured),
+      wipeAuditLogs: Boolean(wipeAuditLogs || wipeToUnconfigured),
+      wipeAll: Boolean(wipeAll || wipeToUnconfigured),
+      wipeToUnconfigured: Boolean(wipeToUnconfigured),
+    }, adminUser);
+
+    // 4. If wipeToUnconfigured, reset setup wizard to initial clean state
+    if (wipeToUnconfigured) {
+      setupService.resetSetup(false);
+      res.clearCookie('session_token');
+      res.clearCookie('auth_token');
+      res.clearCookie('nexus_token');
+      res.clearCookie('nexus_session');
+      res.clearCookie('nexus_setup_session');
+      try {
+        broadcast('system:mode_changed', { mode: 'SETUP', setupRequired: true, wipeToUnconfigured: true });
+      } catch {}
+    }
+
+    res.json({
+      success: true,
+      wipeToUnconfigured: Boolean(wipeToUnconfigured),
+      message: wipeToUnconfigured
+        ? 'Sistem tamamen ilk kurulmamış (sıfırdan kurulum) haline döndürüldü. Kurulum sihirbazı başlatılıyor...'
+        : 'Sistem sıfırlama işlemi başarıyla tamamlandı. Seçilen veri katmanları temizlendi.',
+      result,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: 'Sistem sıfırlanırken bir hata oluştu: ' + (err?.message || err),
+    });
+  }
+}
+
+// Admin pre-validation endpoint for checking master encryption key
+systemRouter.post('/system/verify-encryption-key', authenticateUser, requireAdmin, (req: AuthenticatedRequest, res: any) => {
+  try {
+    const { encryptionKey } = req.body;
+    if (!encryptionKey || typeof encryptionKey !== 'string') {
+      return res.status(400).json({
+        valid: false,
+        reason: 'Lütfen bir şifreleme anahtarı giriniz.',
+      });
+    }
+
+    const verification = verifyMasterEncryptionKey(encryptionKey);
+    return res.json({
+      valid: verification.valid,
+      reason: verification.reason,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      valid: false,
+      reason: err?.message || 'Doğrulama servisi hatası.',
+    });
+  }
+});
+
+systemRouter.post('/system/factory-reset', authenticateUser, requireAdmin, handleFactoryReset);
 
 // Admin Stats & Quotas
 const adminRouter = Router();
@@ -856,6 +1004,8 @@ databaseRouter.post('/retention/cleanup-category', authenticateUser, requireAdmi
   const result = await db.executeCategoryCleanup(category, days ? Number(days) : undefined);
   res.json(result);
 });
+
+databaseRouter.post('/factory-reset', authenticateUser, requireAdmin, handleFactoryReset);
 
 // TimescaleDB Router
 const timescaleRouter = Router();

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Users, UserPlus, Building2, Cpu, Trash2, KeyRound, ShieldCheck, 
-  Search, ExternalLink, CheckCircle2, AlertCircle, Eye, Download, Settings, Edit3, X, SlidersHorizontal, Filter, RotateCcw, Check
+  Search, ExternalLink, CheckCircle2, AlertCircle, Eye, Download, Settings, Edit3, X, SlidersHorizontal, Filter, RotateCcw, Check, Flame
 } from 'lucide-react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +9,7 @@ import type { User } from '../types';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
 import { CustomerAvatar } from './CustomerAvatar';
 import { BulkAdvancedCustomerDeleteModal } from './admin/BulkAdvancedCustomerDeleteModal';
+import { SystemFactoryResetModal } from './system/SystemFactoryResetModal';
 import { apiFetch as fetch } from '../lib/apiFetch';
 
 interface CustomerManagementProps {
@@ -91,6 +92,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   const [detailsModalCustomer, setDetailsModalCustomer] = useState<User | null>(null);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
   const [showBulkAdvancedDelete, setShowBulkAdvancedDelete] = useState(false);
+  const [showFactoryResetModal, setShowFactoryResetModal] = useState(false);
 
   const filteredCustomers = [...customersList].filter(
     (c) => {
@@ -562,6 +564,16 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* System Factory Reset Button */}
+              <button
+                onClick={() => setShowFactoryResetModal(true)}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 font-semibold rounded-xl text-xs shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                title="Tüm sistemi veya seçilen veri katmanlarını şifreleme anahtarı ile sıfırla"
+              >
+                <Flame className="w-3.5 h-3.5 text-rose-500" />
+                <span className="hidden sm:inline">Sistemi Sıfırla</span>
+              </button>
+
               {/* CSV Button */}
               <button
                 onClick={handleExportCSV}
@@ -911,6 +923,16 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
           }}
         />
       )}
+
+      {/* System Factory Reset Modal */}
+      <SystemFactoryResetModal
+        isOpen={showFactoryResetModal}
+        onClose={() => setShowFactoryResetModal(false)}
+        onSuccess={() => {
+          refreshCustomers();
+          fetchDevices();
+        }}
+      />
     </div>
   );
 };

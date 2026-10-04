@@ -6,6 +6,28 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ## 🚀 [v1.47.0] - 2026-10-03
 
+### 🛡️ Kasa Şifreleme Anahtarı (Vault Encryption Key) Korumalı Granüler Sistem & Veritabanı Sıfırlama (Factory Reset)
+- **Sistemi Tamamen İlk Kurulmamış Haline Döndürme (Out-of-the-Box / Sıfırdan Başlatma)**:
+  - Sıfırdan başlamak isteyen kullanıcılar için sistemi ilk kurulduğu günkü haline döndüren tam sıfırlama seçeneği (`wipeToUnconfigured: true`) eklendi.
+  - Yönetici (`usr_admin`) hesabı dahil tüm kullanıcı hesapları, oturum tokenları, cihaz kayıtları, telemetri verileri, paneller, alarmlar ve kurulum kilitleri temizlenir; sistem doğrudan İlk Kurulum Sihirbazı'na (Database & Admin Setup Wizard) geri döner.
+  - Özel güvenlik onay metni (`"SIFIRDAN KURULUM"` veya `"SIFIRLA"`) ve tek tıkla hızlı doldurma butonları eklendi.
+- **Kriptografik Güvenlik Doğrulaması (`/api/system/factory-reset` & `/api/system/verify-encryption-key`)**:
+  - Sistem sıfırlama işlemi yetkisiz çağrılara karşı sunucunun aktif 256-bit AES Kasa Şifreleme Anahtarı (`secrets/encryption_key` veya `/run/secrets/encryption_key`) doğrulamasına bağlandı.
+  - Canlı anahtar doğrulama API'si (`POST /api/system/verify-encryption-key`) ile yöneticinin anahtarı anlık olarak kontrol edilerek arayüzde doğrulama durumu rozeti gösterildi.
+  - Tam sıfırlama durumlarında (`wipeAll: true`) onay metni ("FABRİKA AYARLARI" veya "SIFIRLA") zorunlu kılınarak kazara veri kaybı kesin olarak önlendi.
+- **3 Temel Sıfırlama Modu ve 11 Bağımsız Katman (`SystemFactoryResetModal.tsx`)**:
+  - **1. Mod (Sistemi Tamamen İlk Kurulmamış Haline Döndür)**: Sıfırdan kurulum (OOBE), tüm hesaplar ve kilitler temizlenir.
+  - **2. Mod (Standart Fabrika Sıfırlaması)**: Tüm operasyonel veriler temizlenir, `usr_admin` yönetici hesabı korunur.
+  - **3. Mod (Özelleştirilebilir Katman Sıfırlaması)**: Cihazlar, telemetri, paneller, alarmlar, müşteriler, otomasyonlar, firmwareler, servis jetonları, komutlar, sistem ayarları ve audit logları bağımsız olarak seçilip temizlenebilir.
+- **Yönetici Panellerinde Entegre Erişim**:
+  - Müşteri Yönetimi (`CustomerManagement.tsx`): Üst eylem çubuğunda "Sistemi Sıfırla" butonu.
+  - Veritabanı Yönetimi (`DatabaseDataView.tsx`): Üst başlıkta hızlı erişim butonu ve Ayarlar altında özel "Sistem Sıfırlama (Fabrika Ayarları)" paneli.
+  - Güvenlik ve Audit Paneli (`SecurityView.tsx`): Kasa şifreleme ve denetim alanında sıfırlama aksiyon kartı.
+  - Sunucu Durumu (`ServerStatusView.tsx`): Bakım ve altyapı araç çubuğunda "Sistemi Sıfırla" butonu.
+  - Üst Menü (`Header.tsx`): Sistem yöneticisi profil açılır menüsünde doğrudan sıfırlama seçeneği.
+- **Yardım & Bilgi Merkezi Entegrasyonu (`HelpView.tsx`)**:
+  - "Kasa Şifreleme Anahtarı ile Sistem Sıfırlama (Factory Reset) API'si" başlığı altında çalışan cURL komutları ve parametre dökümantasyonu eklendi.
+
 ### ⚡ Tek-Komutla Sıfır-Dokunuş (Zero-Touch) Otomatik VPS Kurulumu & Genişletilebilir Eklenti Mimarisi
 - **Tek Komutla Uçtan Uca Kurulum Betiği (`install.sh`)**:
   - Yeni kiralanmış veya sıfır bir Linux sunucuya (Ubuntu, Debian, CentOS, RHEL, Rocky, Alpine vb.) tek komutla (`./install.sh` veya `curl ... | bash`) sistemin kendi kendine kurulması sağlandı.

@@ -25,6 +25,7 @@ import {
   UserCog,
   Menu,
   X,
+  Flame,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +35,7 @@ import { getRoleBadgeInfo } from '../lib/permissions';
 import { NexusNodeLogo } from './NexusNodeLogo';
 import { CustomerSelectorDropdown } from './CustomerSelectorDropdown';
 import { CustomerAvatar } from './CustomerAvatar';
+import { SystemFactoryResetModal } from './system/SystemFactoryResetModal';
 
 interface HeaderProps {
   activeTab: string;
@@ -80,6 +82,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showFactoryResetModal, setShowFactoryResetModal] = useState(false);
 
   const notificationsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -440,6 +443,19 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>Hesap & Şifre Ayarları</span>
                   </button>
 
+                  {user?.role === 'admin' && (
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        setShowFactoryResetModal(true);
+                      }}
+                      className="w-full text-left px-4 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 font-medium flex items-center gap-2 transition cursor-pointer"
+                    >
+                      <Flame className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>Sistemi Sıfırla (Fabrika Ayarları)</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => {
                       logout();
@@ -456,6 +472,12 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
+
+      {/* System Factory Reset Modal for Admin */}
+      <SystemFactoryResetModal
+        isOpen={showFactoryResetModal}
+        onClose={() => setShowFactoryResetModal(false)}
+      />
     </header>
   );
 };

@@ -43,6 +43,7 @@ import {
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import { ToastNotification } from '../common/ToastNotification';
 import { useAuth } from '../../context/AuthContext';
+import { SystemFactoryResetModal } from './SystemFactoryResetModal';
 
 interface ServerStatusData {
   status: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
@@ -200,6 +201,7 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
 
   const [statusData, setStatusData] = useState<ServerStatusData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showFactoryResetModal, setShowFactoryResetModal] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshInterval, setRefreshInterval] = useState<number>(2000); // 2 seconds default
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
@@ -494,6 +496,19 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
               >
                 <Sparkles className="w-4 h-4 text-cyan-300" />
                 <span>Bellek Boşalt</span>
+              </button>
+            )}
+
+            {/* Admin Factory Reset */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowFactoryResetModal(true)}
+                className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 rounded-2xl text-xs font-bold flex items-center gap-2 transition cursor-pointer backdrop-blur-md"
+                title="Tüm sistemi veya seçilen veri katmanlarını Kasa Şifreleme Anahtarı ile sıfırla"
+              >
+                <Flame className="w-4 h-4 text-rose-400" />
+                <span>Sistemi Sıfırla</span>
               </button>
             )}
           </div>
@@ -1551,6 +1566,13 @@ export const ServerStatusView: React.FC<ServerStatusViewProps> = ({ onNavigateTo
 
       {/* Toast Notification Container */}
       {toast && <ToastNotification toast={toast} onClose={() => setToast(null)} />}
+
+      {/* System Factory Reset Modal */}
+      <SystemFactoryResetModal
+        isOpen={showFactoryResetModal}
+        onClose={() => setShowFactoryResetModal(false)}
+        onSuccess={() => fetchStatus(true)}
+      />
     </div>
   );
 };

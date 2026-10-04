@@ -2346,6 +2346,79 @@ curl -X POST "\${API_BASE}/clear" \\
 `,
     },
     {
+      id: 'code_system_factory_reset_api',
+      title: 'Kasa Şifreleme Anahtarı ile Sistem Sıfırlama (Factory Reset) API\'si',
+      category: 'curl',
+      categoryLabel: 'Yönetim & Fabrika Ayarları',
+      badge: 'Admin & Kriptografik Doğrulama',
+      description: 'Yönetici panelinden veya REST API üzerinden sunucunun 256-bit AES Kasa Şifreleme Anahtarı (Vault Encryption Key) ile doğrulanarak cihazlar, telemetri, müşteri hesapları, paneller, alarmlar ve sistem ayarlarını seçici ya da tümden sıfırlama uç noktası.',
+      tags: ['factory reset', 'sıfırlama', 'encryption key', 'vault', 'kasa', 'admin', 'cihazlar', 'telemetri', 'curl', 'rest api'],
+      endpoint: 'POST /api/system/verify-encryption-key & POST /api/system/factory-reset',
+      code: `#!/bin/bash
+# =========================================================================
+# NEXUSNODE IoT - KASA ŞİFRELEME ANAHTARI İLE SİSTEM SIFIRLAMA (FACTORY RESET)
+# Güvenlik Kuralı: Bu uç nokta yalnızca Yönetici (Admin) oturumu ve aktif Kasa
+# Şifreleme Anahtarı (secrets/encryption_key veya /run/secrets/encryption_key) ile çalışır.
+# =========================================================================
+
+ADMIN_TOKEN="Bearer YOUR_ADMIN_SESSION_TOKEN"
+API_BASE="${originUrl}/api/system"
+
+# 1. KASA ŞİFRELEME ANAHTARINI ÖN-DOĞRULAMA (Pre-Validation)
+# Anahtarınızın geçerliliğini test etmek için:
+curl -X POST "\${API_BASE}/verify-encryption-key" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "encryptionKey": "YOUR_VAULT_ENCRYPTION_KEY_HERE"
+  }'
+
+# 2. SEÇİCİ SIFIRLAMA (Örn: Sadece Cihazlar & Telemetri Kayıtlarını Temizle)
+curl -X POST "\${API_BASE}/factory-reset" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "encryptionKey": "YOUR_VAULT_ENCRYPTION_KEY_HERE",
+    "wipeDevices": true,
+    "wipeTelemetry": true,
+    "wipeUsers": false,
+    "wipeDashboards": false,
+    "wipeAlarms": true,
+    "wipeAutomations": false,
+    "wipeFirmwares": false,
+    "wipeServiceTokens": false,
+    "wipeDeviceCommands": true,
+    "wipeSystemSettings": false,
+    "wipeAuditLogs": false,
+    "wipeAll": false
+  }'
+
+# 3. TÜM SİSTEMİ TAM FABRİKA AYARLARINA DÖNDÜRME (Master Factory Reset - usr_admin Korunur)
+# Not: wipeAll=true olduğunda confirmText olarak "FABRİKA AYARLARI" veya "SIFIRLA" zorunludur.
+# Yönetici hesabı (usr_admin) güvenlik protokolü gereği korunur.
+curl -X POST "\${API_BASE}/factory-reset" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "encryptionKey": "YOUR_VAULT_ENCRYPTION_KEY_HERE",
+    "confirmText": "FABRİKA AYARLARI",
+    "wipeAll": true
+  }'
+
+# 4. SİSTEMİ TAMAMEN İLK KURULMAMIŞ HALİNE DÖNDÜRME (Sıfırdan Başlatma / Out-of-the-Box)
+# Not: wipeToUnconfigured=true olduğunda confirmText olarak "SIFIRDAN KURULUM" veya "SIFIRLA" zorunludur.
+# Yönetici (usr_admin) dahil tüm hesaplar, tablolar ve kilitler temizlenir; sistem doğrudan İlk Kurulum Sihirbazı'na döner.
+curl -X POST "\${API_BASE}/factory-reset" \\
+  -H "Authorization: \${ADMIN_TOKEN}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "encryptionKey": "YOUR_VAULT_ENCRYPTION_KEY_HERE",
+    "confirmText": "SIFIRDAN KURULUM",
+    "wipeToUnconfigured": true
+  }'
+`,
+    },
+    {
       id: 'code_vps_zero_touch_installer',
       title: 'Tek Komutla Otomatik VPS Kurulumu (Zero-Touch Linux & Docker Installer)',
       category: 'curl',

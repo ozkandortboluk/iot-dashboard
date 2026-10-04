@@ -2141,6 +2141,166 @@ export class PostgresRepository {
     await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
   }
 
+  public async executeFactoryReset(options: {
+    wipeDevices?: boolean;
+    wipeTelemetry?: boolean;
+    wipeUsers?: boolean;
+    wipeDashboards?: boolean;
+    wipeAlarms?: boolean;
+    wipeAutomations?: boolean;
+    wipeFirmwares?: boolean;
+    wipeServiceTokens?: boolean;
+    wipeDeviceCommands?: boolean;
+    wipeSystemSettings?: boolean;
+    wipeAuditLogs?: boolean;
+    wipeAll?: boolean;
+    wipeToUnconfigured?: boolean;
+  }): Promise<{ affectedTables: string[]; resetSummary: Record<string, number> }> {
+    if (!this.pool || !this.isConnected) {
+      throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
+    }
+    const client = await this.pool.connect();
+    const affectedTables: string[] = [];
+    const resetSummary: Record<string, number> = {};
+
+    try {
+      await client.query('BEGIN');
+
+      const isAll = Boolean(options.wipeAll || options.wipeToUnconfigured);
+
+      // 1. TELEMETRY & COMMANDS
+      if (isAll || options.wipeTelemetry || options.wipeDevices) {
+        const r1 = await client.query(`DELETE FROM telemetry_readings;`).catch(() => ({ rowCount: 0 }));
+        const r2 = await client.query(`DELETE FROM simulation_telemetry_readings;`).catch(() => ({ rowCount: 0 }));
+        const r3 = await client.query(`DELETE FROM telemetry_packets;`).catch(() => ({ rowCount: 0 }));
+        const r4 = await client.query(`DELETE FROM device_commands;`).catch(() => ({ rowCount: 0 }));
+        const r5 = await client.query(`DELETE FROM device_ws_messages_dedup;`).catch(() => ({ rowCount: 0 }));
+        affectedTables.push('telemetry_readings', 'simulation_telemetry_readings', 'telemetry_packets', 'device_commands');
+        resetSummary.telemetryReadings = (r1?.rowCount || 0) + (r2?.rowCount || 0) + (r3?.rowCount || 0);
+        resetSummary.deviceCommands = r4?.rowCount || 0;
+      }
+
+      // 2. DEVICES & HIERARCHY
+      if (isAll || options.wipeDevices) {
+        const rDev = await client.query(`DELETE FROM devices;`).catch(() => ({ rowCount: 0 }));
+        await client.query(`DELETE FROM hierarchy_device_groups;`).catch(() => {});
+        await client.query(`DELETE FROM hierarchy_zones;`).catch(() => {});
+        await client.query(`DELETE FROM hierarchy_sites;`).catch(() => {});
+        await client.query(`DELETE FROM device_replacement_history;`).catch(() => {});
+        affectedTables.push('devices', 'hierarchy_sites', 'hierarchy_zones', 'hierarchy_device_groups');
+        resetSummary.devices = rDev?.rowCount || 0;
+      }
+
+      // 3. USERS (If wipeToUnconfigured is true, wipe all users including usr_admin)
+      if (isAll || options.wipeUsers) {
+        if (options.wipeToUnconfigured) {
+          await client.query(`DELETE FROM user_sessions;`).catch(() => {});
+          const rUsers = await client.query(`DELETE FROM users;`).catch(() => ({ rowCount: 0 }));
+          await client.query(`DELETE FROM tenant_memberships;`).catch(() => {});
+          await client.query(`DELETE FROM tenants;`).catch(() => {});
+          affectedTables.push('users', 'user_sessions', 'tenants', 'tenant_memberships');
+          resetSummary.usersDeleted = rUsers?.rowCount || 0;
+        } else {
+          await client.query(`DELETE FROM user_sessions WHERE user_id != 'usr_admin';`).catch(() => {});
+          const rUsers = await client.query(`DELETE FROM users WHERE id != 'usr_admin';`).catch(() => ({ rowCount: 0 }));
+          await client.query(`DELETE FROM tenant_memberships;`).catch(() => {});
+          await client.query(`DELETE FROM tenants;`).catch(() => {});
+          affectedTables.push('users', 'user_sessions', 'tenants', 'tenant_memberships');
+          resetSummary.usersDeleted = rUsers?.rowCount || 0;
+        }
+      }
+
+      // 4. DASHBOARDS
+      if (isAll || options.wipeDashboards) {
+        if (options.wipeToUnconfigured) {
+          await client.query(`DELETE FROM dashboard_layouts;`).catch(() => {});
+          affectedTables.push('dashboard_layouts');
+          resetSummary.dashboardsReset = 0;
+        } else {
+          await client.query(`DELETE FROM dashboard_layouts WHERE id NOT IN ('dash_default', 'dash_usr_admin');`).catch(() => {});
+          // Reset dash_usr_admin to default template widgets
+          await client.query(`
+            UPDATE dashboard_layouts 
+            SET 
+              title = 'Merkez Yönetim Ana Dashboard',
+              widgets_json = COALESCE((SELECT widgets_json FROM dashboard_layouts WHERE id = 'dash_default' LIMIT 1), '[]'::jsonb),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = 'dash_usr_admin';
+          `).catch(() => {});
+          affectedTables.push('dashboard_layouts');
+          resetSummary.dashboardsReset = 1;
+        }
+      }
+
+      // 5. ALARMS & NOTIFICATIONS
+      if (isAll || options.wipeAlarms) {
+        const rAct = await client.query(`DELETE FROM active_alarms;`).catch(() => ({ rowCount: 0 }));
+        const rEvt = await client.query(`DELETE FROM alarm_events;`).catch(() => ({ rowCount: 0 }));
+        const rRul = await client.query(`DELETE FROM threshold_rules;`).catch(() => ({ rowCount: 0 }));
+        const rNot = await client.query(`DELETE FROM notifications;`).catch(() => ({ rowCount: 0 }));
+        await client.query(`DELETE FROM notification_queue;`).catch(() => {});
+        await client.query(`DELETE FROM dispatch_logs;`).catch(() => {});
+        affectedTables.push('active_alarms', 'alarm_events', 'threshold_rules', 'notifications', 'dispatch_logs');
+        resetSummary.alarmsWiped = (rAct?.rowCount || 0) + (rEvt?.rowCount || 0);
+        resetSummary.rulesWiped = rRul?.rowCount || 0;
+        resetSummary.notificationsWiped = rNot?.rowCount || 0;
+      }
+
+      // 6. AUTOMATIONS
+      if (isAll || options.wipeAutomations) {
+        const rAuto = await client.query(`DELETE FROM automations;`).catch(() => ({ rowCount: 0 }));
+        affectedTables.push('automations');
+        resetSummary.automationsWiped = rAuto?.rowCount || 0;
+      }
+
+      // 7. FIRMWARES & OTA
+      if (isAll || options.wipeFirmwares) {
+        await client.query(`DELETE FROM ota_deployment_jobs;`).catch(() => {});
+        const rFw = await client.query(`DELETE FROM firmwares;`).catch(() => ({ rowCount: 0 }));
+        affectedTables.push('firmwares', 'ota_deployment_jobs');
+        resetSummary.firmwaresWiped = rFw?.rowCount || 0;
+      }
+
+      // 8. SERVICE TOKENS & API KEYS
+      if (isAll || options.wipeServiceTokens) {
+        const rTok = await client.query(`DELETE FROM service_tokens;`).catch(() => ({ rowCount: 0 }));
+        affectedTables.push('service_tokens');
+        resetSummary.serviceTokensWiped = rTok?.rowCount || 0;
+      }
+
+      // 9. DEVICE COMMANDS & DOWNLINK QUEUE
+      if (isAll || options.wipeDeviceCommands) {
+        const rCmd = await client.query(`DELETE FROM device_commands;`).catch(() => ({ rowCount: 0 }));
+        await client.query(`DELETE FROM device_ws_messages_dedup;`).catch(() => {});
+        affectedTables.push('device_commands', 'device_ws_messages_dedup');
+        resetSummary.deviceCommandsWiped = rCmd?.rowCount || 0;
+      }
+
+      // 10. SYSTEM SETTINGS
+      if (isAll || options.wipeSystemSettings) {
+        await client.query(`DELETE FROM system_settings WHERE key IN ('service_config', 'email_config', 'retention_policies');`).catch(() => {});
+        affectedTables.push('system_settings');
+        resetSummary.settingsReset = 1;
+      }
+
+      // 11. AUDIT LOGS & SYSTEM EVENTS
+      if (isAll || options.wipeAuditLogs) {
+        await client.query(`DELETE FROM audit_logs;`).catch(() => {});
+        await client.query(`DELETE FROM system_events;`).catch(() => {});
+        affectedTables.push('audit_logs', 'system_events');
+        resetSummary.auditLogsWiped = 1;
+      }
+
+      await client.query('COMMIT');
+      return { affectedTables, resetSummary };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   public async getRulesForDevice(deviceId: string): Promise<ThresholdRule[]> {
     if (!this.pool || !this.isConnected) return [];
     try {

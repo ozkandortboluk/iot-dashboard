@@ -14,6 +14,8 @@
 
 - **USR-04 — Kullanıcı isteği:** 2026-09-29/30 çalışma loglarında görülen migration drift, yanlış şema/oturum bütünlüğü döngüsü, migration başarısızken READY geçişi ve OTA imzalama anahtarı eksikliği hatalarını kod + canlı deployment açısından gider. **Kanonik kontroller:** `DB-01`, `DB-03`, `DB-04`, `DR-02` (aynı teknik işler için ikinci görev oluşturulmaz).
 
+- **USR-05 — Kullanıcı isteği:** Yönetici panelinde sistemin tümünü sıfırla butonu olsun ve bu sıfırlama işlemi encryption key ile sıfırlamaya izin versin; sıfırlama işleminde sıfırlanacak işlemler için seçenek sunulsun (veritabanına ait sıfırlamalar, users, dashboard, devices vs. sistemin tümü, ayarları vs. genişletilmiş seçenekler). Bu sıfırlama işleminde tüm sıfırlama seçeneği de olsun; kısacası sistem tamamen ilk haline kurulmamış haline dönecek şekilde böyle bir seçenek daha ekleyelim sıfırdan başlamak isteyenler için. **Uygulandı:** `☑ ☐ ☐` (Sistemi tamamen ilk kurulmamış haline döndüren OOBE sıfırdan kurulum modu, standart fabrika sıfırlaması ve 11 katmanlı seçici sıfırlama; Kasa Şifreleme Anahtarı doğrulaması, canlı ön-kontrol ve onay metni güvenliği).
+
 <!-- Yeni isteklerini bu satırın altına yazabilirsin. Kod vermen gerekmez; Codex uygun konu grubunda sıradaki USR kodunu oluşturur. -->
 
 ## 1. Güvenlik — erişim, SSH, sırlar ve müşteri izolasyonu
