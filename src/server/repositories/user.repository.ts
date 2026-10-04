@@ -34,6 +34,16 @@ function safeTerminateSessionSocket(sessionToken: string, code = 1008, reason = 
   } catch {}
 }
 
+function safeBroadcast(event: string, payload: any) {
+  try {
+    import('../services/websocket.js').then((wsMod) => {
+      if (typeof wsMod.broadcast === 'function') {
+        wsMod.broadcast(event, payload);
+      }
+    }).catch(() => {});
+  } catch {}
+}
+
 export class UserRepository {
   constructor(private db: any) {}
 
@@ -469,32 +479,28 @@ export class UserRepository {
     return user;
   }
 
-  public deleteUser(userId: string, adminId = 'system', adminName = 'Admin') {
+  public async deleteUser(userId: string, adminId = 'system', adminName = 'Admin') {
     safeTerminateUserSockets(userId, 1008, 'User deleted');
     if (this.isPgReady()) {
-      this.db.postgresRepo.deleteUser(userId).catch((err: any) => {
+      await this.db.postgresRepo.deleteUser(userId).catch((err: any) => {
         console.warn('[Postgres deleteUser Error]:', err?.message || err);
       });
       this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Silindi: ID ${userId}`, 'high');
-      return;
     }
 
     const index = (this.db.data.users || []).findIndex((u: any) => u.id === userId);
-    if (index === -1) return;
-
-    const removed = this.db.data.users[index];
+    const removed = index >= 0 ? this.db.data.users[index] : null;
 
     // 1. CİHAZ SAHİPLİĞİNİ KORUMA & KANONİK AKTARIM:
-    const now = new Date().toISOString();
     const ownedDevices = (this.db.data.devices || []).filter(
-      (d: any) => d.tenantId === userId || d.userId === userId
+      (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
     );
 
     for (const dev of ownedDevices) {
       dev.tenantId = 'usr_admin';
       dev.userId = 'usr_admin';
       if (!dev.location || dev.location === 'Varsayılan') {
-        dev.location = `Merkez Depo (Eski Müşteri: ${removed.name})`;
+        dev.location = `Merkez Depo (Eski Müşteri: ${removed?.name || userId})`;
       }
     }
 
@@ -502,20 +508,37 @@ export class UserRepository {
       this.db.addAuditLog(
         adminId,
         adminName,
-        `Müşteri Silinirken Cihazlar Korundu & Devredildi: "${removed.name}" kullanıcısına ait ${ownedDevices.length} adet cihaz Sistem Yöneticisine devredildi.`,
+        `Müşteri Silinirken Cihazlar Korundu & Devredildi: "${removed?.name || userId}" kullanıcısına ait ${ownedDevices.length} adet cihaz Sistem Yöneticisine devredildi.`,
         'medium'
       );
     }
 
-    // 2. Kullanıcıyı ve oturumları kaldır
-    this.db.data.users.splice(index, 1);
+    // 2. Kullanıcıya ait özel dashboard'u temizle (Admin dashboard'unu bozmasını engelle)
+    if (this.db.data.dashboards) {
+      this.db.data.dashboards = this.db.data.dashboards.filter(
+        (d: any) => d.id !== `dash_${userId}` && d.tenantId !== userId && (d as any).userId !== userId
+      );
+    }
+
+    // 3. Kullanıcıyı ve oturumları kaldır
+    if (index >= 0) {
+      this.db.data.users.splice(index, 1);
+    }
     if (this.db.data.passwords) {
       delete this.db.data.passwords[userId];
     }
     this.db.data.sessions = (this.db.data.sessions || []).filter((s: any) => s.userId !== userId);
 
-    this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
+    if (removed) {
+      this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Kalıcı Olarak Silindi: ${removed.name} (${removed.email})`, 'high');
+    }
     this.db.saveData(this.db.data, true);
+
+    // 4. Canlı Senkronizasyon & WebSocket Bildirimleri
+    safeBroadcast('user:deleted', { id: userId });
+    safeBroadcast('users:updated', this.db.data.users);
+    safeBroadcast('devices:updated', this.db.data.devices);
+    this.db.notifyNotificationListeners('devices:updated', this.db.data.devices);
   }
 
   public async advancedDeleteUser(
@@ -535,13 +558,10 @@ export class UserRepository {
         console.warn('[Postgres advancedDeleteUser Error]:', err?.message || err);
       });
       this.db.addAuditLog(adminId, adminName, `Müşteri Hesabı Gelişmiş Silindi: ID ${userId}`, 'high');
-      return;
     }
 
     const index = (this.db.data.users || []).findIndex((u: any) => u.id === userId);
-    if (index === -1) return;
-
-    const removed = this.db.data.users[index];
+    const removed = index >= 0 ? this.db.data.users[index] : null;
 
     const ownedDevices = (this.db.data.devices || []).filter(
       (d: any) => d.tenantId === userId || d.userId === userId || d.customerId === userId
@@ -551,18 +571,17 @@ export class UserRepository {
       this.db.data.devices = (this.db.data.devices || []).filter(
         (d: any) => !(d.tenantId === userId || d.userId === userId || d.customerId === userId)
       );
-      this.db.addAuditLog(adminId, adminName, `Müşteri Silindi & ${ownedDevices.length} Cihazı Kalıcı Olarak Silindi: ${removed.name}`, 'high');
+      this.db.addAuditLog(adminId, adminName, `Müşteri Silindi & ${ownedDevices.length} Cihazı Kalıcı Olarak Silindi: ${removed?.name || userId}`, 'high');
     } else {
-      const now = new Date().toISOString();
       for (const dev of ownedDevices) {
         dev.tenantId = 'usr_admin';
         dev.userId = 'usr_admin';
         if (!dev.location || dev.location === 'Varsayılan') {
-          dev.location = `Merkez Depo (Eski Müşteri: ${removed.name})`;
+          dev.location = `Merkez Depo (Eski Müşteri: ${removed?.name || userId})`;
         }
       }
       if (ownedDevices.length > 0) {
-        this.db.addAuditLog(adminId, adminName, `Müşteri Silindi, ${ownedDevices.length} Cihazı Merkez'e Devredildi: ${removed.name}`, 'medium');
+        this.db.addAuditLog(adminId, adminName, `Müşteri Silindi, ${ownedDevices.length} Cihazı Merkez'e Devredildi: ${removed?.name || userId}`, 'medium');
       }
     }
 
@@ -581,8 +600,16 @@ export class UserRepository {
 
     if (options.deleteDashboards) {
       this.db.data.dashboards = (this.db.data.dashboards || []).filter(
-        (d: any) => d.userId !== userId && d.tenantId !== userId && d.id !== userId
+        (d: any) => d.userId !== userId && d.tenantId !== userId && d.id !== userId && d.id !== `dash_${userId}`
       );
+    } else if (this.db.data.dashboards) {
+      // Transfer dashboard to usr_admin as archive so it never stays orphaned
+      for (const dash of this.db.data.dashboards) {
+        if (dash.id === `dash_${userId}` || dash.tenantId === userId || (dash as any).userId === userId) {
+          dash.tenantId = 'usr_admin';
+          dash.title = `Arşiv: ${removed?.name || userId} Paneli`;
+        }
+      }
     }
 
     if (options.deleteAlarms) {
@@ -607,7 +634,9 @@ export class UserRepository {
     }
 
     // Kullanıcıyı ve oturumları kaldır
-    this.db.data.users.splice(index, 1);
+    if (index >= 0) {
+      this.db.data.users.splice(index, 1);
+    }
     if (this.db.data.passwords) {
       delete this.db.data.passwords[userId];
     }
@@ -616,6 +645,9 @@ export class UserRepository {
     this.db.saveData(this.db.data, true);
 
     // Real-time broadcast updates
+    safeBroadcast('user:deleted', { id: userId });
+    safeBroadcast('users:updated', this.db.data.users);
+    safeBroadcast('devices:updated', this.db.data.devices);
     this.db.notifyNotificationListeners('devices:updated', this.db.data.devices);
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);

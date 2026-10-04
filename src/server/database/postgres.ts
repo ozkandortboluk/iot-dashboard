@@ -956,7 +956,10 @@ export class PostgresRepository {
       // 2. Kullanıcının oturumlarını temizle
       await client.query(`DELETE FROM user_sessions WHERE user_id = $1;`, [userId]);
 
-      // 3. Kullanıcıyı sil (Artık hiçbir cihaz bu kullanıcıya bağlı olmadığı için FK ihlali oluşmaz)
+      // 3. Kullanıcıya ait dashboard_layouts kayıtlarını temizle (Yetim/null kalıp admin ekranını bozmasını engeller)
+      await client.query(`DELETE FROM dashboard_layouts WHERE user_id = $1 OR id = $1 OR id = ('dash_' || $1);`, [userId]).catch(() => {});
+
+      // 4. Kullanıcıyı sil (Artık hiçbir cihaz bu kullanıcıya bağlı olmadığı için FK ihlali oluşmaz)
       await client.query(`DELETE FROM users WHERE id = $1;`, [userId]);
       await client.query('COMMIT');
       this.validUserIdsCache.delete(userId);
@@ -995,7 +998,15 @@ export class PostgresRepository {
       }
 
       if (options.deleteDashboards) {
-        await client.query(`DELETE FROM dashboard_layouts WHERE user_id = $1 OR id = $1`, [userId]).catch(() => {});
+        await client.query(`DELETE FROM dashboard_layouts WHERE user_id = $1 OR id = $1 OR id = ('dash_' || $1);`, [userId]).catch(() => {});
+      } else {
+        await client.query(`
+          UPDATE dashboard_layouts 
+          SET 
+            title = 'Arşiv: ' || COALESCE((SELECT name FROM users WHERE id = $1 LIMIT 1), $1) || ' Paneli',
+            user_id = 'usr_admin'
+          WHERE user_id = $1 OR id = ('dash_' || $1);
+        `, [userId]).catch(() => {});
       }
 
       if (options.deleteAlarms) {
@@ -3258,18 +3269,22 @@ export class PostgresRepository {
         });
       }
 
-      // 5. Dashboards
+      // 5. Dashboards & Self-healing Orphan Pruning
+      await this.query(`DELETE FROM dashboard_layouts WHERE user_id IS NULL AND id NOT IN ('dash_default', 'dash_usr_admin');`).catch(() => {});
       const dashRes = await this.query(`SELECT * FROM dashboard_layouts ORDER BY updated_at DESC;`);
       const dashboards: DashboardLayout[] = [];
       if (dashRes?.rows) {
         dashRes.rows.forEach((r: any) => {
-          dashboards.push({
-            id: r.id,
-            tenantId: r.user_id,
-            title: r.title || 'Kullanıcı Dashboard',
-            widgets: typeof r.widgets_json === 'string' ? JSON.parse(r.widgets_json) : r.widgets_json || [],
-            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
-          });
+          const effectiveTenantId = r.user_id || (r.id === 'dash_usr_admin' ? 'usr_admin' : (r.id === 'dash_default' ? 'default' : null));
+          if (effectiveTenantId || r.id === 'dash_default' || r.id === 'dash_usr_admin') {
+            dashboards.push({
+              id: r.id,
+              tenantId: effectiveTenantId as string,
+              title: r.title || (r.id === 'dash_usr_admin' ? 'Merkez Yönetim Ana Dashboard' : 'Kullanıcı Dashboard'),
+              widgets: typeof r.widgets_json === 'string' ? JSON.parse(r.widgets_json) : r.widgets_json || [],
+              updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+            });
+          }
         });
       }
 

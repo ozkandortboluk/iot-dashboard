@@ -1,0 +1,177 @@
+import { describe, it, expect } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import { APP_VERSION } from '../config/version';
+
+const rootDir = path.resolve(__dirname, '../..');
+
+describe('Zero-Touch Automated Single-Command Installer & Extensible Architecture', () => {
+  const installScriptPath = path.join(rootDir, 'install.sh');
+  const setupLibDir = path.join(rootDir, 'scripts/setup/lib');
+  const pluginsDir = path.join(rootDir, 'scripts/setup/plugins.d');
+
+  // =========================================================================
+  // 1. Core Installer Script & Modular Structure
+  // =========================================================================
+  it('1. install.sh and setup helper libraries exist and have proper permissions', () => {
+    expect(fs.existsSync(installScriptPath)).toBe(true);
+
+    // Verify executable permissions
+    const stat = fs.statSync(installScriptPath);
+    // Mode must be executable (at least 0o700 / 0o755)
+    expect((stat.mode & 0o111) !== 0).toBe(true);
+
+    const requiredModules = [
+      'colors.sh',
+      'system.sh',
+      'docker-installer.sh',
+      'secrets.sh',
+      'env.sh',
+      'ssl.sh',
+      'backup.sh',
+      'plugins.sh',
+    ];
+
+    for (const mod of requiredModules) {
+      const modPath = path.join(setupLibDir, mod);
+      expect(fs.existsSync(modPath), `Module ${mod} must exist`).toBe(true);
+      const modStat = fs.statSync(modPath);
+      expect((modStat.mode & 0o111) !== 0, `Module ${mod} must be executable`).toBe(true);
+    }
+
+    expect(fs.existsSync(pluginsDir)).toBe(true);
+    expect(fs.existsSync(path.join(pluginsDir, 'README.md'))).toBe(true);
+  });
+
+  // =========================================================================
+  // 2. CLI Interface & Flag Parsing
+  // =========================================================================
+  it('2. ./install.sh --help outputs comprehensive CLI options and usage examples', () => {
+    const helpOutput = execSync(`bash ${installScriptPath} --help`, { cwd: rootDir, encoding: 'utf-8' });
+    expect(helpOutput).toContain('KULLANIM:');
+    expect(helpOutput).toContain('--quick');
+    expect(helpOutput).toContain('--domain');
+    expect(helpOutput).toContain('--email');
+    expect(helpOutput).toContain('--http-only');
+    expect(helpOutput).toContain('--init-only');
+    expect(helpOutput).toContain('--check');
+    expect(helpOutput).toContain('--status');
+    expect(helpOutput).toContain('--backup');
+    expect(helpOutput).toContain('--restore');
+  });
+
+  it('3. ./install.sh --check runs system diagnostic inspection without errors', () => {
+    const checkOutput = execSync(`bash ${installScriptPath} --check`, { cwd: rootDir, encoding: 'utf-8' });
+    expect(checkOutput).toMatch(/Sistem ve Donanım Analizi/i);
+    expect(checkOutput).toMatch(/Ağ ve Port Çakışmaları/i);
+    expect(checkOutput).toMatch(/Sistem denetimi tamamlandı/i);
+  });
+
+  // =========================================================================
+  // 3. Cryptographic Secret Generation & Vault Policy Compliance
+  // =========================================================================
+  it('4. ./install.sh --init-only --quick generates cryptographic keys with strict 0600 POSIX permissions', () => {
+    const initOutput = execSync(`bash ${installScriptPath} --init-only --quick`, { cwd: rootDir, encoding: 'utf-8' });
+    expect(initOutput).toMatch(/Kriptografik Kasa/i);
+
+    const secretsDir = path.join(rootDir, 'secrets');
+    expect(fs.existsSync(secretsDir)).toBe(true);
+
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const jwtKeyPath = path.join(secretsDir, 'jwt_secret');
+    const otaKeyPath = path.join(secretsDir, 'ota_signing_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    expect(fs.existsSync(encKeyPath)).toBe(true);
+    expect(fs.existsSync(jwtKeyPath)).toBe(true);
+    expect(fs.existsSync(otaKeyPath)).toBe(true);
+    expect(fs.existsSync(pgPassPath)).toBe(true);
+
+    const encKey = fs.readFileSync(encKeyPath, 'utf-8').trim();
+    const jwtKey = fs.readFileSync(jwtKeyPath, 'utf-8').trim();
+    const pgPass = fs.readFileSync(pgPassPath, 'utf-8').trim();
+
+    // 256-bit AES hex key has 64 hex characters
+    expect(encKey.length).toBe(64);
+    expect(/^[0-9a-fA-F]{64}$/.test(encKey)).toBe(true);
+
+    // JWT key has 64 hex characters
+    expect(jwtKey.length).toBe(64);
+
+    // Postgres password has high entropy
+    expect(pgPass.length).toBeGreaterThanOrEqual(24);
+
+    // File permissions must be 0600 (owner read/write only)
+    const encStat = fs.statSync(encKeyPath);
+    expect(encStat.mode & 0o077).toBe(0); // No group or other permissions
+  });
+
+  // =========================================================================
+  // 4. Automated Backup & Disaster Recovery Engine
+  // =========================================================================
+  it('5. ./install.sh --backup creates a timestamped archive bundle of secrets and configuration', () => {
+    const backupOutput = execSync(`bash ${installScriptPath} --backup`, { cwd: rootDir, encoding: 'utf-8' });
+    expect(backupOutput).toMatch(/Yedekleme tamamlandı/i);
+
+    const backupsDir = path.join(rootDir, 'backups');
+    expect(fs.existsSync(backupsDir)).toBe(true);
+
+    const files = fs.readdirSync(backupsDir).filter((f) => f.startsWith('nexus_backup_') && f.endsWith('.tar.gz'));
+    expect(files.length).toBeGreaterThan(0);
+
+    const latestBackup = path.join(backupsDir, files[files.length - 1]);
+    const archiveSize = fs.statSync(latestBackup).size;
+    expect(archiveSize).toBeGreaterThan(100); // Must not be empty
+  });
+
+  // =========================================================================
+  // 5. Extensible Plugin & Hook Execution
+  // =========================================================================
+  it('6. Setup plugin runner discovers and executes custom hooks in scripts/setup/plugins.d/', () => {
+    const testPluginPath = path.join(pluginsDir, '99-test-hook.sh');
+    const markerFile = path.join(rootDir, 'data/.plugin_test_marker');
+
+    try {
+      // Create a test plugin
+      fs.writeFileSync(
+        testPluginPath,
+        `#!/usr/bin/env bash\nif [ "$1" = "pre-install" ]; then touch "${markerFile}"; fi\n`,
+        { mode: 0o755 }
+      );
+
+      execSync(`bash ${installScriptPath} --check`, { cwd: rootDir });
+
+      expect(fs.existsSync(markerFile), 'Plugin hook must have run and created marker file').toBe(true);
+    } finally {
+      if (fs.existsSync(testPluginPath)) fs.unlinkSync(testPluginPath);
+      if (fs.existsSync(markerFile)) fs.unlinkSync(markerFile);
+    }
+  });
+
+  // =========================================================================
+  // 6. Docker Compose & Nginx Production Topology Integration
+  // =========================================================================
+  it('7. docker-compose.yml integrates with generated secrets and certificates', () => {
+    const composePath = path.join(rootDir, 'docker-compose.yml');
+    const composeContent = fs.readFileSync(composePath, 'utf-8');
+
+    // Proxy must mount certs directory
+    expect(composeContent).toMatch(/certs/i);
+    // Secrets definition must point to encryption_key
+    expect(composeContent).toMatch(/encryption_key:/);
+    expect(composeContent).toMatch(/\/api\/health\/live/);
+  });
+
+  // =========================================================================
+  // 7. Version Synchronization (Rule 1 & Rule 2)
+  // =========================================================================
+  it('8. package.json, version.ts, and CHANGELOG.md are strictly synchronized to v1.47.0', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'));
+    const changelog = fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf-8');
+
+    expect(pkg.version).toBe('1.47.0');
+    expect(APP_VERSION).toBe('1.47.0');
+    expect(changelog).toContain('## 🚀 [v1.47.0]');
+  });
+});

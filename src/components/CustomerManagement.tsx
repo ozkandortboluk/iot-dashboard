@@ -25,6 +25,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     createNewCustomer,
     deleteCustomer,
     devices,
+    fetchDevices,
     setSelectedCustomerForAdmin,
     selectedCustomerForAdmin,
     notifications,
@@ -901,8 +902,12 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             const data = await res.json();
             if (!res.ok || data.error) throw new Error(data.error || 'Toplu silme başarısız oldu');
             
+            if (selectedCustomerIds.has(selectedCustomerForAdmin)) {
+              setSelectedCustomerForAdmin('all');
+            }
             setSelectedCustomerIds(new Set());
-            refreshCustomers();
+            await refreshCustomers();
+            await fetchDevices();
           }}
         />
       )}

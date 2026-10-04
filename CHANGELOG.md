@@ -4,6 +4,28 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.47.0] - 2026-10-03
+
+### ⚡ Tek-Komutla Sıfır-Dokunuş (Zero-Touch) Otomatik VPS Kurulumu & Genişletilebilir Eklenti Mimarisi
+- **Tek Komutla Uçtan Uca Kurulum Betiği (`install.sh`)**:
+  - Yeni kiralanmış veya sıfır bir Linux sunucuya (Ubuntu, Debian, CentOS, RHEL, Rocky, Alpine vb.) tek komutla (`./install.sh` veya `curl ... | bash`) sistemin kendi kendine kurulması sağlandı.
+  - Donanım ve mimari analizi (CPU mimarisi x86_64/arm64, RAM miktarı, boş disk alanı ve 80, 443, 3000, 5432 port çakışma tespiti).
+  - Eksik Docker ve Docker Compose eklentisini resmi depolardan otomatik kurma yeteneği (`docker-installer.sh`).
+- **Kriptografik Secret & Kasa (Vault) Otomasyonu (`scripts/setup/lib/secrets.sh`)**:
+  - AES-256-GCM Kasa Root Anahtarı (`secrets/encryption_key`), JWT/Oturum Gizli Anahtarı (`secrets/jwt_secret`), Ed25519 OTA Firmware İmzalama Özel Anahtarı (`secrets/ota_signing_key`) ve TimescaleDB bootstrap parolası en yüksek entropiyle otomatik üretilir.
+  - Tüm secret dosyaları POSIX `0600`, secrets dizini `0700` izinleriyle sıkılaştırılarak izole edilir.
+- **Otomatik Ortam Senkronizasyonu & SSL/TLS (`env.sh`, `ssl.sh`)**:
+  - `.env` dosyası sıfır sunucuda otomatik kopyalanır ve üretim değişkenleri (`APP_ENV=vps`, `VPS_PRODUCTION=true`, `DATABASE_URL`) inject edilir.
+  - Modern ECDSA/RSA Self-Signed SAN TLS sertifikası oluşturularak Nginx'in HTTPS (443) üzerinde anında hatasız açılması sağlanır; Let's Encrypt / Certbot ACME doğrulaması (`/.well-known/acme-challenge/`) hazırlandı.
+- **Genişletilebilir Modüler Eklenti (Plugin / Hook) Mimarisi (`scripts/setup/plugins.d/`)**:
+  - `pre-install`, `pre-start`, `post-start` kancaları ile sisteme gelecekte eklenebilecek servislerin (Mosquitto MQTT Broker, Cloudflare Tunnel, Prometheus/Grafana, Telegram Bot vb.) çekirdek koda dokunulmadan bağımsız eklenti olarak çalıştırılması sağlandı.
+- **Afet Kurtarma & Yedekleme Motoru (`--backup`, `--restore`)**:
+  - Veritabanı dökümü (pg_dump), Vault sırları ve platform konfigürasyonunu tek arşivde (`nexus_backup_*.tar.gz`) toplayan ve geri yükleyebilen komut satırı araçları eklendi.
+- **Canlı Yardım & Bilgi Merkezi Entegrasyonu (`HelpView.tsx`)**:
+  - "Tek Komutla Otomatik VPS Kurulumu" başlığı altında kopyalanabilir bash komutları, parametreler ve mimari açıklamaları eklendi.
+
+---
+
 ## 🚀 [v1.46.2] - 2026-09-27
 
 ### 🔒 P0 Güvenlik Sıkılaştırması: Sıfır-Plaintext (Zero-Plaintext) Secret Vault & Kriptografik İzolasyon

@@ -34,7 +34,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   onClose,
   onNavigateToDevices,
 }) => {
-  const { devices, refreshCustomers } = useRealtime();
+  const { devices, refreshCustomers, fetchDevices, selectedCustomerForAdmin, setSelectedCustomerForAdmin } = useRealtime();
   const [activeTab, setActiveTab] = useState<'info' | 'devices' | 'security'>('info');
   const [showAdvancedDelete, setShowAdvancedDelete] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -535,7 +535,11 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
             });
             const data = await res.json();
             if (!res.ok || data.error) throw new Error(data.error || 'Silme işlemi başarısız oldu');
-            refreshCustomers();
+            if (selectedCustomerForAdmin === customer.id) {
+              setSelectedCustomerForAdmin('all');
+            }
+            await refreshCustomers();
+            await fetchDevices();
             onClose();
           }}
         />

@@ -841,6 +841,27 @@ class LocalDatabase {
         if (parsed.users && Array.isArray(parsed.users)) {
           parsed.users = parsed.users.filter((u: any) => !isTestOrEphemeralUser(u.id, u.email, u.name));
         }
+
+        // Dashboard sanitization & self-healing:
+        // 1. Remove orphaned dashboards whose users were deleted (e.g. dash_usr_1789564016169)
+        // 2. Ensure dash_default has tenantId: 'default'
+        // 3. Ensure dash_usr_admin has tenantId: 'usr_admin'
+        if (parsed.dashboards && Array.isArray(parsed.dashboards)) {
+          const validUserIds = new Set<string>((parsed.users || []).map((u: any) => u.id));
+          validUserIds.add('usr_admin');
+          parsed.dashboards = parsed.dashboards.filter((d: any) => {
+            if (d.id === 'dash_default') return true;
+            if (d.id === 'dash_usr_admin') return true;
+            const targetId = (d.id || '').replace(/^dash_/, '');
+            if (d.tenantId && validUserIds.has(d.tenantId)) return true;
+            if (validUserIds.has(targetId)) return true;
+            return false; // Prune orphan!
+          });
+          for (const d of parsed.dashboards) {
+            if (d.id === 'dash_default') d.tenantId = 'default';
+            if (d.id === 'dash_usr_admin') d.tenantId = 'usr_admin';
+          }
+        }
       } catch (err) {
         console.error('Error reading db.json, re-initializing empty database:', err);
         parsed = emptyData;

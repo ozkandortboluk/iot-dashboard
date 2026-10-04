@@ -129,6 +129,16 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [user?.id]);
 
+  // Seçili müşteri silinirse veya listeden kalkarsa yönetici panelini otomatik 'all' (Merkez) görünümüne döndür
+  useEffect(() => {
+    if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
+      const exists = customersList.some((c) => c.id === selectedCustomerForAdmin);
+      if (!exists && customersList.length > 0) {
+        setSelectedCustomerForAdmin('all');
+      }
+    }
+  }, [customersList, selectedCustomerForAdmin, user?.role]);
+
   const getPendingCommand = useCallback(
     (deviceId: string, outputPin?: string): PendingCommandInfo | null => {
       const key = `${deviceId}_${outputPin || ''}`;
@@ -863,11 +873,14 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   user?.role === 'admin' && currentSelectedCust !== 'all'
                     ? currentSelectedCust
                     : user?.id || 'usr_admin';
-                if (
-                  !data.payload.tenantId ||
-                  data.payload.tenantId === currentTarget ||
-                  (user?.role === 'admin' && currentTarget === 'usr_admin' && (data.payload.tenantId === 'usr_admin' || !data.payload.tenantId))
-                ) {
+                const payloadTenantId = data.payload.tenantId;
+                const payloadId = data.payload.id;
+
+                // Strict isolation: only apply layout to this client if it directly targets the currently viewed user/dashboard
+                const isExactTarget = (payloadTenantId && payloadTenantId === currentTarget) || payloadId === `dash_${currentTarget}`;
+                const isAdminDefaultMatch = user?.role === 'admin' && currentTarget === 'usr_admin' && (payloadId === 'dash_usr_admin' || payloadTenantId === 'usr_admin');
+
+                if (isExactTarget || isAdminDefaultMatch) {
                   const sanitized = validateAndSanitizeWidgets(data.payload.widgets);
                   setWidgets(sanitized);
                   if (data.payload.title) setDashboardTitle(data.payload.title);
@@ -879,6 +892,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               } else {
                 refreshCustomers();
               }
+            } else if (data.event === 'user:deleted') {
+              const deletedId = data.payload?.id;
+              if (deletedId && selectedCustomerForAdminRef.current === deletedId) {
+                setSelectedCustomerForAdmin('all');
+              }
+              refreshCustomers();
+              fetchDevices();
             } else if (
               data.event === 'command:ack' ||
               data.event === 'command:ack_confirmed' ||

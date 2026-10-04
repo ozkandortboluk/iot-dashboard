@@ -962,13 +962,77 @@ void loop() {
       {/* TAB 1: STEP-BY-STEP WALKTHROUGH */}
       {activeStepTab === 'steps' && (
         <div className="space-y-6">
+          {/* ZERO-TOUCH SINGLE COMMAND HERO BANNER */}
+          <div className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-slate-900 p-6 rounded-3xl border border-indigo-500/30 shadow-2xl relative overflow-hidden space-y-4">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                      Önerilen Hızlı Yol (Zero-Touch)
+                    </span>
+                    <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                      Tek Komutla Kurulum
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-white mt-1">
+                    Sıfır Sunucuda Tek Komutla Otomatik Kurulum (All-in-One Installer)
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed mt-1 max-w-3xl">
+                    Yeni kiraladığınız Ubuntu/Debian/Linux sunucuya SSH ile bağlandıktan sonra depoyu klonlayıp tek bir komut çalıştırmanız yeterlidir.
+                    Docker, Docker Compose, 256-bit AES Kasa anahtarları, TimescaleDB, Nginx ters proxy ve SSL sertifikaları hiçbir manuel müdahale gerekmeden kendi kendini kurar!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() =>
+                  handleCopy(
+                    `./install.sh --quick`,
+                    'quick_installer_cmd'
+                  )
+                }
+                className="absolute right-3 top-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg transition"
+              >
+                {copiedSection === 'quick_installer_cmd' ? (
+                  <Check className="w-3.5 h-3.5 text-white" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>Kopyala</span>
+              </button>
+              <pre className="p-4 bg-[#020617] text-emerald-400 rounded-2xl border border-slate-800 text-xs font-mono overflow-x-auto leading-relaxed pr-24">
+                {`# 1. Depoyu klonlayın ve dizine girin:\ngit clone https://github.com/kullanici/iot-dashboard.git && cd iot-dashboard\n\n# 2. Tek komutla tam otomatik kurulumu başlatın:\nchmod +x install.sh && ./install.sh --quick`}
+              </pre>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] pt-1">
+              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800/80 text-slate-300">
+                <strong className="text-cyan-400 block font-semibold mb-0.5">🔒 Güvenli Kasa (Vault)</strong>
+                Root AES anahtarı (/run/secrets/encryption_key) otomatik oluşturulur ve POSIX 0600 ile izole edilir.
+              </div>
+              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800/80 text-slate-300">
+                <strong className="text-emerald-400 block font-semibold mb-0.5">💾 Otomatik Afet Yedeği</strong>
+                İstediğiniz zaman <code>./install.sh --backup</code> ile veritabanı ve sırları tek tıkla arşivleyin.
+              </div>
+              <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800/80 text-slate-300">
+                <strong className="text-purple-400 block font-semibold mb-0.5">🧩 Genişletilebilir Eklentiler</strong>
+                <code>scripts/setup/plugins.d/</code> klasörüne betik ekleyerek yeni servisler (MQTT vb.) dahil edin.
+              </div>
+            </div>
+          </div>
+
           <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 text-xs text-slate-300 flex items-start gap-3">
             <HelpCircle className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
             <div>
-              <strong className="text-white">Hiç tecrübeniz yok mu? Endişelenmeyin!</strong>
+              <strong className="text-white">Adım Adım Manuel Kurulumu Tercih Edenler İçin:</strong>
               <p className="mt-0.5 text-slate-400">
-                Aşağıdaki siyah kod kutularındaki komutları kopyalayıp sunucu terminalinize (SSH) yapıştırmanız yeterlidir.
-                Sistem tüm servisleri, veritabanını ve bağlantıları otomatik ayağa kaldıracaktır.
+                Dilerseniz aşağıdaki 4 adımı manuel olarak da uygulayabilirsiniz.
               </p>
             </div>
           </div>

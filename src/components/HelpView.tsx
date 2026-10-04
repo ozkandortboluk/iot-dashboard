@@ -2346,6 +2346,63 @@ curl -X POST "\${API_BASE}/clear" \\
 `,
     },
     {
+      id: 'code_vps_zero_touch_installer',
+      title: 'Tek Komutla Otomatik VPS Kurulumu (Zero-Touch Linux & Docker Installer)',
+      category: 'curl',
+      categoryLabel: 'VPS & Otomatik Kurulum',
+      badge: 'Zero-Touch & Production Ready',
+      description: 'Yeni kiralanan sıfır Ubuntu/Debian/Linux sunucuda Docker, Nginx, TimescaleDB, SSL sertifikaları, AES-256 Vault anahtarları ve servisleri tek bir komutla kendi kendine kuran ve ayağa kaldıran üretim orkestrasyonu.',
+      tags: ['vps', 'kurulum', 'docker', 'tek-komut', 'zero-touch', 'vault', 'backup', 'restore', 'ssl', 'bash'],
+      endpoint: './install.sh [SEÇENEKLER]',
+      code: `#!/bin/bash
+# =========================================================================
+# NEXUSNODE IoT - TEK KOMUTLA SIFIR-DOKUNUŞ (ZERO-TOUCH) VPS KURULUMU
+# =========================================================================
+# Sıfır bir sunucuya (Ubuntu, Debian, CentOS, AlmaLinux, Rocky) SSH ile bağlandıktan
+# sonra hiçbir manuel veritabanı, Nginx veya anahtar yapılandırması yapmadan
+# tüm sistemi tek bir komutla ayağa kaldırabilirsiniz.
+# =========================================================================
+
+# 1. HIZLI KURULUM (TAM OTOMATİK SESSİZ MOD)
+# - Eksikse resmi Docker & Docker Compose eklentisini kurar
+# - 256-bit AES Vault Root Anahtarını (/run/secrets/encryption_key) otomatik üretir
+# - JWT Secret ve Ed25519 OTA imzalama anahtarlarını üretir
+# - TimescaleDB için güçlü rastgele parola ve izole ağ oluşturur
+# - Self-signed TLS sertifikasını hazırlar
+# - Konteynerleri derleyip arka planda başlatır ve sağlık kontrollerini doğrular:
+./install.sh --quick
+
+# 2. ALAN ADI VE E-POSTA İLE KURULUM (CANLI DOMAIN & SSL)
+./install.sh --domain iot.sirketim.com --email admin@sirketim.com
+
+# 3. YALNIZCA SİSTEM VE PORT KONTROLÜ YAPMA (DRY-RUN)
+# CPU, RAM, disk alanı ve port (80, 443, 3000, 5432) çakışmalarını denetler:
+./install.sh --check
+
+# 4. TEK KOMUTLA TAM AFET KURTARMA YEDEĞİ ALMA (BACKUP)
+# TimescaleDB veritabanı dökümü, Vault kasası ve .env ayarlarını zaman damgalı arşivler:
+./install.sh --backup
+# Çıktı: ./backups/nexus_backup_YYYYMMDD_HHMMSS.tar.gz
+
+# 5. YEDEKTEN GERİ YÜKLEME (RESTORE)
+./install.sh --restore ./backups/nexus_backup_20261003_184304.tar.gz
+
+# 6. SİSTEM DURUMU VE SERVİS SAĞLIK RAPORU
+./install.sh --status
+
+# 7. SIFIR KESİNTİYLE SÜRÜM GÜNCELLEME (UPDATE)
+./install.sh --update
+
+# =========================================================================
+# MODÜLER EKLENTİ (PLUGIN / HOOK) MİMARİSİ
+# =========================================================================
+# Gelecekte sisteme yeni bir servis (Mosquitto MQTT, Prometheus, Cloudflare Tunnel vb.)
+# eklemek için "scripts/setup/plugins.d/" klasörüne bir .sh betiği koymanız yeterlidir.
+# Kurulum sihirbazı pre-install, pre-start ve post-start kancalarında eklentiyi
+# otomatik olarak çağıracaktır.
+`,
+    },
+    {
       id: 'code_client_error_logging_js',
       title: 'İstemci ve Node.js Hata Telemetrisi Gönderimi (JavaScript / Fetch)',
       category: 'nodejs',

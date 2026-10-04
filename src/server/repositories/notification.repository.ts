@@ -111,9 +111,18 @@ export class NotificationRepository {
   public async getDashboard(userId: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    const userDash = this.db.data.dashboards.find(
-      (d: any) => d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId || d.id === `dash_${effectiveUserId}`
-    );
+
+    // 1. First priority: Exact ID match (dash_usr_admin or dash_<userId>)
+    const targetDashId = `dash_${effectiveUserId}`;
+    let userDash = this.db.data.dashboards.find((d: any) => d.id === targetDashId);
+
+    // 2. Second priority: If not found by ID and NOT admin, match tenantId (excluding dash_default and dash_usr_admin)
+    if (!userDash && effectiveUserId !== 'usr_admin') {
+      userDash = this.db.data.dashboards.find(
+        (d: any) => (d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId) && d.id !== 'dash_default' && d.id !== 'dash_usr_admin'
+      );
+    }
+
     if (userDash) {
       if (!userDash.widgets || !Array.isArray(userDash.widgets) || userDash.widgets.length === 0) {
         userDash.widgets = [...defaultWidgets];
@@ -122,39 +131,48 @@ export class NotificationRepository {
       return userDash;
     }
 
+    // 3. Fallback: If effectiveUserId is 'usr_admin' and dash_default exists, copy widgets from template
+    const templateWidgets = (this.db.data.dashboards.find((d: any) => d.id === 'dash_default')?.widgets) || defaultWidgets;
+
     const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
     const title = user
       ? `${user.companyName || user.name} Özel Dashboard`
-      : (effectiveUserId === 'usr_admin' ? 'Ana Analitik & Saha İzleme Dashboard' : 'Sistem Dashboard');
+      : (effectiveUserId === 'usr_admin' ? 'Merkez Yönetim Ana Dashboard' : 'Sistem Dashboard');
 
     const newDash: DashboardLayout = {
-      id: `dash_${effectiveUserId}`,
+      id: targetDashId,
       tenantId: effectiveUserId,
       title,
-      widgets: [...defaultWidgets],
+      widgets: [...templateWidgets],
       updatedAt: new Date().toISOString(),
     };
     this.db.data.dashboards.push(newDash);
     this.db.scheduleSave();
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(newDash).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(newDash).catch((e: any) => console.warn('[PG Error]', e.message)); }
     return newDash;
   }
 
   public async saveDashboardWidgets(userId: string, widgets: WidgetConfig[], title?: string): Promise<DashboardLayout> {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
-    let userDash = this.db.data.dashboards.find(
-      (d: any) => d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId || d.id === `dash_${effectiveUserId}`
-    );
+    const targetDashId = `dash_${effectiveUserId}`;
+    let userDash = this.db.data.dashboards.find((d: any) => d.id === targetDashId);
+    if (!userDash && effectiveUserId !== 'usr_admin') {
+      userDash = this.db.data.dashboards.find(
+        (d: any) => (d.tenantId === effectiveUserId || (d as any).userId === effectiveUserId) && d.id !== 'dash_default' && d.id !== 'dash_usr_admin'
+      );
+    }
     if (!userDash) {
       userDash = await this.getDashboard(effectiveUserId);
     }
     const sanitized = validateAndSanitizeWidgets(widgets);
+    userDash.id = targetDashId;
+    userDash.tenantId = effectiveUserId;
     userDash.widgets = sanitized.length > 0 ? sanitized : [...defaultWidgets];
     if (title) userDash.title = title;
     userDash.updatedAt = new Date().toISOString();
     this.db.scheduleSave();
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(userDash).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(userDash).catch((e: any) => console.warn('[PG Error]', e.message)); }
     return userDash;
   }
 
@@ -163,7 +181,7 @@ export class NotificationRepository {
     const user = (this.db.data.users || []).find((u: any) => u.id === effectiveUserId);
     const title = user
       ? `${user.companyName || user.name} Özel Dashboard`
-      : (effectiveUserId === 'usr_admin' ? 'Ana Analitik & Saha İzleme Dashboard' : 'Varsayılan Sistem Dashboard');
+      : (effectiveUserId === 'usr_admin' ? 'Merkez Yönetim Ana Dashboard' : 'Varsayılan Sistem Dashboard');
     return await this.saveDashboardWidgets(effectiveUserId, defaultWidgets, title);
   }
 }
