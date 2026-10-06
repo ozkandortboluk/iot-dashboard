@@ -358,6 +358,8 @@ app.use((req, res, next) => {
     const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
     const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
     const isStaticAsset =
+      req.path === '/' ||
+      req.path === '/index.html' ||
       req.path === '/favicon.svg' ||
       req.path === '/favicon.ico' ||
       req.path === '/site.webmanifest' ||

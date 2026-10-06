@@ -26,11 +26,15 @@ class SystemLoggerService {
   private logToFile: boolean = true;
   private minLevel: SystemEventLevel = 'info';
   private maxFileSizeBytes: number = 20 * 1024 * 1024; // 20 MB
+  private deduplication: boolean = true;
+  private deduplicateWindowMs: number = 60000;
+  private recentMessageSignatures: Map<string, { lastLoggedAt: number; count: number }> = new Map();
 
   constructor() {
     this.ensureDirectories();
     this.loadConfiguration();
     this.loadPersistedEvents();
+    this.simplifyExistingLogs();
   }
 
   private ensureDirectories(): void {
@@ -64,6 +68,12 @@ class SystemLoggerService {
         if (typeof parsed.maxInMemory === 'number' && parsed.maxInMemory > 0) {
           this.maxInMemoryEvents = parsed.maxInMemory;
         }
+        if (typeof parsed.deduplication === 'boolean') {
+          this.deduplication = parsed.deduplication;
+        }
+        if (typeof parsed.deduplicateWindowMs === 'number' && parsed.deduplicateWindowMs >= 1000) {
+          this.deduplicateWindowMs = parsed.deduplicateWindowMs;
+        }
       }
     } catch (err) {
       console.warn('[SystemLogger] Konfigürasyon okunamadı, varsayılanlar aktif:', err);
@@ -77,6 +87,8 @@ class SystemLoggerService {
         logToFile: this.logToFile,
         minLevel: this.minLevel,
         maxInMemory: this.maxInMemoryEvents,
+        deduplication: this.deduplication,
+        deduplicateWindowMs: this.deduplicateWindowMs,
         updatedAt: new Date().toISOString(),
       };
       fs.writeFileSync(this.configFilePath, JSON.stringify(payload, null, 2), 'utf-8');
@@ -93,6 +105,18 @@ class SystemLoggerService {
         if (Array.isArray(parsed)) {
           this.inMemoryEvents = parsed.slice(-this.maxInMemoryEvents);
         }
+      }
+      // Fallback: If inMemoryEvents is empty but system_events.log exists, read from log file
+      if (this.inMemoryEvents.length === 0 && fs.existsSync(this.logFilePath)) {
+        const raw = fs.readFileSync(this.logFilePath, 'utf-8');
+        const lines = raw.split('\n').filter(Boolean);
+        const parsed: SystemEvent[] = [];
+        for (const line of lines) {
+          try {
+            parsed.push(JSON.parse(line));
+          } catch {}
+        }
+        this.inMemoryEvents = parsed.reverse().slice(0, this.maxInMemoryEvents);
       }
     } catch {
       this.inMemoryEvents = [];
@@ -124,6 +148,8 @@ class SystemLoggerService {
     logToFile?: boolean;
     minLevel?: SystemEventLevel;
     maxInMemory?: number;
+    deduplication?: boolean;
+    deduplicateWindowMs?: number;
   }): SystemLoggerConfig {
     if (typeof partial.enabled === 'boolean') {
       this.enabled = partial.enabled;
@@ -133,6 +159,12 @@ class SystemLoggerService {
     }
     if (partial.minLevel && LEVEL_WEIGHTS[partial.minLevel]) {
       this.minLevel = partial.minLevel;
+    }
+    if (typeof partial.deduplication === 'boolean') {
+      this.deduplication = partial.deduplication;
+    }
+    if (typeof partial.deduplicateWindowMs === 'number' && partial.deduplicateWindowMs >= 1000) {
+      this.deduplicateWindowMs = partial.deduplicateWindowMs;
     }
     if (typeof partial.maxInMemory === 'number' && partial.maxInMemory >= 100) {
       this.maxInMemoryEvents = partial.maxInMemory;
@@ -162,6 +194,8 @@ class SystemLoggerService {
       totalEvents: this.inMemoryEvents.length,
       fileSizeBytes,
       filePath: this.logFilePath,
+      deduplication: this.deduplication,
+      deduplicateWindowMs: this.deduplicateWindowMs,
       counts,
     };
   }
@@ -289,12 +323,51 @@ class SystemLoggerService {
     const cleanStack = stack ? sanitizeLogString(stack) : undefined;
     const cleanPath = pathStr ? sanitizeLogString(pathStr) : undefined;
 
+    // Intelligent Deduplication / Rate-Limiting:
+    // Suppress consecutive or rapid identical messages within deduplicateWindowMs (default 60s)
+    let finalMessage = cleanMessage;
+    if (this.deduplication) {
+      const now = Date.now();
+      const dedupKey = `${level}:${category}:${cleanMessage}`;
+      const existing = this.recentMessageSignatures.get(dedupKey);
+
+      if (existing && now - existing.lastLoggedAt < this.deduplicateWindowMs) {
+        existing.count++;
+        // Suppress writing redundant duplicate to file or in-memory list
+        return {
+          id: `suppressed_${now}_${Math.random().toString(36).substring(2, 7)}`,
+          timestamp: new Date().toISOString(),
+          level,
+          category,
+          message: cleanMessage,
+          details: cleanDetails,
+          source: source || 'system',
+        };
+      }
+
+      const prevSuppressed = existing ? existing.count : 0;
+      this.recentMessageSignatures.set(dedupKey, { lastLoggedAt: now, count: 0 });
+
+      // Clean stale signatures if cache grows
+      if (this.recentMessageSignatures.size > 1000) {
+        for (const [key, val] of this.recentMessageSignatures.entries()) {
+          if (now - val.lastLoggedAt > this.deduplicateWindowMs * 2) {
+            this.recentMessageSignatures.delete(key);
+          }
+        }
+      }
+
+      if (prevSuppressed > 0) {
+        finalMessage += ` (Önceki ${prevSuppressed} adet benzer kayıt birleştirildi)`;
+      }
+    }
+
     const event: SystemEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
       level,
       category,
-      message: cleanMessage,
+      message: finalMessage,
       details: cleanDetails,
       source: source || 'system',
       stack: cleanStack,
@@ -491,6 +564,82 @@ class SystemLoggerService {
       console.warn('[SystemLogger] Log temizlenirken hata oluştu:', err);
     }
     this.logDirect('info', 'server', 'Sistem olay günlükleri yönetici tarafından temizlendi.', undefined, 'admin_action');
+  }
+
+  /**
+   * Cleans up redundant, spammy, and fluttering entries from stored logs.
+   * Keeps critical milestones, real error messages, warnings, and unique notifications intact.
+   */
+  public simplifyExistingLogs(): { removedCount: number; remainingCount: number } {
+    const beforeCount = this.inMemoryEvents.length;
+    const simplified: SystemEvent[] = [];
+    let lastEventKey: string | null = null;
+    let lastDbState: string | null = null;
+
+    // Process from oldest to newest to preserve natural chronology during dedup
+    const chronological = [...this.inMemoryEvents].reverse();
+
+    for (const evt of chronological) {
+      const msg = evt.message || '';
+
+      // 1. Remove flapping database state machine noise (e.g. alternating DB_CONNECTING <-> DB_UNAVAILABLE)
+      if (msg.includes('[Database State Machine] Durum değişti:')) {
+        const isUnavailableConnectingFlap =
+          msg.includes('DB_CONNECTING -> DB_UNAVAILABLE') ||
+          msg.includes('DB_UNAVAILABLE -> DB_CONNECTING');
+
+        if (isUnavailableConnectingFlap) {
+          if (lastDbState === 'DB_UNAVAILABLE' || lastDbState === 'DB_CONNECTING') {
+            // Already logged an initial unavailable state, discard flapping repetition
+            continue;
+          }
+          lastDbState = msg.includes('DB_UNAVAILABLE') ? 'DB_UNAVAILABLE' : 'DB_CONNECTING';
+        } else {
+          lastDbState = null;
+        }
+      }
+
+      // 2. Remove routine HTTP 200 GET / or static page pings
+      if (
+        evt.category === 'http' &&
+        evt.level === 'info' &&
+        (msg.includes('GET / ') || msg.includes('GET / (') || msg.includes('GET /index.html'))
+      ) {
+        continue;
+      }
+
+      // 3. Deduplicate identical messages in rapid succession
+      const baseMsg = msg.split(' (Önceki')[0].trim();
+      const eventKey = `${evt.level}:${evt.category}:${baseMsg}`;
+      if (eventKey === lastEventKey) {
+        continue;
+      }
+      lastEventKey = eventKey;
+
+      simplified.push(evt);
+    }
+
+    // inMemoryEvents stores newest first
+    this.inMemoryEvents = [...simplified].reverse();
+    const removedCount = beforeCount - this.inMemoryEvents.length;
+
+    // Write back simplified logs to file and json backup
+    try {
+      if (fs.existsSync(this.logFilePath)) {
+        const fileContent = simplified.map((e) => JSON.stringify(e)).join('\n') + (simplified.length > 0 ? '\n' : '');
+        fs.writeFileSync(this.logFilePath, fileContent, 'utf-8');
+      }
+      if (fs.existsSync(this.jsonBackupPath)) {
+        fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] Log dosyaları sadeleştirilirken hata oluştu:', err);
+    }
+
+    return {
+      removedCount,
+      remainingCount: this.inMemoryEvents.length,
+    };
   }
 
   public exportLogs(format: 'json' | 'log' = 'json'): { content: string; filename: string; mimeType: string } {

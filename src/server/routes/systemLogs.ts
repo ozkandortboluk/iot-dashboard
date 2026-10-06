@@ -56,19 +56,34 @@ systemLogsRouter.get('/settings', authenticateUser, requireAdmin, (req, res) => 
  * Toggle logging on/off and update retention / minimum level settings.
  */
 systemLogsRouter.post('/settings', authenticateUser, requireAdmin, (req, res) => {
-  const { enabled, minLevel, logToFile, maxInMemory } = req.body || {};
+  const { enabled, minLevel, logToFile, maxInMemory, deduplication, deduplicateWindowMs } = req.body || {};
 
   const updatedConfig = systemLogger.updateConfig({
     enabled: typeof enabled === 'boolean' ? enabled : undefined,
     minLevel: minLevel as SystemEventLevel | undefined,
     logToFile: typeof logToFile === 'boolean' ? logToFile : undefined,
     maxInMemory: typeof maxInMemory === 'number' ? maxInMemory : undefined,
+    deduplication: typeof deduplication === 'boolean' ? deduplication : undefined,
+    deduplicateWindowMs: typeof deduplicateWindowMs === 'number' ? deduplicateWindowMs : undefined,
   });
 
   res.json({
     success: true,
     message: `Loglama sistemi ayarları güncellendi. Durum: ${updatedConfig.enabled ? 'Aktif' : 'Devre Dışı'}`,
     config: updatedConfig,
+  });
+});
+
+/**
+ * POST /api/system-logs/simplify
+ * Cleans out redundant, repetitive and fluttering log events, keeping necessary errors and notifications.
+ */
+systemLogsRouter.post('/simplify', authenticateUser, requireAdmin, (req, res) => {
+  const result = systemLogger.simplifyExistingLogs();
+  res.json({
+    success: true,
+    message: `${result.removedCount} adet gereksiz/yinelenen log kaydı temizlendi ve sadeleştirildi. Kalan aktif kayıt: ${result.remainingCount}.`,
+    ...result,
   });
 });
 

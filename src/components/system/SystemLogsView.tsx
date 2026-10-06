@@ -32,6 +32,7 @@ import {
   Activity,
   Layers,
   ArrowUpDown,
+  Sparkles,
 } from 'lucide-react';
 
 export const SystemLogsView: React.FC = () => {
@@ -218,6 +219,28 @@ export const SystemLogsView: React.FC = () => {
     window.location.href = `/api/system-logs/export?format=${format}`;
   };
 
+  // Simplify & Deduplicate Logs
+  const [isSimplifying, setIsSimplifying] = useState<boolean>(false);
+  const handleSimplifyLogs = async () => {
+    setIsSimplifying(true);
+    try {
+      const res = await fetch('/api/system-logs/simplify', {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showNotification(data.message || 'Gereksiz ve yinelenen loglar sadeleştirildi.');
+        fetchLogs();
+      } else {
+        showNotification('Sadeleştirme işlemi gerçekleştirilemedi', true);
+      }
+    } catch {
+      showNotification('Sadeleştirme sırasında bağlantı hatası oluştu', true);
+    } finally {
+      setIsSimplifying(false);
+    }
+  };
+
   // Copy helper
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -318,6 +341,17 @@ export const SystemLogsView: React.FC = () => {
               <span>{config.enabled ? 'Loglamayı Durdur' : 'Loglamayı Başlat'}</span>
             </button>
           )}
+
+          {/* Simplify & Deduplicate Logs */}
+          <button
+            onClick={handleSimplifyLogs}
+            disabled={isSimplifying}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
+            title="Gereksiz, yinelenen ve çırpınan logları sadeleştirip temizler; kritik bildirim ve gerçek hataları korur"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${isSimplifying ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Logları Sadeleştir</span>
+          </button>
 
           {/* Test Error Generation */}
           <button

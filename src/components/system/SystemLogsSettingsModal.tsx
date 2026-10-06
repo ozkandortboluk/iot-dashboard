@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   RotateCcw,
   Save,
+  Sparkles,
 } from 'lucide-react';
 
 interface SystemLogsSettingsModalProps {
@@ -29,6 +30,7 @@ export const SystemLogsSettingsModal: React.FC<SystemLogsSettingsModalProps> = (
   const [logToFile, setLogToFile] = useState<boolean>(config?.logToFile ?? true);
   const [minLevel, setMinLevel] = useState<SystemEventLevel>(config?.minLevel ?? 'info');
   const [maxInMemory, setMaxInMemory] = useState<number>(config?.maxInMemory ?? 1000);
+  const [deduplication, setDeduplication] = useState<boolean>(config?.deduplication ?? true);
   const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen || !config) return null;
@@ -41,6 +43,7 @@ export const SystemLogsSettingsModal: React.FC<SystemLogsSettingsModalProps> = (
         logToFile,
         minLevel,
         maxInMemory,
+        deduplication,
       });
       onClose();
     } finally {
@@ -125,6 +128,32 @@ export const SystemLogsSettingsModal: React.FC<SystemLogsSettingsModalProps> = (
               <span
                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                   logToFile ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Deduplication & Simplification Toggle */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <Sparkles className={`w-4 h-4 ${deduplication ? 'text-indigo-500' : 'text-slate-400'}`} />
+                <span>Akıllı Log Sadeleştirme & Yinelenenleri Filtreleme</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Arka arkaya tekrarlayan aynı hata ve bildirimleri (örn: veritabanı bağlantı çırpınması) otomatik birleştirir; log kirliliğini engeller.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeduplication(!deduplication)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                deduplication ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  deduplication ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

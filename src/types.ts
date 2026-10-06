@@ -1017,6 +1017,8 @@ export interface SystemLoggerConfig {
   totalEvents: number;
   fileSizeBytes: number;
   filePath: string;
+  deduplication?: boolean;
+  deduplicateWindowMs?: number;
   counts: {
     critical: number;
     error: number;

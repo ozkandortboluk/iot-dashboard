@@ -105,6 +105,7 @@ export class DatabaseAutoHealer {
   private lastRepairedAt: string | null = null;
   private healingHistory: string[] = [];
   private lastAutoHealerWarning: string | null = null;
+  private lastAutoHealerWarningTime: number = 0;
 
   constructor(dbInstance: any) {
     this.dbInstance = dbInstance;
@@ -467,7 +468,6 @@ export class DatabaseAutoHealer {
           healingEvents: this.healingHistory.slice(-10),
         };
       }
-      this.lastAutoHealerWarning = null;
 
       // 1. Check pool saturation
       if (poolStats.waitingCount > 15) {
@@ -529,6 +529,8 @@ export class DatabaseAutoHealer {
           schemaStatus = 'PASS';
           missingTables = [];
           remainingDiscrepancies = [];
+          this.lastAutoHealerWarning = null;
+          this.lastAutoHealerWarningTime = 0;
         }
       } finally {
         client.release();
@@ -571,15 +573,20 @@ export class DatabaseAutoHealer {
       const errMsg = err?.message || String(err);
       const sshRequired = isSshTunnelRequired();
 
+      const nowMs = Date.now();
       if (sshRequired) {
         this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-        if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL') {
+        const isTimeThrottled = nowMs - this.lastAutoHealerWarningTime < 15 * 60 * 1000;
+        if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL' || !isTimeThrottled) {
           this.lastAutoHealerWarning = 'WAITING_SSH_TUNNEL';
+          this.lastAutoHealerWarningTime = nowMs;
           systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
         }
       } else {
-        if (this.lastAutoHealerWarning !== errMsg) {
+        const isTimeThrottled = nowMs - this.lastAutoHealerWarningTime < 15 * 60 * 1000;
+        if (this.lastAutoHealerWarning !== errMsg || !isTimeThrottled) {
           this.lastAutoHealerWarning = errMsg;
+          this.lastAutoHealerWarningTime = nowMs;
           systemLogger.warn('database', `Veritabanı sağlık kontrolü başarısız: ${errMsg}. Yerel bellek veritabanı aktif tutuluyor.`);
         }
       }

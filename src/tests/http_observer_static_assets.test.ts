@@ -23,6 +23,8 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
         const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
         const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
         const isStaticAsset =
+          req.path === '/' ||
+          req.path === '/index.html' ||
           req.path === '/favicon.svg' ||
           req.path === '/favicon.ico' ||
           req.path === '/site.webmanifest' ||
@@ -99,6 +101,7 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
       return res.status(200).send('console.log(1)');
     });
 
+    app.get('/', (_req, res) => res.status(200).send('<html></html>'));
     app.get('/api/devices', (_req, res) => res.status(200).json([{ id: 1 }]));
   });
 
@@ -155,5 +158,12 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
       expect.objectContaining({ statusCode: 200 }),
       'express_http_observer'
     );
+  });
+
+  it('7. root / 200 response: systemLogger is NOT called to keep logs clean and free of ping spam', async () => {
+    await request(app).get('/');
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

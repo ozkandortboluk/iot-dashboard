@@ -176,7 +176,7 @@ export class PostgresRepository {
     this.isConnected = connected;
     if (schemaEnsured !== undefined) {
       this.isSchemaEnsured = schemaEnsured;
-    } else if (process.env.VITEST || process.env.NODE_ENV === 'test') {
+    } else if ((process.env.VITEST || process.env.NODE_ENV === 'test') && process.env.DISABLE_AUTO_MIGRATION !== 'true') {
       this.isSchemaEnsured = connected;
     }
     if (connected) {
@@ -220,11 +220,13 @@ export class PostgresRepository {
     if (!this.pool || (this.pool as any).ending || (this.pool as any).ended || !this.isConnected) {
       return false;
     }
-    if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
-      return true;
+    // Block readiness if latest migration run failed
+    const latestMig = this.getLatestMigrationRunStatus();
+    if (latestMig && !latestMig.success) {
+      return false;
     }
-    // Block readiness until runtime schema migrations have successfully completed
-    // Incoming telemetry will naturally fall back to resilient WAL during this period.
+    // Block readiness until runtime schema migrations or schema contract verification have successfully completed.
+    // DISABLE_AUTO_MIGRATION=true only stops auto-running migrations; it must NEVER bypass schema readiness!
     return this.isSchemaEnsured;
   }
 
@@ -464,7 +466,7 @@ export class PostgresRepository {
     if (!client) {
       try {
         client = await pool!.connect();
-        if (client) client.on('error', onVerifyClientErr);
+        if (client && typeof client.on === 'function') client.on('error', onVerifyClientErr);
         shouldRelease = true;
       } catch (connErr) {
         console.error('[Schema Contract Check] DB connection failed:', connErr);
@@ -506,23 +508,29 @@ export class PostgresRepository {
   private lastSchemaEnsureTime = 0;
 
   public async ensureTelemetrySchema(force = false): Promise<void> {
+    const activePool = this.getPool();
+    if (!activePool) return;
+
     if (process.env.DISABLE_AUTO_MIGRATION === 'true') {
-      if (process.env.NODE_ENV === 'production') {
-        console.warn('[PostgreSQL] DISABLE_AUTO_MIGRATION set in production. Verifying schema contract strictly...');
-        const isContractValid = await this.verifySchemaContract();
-        this.isSchemaEnsured = isContractValid;
-        if (!isContractValid) {
-          console.error('[PostgreSQL] Production schema contract failed! Readiness will remain 503.');
-        }
+      const now = Date.now();
+      if (this.isSchemaEnsured && !force && now - this.lastSchemaEnsureTime < 60000) {
         return;
       }
-      this.isSchemaEnsured = true;
+      this.lastSchemaEnsureTime = now;
+      console.warn('[PostgreSQL] DISABLE_AUTO_MIGRATION aktif. Otomatik migration çalıştırılması durduruldu. Şema sözleşmesi sıkı olarak doğrulanıyor...');
+      const isContractValid = await this.verifySchemaContract();
+      const latestMig = this.getLatestMigrationRunStatus();
+      const hasMigrationError = Boolean(latestMig && !latestMig.success);
+      this.isSchemaEnsured = isContractValid && !hasMigrationError;
+      if (!this.isSchemaEnsured) {
+        console.error('[PostgreSQL] DISABLE_AUTO_MIGRATION=true iken şema doğrulaması başarısız veya eksik! Readiness 503 kalacak.');
+      } else {
+        console.log('[PostgreSQL] DISABLE_AUTO_MIGRATION=true iken şema sözleşmesi başarıyla doğrulandı. Readiness OK (200).');
+      }
       return;
     }
     
     const now = Date.now();
-    const activePool = this.getPool();
-    if (!activePool) return;
     if (this.isSchemaEnsured && !force) return;
     if (!force && now - this.lastSchemaEnsureTime < 60000) return; // Debounce to prevent cascading checks
 

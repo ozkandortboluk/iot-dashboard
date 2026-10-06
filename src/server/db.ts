@@ -296,9 +296,18 @@ class LocalDatabase {
     }
     if (this.dbState !== newState) {
       const oldState = this.dbState;
-      console.log(`[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
-      systemLogger.info('database', `[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
       this.dbState = newState;
+      console.log(`[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
+
+      // Suppress spamming systemLogger for flapping transitions between DB_CONNECTING and DB_UNAVAILABLE
+      const isFlapping =
+        (oldState === DatabaseState.DB_CONNECTING && newState === DatabaseState.DB_UNAVAILABLE) ||
+        (oldState === DatabaseState.DB_UNAVAILABLE && newState === DatabaseState.DB_CONNECTING);
+
+      if (!isFlapping) {
+        systemLogger.info('database', `[Database State Machine] Durum değişti: ${oldState} -> ${newState}`);
+      }
+
       for (const listener of this.stateChangeListeners) {
         try {
           listener(newState, oldState);
@@ -509,7 +518,8 @@ class LocalDatabase {
 
       const wasAlreadyReady = this.dbState === DatabaseState.READY;
       this.postgresRepo.setPool(pool);
-      if (!wasAlreadyReady) {
+      // Only transition to DB_CONNECTING during initial bootstrap or if not already marked unavailable.
+      if (!wasAlreadyReady && this.dbState === DatabaseState.BOOTSTRAP) {
         this.setDatabaseState(DatabaseState.DB_CONNECTING);
       }
 

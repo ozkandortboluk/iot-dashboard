@@ -706,10 +706,16 @@ export class SetupService {
           c.on('error', onStatusClientErr);
           return c;
         });
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('PostgreSQL bağlantısı zaman aşımına uğradı (7000ms).')), 7000)
-        );
-        client = await Promise.race([connectPromise, timeoutPromise]);
+        let timeoutId: any;
+        const connectTimeoutMs = isTestEnv ? 1500 : 7000;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(`PostgreSQL bağlantısı zaman aşımına uğradı (${connectTimeoutMs}ms).`)), connectTimeoutMs);
+        });
+        try {
+          client = await Promise.race([connectPromise, timeoutPromise]);
+        } finally {
+          clearTimeout(timeoutId);
+        }
         // Connection test
         await client.query('SELECT 1;');
         isDbConnected = true;
