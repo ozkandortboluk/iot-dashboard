@@ -59,7 +59,6 @@ export function getEd25519KeyPair(): KeyPair {
   if (cachedKeyPair) return cachedKeyPair;
 
   const activeKeyId = process.env.OTA_SIGNING_KEY_ID || 'root_ed25519_v1';
-  const isProd = isProductionVpsEnvironment();
 
   // 1. Check direct PEM string from AES-256-GCM Vault (CANONICAL RUNTIME SOURCE)
   const rawVaultKey = systemSecretsService.getOtaSigningKey() ||
@@ -80,115 +79,52 @@ export function getEd25519KeyPair(): KeyPair {
     }
   }
 
-  // In production runtime, Security Vault is strictly the ONLY canonical source!
-  // In Single-Key architecture, auto-provision an Ed25519 keypair directly inside the Vault if missing.
-  if (isProd) {
-    try {
-      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-      });
-      systemSecretsService.setSecret('ota.signing_key', privateKey, {
-        category: 'ota',
-        label: 'OTA Imzalama Özel Anahtarı',
-        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Vault Auto-Provisioned)',
-        isSensitive: true,
-      }).catch(() => {});
-      const privKeyObj = crypto.createPrivateKey(privateKey);
-      const pubKeyObj = crypto.createPublicKey(privKeyObj);
-      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
-      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
-      cachedKeyPair = { keyId: activeKeyId, privateKeyPem: privateKey, publicKeyPem, publicKeyHex };
-      return cachedKeyPair;
-    } catch {}
+  // 2. In non-production or test environment, read candidate files or env if present
+  const isProd = isProductionVpsEnvironment();
+  if (!isProd) {
+    const candidateSecretPaths = [
+      '/run/secrets/ota_signing_key',
+      '/run/secrets/ota_private_key',
+      process.env.OTA_SIGNING_PRIVATE_KEY_PATH,
+      path.join(SECRETS_DIR, 'ota_signing_key'),
+      path.join(SECRETS_DIR, 'ota_signing_key.pem'),
+      path.join(KEYS_DIR, 'ed25519_private.pem'),
+    ].filter((p): p is string => Boolean(p));
 
-    throw new Error('[OTA Crypto] Üretim ortamında OTA imzalama özel anahtarı tanımlanmamış veya Vault kasasında bulunamadı.');
-  }
-
-  // 2. Non-production development & test fallback: check candidate files or env
-  const candidateSecretPaths = [
-    '/run/secrets/ota_signing_key',
-    '/run/secrets/ota_private_key',
-    process.env.OTA_SIGNING_PRIVATE_KEY_PATH,
-    path.join(SECRETS_DIR, 'ota_signing_key'),
-    path.join(SECRETS_DIR, 'ota_signing_key.pem'),
-    path.join(KEYS_DIR, 'ed25519_private.pem'),
-  ].filter((p): p is string => Boolean(p));
-
-  const rawEnvKey = process.env.OTA_SIGNING_PRIVATE_KEY;
-  if (rawEnvKey) {
-    try {
-      const privateKeyPem = rawEnvKey.replace(/\\n/g, '\n');
-      const privKeyObj = crypto.createPrivateKey(privateKeyPem);
-      const pubKeyObj = crypto.createPublicKey(privKeyObj);
-      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
-      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
-      cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
-      return cachedKeyPair;
-    } catch {}
-  }
-
-  for (const secretPath of candidateSecretPaths) {
-    if (fs.existsSync(secretPath)) {
+    const rawEnvKey = process.env.OTA_SIGNING_PRIVATE_KEY;
+    if (rawEnvKey) {
       try {
-        const privateKeyPem = fs.readFileSync(secretPath, 'utf8');
+        const privateKeyPem = rawEnvKey.replace(/\\n/g, '\n');
         const privKeyObj = crypto.createPrivateKey(privateKeyPem);
         const pubKeyObj = crypto.createPublicKey(privKeyObj);
         const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
         const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
-
-        // One-way migration into Central Security Vault
-        systemSecretsService.setSecret('ota.signing_key', privateKeyPem, {
-          category: 'ota',
-          label: 'OTA Imzalama Özel Anahtarı',
-          description: 'Ed25519 firmware paketi imzalama özel anahtarı (Migrated)',
-          isSensitive: true,
-          updatedBy: 'legacy_file_migration',
-        }).then(() => {
-          if (!secretPath.startsWith('/run/secrets/')) {
-            try { fs.unlinkSync(secretPath); } catch {}
-          }
-        }).catch(() => {});
-
-        cachedKeyPair = {
-          keyId: activeKeyId,
-          privateKeyPem,
-          publicKeyPem,
-          publicKeyHex,
-        };
+        cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
         return cachedKeyPair;
-      } catch (err: any) {
-        console.error(`[OTA Crypto] ${secretPath} konumundaki özel anahtar okunamadı:`, err.message);
+      } catch {}
+    }
+
+    for (const secretPath of candidateSecretPaths) {
+      if (fs.existsSync(secretPath)) {
+        try {
+          const privateKeyPem = fs.readFileSync(secretPath, 'utf8');
+          const privKeyObj = crypto.createPrivateKey(privateKeyPem);
+          const pubKeyObj = crypto.createPublicKey(privKeyObj);
+          const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
+          const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
+          cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
+          return cachedKeyPair;
+        } catch {}
       }
     }
   }
 
-  // Auto-bootstrap key pair in test/non-production environments if no explicit key is present
-  if (process.env.NODE_ENV !== 'production' || process.env.VITEST) {
-    try {
-      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
-      const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-      const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-      const publicKeyHex = publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
-
-      systemSecretsService.setSecret('ota.signing_key', privateKeyPem, {
-        category: 'ota',
-        label: 'OTA Imzalama Özel Anahtarı',
-        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Bootstrap)',
-        isSensitive: true,
-      }).catch(() => {});
-
-      cachedKeyPair = { keyId: activeKeyId, privateKeyPem, publicKeyPem, publicKeyHex };
-      return cachedKeyPair;
-    } catch {}
-  }
-
   // STRICT ROOT-OF-TRUST DIRECTIVE:
-  // If the private key is missing or corrupted in production, fail fast and NEVER auto-generate a new key!
+  // OTA key must NOT be silently generated or used without verified persistence in Vault.
   const errMsg =
-    '[OTA Root of Trust Hatası] Kalıcı Ed25519 imzalama özel anahtarı (private key) bulunamadı! ' +
-    'Cihaz donanımlarına derleme anında sabitlenen (pinning) Root of Trust anahtar güvenliğini korumak için sistem otomatik olarak yeni anahtar üretmez. ' +
-    'Lütfen Docker secret (/run/secrets/ota_signing_key) veya OTA_SIGNING_PRIVATE_KEY / OTA_SIGNING_PRIVATE_KEY_PATH değerini yapılandırın.';
+    '[OTA Root of Trust Hatası] Kalıcı Ed25519 imzalama özel anahtarı (private key) Vault kasasında bulunamadı! ' +
+    'Cihaz donanımlarına derleme anında sabitlenen Root of Trust güvenliğini korumak için sistem doğrulanmamış geçici anahtar kullanmaz. ' +
+    'Lütfen systemSecretsService.ensureOtaSigningKey() çağrısının tamamlandığından emin olun.';
 
   console.error(errMsg);
   throw new Error(errMsg);

@@ -76,7 +76,13 @@ export class MasterKeyProvider {
       try {
         if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
           const raw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
-          if (raw && raw.length >= 16) {
+          // Production policy: require strict 256-bit cryptographic root key (64 hex characters or 32-byte binary)
+          if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+            this.cachedKeyBuffer = Buffer.from(raw, 'hex');
+            this.cachedSource = 'docker_secret';
+            this.cachedSourcePath = DOCKER_SECRET_KEY_PATH;
+            return this.cachedKeyBuffer;
+          } else if (raw.length >= 32) {
             this.cachedKeyBuffer = this.derive32ByteKey(raw);
             this.cachedSource = 'docker_secret';
             this.cachedSourcePath = DOCKER_SECRET_KEY_PATH;

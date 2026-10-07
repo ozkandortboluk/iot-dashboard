@@ -1038,12 +1038,12 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Shield className="w-4 h-4 text-indigo-400" />
-                        <span className="font-bold text-xs text-white">Merkezi Sistem Kök Anahtarı (Single Master Key)</span>
+                        <span className="font-bold text-xs text-white">Güvenlik Kasası (Security Vault)</span>
                       </div>
                       {keysStatus?.keys?.encryptionKey?.isConfigured ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 border border-emerald-800 text-emerald-300">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          Kasa Kök Anahtarı Hazır
+                          Security Vault Hazır
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 border border-amber-800 text-amber-300">
@@ -1054,16 +1054,20 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </div>
 
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Platformumuz <strong>Tek Kök Anahtar (Single Root-of-Trust)</strong> mimarisiyle çalışır. Kasa şifrelemesi (<code className="text-indigo-300">ENCRYPTION_KEY</code>) sağlandığında; donanım OTA firmware imzalama anahtarları (Ed25519), veritabanı şifreleri ve oturum güvenliği doğrudan Kasa (Vault) içinde otomatik yönetilir. Harici ek anahtar yapılandırması gerektirmez.
+                      Platformumuz <strong>Tek Kök Anahtar (Single Root-of-Trust: ENCRYPTION_KEY)</strong> mimarisiyle çalışır. Kasa şifrelemesi sağlandığında tüm alt sistem sırları (OTA firmware Ed25519 imzalama anahtarı, veritabanı parolaları, oturum güvenliği) doğrudan şifreli Vault içinde güvenle yönetilir.
                     </p>
 
                     <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between text-[11px]">
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Merkezi Kasa Kök Anahtarı (AES-256-GCM)</span>
+                        <span className="text-slate-400 block text-[10px]">Kasa Kök Anahtarı (AES-256-GCM)</span>
                         <span className="font-mono font-bold text-white text-xs">ENCRYPTION_KEY</span>
                         <span className="text-[10px] text-slate-500 block mt-0.5">
-                          {keysStatus?.keys?.encryptionKey?.source
-                            ? `Kaynak: ${keysStatus.keys.encryptionKey.source === 'docker_secret' ? 'Docker Secret (/run/secrets/encryption_key)' : keysStatus.keys.encryptionKey.source === 'data_file' ? 'Yerel Kasa (data/.vault_key)' : keysStatus.keys.encryptionKey.source}`
+                          {keysStatus?.keys?.encryptionKey?.source === 'docker_secret'
+                            ? 'Kaynak: Docker Secret (/run/secrets/encryption_key)'
+                            : keysStatus?.keys?.encryptionKey?.source === 'data_file'
+                            ? 'Kaynak: Yerel Kasa (data/.vault_key)'
+                            : keysStatus?.keys?.encryptionKey?.source
+                            ? `Kaynak: ${keysStatus.keys.encryptionKey.source}`
                             : 'Geliştirmede otomatik üretilir; üretimde Docker Secret ile sağlanır.'}
                         </span>
                       </div>
@@ -1077,39 +1081,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                         </span>
                       )}
                     </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                      <button
-                        type="button"
-                        disabled={keysLoading}
-                        onClick={handleGenerateKeys}
-                        className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50 cursor-pointer"
-                      >
-                        {keysLoading ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Anahtar Doğrulanıyor...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Key className="w-3.5 h-3.5" />
-                            <span>✨ Kök Anahtarı Doğrula & Kasayı Başlat</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {generatedKeysResult && (
-                      <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl text-xs space-y-2">
-                        <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-[11px]">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>Kasa Kök Anahtarı doğrulandı ve Security Vault başarıyla başlatıldı!</span>
-                        </div>
-                        <p className="text-[10px] text-slate-300">
-                          Tüm alt sistem sırları (OTA firmware Ed25519 anahtarı, veritabanı parolaları, oturum belirteçleri) tek kök anahtar korumasıyla doğrudan Vault kasasında güvenle işlenir.
-                        </p>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -1286,7 +1257,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <span className="text-[10px] text-slate-500">Güvenlik: Şifre sunucuda 0600 izinli protected secret dosyasında saklanır.</span>
+                    <span className="text-[10px] text-slate-500">Güvenlik: Veritabanı parolası Security Vault içinde AES-256-GCM ile şifreli saklanır. Diskteki runtime config dosyası yalnız bağlantı metadata'sı ve Vault referansı içerir.</span>
                   </div>
 
                   <div className="space-y-1.5 sm:col-span-2">
@@ -1386,20 +1357,20 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                         </p>
                       )}
 
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="text-slate-400">TimescaleDB Eklentisi:</span>
-                        {testResult.timescaleAvailable ? (
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Mevcut {testResult.timescaleVersion ? `(v${testResult.timescaleVersion})` : ''}</span>
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 font-semibold flex items-center gap-1">
-                            <HelpCircle className="w-3.5 h-3.5" />
-                            <span>Henüz aktif değil (İlklendirmede otomatik yüklenecek)</span>
-                          </span>
-                        )}
-                      </div>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="text-slate-400">TimescaleDB Eklentisi:</span>
+                          {testResult.timescaleAvailable ? (
+                            <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Mevcut {testResult.timescaleVersion ? `(v${testResult.timescaleVersion})` : ''}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal flex items-center gap-1">
+                              <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+                              <span>TimescaleDB sunucuda mevcutsa etkinleştirilir; mevcut değilse standart PostgreSQL modunda devam edilir.</span>
+                            </span>
+                          )}
+                        </div>
                     </div>
 
                     {!testResult.success && (
@@ -1420,7 +1391,8 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                                 setDbConfig(updated);
                                 fetch('/api/setup/test-database', {
                                   method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
+                                  headers: getAuthHeaders(),
+                                  credentials: 'include',
                                   body: JSON.stringify(updated),
                                 })
                                   .then((r) => r.json())
@@ -1444,7 +1416,8 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                                 setDbConfig(updated);
                                 fetch('/api/setup/test-database', {
                                   method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
+                                  headers: getAuthHeaders(),
+                                  credentials: 'include',
                                   body: JSON.stringify(updated),
                                 })
                                   .then((r) => r.json())
@@ -1459,15 +1432,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                               🐳 Host Olarak 'timescaledb' Dene
                             </button>
                           )}
-
-                          <button
-                            type="button"
-                            onClick={onComplete}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-medium cursor-pointer transition flex items-center gap-1.5"
-                          >
-                            <LogIn className="w-3.5 h-3.5 text-indigo-400" />
-                            <span>⚡ Doğrudan Giriş Yap (Test Hesabı)</span>
-                          </button>
                         </div>
 
                         <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800 space-y-2 text-[11px] text-slate-300 font-sans">
@@ -1804,10 +1768,17 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </div>
                   )}
                   <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
-                    <span className="text-slate-400">Güvenlik Anahtarları:</span>
+                    <span className="text-slate-400">Security Vault:</span>
                     <span className="text-emerald-400 font-semibold flex items-center gap-1">
                       <Shield className="w-3.5 h-3.5" />
-                      <span>secrets/ & .env'de Hazır</span>
+                      <span>Hazır (Root Key: Docker Secret)</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
+                    <span className="text-slate-400">Application Secrets:</span>
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Encrypted Vault (AES-256-GCM)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-slate-300 pt-1 border-t border-slate-800/80">
@@ -1822,16 +1793,16 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 <div className="max-w-md mx-auto p-3 bg-slate-950/40 rounded-xl border border-slate-800 text-left text-xs space-y-1.5">
                   <div className="flex items-center gap-1.5 text-indigo-300 font-semibold text-[11px]">
                     <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>VPS Anahtar Yönetim Komutu:</span>
+                    <span>VPS Güvenlik Durumu Komutu:</span>
                   </div>
                   <div className="p-2 bg-black/60 rounded-lg font-mono text-[11px] text-slate-300 flex items-center justify-between">
-                    <code>npm run show-keys</code>
+                    <code>npm run security-status</code>
                     <button
                       type="button"
-                      onClick={() => copyKeyToClipboard('npm run show-keys', 'cmd_show_keys')}
+                      onClick={() => copyKeyToClipboard('npm run security-status', 'cmd_security_status')}
                       className="text-xs text-indigo-400 hover:text-indigo-300 ml-2"
                     >
-                      {copiedKey === 'cmd_show_keys' ? 'Kopyalandı!' : 'Kopyala'}
+                      {copiedKey === 'cmd_security_status' ? 'Kopyalandı!' : 'Kopyala'}
                     </button>
                   </div>
                 </div>

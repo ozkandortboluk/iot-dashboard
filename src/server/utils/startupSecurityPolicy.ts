@@ -246,9 +246,9 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında Vault root encryption key (/run/secrets/encryption_key) bulunamadı (SEC-13 / OLD-115). Uygulama fail-closed olarak durduruldu.`
     );
-  } else if (isDefaultSecret(encKey) || encKey.trim().length < 16) {
+  } else if (isDefaultSecret(encKey) || (encKey.length !== 64 && encKey.length < 32)) {
     errors.push(
-      `[CRITICAL POLICY] Üretim ortamında /run/secrets/encryption_key içindeki root key yetersiz entropiye sahip veya varsayılan değer içeriyor (SEC-13 / OLD-115).`
+      `[CRITICAL POLICY] Üretim ortamında /run/secrets/encryption_key içindeki root key yetersiz entropiye sahip veya varsayılan değer içeriyor (SEC-13 / OLD-115). 256-bit (64 hex karakter) olmalıdır.`
     );
   }
 

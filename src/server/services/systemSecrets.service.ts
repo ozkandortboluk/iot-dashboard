@@ -659,6 +659,59 @@ export class SystemSecretsService {
   }
 
   /**
+   * Central, authoritative generator and accessor for Ed25519 OTA firmware signing private key.
+   * Root-of-Trust Rule: Strictly generated ONCE and persisted to encrypted Vault (ota.signing_key).
+   * Never generated across multiple disparate places.
+   * If persistence fails, the key is NEVER used (fail-closed).
+   */
+  public async ensureOtaSigningKey(): Promise<{ privateKeyPem: string; publicKeyPem: string }> {
+    const existingKey = this.getOtaSigningKey();
+    if (existingKey && (existingKey.includes('PRIVATE KEY') || existingKey.length > 30)) {
+      try {
+        const privKeyObj = crypto.createPrivateKey(existingKey.replace(/\\n/g, '\n'));
+        const pubKeyObj = crypto.createPublicKey(privKeyObj);
+        return {
+          privateKeyPem: existingKey.replace(/\\n/g, '\n'),
+          publicKeyPem: pubKeyObj.export({ type: 'spki', format: 'pem' }).toString(),
+        };
+      } catch (err: any) {
+        systemLogger.error('ota', `Vault OTA anahtarı ayrıştırılamadı: ${err?.message || err}`);
+      }
+    }
+
+    // Generate fresh Ed25519 keypair
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+
+    // Write to Vault and strictly await persistence confirmation
+    await this.setSecret('ota.signing_key', privateKey, {
+      category: 'ota',
+      label: 'OTA Imzalama Özel Anahtarı',
+      description: 'Ed25519 firmware paketi imzalama özel anahtarı (Vault-managed)',
+      isSensitive: true,
+      updatedBy: 'system_bootstrap',
+    });
+
+    const verified = this.getSecret('ota.signing_key');
+    if (!verified || verified !== privateKey) {
+      throw new Error('[OTA Security] OTA imzalama anahtarı Security Vault kasasına yazılamadı veya doğrulanamadı. İşlem durduruldu.');
+    }
+
+    // Write public key file if directory exists (public key is non-sensitive)
+    try {
+      const secretsDir = path.join(process.cwd(), 'secrets');
+      if (fs.existsSync(secretsDir)) {
+        fs.writeFileSync(path.join(secretsDir, 'ota_signing_key.pub'), publicKey, { encoding: 'utf8', mode: 0o644 });
+      }
+    } catch {}
+
+    systemLogger.info('security', '[OTA Security] Yeni Ed25519 OTA imzalama anahtarı üretildi ve Vault kasasına kalıcı olarak mühürlendi.');
+    return { privateKeyPem: privateKey, publicKeyPem: publicKey };
+  }
+
+  /**
    * Explicit one-way migration for legacy plaintext sources into Central Security Vault.
    * Reads legacy source, validates, encrypts into Vault, verifies from Vault, and scrubs legacy plaintext.
    */
