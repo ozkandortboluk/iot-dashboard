@@ -714,74 +714,122 @@ export class SystemSecretsService {
   /**
    * Explicit one-way migration for legacy plaintext sources into Central Security Vault.
    * Reads legacy source, validates, encrypts into Vault, verifies from Vault, and scrubs legacy plaintext.
+   * If legacy files cannot be deleted due to read-only mounts, explicitly logs and reports them.
    */
-  public async migrateLegacySecrets(): Promise<{ migratedCount: number; keys: string[] }> {
+  public async migrateLegacySecrets(): Promise<{
+    migratedCount: number;
+    keys: string[];
+    scrubbedFiles?: string[];
+    readOnlyFiles?: string[];
+    warning?: string;
+  }> {
     const migratedKeys: string[] = [];
+    const scrubbedFiles: string[] = [];
+    const readOnlyFiles: string[] = [];
+
+    const tryScrubLegacyFile = (filePath: string) => {
+      if (filePath && fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          scrubbedFiles.push(filePath);
+        } catch (err: any) {
+          readOnlyFiles.push(filePath);
+          systemLogger.warn('security', `[Migration] Legacy dosya (${filePath}) salt okunur (read-only) mount veya yetki nedeniyle silinemedi: ${err?.message || err}`);
+        }
+      }
+    };
 
     // 1. DB password & connection from legacy Docker secret, .db_config.json, or environment
-    if (!this.getSecret('database.password')) {
-      let candidate = '';
-      const secretPaths = [
-        '/run/secrets/postgres_password',
-        '/run/secrets/db_password',
-        path.join(process.cwd(), 'secrets', 'postgres_password'),
-        path.join(process.cwd(), 'secrets', 'db_password'),
-      ];
-      for (const p of secretPaths) {
-        try {
-          if (fs.existsSync(p)) {
-            const v = fs.readFileSync(p, 'utf8').trim();
-            if (v) {
-              candidate = v;
-              break;
-            }
+    let dbPasswordCandidate = '';
+    let dbPasswordLegacyFile = '';
+    const secretPaths = [
+      path.join(process.cwd(), 'secrets', 'postgres_password'),
+      path.join(process.cwd(), 'secrets', 'db_password'),
+      path.join(process.cwd(), 'data', '.postgres_password'),
+      path.join(process.cwd(), 'data', '.db_password'),
+      '/run/secrets/postgres_password',
+      '/run/secrets/db_password',
+    ];
+    for (const p of secretPaths) {
+      try {
+        if (fs.existsSync(p)) {
+          const v = fs.readFileSync(p, 'utf8').trim();
+          if (v) {
+            dbPasswordCandidate = v;
+            dbPasswordLegacyFile = p;
+            break;
           }
-        } catch {}
-      }
+        }
+      } catch {}
+    }
 
-      const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
-      if (!candidate && fs.existsSync(dbConfigPath)) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
-          if (raw.password && typeof raw.password === 'string' && !raw.password.includes('••••')) {
-            candidate = raw.password.trim();
-          }
-        } catch {}
-      }
+    const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
+    if (!dbPasswordCandidate && fs.existsSync(dbConfigPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
+        if (raw.password && typeof raw.password === 'string' && !raw.password.includes('••••')) {
+          dbPasswordCandidate = raw.password.trim();
+        }
+      } catch {}
+    }
 
-      if (!candidate && process.env.DATABASE_URL) {
-        try {
-          const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
-          if (parsed.password) {
-            candidate = decodeURIComponent(parsed.password).trim();
-          }
-        } catch {}
-      }
+    if (!dbPasswordCandidate && process.env.DATABASE_URL) {
+      try {
+        const parsed = new URL(process.env.DATABASE_URL.replace(/^postgres(ql)?:\/\//i, 'http://'));
+        if (parsed.password) {
+          dbPasswordCandidate = decodeURIComponent(parsed.password).trim();
+        }
+      } catch {}
+    }
 
-      if (!candidate && process.env.POSTGRES_PASSWORD) {
-        candidate = process.env.POSTGRES_PASSWORD.trim();
-      }
+    if (!dbPasswordCandidate && process.env.POSTGRES_PASSWORD) {
+      dbPasswordCandidate = process.env.POSTGRES_PASSWORD.trim();
+    }
 
-      if (!candidate && process.env.DB_PASSWORD) {
-        candidate = process.env.DB_PASSWORD.trim();
-      }
+    if (!dbPasswordCandidate && process.env.DB_PASSWORD) {
+      dbPasswordCandidate = process.env.DB_PASSWORD.trim();
+    }
 
-      if (candidate) {
-        await this.setSecret('database.password', candidate, {
+    if (dbPasswordCandidate) {
+      const existingVaultPass = this.getSecret('database.password');
+      if (!existingVaultPass || existingVaultPass !== dbPasswordCandidate) {
+        await this.setSecret('database.password', dbPasswordCandidate, {
           category: 'database',
           label: 'PostgreSQL Password',
           isSensitive: true,
           updatedBy: 'legacy_migration',
         });
-        if (this.getSecret('database.password') === candidate) {
-          migratedKeys.push('database.password');
-          systemLogger.info('security', '[Migration] PostgreSQL parolası Vault kasasına başarıyla aktarıldı ve doğrulandı.');
+      }
+      // Verify written value from Vault
+      if (this.getSecret('database.password') === dbPasswordCandidate) {
+        if (!migratedKeys.includes('database.password')) migratedKeys.push('database.password');
+        systemLogger.info('security', '[Migration] PostgreSQL parolası Vault kasasına aktarıldı ve doğrulandı.');
+
+        // Scrub legacy files once verified in Vault
+        if (dbPasswordLegacyFile && !dbPasswordLegacyFile.startsWith('/run/secrets/')) {
+          tryScrubLegacyFile(dbPasswordLegacyFile);
+        }
+        // Also scrub mirror secrets/db_password if present
+        const dbMirror = path.join(process.cwd(), 'secrets', 'db_password');
+        if (fs.existsSync(dbMirror) && dbMirror !== dbPasswordLegacyFile) {
+          tryScrubLegacyFile(dbMirror);
+        }
+        // Clean password from .db_config.json
+        if (fs.existsSync(dbConfigPath)) {
+          try {
+            const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
+            if (raw.password) {
+              const scrubbed = { ...raw };
+              delete scrubbed.password;
+              scrubbed.passwordRef = 'vault:database.password';
+              fs.writeFileSync(dbConfigPath, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
+            }
+          } catch {}
         }
       }
     }
 
     // 1.1 Migrate database coordinates if in .db_config.json or environment
-    const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
     if (fs.existsSync(dbConfigPath)) {
       try {
         const raw = JSON.parse(fs.readFileSync(dbConfigPath, 'utf8'));
@@ -867,18 +915,10 @@ export class SystemSecretsService {
         });
         if (this.getSecret('authentication.jwt_secret') === candidate) {
           migratedKeys.push('authentication.jwt_secret');
-          let scrubbed = false;
-          if (legacyFilePath && fs.existsSync(legacyFilePath)) {
-            try {
-              fs.unlinkSync(legacyFilePath);
-              scrubbed = true;
-            } catch {}
+          if (legacyFilePath) {
+            tryScrubLegacyFile(legacyFilePath);
           }
-          if (scrubbed) {
-            systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
-          } else {
-            systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı ve doğrulandı.');
-          }
+          systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı ve doğrulandı.');
         }
       }
     }
@@ -888,11 +928,11 @@ export class SystemSecretsService {
       let candidate = '';
       let legacyFilePath = '';
       const fileCandidates = [
-        '/run/secrets/ota_signing_key',
         path.join(process.cwd(), 'secrets', 'ota_signing_key'),
         path.join(process.cwd(), 'secrets', 'ota_signing_key.pem'),
         path.join(process.cwd(), 'data', '.ota_signing_key'),
         path.join(process.cwd(), 'uploads', 'keys', 'ed25519_private.pem'),
+        '/run/secrets/ota_signing_key',
       ];
       for (const p of fileCandidates) {
         if (fs.existsSync(p)) {
@@ -937,18 +977,10 @@ export class SystemSecretsService {
         });
         if (this.getSecret('ota.signing_key') === candidate) {
           migratedKeys.push('ota.signing_key');
-          let scrubbed = false;
-          if (legacyFilePath && fs.existsSync(legacyFilePath)) {
-            try {
-              fs.unlinkSync(legacyFilePath);
-              scrubbed = true;
-            } catch {}
+          if (legacyFilePath && !legacyFilePath.startsWith('/run/secrets/')) {
+            tryScrubLegacyFile(legacyFilePath);
           }
-          if (scrubbed) {
-            systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
-          } else {
-            systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı ve doğrulandı.');
-          }
+          systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı ve doğrulandı.');
         }
       }
     }
@@ -1012,7 +1044,17 @@ export class SystemSecretsService {
       migratedKeys.push('notifications.webhook.secretHeader');
     }
 
-    return { migratedCount: migratedKeys.length, keys: migratedKeys };
+    const warning = readOnlyFiles.length > 0
+      ? `${readOnlyFiles.length} adet legacy dosya salt okunur mount nedeniyle diskten silinemedi: ${readOnlyFiles.join(', ')}`
+      : undefined;
+
+    return {
+      migratedCount: migratedKeys.length,
+      keys: migratedKeys,
+      scrubbedFiles,
+      readOnlyFiles,
+      warning,
+    };
   }
 
   /**
@@ -1040,10 +1082,15 @@ export class SystemSecretsService {
           return false;
         },
       },
+      { name: 'secrets/postgres_password', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'postgres_password')) },
+      { name: 'secrets/db_password', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'db_password')) },
+      { name: 'data/.postgres_password', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.postgres_password')) },
+      { name: 'data/.db_password', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.db_password')) },
       { name: 'secrets/jwt_secret', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'jwt_secret')) },
       { name: 'data/.jwt_secret', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.jwt_secret')) },
       { name: 'secrets/session_secret', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'session_secret')) },
       { name: 'data/.session_secret', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.session_secret')) },
+      { name: 'secrets/ota_signing_key', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'ota_signing_key')) },
       { name: 'secrets/ota_signing_key.pem', check: () => fs.existsSync(path.join(process.cwd(), 'secrets', 'ota_signing_key.pem')) },
       { name: 'data/.ota_signing_key', check: () => fs.existsSync(path.join(process.cwd(), 'data', '.ota_signing_key')) },
       { name: 'uploads/keys/ed25519_private.pem', check: () => fs.existsSync(path.join(process.cwd(), 'uploads', 'keys', 'ed25519_private.pem')) },

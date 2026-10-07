@@ -21,12 +21,11 @@ perform_backup() {
     docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$DB_DUMP_FILE" 2>/dev/null || true
   fi
 
-  log_info "Şifreli Kasa (Vault), veriler ve konfigürasyon arşivleniyor..."
-  log_warn "GÜVENLİK SINIRI: Root şifreleme anahtarı (encryption_key) Vault kasası ile aynı düz metin arşive konulmaz! Kök anahtarınızı harici güvenli bir kasada ayrı saklayınız."
+  log_info "Şifreli Kasa (Vault), veriler ve veritabanı yedeği arşivleniyor..."
+  log_warn "GÜVENLİK SINIRI: Root şifreleme anahtarı (encryption_key), düz metin parolalar ve .env arşive konulmaz! Orijinal ENCRYPTION_KEY kök anahtarınızı harici güvenli bir kasada ayrı saklayınız."
   local TARGETS=()
-  [ -d "./secrets" ] && TARGETS+=("./secrets")
   [ -d "./data" ] && TARGETS+=("./data")
-  [ -f "./.env" ] && TARGETS+=("./.env")
+  [ -d "./docker/certs" ] && TARGETS+=("./docker/certs")
   [ -f "$DB_DUMP_FILE" ] && TARGETS+=("$DB_DUMP_FILE")
 
   if [ ${#TARGETS[@]} -eq 0 ]; then
@@ -34,8 +33,19 @@ perform_backup() {
     return 1
   fi
 
-  # Strictly exclude root master encryption key from the unencrypted archive
-  tar --exclude='./secrets/encryption_key' --exclude='data/.vault_key' -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
+  # Strictly exclude root master encryption key, plaintext secrets and env files from unencrypted archive
+  tar \
+    --exclude='./secrets/encryption_key' \
+    --exclude='data/.vault_key' \
+    --exclude='./secrets/postgres_password' \
+    --exclude='./secrets/db_password' \
+    --exclude='./secrets/ota_signing_key' \
+    --exclude='./secrets/ota_private_key' \
+    --exclude='./secrets/jwt_secret' \
+    --exclude='./secrets/session_secret' \
+    --exclude='./.env' \
+    --exclude='./.env.*' \
+    -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
   rm -f "$DB_DUMP_FILE"
 
   local SIZE

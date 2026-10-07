@@ -34,6 +34,21 @@ ensure_secrets_initialized() {
   # 1. Root Encryption Key (AES-256-GCM Vault Root: /run/secrets/encryption_key)
   # Tek kullanıcı tarafından yönetilen root-of-trust anahtarı.
   local ENC_KEY_FILE="${SECRETS_DIR}/encryption_key"
+  local VAULT_DATA_FILE="${DATA_DIR}/.system_secrets.json"
+
+  # SECURITY GATE: If restored encrypted Vault exists without root key, NEVER generate a new random key!
+  if [ ! -s "$ENC_KEY_FILE" ] && [ ! -s "${DATA_DIR}/.vault_key" ] && [ -s "$VAULT_DATA_FILE" ]; then
+    echo "" >&2
+    echo "==========================================================================================" >&2
+    echo "❌ [KRİTİK GÜVENLİK HATASI] Restore Edilmiş Güvenlik Kasası Mevcut Ama ENCRYPTION_KEY Yok!" >&2
+    echo "------------------------------------------------------------------------------------------" >&2
+    echo "'${VAULT_DATA_FILE}' dosyası şifreli veriler içermektedir." >&2
+    echo "Yeni bir root key üretilmesi mevcut şifreli verilerin kalıcı olarak çözülemez hale gelmesine yol açar." >&2
+    echo "Lütfen bu yedek ile kullanılan orijinal ENCRYPTION_KEY'i '${ENC_KEY_FILE}' konumuna geri yükleyin." >&2
+    echo "==========================================================================================" >&2
+    exit 1
+  fi
+
   if [ -s "$ENC_KEY_FILE" ]; then
     log_info "Vault Root Anahtarı mevcut (${ENC_KEY_FILE}) [KORUNDU]."
   else
@@ -44,7 +59,8 @@ ensure_secrets_initialized() {
     log_success "Yeni 256-bit AES Vault Root Anahtarı üretildi (${ENC_KEY_FILE})."
   fi
 
-  # 2. TimescaleDB / PostgreSQL Bootstrap Password (/run/secrets/postgres_password and /run/secrets/db_password)
+  # 2. TimescaleDB / PostgreSQL Bootstrap Password (/run/secrets/postgres_password)
+  # Yalnız bootstrap amacıyla kullanılır; mirror db_password oluşturulmaz.
   local PG_PASS_FILE="${SECRETS_DIR}/postgres_password"
   local DB_PASS_FILE="${SECRETS_DIR}/db_password"
   if [ -s "$PG_PASS_FILE" ]; then
@@ -54,16 +70,11 @@ ensure_secrets_initialized() {
     PG_GENERATED_PASS=$(cat "$DB_PASS_FILE")
     printf "%s" "$PG_GENERATED_PASS" > "$PG_PASS_FILE"
     chmod 600 "$PG_PASS_FILE"
-    log_info "Veritabanı bootstrap parolası mevcut [KORUNDU]."
+    log_info "Legacy veritabanı bootstrap parolası aktarıldı (${PG_PASS_FILE}) [KORUNDU]."
   else
     PG_GENERATED_PASS=$(generate_random_hex 24)
     printf "%s" "$PG_GENERATED_PASS" > "$PG_PASS_FILE"
     chmod 600 "$PG_PASS_FILE"
     log_success "Yeni yüksek entropili veritabanı parolası üretildi."
-  fi
-  # Ensure db_password mirror exists for unified compatibility
-  if [ ! -s "$DB_PASS_FILE" ]; then
-    printf "%s" "$PG_GENERATED_PASS" > "$DB_PASS_FILE"
-    chmod 600 "$DB_PASS_FILE"
   fi
 }

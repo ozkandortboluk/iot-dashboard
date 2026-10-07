@@ -59,7 +59,6 @@ services:
       # or PostgreSQL system_settings). Root ENCRYPTION_KEY unlocks the vault. No plaintext secrets in app container env.
     volumes:
       - app_data:/app/data
-      - ./secrets:/app/secrets:ro
     secrets:
       - encryption_key
     healthcheck:
