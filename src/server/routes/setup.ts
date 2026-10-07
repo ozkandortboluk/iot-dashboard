@@ -27,6 +27,7 @@ setupRouter.get('/status', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       ...status,
+      setupToken: undefined,
       keysStatus,
     });
   } catch (err: any) {
@@ -346,16 +347,6 @@ setupRouter.post('/reset', requireSetupAuth, (req: Request, res: Response) => {
   try {
     const result = setupService.resetSetup(preserveConfig);
 
-    // Update setup session cookie with new token
-    if (result.setupToken) {
-      res.cookie('nexus_setup_session', result.setupToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 2 * 60 * 60 * 1000,
-      });
-    }
-
     systemLogger.info('security', `Kurulum sıfırlandı (IP: ${clientIp}, preserveConfig: ${preserveConfig})`);
     return res.json(result);
   } catch (err: any) {
@@ -377,16 +368,6 @@ setupRouter.post('/resume', requireSetupAuth, (req: Request, res: Response) => {
 
   try {
     const result = setupService.resumeSetup();
-
-    // Update setup session cookie
-    if (result.setupToken) {
-      res.cookie('nexus_setup_session', result.setupToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 2 * 60 * 60 * 1000,
-      });
-    }
 
     systemLogger.info('security', `Kurulum devam ettirildi (IP: ${clientIp})`);
     return res.json(result);

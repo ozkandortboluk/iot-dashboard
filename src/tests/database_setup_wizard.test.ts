@@ -231,17 +231,18 @@ describe('First Run Database Setup Wizard Service & Security', () => {
     (setupService as any).isCompletedState = true;
     expect(setupService.isSetupCompleted()).toBe(true);
 
-    // 3. Reset setup preserving DB config
+    // 3. Reset setup preserving DB config (never returns setupToken)
     const resetResult = await setupService.resetSetup(true);
     expect(resetResult.success).toBe(true);
-    expect(resetResult.setupToken).toBeDefined();
+    expect((resetResult as any).setupToken).toBeUndefined();
     expect(setupService.isSetupCompleted()).toBe(false);
 
-    // 4. Test resumeSetup
+    // 4. Test resumeSetup (never returns setupToken)
     (setupService as any).isCompletedState = true;
     const resumeResult = await setupService.resumeSetup();
     expect(resumeResult.success).toBe(true);
     expect(resumeResult.hasSavedConfig).toBe(true);
+    expect((resumeResult as any).setupToken).toBeUndefined();
     expect(setupService.isSetupCompleted()).toBe(false);
 
     // 5. Reset without preserving config

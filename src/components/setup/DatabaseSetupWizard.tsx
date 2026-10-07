@@ -279,11 +279,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           setKeysStatus(data.keysStatus);
         }
 
-        if (data.setupToken) {
-          setSetupToken(data.setupToken);
-          sessionStorage.setItem('nexus_setup_token', data.setupToken);
-          setIsTokenVerified(true);
-        } else if (data.isSetupAuthenticated || !tokenRequired) {
+        if (data.isSetupAuthenticated || !tokenRequired) {
           setIsTokenVerified(true);
         } else if (savedToken) {
           // Attempt silent verification with cached session token
@@ -311,7 +307,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         if (manualStep !== undefined) {
           setCurrentStep(manualStep);
         } else if (data.isDbConnected && data.stepsCompleted?.schemaVerified && !data.hasAdmin) {
-          setCurrentStep(6);
+          setCurrentStep(5);
         } else if (data.isDbConnected && !data.stepsCompleted?.migrations) {
           setCurrentStep(4);
         } else if (data.isDbConnected) {
@@ -355,10 +351,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
           setResetTokenRequired(true);
         }
         throw new Error(data.message || data.error || 'Kurulum sıfırlanamadı.');
-      }
-      if (data.setupToken) {
-        setSetupToken(data.setupToken);
-        sessionStorage.setItem('nexus_setup_token', data.setupToken);
       }
       setIsTokenVerified(true);
       setSetupTokenRequired(false);
@@ -435,10 +427,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       if (!res.ok || !data.success) {
         throw new Error(data.message || data.error || 'Kurulum devam ettirilemedi.');
       }
-      if (data.setupToken) {
-        setSetupToken(data.setupToken);
-        sessionStorage.setItem('nexus_setup_token', data.setupToken);
-      }
       setIsTokenVerified(true);
       setSetupTokenRequired(false);
       const resumeStep = data.currentStep || 1;
@@ -475,7 +463,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
 
       setTestSuccess(true);
       setInitComplete(true);
-      setCurrentStep(6);
+      setCurrentStep(5);
     } catch (err: any) {
       setError(err?.message || 'Hızlı Docker kurulumu başarısız. Lütfen parametreleri manuel yapılandırın.');
     } finally {
@@ -667,7 +655,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       } catch {}
 
       setCompletedAdmin(data.user?.email || adminForm.email);
-      setCurrentStep(7);
+      setCurrentStep(6);
     } catch (err: any) {
       setError(err?.message || 'Yönetici hesabı oluşturulurken bir hata oluştu.');
     } finally {
@@ -707,10 +695,9 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
     { num: 1, title: 'Hoş Geldiniz', label: 'Başlangıç' },
     { num: 2, title: 'Veritabanı Ayarları', label: 'Konfigürasyon' },
     { num: 3, title: 'Bağlantı Testi', label: 'Test' },
-    { num: 4, title: 'İlklendirme & Migrasyon', label: 'Kurulum' },
-    { num: 5, title: 'Şema Doğrulama', label: 'Doğrulama' },
-    { num: 6, title: 'Yönetici Hesabı', label: 'Yönetici' },
-    { num: 7, title: 'Tamamlandı', label: 'Bitiş' },
+    { num: 4, title: 'Veritabanı Hazırlama', label: 'İlklendirme' },
+    { num: 5, title: 'Yönetici Hesabı', label: 'Yönetici' },
+    { num: 6, title: 'Tamamlandı', label: 'Bitiş' },
   ];
 
   if (initialLoading) {
@@ -773,7 +760,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span className="text-slate-400">Sıfır Veri Kaybı Mimarisi</span>
+                  <span className="text-slate-400">Güvenli Veri Bütünlüğü</span>
                 </>
               )}
             </div>
@@ -1027,8 +1014,8 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-start gap-2.5">
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                       <div>
-                        <span className="font-semibold text-white block">Sıfır Veri Kaybı Garantisi</span>
-                        <span className="text-slate-400 text-[11px]">Mevcut verileriniz hiçbir şartta silinmez, şema onarımları güvenle yürütülür.</span>
+                        <span className="font-semibold text-white block">Güvenli Veri Bütünlüğü</span>
+                        <span className="text-slate-400 text-[11px]">Mevcut verileriniz korunur, migrasyon ve şema hazırlıkları güvenle yürütülür.</span>
                       </div>
                     </div>
                   </div>
@@ -1104,16 +1091,6 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                           <span>🚀 1-Tıkla Hızlı Docker Kurulumu</span>
                         </>
                       )}
-                    </button>
-
-                    <button
-                      id="wizard-step1-bypass-login"
-                      type="button"
-                      onClick={onComplete}
-                      className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
-                    >
-                      <LogIn className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>⚡ Doğrudan Giriş Yap (Test Hesabı)</span>
                     </button>
                   </div>
 
@@ -1498,8 +1475,8 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
               </motion.div>
             )}
 
-            {/* STEP 4 & 5: Initialization, Migrations, and Schema Verification */}
-            {(currentStep === 4 || currentStep === 5) && (
+            {/* STEP 4: Initialization, Migrations, and Schema Verification */}
+            {currentStep === 4 && (
               <motion.div
                 key="step4"
                 initial={{ opacity: 0, y: 12 }}
@@ -1510,7 +1487,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                 <div>
                   <h2 className="text-xl font-bold text-white flex items-center gap-2">
                     <Zap className="w-5 h-5 text-indigo-400" />
-                    <span>Veritabanı İlklendirme & Şema Doğrulama</span>
+                    <span>Veritabanı Hazırlama & Şema Doğrulama</span>
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
                     TimescaleDB eklentisi kontrol edilir, sırayla tüm migrasyonlar uygulanır ve Canonical Schema ile doğrulanır.
@@ -1587,7 +1564,7 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     id="wizard-step4-next"
                     type="button"
                     disabled={!initComplete || loading}
-                    onClick={() => setCurrentStep(6)}
+                    onClick={() => setCurrentStep(5)}
                     className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition cursor-pointer ${
                       initComplete && !loading
                         ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
@@ -1601,10 +1578,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
               </motion.div>
             )}
 
-            {/* STEP 6: Create Administrator */}
-            {currentStep === 6 && (
+            {/* STEP 5: Create Administrator */}
+            {currentStep === 5 && (
               <motion.div
-                key="step6"
+                key="step5"
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
@@ -1730,10 +1707,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
               </motion.div>
             )}
 
-            {/* STEP 7: Installation Complete */}
-            {currentStep === 7 && (
+            {/* STEP 6: Installation Complete */}
+            {currentStep === 6 && (
               <motion.div
-                key="step7"
+                key="step6"
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}

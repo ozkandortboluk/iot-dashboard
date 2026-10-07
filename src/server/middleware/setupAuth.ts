@@ -1,5 +1,6 @@
 import { type Request, type Response, type NextFunction } from 'express';
 import { setupService } from '../services/setup.service.js';
+import { db } from '../db.js';
 
 /**
  * Extracts setup token from secure HTTP request vectors only (Header or HttpOnly cookie).
@@ -36,10 +37,12 @@ export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: bool
 }
 
 /**
- * Guards setup APIs. Reset/resume remain available for disaster recovery, but
- * require the server-side setup token when the installation is locked.
+ * Guards setup APIs.
+ * During initial installation, strictly requires valid setup token.
+ * After setup completion, setup token is invalidated; disaster recovery (/reset, /resume)
+ * strictly requires active admin authentication or server-side recovery token.
  */
-export function requireSetupAuth(req: Request, res: Response, next: NextFunction): void {
+export async function requireSetupAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   // Test exception is ONLY allowed when strictly running in test mode with VITEST
   if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
     next();
@@ -55,23 +58,60 @@ export function requireSetupAuth(req: Request, res: Response, next: NextFunction
 
   const token = extractSetupToken(req);
 
-  // Recovery requests (/reset, /resume) always require a valid setup recovery token
+  // Recovery requests (/reset, /resume)
   if (isRecoveryRequest) {
-    if (!token || !setupService.validateSetupToken(token, true)) {
-      res.status(401).json({
-        success: false,
-        code: 'SETUP_RECOVERY_TOKEN_REQUIRED',
-        error: 'Yetkisiz kurulum kurtarma isteği.',
-        message: 'Kurulumu sıfırlamak veya devam ettirmek için sunucudaki geçerli Setup Token gereklidir.',
-        hint: 'Anahtar data/.setup_token dosyasında, Docker secret içinde veya sunucu başlangıç günlüğünde bulunur.',
-      });
+    if (isCompleted) {
+      // Setup was completed: setup token is destroyed.
+      // Recovery operations strictly require active admin authentication OR recovery token.
+      const isRecoveryTokenValid = token ? setupService.validateRecoveryToken(token) : false;
+      const isSetupTokenValid = token ? setupService.validateSetupToken(token, true) : false;
+
+      let isAdmin = false;
+      const userToken =
+        (req.headers['authorization']?.startsWith('Bearer ')
+          ? req.headers['authorization'].slice(7).trim()
+          : (req.headers['x-auth-token'] as string)?.trim()) ||
+        (req as any).cookies?.nexus_session_token;
+
+      if (userToken) {
+        try {
+          const verified = (await db.verifySessionAsync(userToken).catch(() => null)) || db.verifySession(userToken);
+          if (verified && (verified.user.role === 'admin' || verified.user.role === 'superadmin')) {
+            isAdmin = true;
+          }
+        } catch {}
+      }
+
+      if (!isRecoveryTokenValid && !isSetupTokenValid && !isAdmin) {
+        res.status(401).json({
+          success: false,
+          code: 'SETUP_RECOVERY_AUTH_REQUIRED',
+          error: 'Yetkisiz kurulum kurtarma isteği.',
+          message: 'Kurulum tamamlandıktan sonra sıfırlama veya devam ettirme işlemleri geçerli yönetici oturumu veya kurtarma anahtarı (recovery token) gerektirir.',
+          hint: 'Yönetici olarak giriş yapınız veya data/.recovery_token içindeki anahtarı X-Setup-Token başlığı ile gönderiniz.',
+        });
+        return;
+      }
+      next();
+      return;
+    } else {
+      // Initial setup in progress: requires valid setup token
+      if (!token || !setupService.validateSetupToken(token)) {
+        res.status(401).json({
+          success: false,
+          code: 'SETUP_TOKEN_REQUIRED',
+          error: 'Yetkisiz kurulum kurtarma isteği.',
+          message: 'Kurulumu sıfırlamak veya devam ettirmek için sunucudaki geçerli Setup Token gereklidir.',
+          hint: 'Anahtar data/.setup_token dosyasında veya sunucu başlangıç günlüğünde bulunur.',
+        });
+        return;
+      }
+      next();
       return;
     }
-    next();
-    return;
   }
 
-  // When setup is completed and locked, reject other endpoints
+  // When setup is completed and locked, reject all other setup endpoints
   if (isCompleted) {
     res.status(403).json({
       success: false,

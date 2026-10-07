@@ -16,6 +16,7 @@ import { DatabaseState, type AuditLog, type User } from '../../types.js';
 import { systemSecretsService } from './systemSecrets.service.js';
 import { systemKeysService } from './systemKeys.service.js';
 import { isVaultConfigured, getVaultStatus } from '../utils/crypto.js';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 export interface DatabaseConfigPayload {
   host: string;
@@ -36,7 +37,7 @@ export interface SetupStatusResponse {
   vaultStatus?: 'READY' | 'UNCONFIGURED';
   setupTokenRequired: boolean;
   isSetupAuthenticated?: boolean;
-  setupToken?: string;
+  setupToken?: undefined;
   currentStep: number;
   isDbConnected: boolean;
   dbErrorMessage?: string;
@@ -632,10 +633,13 @@ export class SetupService {
   }
 
   /**
-   * Safely resets the setup wizard state and generates a fresh setup token.
+   * Safely resets the setup wizard state.
    * If preserveConfig is true, keeps the saved database connection host/port/db/user.
+   * If setup was already completed, setup token is NOT regenerated (requires admin/recovery auth).
+   * Setup token is never returned in HTTP responses.
    */
-  public resetSetup(preserveConfig: boolean = false): { success: boolean; message: string; setupToken: string; currentStep: number } {
+  public resetSetup(preserveConfig: boolean = false): { success: boolean; message: string; currentStep: number } {
+    const wasCompleted = this.isSetupCompleted();
     this.isCompletedState = false;
     this.completedAtDate = null;
 
@@ -657,9 +661,13 @@ export class SetupService {
       this.saveRuntimeSecretConfig(this.runtimeConfig, false);
     }
 
-    // Invalidate existing token and generate fresh setup token
-    this.invalidateSetupToken();
-    const newToken = this.getOrInitSetupToken(true);
+    if (!wasCompleted) {
+      // Initial setup in progress: initialize or refresh setup token
+      this.getOrInitSetupToken();
+    } else {
+      // Post-completion recovery: do NOT automatically regenerate setup token!
+      this.invalidateSetupToken();
+    }
 
     systemLogger.info('security', `Kurulum durumu operatör tarafından sıfırlandı (preserveConfig: ${preserveConfig}).`);
 
@@ -668,18 +676,24 @@ export class SetupService {
       message: preserveConfig
         ? 'Kurulum adımları sıfırlandı, veritabanı bağlantı parametreleri korundu.'
         : 'Kurulum ve veritabanı bağlantı parametreleri tamamen sıfırlandı.',
-      setupToken: newToken,
       currentStep: preserveConfig && this.runtimeConfig ? 2 : 1,
     };
   }
 
   /**
    * Resumes an interrupted setup process, restoring runtime config and unblocking setup locks if admin is missing.
+   * Setup token is never returned in HTTP responses.
    */
-  public resumeSetup(): { success: boolean; message: string; setupToken: string; currentStep: number; hasSavedConfig: boolean } {
+  public resumeSetup(): { success: boolean; message: string; currentStep: number; hasSavedConfig: boolean } {
+    const wasCompleted = this.isSetupCompleted();
     this.isCompletedState = false;
     this.loadRuntimeSecretConfig();
-    const token = this.getOrInitSetupToken();
+
+    if (!wasCompleted) {
+      this.getOrInitSetupToken();
+    } else {
+      this.invalidateSetupToken();
+    }
 
     let step = 1;
     if (this.runtimeConfig?.host) {
@@ -691,7 +705,6 @@ export class SetupService {
     return {
       success: true,
       message: 'Kurulum devam ettirilmeye hazır.',
-      setupToken: token,
       currentStep: step,
       hasSavedConfig: Boolean(this.runtimeConfig),
     };
@@ -809,15 +822,12 @@ export class SetupService {
         systemMode = 'SETUP';
         this.getOrInitSetupToken();
       } else if (!isDbConnected) {
-        // PostgreSQL is temporarily unreachable after setup was completed.
-        // In NexusNode IoT architecture, when an admin is created and setup is marked completed,
-        // operate in READY state with local WAL persistence so operator is NEVER locked out.
-        // Only if STRICT_MAINTENANCE_LOCK=true, force MAINTENANCE.
-        const enforceStrictLock = process.env.STRICT_MAINTENANCE_LOCK === 'true';
-        if (!enforceStrictLock && hasAdmin) {
-          systemMode = 'READY';
-        } else {
+        // If PostgreSQL is unreachable, strictly return MAINTENANCE mode in production
+        const isProd = process.env.NODE_ENV === 'production' || isProductionVpsEnvironment();
+        if (isProd || process.env.STRICT_MAINTENANCE_LOCK === 'true' || !hasAdmin) {
           systemMode = 'MAINTENANCE';
+        } else {
+          systemMode = 'READY';
         }
       } else if (!hasAdmin) {
         // PostgreSQL is connected, setup was completed, but admin user is missing.
@@ -831,9 +841,16 @@ export class SetupService {
         this.markSetupCompleted();
         systemMode = 'READY';
       } else if (hasAdmin && !isTestEnv) {
-        // Administrator already exists in persistent storage: keep system in READY mode
-        this.markSetupCompleted();
-        systemMode = 'READY';
+        // In production, if PostgreSQL is disconnected, return MAINTENANCE rather than READY
+        if (!isDbConnected && (process.env.NODE_ENV === 'production' || isProductionVpsEnvironment())) {
+          systemMode = 'MAINTENANCE';
+        } else if (isDbConnected) {
+          this.markSetupCompleted();
+          systemMode = 'READY';
+        } else {
+          systemMode = 'SETUP';
+          this.getOrInitSetupToken();
+        }
       } else {
         systemMode = 'SETUP';
         this.getOrInitSetupToken();
@@ -852,10 +869,10 @@ export class SetupService {
 
     let currentStep = 1;
     if (systemMode === 'READY') {
-      currentStep = 7;
-    } else if (schemaVerified && migrationsComplete && !hasAdmin) {
       currentStep = 6;
-    } else if (isDbConnected && !migrationsComplete) {
+    } else if (schemaVerified && migrationsComplete && !hasAdmin) {
+      currentStep = 5;
+    } else if (isDbConnected && (!migrationsComplete || !schemaVerified)) {
       currentStep = 4;
     } else if (isDbConnected) {
       currentStep = 3;
@@ -865,11 +882,10 @@ export class SetupService {
       currentStep = 1;
     }
 
-    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
-    const isDevOrStudio = !isTest && (process.env.NODE_ENV !== 'production' || process.env.AI_STUDIO === 'true');
-    const isAuth = systemMode !== 'SETUP' ? true : (isDevOrStudio || Boolean(isAuthenticated));
-    const setupTokenRequired = systemMode === 'SETUP' && !isDevOrStudio;
-    const activeSetupToken = systemMode === 'SETUP' && isAuth ? this.getOrInitSetupToken(true) : undefined;
+    // Real setup authentication requires actual token or session verification.
+    // Never auto-authenticate based on NODE_ENV !== production or AI_STUDIO === true.
+    const isAuth = systemMode !== 'SETUP' ? true : Boolean(isAuthenticated);
+    const setupTokenRequired = systemMode === 'SETUP';
 
     return {
       systemMode,
@@ -880,7 +896,7 @@ export class SetupService {
       vaultStatus: (vaultReady ? 'READY' : 'UNCONFIGURED') as 'READY' | 'UNCONFIGURED',
       setupTokenRequired,
       isSetupAuthenticated: isAuth,
-      setupToken: activeSetupToken,
+      setupToken: undefined,
       currentStep,
       isDbConnected,
       dbErrorMessage: this.lastDbError || undefined,
