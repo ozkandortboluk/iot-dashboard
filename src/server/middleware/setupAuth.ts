@@ -26,14 +26,17 @@ export function extractSetupToken(req: Request): string | null {
   return null;
 }
 
-export function isRequestSetupAuthenticated(req: Request, allowIfCompleted: boolean = false): boolean {
+export function isRequestSetupAuthenticated(req: Request): boolean {
   // Test exception is ONLY allowed when strictly running in test mode with VITEST
   if (process.env.NODE_ENV === 'test' && process.env.VITEST === 'true' && process.env.DISABLE_SETUP_TOKEN === 'true') {
     return true;
   }
+  if (setupService.isSetupCompleted()) {
+    return false;
+  }
   const token = extractSetupToken(req);
   if (!token) return false;
-  return setupService.validateSetupToken(token, allowIfCompleted);
+  return setupService.validateSetupToken(token);
 }
 
 /**
@@ -61,10 +64,9 @@ export async function requireSetupAuth(req: Request, res: Response, next: NextFu
   // Recovery requests (/reset, /resume)
   if (isRecoveryRequest) {
     if (isCompleted) {
-      // Setup was completed: setup token is destroyed.
-      // Recovery operations strictly require active admin authentication OR recovery token.
+      // Setup was completed: setup token is destroyed and cannot be used.
+      // Recovery operations (/reset, /resume) strictly require active admin authentication OR recovery token.
       const isRecoveryTokenValid = token ? setupService.validateRecoveryToken(token) : false;
-      const isSetupTokenValid = token ? setupService.validateSetupToken(token, true) : false;
 
       let isAdmin = false;
       const userToken =
@@ -82,7 +84,7 @@ export async function requireSetupAuth(req: Request, res: Response, next: NextFu
         } catch {}
       }
 
-      if (!isRecoveryTokenValid && !isSetupTokenValid && !isAdmin) {
+      if (!isRecoveryTokenValid && !isAdmin) {
         res.status(401).json({
           success: false,
           code: 'SETUP_RECOVERY_AUTH_REQUIRED',

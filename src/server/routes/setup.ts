@@ -42,7 +42,7 @@ setupRouter.get('/status', async (req: Request, res: Response) => {
 
 /**
  * GET /api/setup/keys-status
- * Inspects all system security keys status (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
+ * Inspects system root security key status (ENCRYPTION_KEY)
  * Requires Setup Authentication.
  */
 setupRouter.get('/keys-status', requireSetupAuth, (req: Request, res: Response) => {
@@ -62,8 +62,8 @@ setupRouter.get('/keys-status', requireSetupAuth, (req: Request, res: Response) 
 
 /**
  * POST /api/setup/generate-keys
- * Generates ONLY missing system security keys (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
- * Strictly preserves existing keys to avoid data or session corruption.
+ * Generates ONLY missing system root security key (ENCRYPTION_KEY)
+ * Strictly preserves existing keys to avoid data corruption.
  * Requires Setup Authentication.
  */
 setupRouter.post('/generate-keys', requireSetupAuth, async (req: Request, res: Response) => {

@@ -55,7 +55,7 @@ function validateTunnelTarget(
  */
 async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunction) {
   // 1. Valid local Setup/Recovery Token grants access
-  if (isRequestSetupAuthenticated(req, true)) {
+  if (isRequestSetupAuthenticated(req)) {
     return next();
   }
 

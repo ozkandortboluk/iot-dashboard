@@ -705,9 +705,9 @@ export const SystemSecretsPanel: React.FC = () => {
                         <Cpu className="w-4 h-4" />
                       </span>
                       <div>
-                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">OTA_SIGNING_KEY (Ed25519)</h5>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">Firmware İmzalama (OTA Secret)</h5>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <p className="text-[11px] text-slate-500">Firmware İmzalama Özel Anahtarı</p>
+                          <p className="text-[11px] text-slate-500">Vault Dahili Ed25519 Sırrı (<code className="text-[10px]">ota.signing_key</code>)</p>
                           {secretsState?.systemKeys?.keys.otaSigningKey.keyId && (
                             <span className="font-mono text-[10px] px-1.5 py-0.2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded">
                               {secretsState.systemKeys.keys.otaSigningKey.keyId}
@@ -741,7 +741,7 @@ export const SystemSecretsPanel: React.FC = () => {
 
                 <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-                    🛡️ <strong>Güvence:</strong> Sahadaki cihazlar yeni firmware gelene kadar mevcut anahtarla çalışır.
+                    🛡️ <strong>Güvence:</strong> Dahili Vault sırrıdır; sahadaki cihazlar yeni firmware gelene kadar mevcut anahtarla güvenle doğrulanır.
                   </p>
                 </div>
               </div>
@@ -755,8 +755,8 @@ export const SystemSecretsPanel: React.FC = () => {
                         <Database className="w-4 h-4" />
                       </span>
                       <div>
-                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">POSTGRES_PASSWORD</h5>
-                        <p className="text-[11px] text-slate-500">PostgreSQL & TimescaleDB Parolası</p>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">Veritabanı Kimlik Bilgisi</h5>
+                        <p className="text-[11px] text-slate-500">Vault Parolası (<code className="text-[10px]">database.password</code>)</p>
                       </div>
                     </div>
                     {secretsState?.database.source === 'vault' ? (
@@ -782,7 +782,7 @@ export const SystemSecretsPanel: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                  🛡️ <strong>Güvence:</strong> <code className="font-mono">db.json</code> içinde şifresiz safe URL tutulur. Gerçek parola kasa üzerinden enjekte edilir.
+                  🛡️ <strong>Güvence:</strong> <code className="font-mono">db.json</code> veya <code className="font-mono">.env</code> içinde plaintext parola tutulmaz; çalışma zamanında Vault üzerinden güvenle çözülür.
                 </p>
               </div>
 
@@ -795,8 +795,8 @@ export const SystemSecretsPanel: React.FC = () => {
                         <LockKeyhole className="w-4 h-4" />
                       </span>
                       <div>
-                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">ENCRYPTION_KEY</h5>
-                        <p className="text-[11px] text-slate-500">Root Master Kasa Anahtarı</p>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">ENCRYPTION_KEY (Tek Root Anahtar)</h5>
+                        <p className="text-[11px] text-slate-500">Kullanıcı Yönetimli Kasa Anahtarı</p>
                       </div>
                     </div>
                     {secretsState?.systemKeys?.vaultConfigured ? (
@@ -819,7 +819,7 @@ export const SystemSecretsPanel: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                  🛡️ <strong>Güvence:</strong> Kasayı açan master anahtardır. Güvenlik standardı gereği Docker Secret veya volume dışı ortam değişkeninde tutulur.
+                  🛡️ <strong>Güvence:</strong> Kasayı açan tek yetkili master anahtardır. Docker Secret veya kısıtlı ortam değişkeniyle enjekte edilir.
                 </p>
               </div>
             </div>

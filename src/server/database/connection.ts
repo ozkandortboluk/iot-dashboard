@@ -349,10 +349,7 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         try {
           const vaultDb = systemSecretsService.getDatabaseConfig();
           const user = vaultDb.user || process.env.SQL_USER || process.env.DB_USER || process.env.POSTGRES_USER || 'postgres';
-          let pass = vaultDb.password || systemSecretsService.getDatabasePassword() || process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD || '';
-          if (!pass && fs.existsSync('/run/secrets/db_password')) {
-            try { pass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim(); } catch {}
-          }
+          const pass = vaultDb.password || systemSecretsService.getDatabasePassword() || process.env.DB_PASSWORD || '';
           const dbName = vaultDb.database || process.env.DB_NAME || process.env.POSTGRES_DB || process.env.SQL_DB_NAME || 'iot_dashboard';
           const encUser = encodeURIComponent(user);
           const encPass = pass ? encodeURIComponent(pass) : '';

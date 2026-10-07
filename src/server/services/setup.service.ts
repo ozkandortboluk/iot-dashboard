@@ -472,10 +472,11 @@ export class SetupService {
   }
 
   /**
-   * Validates provided setup token with timing-safe comparison
+   * Validates provided setup token with timing-safe comparison.
+   * Strictly returns false once setup is completed.
    */
-  public validateSetupToken(token?: string | null, allowIfCompleted: boolean = false): boolean {
-    if (this.isSetupCompleted() && !allowIfCompleted) {
+  public validateSetupToken(token?: string | null): boolean {
+    if (this.isSetupCompleted()) {
       return false;
     }
 
@@ -499,7 +500,7 @@ export class SetupService {
       }
     }
 
-    const activeToken = this.getOrInitSetupToken(allowIfCompleted);
+    const activeToken = this.getOrInitSetupToken();
     if (!activeToken) {
       return false;
     }
@@ -1562,11 +1563,11 @@ export class SetupService {
     // 2. Configure
     await this.configureDatabase(config);
 
-    // 3. Ensure system security keys exist (JWT_SECRET, ENCRYPTION_KEY, OTA_SIGNING_KEY)
+    // 3. Ensure system root security key exists (ENCRYPTION_KEY)
     try {
       await systemKeysService.generateMissingKeys();
     } catch (keyErr: any) {
-      systemLogger.warn('security', `Otomatik anahtar üretimi uyarısı: ${keyErr?.message || keyErr}`);
+      systemLogger.warn('security', `Otomatik anahtar kontrolü uyarısı: ${keyErr?.message || keyErr}`);
     }
 
     // 4. Initialize

@@ -139,13 +139,11 @@ describe('Production Setup Authentication & Token Security', () => {
     );
   });
 
-  it('6. should allow disaster recovery (/reset, /resume) when setup is completed ONLY if valid token is provided', () => {
+  it('6. should allow disaster recovery (/reset, /resume) when setup is completed ONLY if valid recovery token or admin session is provided', () => {
     process.env.NODE_ENV = 'production';
     (setupService as any).isCompletedState = true;
 
-    const validToken = setupService.getOrInitSetupToken(true);
-
-    // Unauthenticated recovery request -> 401
+    // 1. Unauthenticated recovery request -> 401
     const unauthReq: any = {
       path: '/reset',
       originalUrl: '/api/setup/reset',
@@ -164,24 +162,44 @@ describe('Production Setup Authentication & Token Security', () => {
     expect(unauthNext).not.toHaveBeenCalled();
     expect(unauthRes.status).toHaveBeenCalledWith(401);
 
-    // Authenticated recovery request -> allowed to proceed to reset handler
-    const authReq: any = {
+    // 2. Old setup token request -> 401 (Setup token is not accepted once setup is completed!)
+    const oldSetupReq: any = {
       path: '/reset',
       originalUrl: '/api/setup/reset',
-      headers: { 'x-setup-token': validToken },
+      headers: { 'x-setup-token': 'old_setup_token_value_1234567890' },
       cookies: {},
       query: {},
       body: {},
     };
-    const authRes: any = {
+    const oldSetupRes: any = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn().mockReturnThis(),
     };
-    const authNext = vi.fn();
+    const oldSetupNext = vi.fn();
 
-    requireSetupAuth(authReq, authRes, authNext);
-    expect(authNext).toHaveBeenCalledOnce();
-    expect(authRes.status).not.toHaveBeenCalled();
+    requireSetupAuth(oldSetupReq, oldSetupRes, oldSetupNext);
+    expect(oldSetupNext).not.toHaveBeenCalled();
+    expect(oldSetupRes.status).toHaveBeenCalledWith(401);
+
+    // 3. Valid recovery token request -> allowed to proceed to reset handler
+    const recoveryToken = setupService.getOrInitRecoveryToken(true);
+    const recAuthReq: any = {
+      path: '/reset',
+      originalUrl: '/api/setup/reset',
+      headers: { 'x-setup-token': recoveryToken },
+      cookies: {},
+      query: {},
+      body: {},
+    };
+    const recAuthRes: any = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+    const recAuthNext = vi.fn();
+
+    requireSetupAuth(recAuthReq, recAuthRes, recAuthNext);
+    expect(recAuthNext).toHaveBeenCalledOnce();
+    expect(recAuthRes.status).not.toHaveBeenCalled();
   });
 
   it('7. should reject missing/invalid setup token in development and AI_STUDIO mode (SEC-01 no-bypass)', () => {

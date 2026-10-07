@@ -50,7 +50,22 @@ ensure_secrets_initialized() {
   fi
 
   if [ -s "$ENC_KEY_FILE" ]; then
-    log_info "Vault Root Anahtarı mevcut (${ENC_KEY_FILE}) [KORUNDU]."
+    local EXISTING_ENC_KEY
+    EXISTING_ENC_KEY=$(tr -d '[:space:]' < "$ENC_KEY_FILE")
+    # Production / Root Key strictly requires exactly 64 hexadecimal characters (256-bit key)
+    # Fail-closed: Never silently hash invalid/short keys with SHA-256 in bootstrap
+    if [[ ! "$EXISTING_ENC_KEY" =~ ^[0-9a-fA-F]{64}$ ]]; then
+      echo "" >&2
+      echo "==========================================================================================" >&2
+      echo "❌ [KRİTİK GÜVENLİK HATASI] Geçersiz ENCRYPTION_KEY Formatı!" >&2
+      echo "------------------------------------------------------------------------------------------" >&2
+      echo "'${ENC_KEY_FILE}' içindeki anahtar tam 64 hexadecimal karakter (256-bit hex) olmalıdır." >&2
+      echo "Geçersiz anahtarlar güvenliği tehlikeye atmamak için otomatik dönüştürülmez (fail-closed)." >&2
+      echo "Lütfen geçerli bir 64 karakterli hex root key sağlayın veya dosyayı kaldırıp yeniden üretin." >&2
+      echo "==========================================================================================" >&2
+      exit 1
+    fi
+    log_info "Vault Root Anahtarı mevcut ve geçerli (${ENC_KEY_FILE}) [KORUNDU]."
   else
     local ROOT_KEY
     ROOT_KEY=$(generate_random_hex 32)
