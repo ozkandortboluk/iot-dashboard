@@ -113,12 +113,17 @@ ensure_secrets_initialized() {
   # --------------------------------------------------------------------------
   # 2. TimescaleDB / PostgreSQL Bootstrap Password (/run/secrets/postgres_password)
   # --------------------------------------------------------------------------
-  # Sync app_data volume to host .system_secrets.json if host is missing it
-  if [ ! -s "$VAULT_DATA_FILE" ] && command -v docker >/dev/null 2>&1; then
+  local TEMP_APP_DATA_VAULT=""
+  if command -v docker >/dev/null 2>&1; then
     local APP_DATA_VOL
     APP_DATA_VOL=$(docker volume ls -q 2>/dev/null | grep -E '(^|_)app_data$' | head -n1 || true)
     if [ -n "$APP_DATA_VOL" ]; then
-      docker run --rm -v "${APP_DATA_VOL}:/vdata:ro" -v "$(pwd)/data:/hostdata" alpine:latest sh -c "if [ -s /vdata/.system_secrets.json ]; then cp /vdata/.system_secrets.json /hostdata/.system_secrets.json; chmod 600 /hostdata/.system_secrets.json; fi" 2>/dev/null || true
+      TEMP_APP_DATA_VAULT=$(mktemp 2>/dev/null || echo "/tmp/.app_data_vault_$$.json")
+      docker run --rm -v "${APP_DATA_VOL}:/vdata:ro" -v "$(dirname "$TEMP_APP_DATA_VAULT"):/tmpout" alpine:latest sh -c "if [ -s /vdata/.system_secrets.json ]; then cp /vdata/.system_secrets.json /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); chmod 600 /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); else rm -f /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); fi" 2>/dev/null || rm -f "$TEMP_APP_DATA_VAULT"
+      if [ ! -s "$TEMP_APP_DATA_VAULT" ]; then
+        rm -f "$TEMP_APP_DATA_VAULT"
+        TEMP_APP_DATA_VAULT=""
+      fi
     fi
   fi
 
@@ -132,10 +137,17 @@ ensure_secrets_initialized() {
   elif [ "$IS_EXISTING" = true ]; then
     # EXISTING INSTALLATION / UPGRADE:
     # Strictly NEVER generate a random password on an existing install with database volumes!
-    # Instead, recover database.password from the Central Security Vault using the migration helper.
-    log_info "Mevcut sistem yükseltmesi tespit edildi. Veritabanı parolası Vault kasasından kurtarılıyor..."
+    # Instead, recover database.password from Authoritative Security Vault (prioritizing app_data Docker volume over host).
+    log_info "Mevcut sistem yükseltmesi tespit edildi. Veritabanı parolası yetkili Vault kasasından kurtarılıyor..."
     
     local RECOVERY_SUCCESS=false
+    local CANDIDATE_VAULTS=""
+    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -s "$TEMP_APP_DATA_VAULT" ]; then
+      CANDIDATE_VAULTS="${TEMP_APP_DATA_VAULT},${VAULT_DATA_FILE}"
+    else
+      CANDIDATE_VAULTS="${VAULT_DATA_FILE}"
+    fi
+
     if command -v node >/dev/null 2>&1; then
       node -e "
         const fs = require('fs');
@@ -143,41 +155,56 @@ ensure_secrets_initialized() {
         try {
           const encKeyRaw = fs.readFileSync('$ENC_KEY_FILE', 'utf8').trim();
           if (!/^[0-9a-fA-F]{64}$/.test(encKeyRaw)) {
-            throw new Error('Geçersiz ENCRYPTION_KEY formatı.');
+            throw new Error('Geçersiz ENCRYPTION_KEY formatı: Root key 64 hex karakter olmalıdır.');
           }
           const rootKey = Buffer.from(encKeyRaw, 'hex');
           
-          let vaultData = null;
-          if (fs.existsSync('$VAULT_DATA_FILE')) {
-            vaultData = JSON.parse(fs.readFileSync('$VAULT_DATA_FILE', 'utf8'));
+          const candidates = '$CANDIDATE_VAULTS'.split(',').map(s => s.trim()).filter(Boolean);
+          let decryptedPassword = '';
+          let lastErr = '';
+
+          for (const vaultPath of candidates) {
+            if (!fs.existsSync(vaultPath)) continue;
+            try {
+              const vaultData = JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
+              const dbRecord = vaultData?.secrets?.['database.password'];
+              if (!dbRecord || !dbRecord.encryptedValue) {
+                lastErr = 'Vault içinde database.password kaydı yok (' + vaultPath + ')';
+                continue;
+              }
+
+              const cipherText = dbRecord.encryptedValue;
+              const parts = cipherText.split(':');
+              if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
+                lastErr = 'Bilinmeyen şifreli veri formatı (' + vaultPath + ')';
+                continue;
+              }
+
+              const iv = Buffer.from(parts[2], 'hex');
+              const authTag = Buffer.from(parts[3], 'hex');
+              const encData = parts[4];
+
+              const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
+              decipher.setAuthTag(authTag);
+              let dec = decipher.update(encData, 'hex', 'utf8');
+              dec += decipher.final('utf8');
+
+              if (dec && dec.trim().length > 0) {
+                decryptedPassword = dec.trim();
+                break;
+              }
+            } catch (err) {
+              lastErr = err.message;
+              continue;
+            }
           }
 
-          const dbRecord = vaultData?.secrets?.['database.password'];
-          if (!dbRecord || !dbRecord.encryptedValue) {
-            throw new Error('Vault içinde database.password kaydı bulunamadı.');
-          }
-
-          const cipherText = dbRecord.encryptedValue;
-          const parts = cipherText.split(':');
-          if (parts.length < 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
-            throw new Error('Bilinmeyen şifreli veri formatı.');
-          }
-
-          const iv = Buffer.from(parts[2], 'hex');
-          const authTag = Buffer.from(parts[3], 'hex');
-          const encData = parts[4];
-
-          const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
-          decipher.setAuthTag(authTag);
-          let decrypted = decipher.update(encData, 'hex', 'utf8');
-          decrypted += decipher.final('utf8');
-
-          if (!decrypted || decrypted.trim().length === 0) {
-            throw new Error('Çözülen parola boş.');
+          if (!decryptedPassword) {
+            throw new Error(lastErr || 'Hiçbir Vault kaynağından parola çözülemedi.');
           }
 
           const tempTarget = '${PG_PASS_FILE}.tmp.' + crypto.randomBytes(4).toString('hex');
-          fs.writeFileSync(tempTarget, decrypted.trim(), { mode: 0o600 });
+          fs.writeFileSync(tempTarget, decryptedPassword, { mode: 0o600 });
           fs.chmodSync(tempTarget, 0o600);
           fs.renameSync(tempTarget, '$PG_PASS_FILE');
           fs.chmodSync('$PG_PASS_FILE', 0o600);
@@ -187,6 +214,11 @@ ensure_secrets_initialized() {
           process.exit(1);
         }
       " 2>/dev/null && RECOVERY_SUCCESS=true || RECOVERY_SUCCESS=false
+    fi
+
+    # Clean up temp volume extraction file
+    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -f "$TEMP_APP_DATA_VAULT" ]; then
+      rm -f "$TEMP_APP_DATA_VAULT"
     fi
 
     if [ "$RECOVERY_SUCCESS" = true ] && [ -s "$PG_PASS_FILE" ]; then
@@ -206,6 +238,11 @@ ensure_secrets_initialized() {
     fi
   else
     # FRESH INSTALLATION: Generate secure random password
+    # Clean up temp volume extraction file if any
+    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -f "$TEMP_APP_DATA_VAULT" ]; then
+      rm -f "$TEMP_APP_DATA_VAULT"
+    fi
+
     local PG_GENERATED_PASS
     PG_GENERATED_PASS=$(generate_random_hex 24)
     printf "%s" "$PG_GENERATED_PASS" > "$PG_PASS_FILE"
@@ -272,8 +309,8 @@ ensure_secrets_initialized() {
       fi
     fi
 
-    # Align host Vault with Docker app_data volume if volume already exists
-    if [ -s "$VAULT_DATA_FILE" ] && command -v docker >/dev/null 2>&1; then
+    # For FRESH INSTALL ONLY: Seed empty app_data volume if volume exists without a vault
+    if [ "$IS_EXISTING" = false ] && [ -s "$VAULT_DATA_FILE" ] && command -v docker >/dev/null 2>&1; then
       local APP_DATA_VOL
       APP_DATA_VOL=$(docker volume ls -q 2>/dev/null | grep -E '(^|_)app_data$' | head -n1 || true)
       if [ -n "$APP_DATA_VOL" ]; then

@@ -19,15 +19,26 @@ import { decryptSecret } from '../src/server/utils/crypto.js';
 export interface MigrateSecretOptions {
   encryptionKeyPath?: string;
   vaultFilePath?: string;
+  candidateVaultPaths?: string[];
   targetPasswordPath?: string;
   allowEmpty?: boolean;
 }
 
-export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions): { success: boolean; error?: string } {
+export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions): { success: boolean; error?: string; recoveredFrom?: string } {
   const rootDir = process.cwd();
   const encKeyFile = options?.encryptionKeyPath || path.resolve(rootDir, 'secrets', 'encryption_key');
-  const vaultFile = options?.vaultFilePath || path.resolve(rootDir, 'data', '.system_secrets.json');
   const targetFile = options?.targetPasswordPath || path.resolve(rootDir, 'secrets', 'postgres_password');
+
+  // Determine candidate vault files to inspect in priority order
+  const candidateFiles: string[] = [];
+  if (options?.candidateVaultPaths && options.candidateVaultPaths.length > 0) {
+    candidateFiles.push(...options.candidateVaultPaths);
+  } else if (options?.vaultFilePath) {
+    candidateFiles.push(options.vaultFilePath);
+  } else {
+    // Default search order: check app_data volume extraction path if present, then host ./data/.system_secrets.json
+    candidateFiles.push(path.resolve(rootDir, 'data', '.system_secrets.json'));
+  }
 
   // 1. Resolve Root Encryption Key
   let rootKeyHex = '';
@@ -44,70 +55,69 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
     };
   }
 
-  // 2. Locate and Parse Vault
-  if (!fs.existsSync(vaultFile)) {
-    return {
-      success: false,
-      error: `Vault dosyası bulunamadı (${vaultFile}).`
-    };
-  }
+  const rootKeyBuffer = Buffer.from(rootKeyHex, 'hex');
 
-  let vaultData: any;
-  try {
-    const raw = fs.readFileSync(vaultFile, 'utf8');
-    vaultData = JSON.parse(raw);
-  } catch (err: any) {
-    return {
-      success: false,
-      error: `Vault dosyası okunamadı veya JSON geçersiz: ${err?.message || 'Bilinmeyen hata'}`
-    };
-  }
-
-  const dbSecretRecord = vaultData?.secrets?.['database.password'];
-  if (!dbSecretRecord || !dbSecretRecord.encryptedValue) {
-    return {
-      success: false,
-      error: 'Vault kasasında database.password kaydı bulunamadı.'
-    };
-  }
-
-  // 3. Decrypt the password using AES-256-GCM
+  // 2. Iterate through candidate vaults in priority order
   let decryptedPassword = '';
-  try {
-    const rootKeyBuffer = Buffer.from(rootKeyHex, 'hex');
-    const ciphertext = dbSecretRecord.encryptedValue;
-    const parts = ciphertext.split(':');
-    if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
-      return {
-        success: false,
-        error: 'Bilinmeyen veya geçersiz şifreli veri formatı (enc:v1 bekleniyor).'
-      };
+  let successfulSource = '';
+  let lastError = '';
+
+  for (const vaultFile of candidateFiles) {
+    if (!fs.existsSync(vaultFile)) {
+      continue;
     }
 
-    const iv = Buffer.from(parts[2], 'hex');
-    const authTag = Buffer.from(parts[3], 'hex');
-    const encryptedHex = parts[4];
+    let vaultData: any;
+    try {
+      const raw = fs.readFileSync(vaultFile, 'utf8');
+      vaultData = JSON.parse(raw);
+    } catch (err: any) {
+      lastError = `Vault dosyası okunamadı (${vaultFile}): ${err?.message || 'JSON hatası'}`;
+      continue;
+    }
 
-    const decipher = crypto.createDecipheriv('aes-256-gcm', rootKeyBuffer, iv);
-    decipher.setAuthTag(authTag);
-    let dec = decipher.update(encryptedHex, 'hex', 'utf8');
-    dec += decipher.final('utf8');
-    decryptedPassword = dec;
-  } catch (err: any) {
+    const dbSecretRecord = vaultData?.secrets?.['database.password'];
+    if (!dbSecretRecord || !dbSecretRecord.encryptedValue) {
+      lastError = `Vault içinde database.password kaydı bulunamadı (${vaultFile}).`;
+      continue;
+    }
+
+    try {
+      const ciphertext = dbSecretRecord.encryptedValue;
+      const parts = ciphertext.split(':');
+      if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
+        lastError = `Geçersiz şifreli veri formatı (${vaultFile}).`;
+        continue;
+      }
+
+      const iv = Buffer.from(parts[2], 'hex');
+      const authTag = Buffer.from(parts[3], 'hex');
+      const encryptedHex = parts[4];
+
+      const decipher = crypto.createDecipheriv('aes-256-gcm', rootKeyBuffer, iv);
+      decipher.setAuthTag(authTag);
+      let dec = decipher.update(encryptedHex, 'hex', 'utf8');
+      dec += decipher.final('utf8');
+
+      if (dec && dec.trim().length > 0) {
+        decryptedPassword = dec.trim();
+        successfulSource = vaultFile;
+        break; // Successfully decrypted from authoritative candidate
+      }
+    } catch (err: any) {
+      lastError = `Veritabanı parolası çözülemedi (${vaultFile}): ${err?.message || 'Şifre çözme hatası'}`;
+      continue;
+    }
+  }
+
+  if (!decryptedPassword) {
     return {
       success: false,
-      error: `Veritabanı parolası çözülemedi: ${err?.message || 'Şifre çözme hatası'}`
+      error: lastError || 'Hiçbir geçerli Vault kaynağından veritabanı parolası kurtarılamadı.'
     };
   }
 
-  if (!decryptedPassword || decryptedPassword.trim().length === 0) {
-    return {
-      success: false,
-      error: 'Çözülen veritabanı parolası boş.'
-    };
-  }
-
-  // 4. Atomically write to target password file with 0600 mode
+  // 3. Atomically write to target password file with 0600 mode
   const targetDir = path.dirname(targetFile);
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
@@ -115,7 +125,7 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
 
   const tempFile = path.join(targetDir, `.postgres_password.tmp.${crypto.randomBytes(6).toString('hex')}`);
   try {
-    fs.writeFileSync(tempFile, decryptedPassword.trim(), { mode: 0o600, encoding: 'utf8' });
+    fs.writeFileSync(tempFile, decryptedPassword, { mode: 0o600, encoding: 'utf8' });
     fs.chmodSync(tempFile, 0o600);
     fs.renameSync(tempFile, targetFile);
     fs.chmodSync(targetFile, 0o600);
@@ -129,14 +139,38 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
     };
   }
 
-  return { success: true };
+  return { success: true, recoveredFrom: successfulSource };
 }
 
 // CLI Execution Support
 if (process.argv[1] && (process.argv[1].endsWith('migrate-vault-secret.ts') || process.argv[1].endsWith('migrate-vault-secret.cjs') || process.argv[1].endsWith('migrate-vault-secret.js'))) {
-  const result = recoverDatabasePasswordFromVault();
+  const args = process.argv.slice(2);
+  let vaultPath: string | undefined;
+  let keyPath: string | undefined;
+  let targetPath: string | undefined;
+  let candidateList: string[] | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--vault' && args[i + 1]) {
+      vaultPath = args[++i];
+    } else if (args[i] === '--key' && args[i + 1]) {
+      keyPath = args[++i];
+    } else if (args[i] === '--target' && args[i + 1]) {
+      targetPath = args[++i];
+    } else if (args[i] === '--candidates' && args[i + 1]) {
+      candidateList = args[++i].split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  const result = recoverDatabasePasswordFromVault({
+    vaultFilePath: vaultPath,
+    encryptionKeyPath: keyPath,
+    targetPasswordPath: targetPath,
+    candidateVaultPaths: candidateList
+  });
+
   if (result.success) {
-    console.log('✅ [Vault Secret Migration] Veritabanı parolası Vault kasasından başarıyla kurtarıldı ve mühürlendi.');
+    console.log(`✅ [Vault Secret Migration] Veritabanı parolası Vault kasasından başarıyla kurtarıldı (${result.recoveredFrom || 'authoritative vault'}).`);
     process.exit(0);
   } else {
     console.error(`❌ [Vault Secret Migration Hatası]: ${result.error}`);

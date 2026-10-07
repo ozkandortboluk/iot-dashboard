@@ -58,7 +58,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
   --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
-  --update                 En son kodları çeker, konteynerleri yeniden derler ve sıfır kesintiyle günceller
+  --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
   -h, --help               Bu yardım mesajını gösterir
 
 ${CLR_BOLD}ÖRNEKLER:${CLR_RESET}
@@ -162,6 +162,17 @@ fi
 print_banner
 log_info "NexusNode IoT Kurulum Sihirbazı Başlatıldı."
 
+# Controlled Git Update if --update requested
+if [ "$DO_UPDATE" = true ]; then
+  log_step "NexusNode IoT Güncelleme Akışı Başlatılıyor..."
+  if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
+    log_info "Git deposundan en son güncellemeler kontrol ediliyor (git pull)..."
+    git pull --ff-only || log_warn "Git pull tamamlanamadı veya yerel değişiklikler mevcut; mevcut kod tabanıyla devam ediliyor."
+  else
+    log_info "Git ortamı bulunamadı; mevcut kaynak kodlar derlenip güncelleniyor."
+  fi
+fi
+
 # 1. Plugin Pre-Install Hook
 run_setup_hooks "pre-install"
 
@@ -229,7 +240,7 @@ log_success "Docker Compose yapılandırması ve secret bağlamları doğruland�
 
 # Build and start services
 if [ "$DO_UPDATE" = true ]; then
-  log_info "Sıfır kesintili güncelleme uygulanıyor: ${COMPOSE_CMD} up -d --build..."
+  log_info "Konteynerler güncelleniyor ve yeniden derleniyor: ${COMPOSE_CMD} up -d --build..."
 else
   log_info "Konteynerler arka planda başlatılıyor: ${COMPOSE_CMD} up -d --build..."
 fi

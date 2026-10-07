@@ -183,6 +183,12 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('5. Idempotent update: running --init-only or update multiple times preserves all existing secrets', () => {
+    // Ensure initial secrets exist
+    const testKey = 'ccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb';
+    const testPass = 'IdempotentPass_Test_1234567890!';
+    fs.writeFileSync(path.join(secretsDir, 'encryption_key'), testKey, { mode: 0o600 });
+    fs.writeFileSync(path.join(secretsDir, 'postgres_password'), testPass, { mode: 0o600 });
+
     const encKeyBefore = fs.readFileSync(path.join(secretsDir, 'encryption_key'), 'utf8');
     const pgPassBefore = fs.readFileSync(path.join(secretsDir, 'postgres_password'), 'utf8');
 
@@ -247,6 +253,86 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
       fs.unlinkSync(tempKeyFile);
       fs.unlinkSync(tempVaultFile);
       fs.unlinkSync(tempTargetPass);
+    } catch {}
+  });
+
+  it('7. Authoritative app_data volume priority: recovers genuine password from app_data volume over stale host vault', () => {
+    const knownEncryptionKey = 'beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef';
+    const appDataGenuinePass = 'AppData_Authoritative_Password_Real_777!';
+    const hostStalePass = 'Host_Stale_Incorrect_Password_000!';
+
+    const tempKeyFile = path.join(secretsDir, 'test_priority_key');
+    const appDataVaultFile = path.join(dataDir, '.test_app_data_vault.json');
+    const hostVaultFile = path.join(dataDir, '.test_host_stale_vault.json');
+    const targetPassFile = path.join(secretsDir, 'test_target_pass');
+
+    fs.writeFileSync(tempKeyFile, knownEncryptionKey, { mode: 0o600 });
+
+    const rootKeyBuffer = Buffer.from(knownEncryptionKey, 'hex');
+
+    // Helper to encrypt
+    const sealPassword = (pass: string) => {
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', rootKeyBuffer, iv);
+      let enc = cipher.update(pass, 'utf8', 'hex');
+      enc += cipher.final('hex');
+      const tag = cipher.getAuthTag().toString('hex');
+      return `enc:v1:${iv.toString('hex')}:${tag}:${enc}`;
+    };
+
+    // AppData vault (authoritative)
+    fs.writeFileSync(appDataVaultFile, JSON.stringify({
+      version: 1,
+      secrets: {
+        'database.password': {
+          key: 'database.password',
+          encryptedValue: sealPassword(appDataGenuinePass)
+        }
+      }
+    }), { mode: 0o600 });
+
+    // Host vault (stale / outdated)
+    fs.writeFileSync(hostVaultFile, JSON.stringify({
+      version: 1,
+      secrets: {
+        'database.password': {
+          key: 'database.password',
+          encryptedValue: sealPassword(hostStalePass)
+        }
+      }
+    }), { mode: 0o600 });
+
+    // Execute recovery prioritizing app_data vault over host vault
+    const res = recoverDatabasePasswordFromVault({
+      encryptionKeyPath: tempKeyFile,
+      candidateVaultPaths: [appDataVaultFile, hostVaultFile],
+      targetPasswordPath: targetPassFile
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.recoveredFrom).toBe(appDataVaultFile);
+    expect(fs.existsSync(targetPassFile)).toBe(true);
+
+    const writtenPass = fs.readFileSync(targetPassFile, 'utf8').trim();
+    // Must strictly match authoritative app_data password, NOT stale host password
+    expect(writtenPass).toBe(appDataGenuinePass);
+    expect(writtenPass).not.toBe(hostStalePass);
+
+    // Second execution must not mutate or rotate the secret
+    const res2 = recoverDatabasePasswordFromVault({
+      encryptionKeyPath: tempKeyFile,
+      candidateVaultPaths: [appDataVaultFile, hostVaultFile],
+      targetPasswordPath: targetPassFile
+    });
+    expect(res2.success).toBe(true);
+    expect(fs.readFileSync(targetPassFile, 'utf8').trim()).toBe(appDataGenuinePass);
+
+    // Clean up
+    try {
+      fs.unlinkSync(tempKeyFile);
+      fs.unlinkSync(appDataVaultFile);
+      fs.unlinkSync(hostVaultFile);
+      fs.unlinkSync(targetPassFile);
     } catch {}
   });
 });

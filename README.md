@@ -90,7 +90,7 @@ Kurulum tamamlandığında web arayüzünüze doğrudan **`https://iot.sirketim.
 | `--status` | Çalışan tüm servislerin, portların ve Kasa (Vault) root anahtarının sağlık durumunu gösterir. |
 | `--backup` | TimescaleDB veritabanı yedeğini (`pg_dump`), Kasa sırlarını ve ayarları zaman damgalı arşivler. |
 | `--restore <arsiv.tar.gz>` | Alınan afet yedeğini sisteme geri yükler. |
-| `--update` | En son kodları çeker, konteynerleri yeniden derler ve sıfır kesintiyle günceller. |
+| `--update` | Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller. |
 | `-h`, `--help` | Yardım menüsünü ve parametre listesini görüntüler. |
 
 ---
