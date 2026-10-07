@@ -123,4 +123,53 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
+
+  it('7. Fresh install lifecycle: quickInitDocker must resolve password via canonical resolver and keep .db_config.json free of plaintext passwords', async () => {
+    delete process.env.POSTGRES_PASSWORD;
+    delete process.env.DB_PASSWORD;
+
+    const freshBootstrapPass = 'FreshInstallPass_998877665544!';
+    await systemSecretsService.setSecret('database.password', freshBootstrapPass, {
+      category: 'database',
+      label: 'PostgreSQL Password',
+      isSensitive: true,
+      updatedBy: 'bootstrap',
+    });
+
+    // Mock testConnection to succeed
+    const testConnSpy = vi.spyOn(setupService, 'testConnection').mockResolvedValue({
+      success: true,
+      message: 'PostgreSQL bağlantısı başarılı.',
+      timescaleAvailable: true,
+    } as any);
+
+    const initDbSpy = vi.spyOn(setupService, 'initializeDatabase').mockResolvedValue({
+      success: true,
+      message: 'Initialized',
+      migratedTables: ['users', 'devices'],
+    } as any);
+
+    // Call quickInitDocker without passing password argument and without process.env.POSTGRES_PASSWORD
+    const result = await setupService.quickInitDocker();
+    expect(result.success).toBe(true);
+
+    // Verify testConnection received the canonical Vault password
+    expect(testConnSpy).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'timescaledb',
+      user: 'iot_user',
+      password: freshBootstrapPass,
+    }));
+
+    // Verify .db_config.json on disk contains no plaintext password
+    const runtimeConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+    if (fs.existsSync(runtimeConfigPath)) {
+      const savedConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
+      expect(savedConfig.password).toBeUndefined();
+      expect(savedConfig.passwordRef).toBe('vault:database.password');
+      expect(savedConfig.hasPassword).toBe(true);
+    }
+
+    testConnSpy.mockRestore();
+    initDbSpy.mockRestore();
+  });
 });

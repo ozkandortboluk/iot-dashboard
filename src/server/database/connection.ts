@@ -230,11 +230,6 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         password = systemSecretsService.getDatabasePassword();
       } catch {}
     }
-    if ((password === undefined || password === '') && fs.existsSync('/run/secrets/db_password')) {
-      try {
-        password = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
-      } catch {}
-    }
 
     const dbName = process.env.SQL_DB_NAME || process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.SQL_DATABASE || process.env.DB_NAME || 'postgres';
     const port = process.env.SQL_PORT || process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
@@ -282,11 +277,6 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
           if (!resolvedPass) {
             try {
               resolvedPass = systemSecretsService.getDatabasePassword();
-            } catch {}
-          }
-          if (!resolvedPass && fs.existsSync('/run/secrets/db_password')) {
-            try {
-              resolvedPass = fs.readFileSync('/run/secrets/db_password', 'utf8').trim();
             } catch {}
           }
           let targetHost = cfg.host;

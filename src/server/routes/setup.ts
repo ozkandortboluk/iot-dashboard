@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { setupService, type DatabaseConfigPayload } from '../services/setup.service.js';
+import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { systemKeysService } from '../services/systemKeys.service.js';
 import { setSessionCookie } from './auth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
@@ -170,7 +171,7 @@ setupRouter.post('/test-database', requireSetupAuth, async (req: Request, res: R
     port: parseInt(String(port), 10) || 5432,
     database: String(database).trim(),
     user: String(user).trim(),
-    password: password ? String(password) : (setupService.getRuntimeConfig()?.password || process.env.POSTGRES_PASSWORD || ''),
+    password: password ? String(password) : (setupService.getRuntimeConfig()?.password || systemSecretsService.getDatabasePassword() || ''),
     sslMode: sslMode || 'disable',
   };
 

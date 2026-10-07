@@ -1540,7 +1540,7 @@ export class SetupService {
       port: 5432,
       database: 'iot_dashboard',
       user: 'iot_user',
-      password: password || this.runtimeConfig?.password || process.env.POSTGRES_PASSWORD || '',
+      password: password || systemSecretsService.getDatabasePassword() || this.runtimeConfig?.password || '',
       sslMode: 'disable',
     };
 

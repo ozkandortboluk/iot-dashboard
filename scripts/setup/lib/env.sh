@@ -42,16 +42,15 @@ ensure_env_configured() {
   set_env_var "POSTGRES_USER" "iot_user"
   set_env_var "POSTGRES_DB" "iot_dashboard"
 
-  # Database Bootstrap Password for TimescaleDB container initialization only
+  # Database Bootstrap Password:
+  # TimescaleDB cluster bootstrap receives the password strictly via Docker Secret (POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password).
   # Canonical runtime database password is stored securely in Central Security Vault (database.password).
-  # Redundant plaintext POSTGRES_PASSWORD and password-bearing DATABASE_URL are not leaked into .env.
-  if [ -n "$PG_GENERATED_PASS" ]; then
-    set_env_var "POSTGRES_INIT_PASSWORD" "$PG_GENERATED_PASS"
-  fi
+  # No plaintext database passwords or password-bearing DATABASE_URL are ever written to .env.
 
   # Clean up legacy plaintext database password entries from .env if present
   if [ -f "$ENV_FILE" ]; then
     sed -i.bak '/^POSTGRES_PASSWORD=/d' "$ENV_FILE" 2>/dev/null || true
+    sed -i.bak '/^POSTGRES_INIT_PASSWORD=/d' "$ENV_FILE" 2>/dev/null || true
     sed -i.bak '/^DATABASE_URL=.*:[^@]*@/d' "$ENV_FILE" 2>/dev/null || true
     rm -f "${ENV_FILE}.bak"
   fi

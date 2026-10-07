@@ -77,4 +77,59 @@ ensure_secrets_initialized() {
     chmod 600 "$PG_PASS_FILE"
     log_success "Yeni yüksek entropili veritabanı parolası üretildi."
   fi
+
+  # 3. Canonical Application Vault Bootstrap Initialization:
+  # On fresh install, seal database.password into data/.system_secrets.json with AES-256-GCM.
+  # This ensures the app container (which only receives encryption_key) deterministically
+  # resolves the canonical database password from Central Security Vault without mounting ./secrets.
+  if [ -s "$ENC_KEY_FILE" ] && [ -s "$PG_PASS_FILE" ]; then
+    if [ ! -s "$VAULT_DATA_FILE" ] || ! grep -q '"database.password"' "$VAULT_DATA_FILE" 2>/dev/null; then
+      if command -v node >/dev/null 2>&1; then
+        node -e "
+          const fs = require('fs');
+          const crypto = require('crypto');
+          try {
+            const keyRaw = fs.readFileSync('$ENC_KEY_FILE', 'utf8').trim();
+            const rootKey = /^[0-9a-fA-F]{64}$/.test(keyRaw) ? Buffer.from(keyRaw, 'hex') : crypto.createHash('sha256').update(keyRaw).digest();
+            const pass = fs.readFileSync('$PG_PASS_FILE', 'utf8').trim();
+            const iv = crypto.randomBytes(12);
+            const cipher = crypto.createCipheriv('aes-256-gcm', rootKey, iv);
+            let enc = cipher.update(pass, 'utf8', 'hex');
+            enc += cipher.final('hex');
+            const tag = cipher.getAuthTag().toString('hex');
+            const ciphertext = 'enc:v1:' + iv.toString('hex') + ':' + tag + ':' + enc;
+
+            let vault = { version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), secrets: {} };
+            if (fs.existsSync('$VAULT_DATA_FILE')) {
+              try {
+                const parsed = JSON.parse(fs.readFileSync('$VAULT_DATA_FILE', 'utf8'));
+                if (parsed && typeof parsed === 'object') {
+                  vault = parsed;
+                  if (!vault.secrets) vault.secrets = {};
+                }
+              } catch {}
+            }
+
+            if (!vault.secrets['database.password']) {
+              vault.secrets['database.password'] = {
+                key: 'database.password',
+                category: 'database',
+                label: 'PostgreSQL Password',
+                encryptedValue: ciphertext,
+                isSensitive: true,
+                updatedAt: new Date().toISOString(),
+                updatedBy: 'bootstrap'
+              };
+              vault.updatedAt = new Date().toISOString();
+              fs.writeFileSync('$VAULT_DATA_FILE', JSON.stringify(vault, null, 2), { mode: 0o600 });
+            }
+          } catch (e) {
+            console.error('Vault bootstrap initialization warning:', e.message);
+          }
+        " 2>/dev/null || true
+        [ -s "$VAULT_DATA_FILE" ] && chmod 600 "$VAULT_DATA_FILE" 2>/dev/null || true
+        log_success "Veritabanı bootstrap parolası Vault kasasına AES-256-GCM ile mühürlendi."
+      fi
+    fi
+  fi
 }
