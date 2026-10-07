@@ -6,6 +6,7 @@ import { systemKeysService } from '../server/services/systemKeys.service.js';
 import { setupService } from '../server/services/setup.service.js';
 import { resolvePostgresConnectionString } from '../server/database/connection.js';
 import { validateProductionSecurityPolicy } from '../server/utils/startupSecurityPolicy.js';
+import { resetKeyCacheForTesting } from '../server/utils/crypto.js';
 import { db } from '../server/db.js';
 
 describe('Central Security Vault - Canonical Single Source of Truth Suite', () => {
@@ -13,10 +14,13 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    process.env.ENCRYPTION_KEY = 'a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
+    resetKeyCacheForTesting();
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    resetKeyCacheForTesting();
   });
 
   it('1. Database password must be resolved from Central Security Vault as canonical source', async () => {
@@ -171,5 +175,84 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
 
     testConnSpy.mockRestore();
     initDbSpy.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+
+  it('8. Production mode: Vault password overrides conflicting passwords in env vars and customUrl', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    process.env.POSTGRES_PASSWORD = 'insecure_env_password_should_be_ignored';
+    process.env.DB_PASSWORD = 'insecure_db_password_should_be_ignored';
+    process.env.DATABASE_URL = 'postgresql://iot_user:env_url_password@timescaledb:5432/iot_dashboard';
+
+    const vaultCanonicalPassword = 'CanonicalVaultPass_StrictProd_9988!';
+    const getPassSpy = vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue(vaultCanonicalPassword);
+
+    // Case A: Resolving with DATABASE_URL env var
+    const resolvedFromEnv = resolvePostgresConnectionString();
+    expect(resolvedFromEnv).toContain(encodeURIComponent(vaultCanonicalPassword));
+    expect(resolvedFromEnv).not.toContain('insecure_env_password_should_be_ignored');
+    expect(resolvedFromEnv).not.toContain('env_url_password');
+
+    // Case B: Resolving with explicit customUrl containing a conflicting password
+    const customUrl = 'postgresql://admin:conflicting_url_pass@timescaledb:5432/iot_dashboard';
+    const resolvedFromCustom = resolvePostgresConnectionString(customUrl);
+    expect(resolvedFromCustom).toContain(encodeURIComponent(vaultCanonicalPassword));
+    expect(resolvedFromCustom).not.toContain('conflicting_url_pass');
+
+    getPassSpy.mockRestore();
+  });
+
+  it('9. Production mode fail-closed: returns empty string when Vault DB password is missing, refusing plaintext env fallback', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    process.env.POSTGRES_PASSWORD = 'plaintext_env_fallback_pass';
+    process.env.DB_PASSWORD = 'plaintext_env_fallback_pass';
+    process.env.DATABASE_URL = 'postgresql://iot_user:plaintext_url_pass@timescaledb:5432/iot_dashboard';
+    process.env.SQL_HOST = 'timescaledb';
+
+    // Mock getDatabasePassword to return empty string
+    const getPassSpy = vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue('');
+
+    const resolved = resolvePostgresConnectionString();
+    expect(resolved).toBe('');
+
+    const resolvedCustom = resolvePostgresConnectionString('postgresql://iot_user:plaintext_url_pass@timescaledb:5432/iot_dashboard');
+    expect(resolvedCustom).toBe('');
+
+    getPassSpy.mockRestore();
+  });
+
+  it('10. Development mode: preserves environment and URL password fallbacks when Vault password is empty', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.VPS_PRODUCTION;
+    delete process.env.DATABASE_URL;
+    delete process.env.POSTGRES_URL;
+    delete process.env.POSTGRESQL_URL;
+    delete process.env.PG_URL;
+    process.env.SQL_HOST = '127.0.0.1';
+    process.env.SQL_ADMIN_PASSWORD = 'dev_env_password_123';
+
+    // Mock getDatabasePassword to return empty
+    const getPassSpy = vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue('');
+    const getCfgSpy = vi.spyOn(systemSecretsService, 'getDatabaseConfig').mockReturnValue({
+      host: '',
+      port: 5432,
+      database: '',
+      user: '',
+      password: '',
+      sslMode: 'disable',
+      isConfigured: false,
+    });
+
+    const customUrl = 'postgresql://postgres:dev_explicit_pass@127.0.0.1:5432/iot_dashboard';
+    const resolvedCustom = resolvePostgresConnectionString(customUrl);
+    expect(resolvedCustom).toContain('dev_explicit_pass');
+
+    const resolvedEnv = resolvePostgresConnectionString();
+    expect(resolvedEnv).toContain('dev_env_password_123');
+
+    getPassSpy.mockRestore();
+    getCfgSpy.mockRestore();
   });
 });

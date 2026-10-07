@@ -33,7 +33,8 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
     expect(isSshTunnelRequired('postgresql://postgres:pass@timescaledb:5432/db')).toBe(false);
 
     const resolved = resolvePostgresConnectionString('postgresql://postgres:pass@timescaledb:5432/db');
-    expect(resolved).toBe('postgresql://postgres:pass@timescaledb:5432/db');
+    expect(resolved).toContain('@timescaledb:5432/db');
+    expect(resolved).not.toContain('127.0.0.1');
   });
 
   it('2. Local Postgres without SSH tunnel config: isSshTunnelRequired returns false', () => {

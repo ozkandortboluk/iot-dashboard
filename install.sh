@@ -200,7 +200,7 @@ if [ "$INIT_ONLY" = true ]; then
 fi
 
 # 8. Docker Compose Orchestration
-log_step "6. Docker Konteynerleri Derleniyor ve Başlatılıyor..."
+log_step "6. Docker Konteynerleri Doğrulanıyor ve Başlatılıyor..."
 
 # Select compose command
 if docker compose version >/dev/null 2>&1; then
@@ -209,10 +209,31 @@ elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE_CMD="docker-compose"
 else
   log_fatal "Docker Compose bulunamadı. Lütfen Docker Compose eklentisini yükleyiniz."
+  exit 1
 fi
 
+# Verify secrets readiness before starting containers
+if [ ! -s "./secrets/encryption_key" ] || [ ! -s "./secrets/postgres_password" ]; then
+  log_fatal "Kritik Docker secret dosyaları (encryption_key veya postgres_password) eksik! Konteynerler başlatılamaz."
+  exit 1
+fi
+
+# Validate Docker Compose configuration
+log_info "Docker Compose yapılandırması doğrulanıyor (${COMPOSE_CMD} config)..."
+if [ "$IS_ROOT" = false ] && ! groups | grep -q "docker"; then
+  $SUDO_CMD $COMPOSE_CMD config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
+else
+  $COMPOSE_CMD config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
+fi
+log_success "Docker Compose yapılandırması ve secret bağlamları doğrulandı."
+
 # Build and start services
-log_info "Konteynerler arka planda başlatılıyor: ${COMPOSE_CMD} up -d --build..."
+if [ "$DO_UPDATE" = true ]; then
+  log_info "Sıfır kesintili güncelleme uygulanıyor: ${COMPOSE_CMD} up -d --build..."
+else
+  log_info "Konteynerler arka planda başlatılıyor: ${COMPOSE_CMD} up -d --build..."
+fi
+
 if [ "$IS_ROOT" = false ] && ! groups | grep -q "docker"; then
   $SUDO_CMD $COMPOSE_CMD up -d --build
 else
