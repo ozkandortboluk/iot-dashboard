@@ -29,7 +29,11 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
           req.path === '/favicon.ico' ||
           req.path === '/site.webmanifest' ||
           req.path.startsWith('/assets/') ||
-          req.path.startsWith('/public/');
+          req.path.startsWith('/public/') ||
+          req.path.startsWith('/src/') ||
+          req.path.startsWith('/@') ||
+          req.path.startsWith('/node_modules/') ||
+          /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
 
         if (isSystemLogPath) return;
         if (isStaticAsset && res.statusCode < 400) return;
@@ -162,6 +166,17 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
 
   it('7. root / 200 response: systemLogger is NOT called to keep logs clean and free of ping spam', async () => {
     await request(app).get('/');
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('8. vite client and source files: systemLogger is NOT called for 200 responses', async () => {
+    app.get('/@vite/client', (_req, res) => res.status(200).send('// vite'));
+    app.get('/src/App.tsx', (_req, res) => res.status(200).send('export default () => null'));
+
+    await request(app).get('/@vite/client');
+    await request(app).get('/src/App.tsx');
     expect(infoSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();

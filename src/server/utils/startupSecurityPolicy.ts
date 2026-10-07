@@ -1,8 +1,7 @@
 import fs from 'node:fs';
-import crypto from 'node:crypto';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
-import { resetEncryptionKeyCache } from './crypto.js';
+import { masterKeyProvider } from '../services/masterKeyProvider.js';
 import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 /**
@@ -68,9 +67,9 @@ export interface SecurityPolicyValidationResult {
 }
 
 /**
- * Ensures that high-entropy runtime security secrets (ENCRYPTION_KEY, JWT_SECRET, SESSION_SECRET)
- * are bootstrapped when missing or matching insecure sample defaults in local development runtimes only.
- * In production (NODE_ENV=production or VPS_PRODUCTION=true), secrets MUST NOT be auto-generated or modified.
+ * Ensures that the high-entropy runtime Vault master encryption key is preserved across restarts
+ * in local development runtimes without mutating or regenerating existing keys.
+ * In production (NODE_ENV=production or VPS_PRODUCTION=true), secrets MUST NOT be auto-generated.
  */
 export function ensureRuntimeSecuritySecrets(): void {
   const isProd = isProductionVpsEnvironment();
@@ -80,23 +79,9 @@ export function ensureRuntimeSecuritySecrets(): void {
     return;
   }
 
-  // 1. Vault ENCRYPTION_KEY bootstrap (Development, Test, and Cloud Run preview sandbox)
-  const rawEncKey = (process.env.ENCRYPTION_KEY || '').trim();
-  if (!rawEncKey || isDefaultSecret(rawEncKey) || rawEncKey.length < 16) {
-    const generatedVaultKey = crypto.randomBytes(32).toString('hex');
-    process.env.ENCRYPTION_KEY = generatedVaultKey;
-    resetEncryptionKeyCache();
-    console.log('[Security Bootstrap] High-entropy runtime Vault ENCRYPTION_KEY bootstrapped.');
-  }
-
-  // 2. SESSION_SECRET & JWT_SECRET bootstrap (Development, Test, and Cloud Run preview sandbox)
-  const rawJwt = (process.env.JWT_SECRET || process.env.SESSION_SECRET || '').trim();
-  if (!rawJwt || isDefaultSecret(rawJwt) || rawJwt.length < 16) {
-    const generatedJwtSecret = crypto.randomBytes(32).toString('hex');
-    process.env.JWT_SECRET = generatedJwtSecret;
-    process.env.SESSION_SECRET = generatedJwtSecret;
-    console.log('[Security Bootstrap] High-entropy runtime SESSION_SECRET & JWT_SECRET bootstrapped.');
-  }
+  // Delegate strictly to MasterKeyProvider (Single Source of Truth)
+  // MasterKeyProvider checks persistent data/.vault_key first and preserves it across restarts!
+  masterKeyProvider.getKey();
 }
 
 /**
@@ -166,15 +151,23 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
       }
 
       if (!candidateDbPass && !process.env.NO_SECRET_FILES) {
-        const dockerSecretPath = '/run/secrets/db_password';
-        const appSecretPath = 'secrets/db_password';
-        try {
-          if (fs.existsSync(dockerSecretPath)) {
-            candidateDbPass = fs.readFileSync(dockerSecretPath, 'utf8').trim();
-          } else if (fs.existsSync(appSecretPath)) {
-            candidateDbPass = fs.readFileSync(appSecretPath, 'utf8').trim();
-          }
-        } catch {}
+        const candidateSecretPaths = [
+          '/run/secrets/postgres_password',
+          '/run/secrets/db_password',
+          'secrets/postgres_password',
+          'secrets/db_password',
+        ];
+        for (const p of candidateSecretPaths) {
+          try {
+            if (fs.existsSync(p)) {
+              const val = fs.readFileSync(p, 'utf8').trim();
+              if (val) {
+                candidateDbPass = val;
+                break;
+              }
+            }
+          } catch {}
+        }
       }
     } else {
       // 3. Check runtime secret store or vault
@@ -210,6 +203,8 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
   }
 
   // 2. JWT / Session Secret Validation (SEC-13 / OLD-113)
+  // Active session management uses random opaque tokens hashed with SHA-256 in database/memory.
+  // JWT_SECRET is optional. If provided, it must not be a weak or default secret.
   let sessionSecret = (process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
   if (!sessionSecret) {
     try {
@@ -217,7 +212,6 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     } catch {}
   }
   if (!sessionSecret && !process.env.NO_SECRET_FILES) {
-    // Check mounted Docker secrets or dedicated app secrets
     try {
       if (fs.existsSync('/run/secrets/jwt_secret')) {
         sessionSecret = fs.readFileSync('/run/secrets/jwt_secret', 'utf8').trim();
@@ -231,11 +225,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     } catch {}
   }
 
-  if (!sessionSecret || sessionSecret.trim() === '') {
-    errors.push(
-      `[CRITICAL POLICY] Üretim ortamında SESSION_SECRET veya JWT_SECRET tanımlanmamıştır (SEC-13 / OLD-113). .env dosyanıza JWT_SECRET ekleyin veya Docker secrets kullanın.`
-    );
-  } else if (isDefaultSecret(sessionSecret) || sessionSecret.trim().length < 16) {
+  if (sessionSecret && (isDefaultSecret(sessionSecret) || sessionSecret.trim().length < 16)) {
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz oturum/JWT anahtarı kullanımı engellenmiştir (SEC-13 / OLD-113).`
     );

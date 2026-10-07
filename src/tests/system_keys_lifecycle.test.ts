@@ -20,7 +20,12 @@ describe('System Keys Automatic Generation & Preservation Service', () => {
     const result = await systemKeysService.generateMissingKeys();
     expect(result.success).toBe(true);
     expect(result.envSnippet).toContain('JWT_SECRET=');
-    expect(result.envSnippet).toContain('ENCRYPTION_KEY=');
+    expect(result.envSnippet).toContain('ENCRYPTION_KEY');
+    // Security policy: raw master key must NOT be exported in plaintext
+    const rawKey = systemKeysService.resolveEncryptionKey().value;
+    if (rawKey) {
+      expect(result.envSnippet).not.toContain(`ENCRYPTION_KEY=${rawKey}`);
+    }
 
     const updatedStatus = systemKeysService.getKeyStatuses();
     expect(updatedStatus.keys.jwtSecret.isConfigured).toBe(true);

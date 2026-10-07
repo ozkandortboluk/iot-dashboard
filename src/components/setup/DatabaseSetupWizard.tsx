@@ -1033,78 +1033,49 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                     </div>
                   </div>
 
-                  {/* System Security Keys Card */}
+                  {/* Single Master Key Card */}
                   <div className="p-3.5 bg-slate-950/70 rounded-2xl border border-indigo-950/80 space-y-3">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Shield className="w-4 h-4 text-indigo-400" />
-                        <span className="font-bold text-xs text-white">Sistem & Üretim Güvenlik Anahtarları</span>
+                        <span className="font-bold text-xs text-white">Merkezi Sistem Kök Anahtarı (Single Master Key)</span>
                       </div>
-                      {keysStatus?.allConfigured ? (
+                      {keysStatus?.keys?.encryptionKey?.isConfigured ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/60 border border-emerald-800 text-emerald-300">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          Tüm Anahtarlar Hazır
+                          Kasa Kök Anahtarı Hazır
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/60 border border-amber-800 text-amber-300">
                           <AlertTriangle className="w-3 h-3 text-amber-400" />
-                          Eksik Anahtarlar Mevcut
+                          Kök Anahtar Bekleniyor
                         </span>
                       )}
                     </div>
 
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Üretim ortamında oturum güvenliği (<code className="text-indigo-300">JWT_SECRET</code>) ve Kasa şifrelemesi (<code className="text-indigo-300">ENCRYPTION_KEY</code>) zorunludur. Mevcut anahtarlarınız korunur; eksik olanlar güvenle otomatik üretilir.
+                      Platformumuz <strong>Tek Kök Anahtar (Single Root-of-Trust)</strong> mimarisiyle çalışır. Kasa şifrelemesi (<code className="text-indigo-300">ENCRYPTION_KEY</code>) sağlandığında; donanım OTA firmware imzalama anahtarları (Ed25519), veritabanı şifreleri ve oturum güvenliği doğrudan Kasa (Vault) içinde otomatik yönetilir. Harici ek anahtar yapılandırması gerektirmez.
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Oturum / Token İmzası</span>
-                          <span className="font-mono font-bold text-white text-xs">JWT_SECRET</span>
-                        </div>
-                        {keysStatus?.keys?.jwtSecret?.isConfigured ? (
-                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" /> Hazır
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                            <XCircle className="w-3.5 h-3.5" /> Eksik
-                          </span>
-                        )}
+                    <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between text-[11px]">
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Merkezi Kasa Kök Anahtarı (AES-256-GCM)</span>
+                        <span className="font-mono font-bold text-white text-xs">ENCRYPTION_KEY</span>
+                        <span className="text-[10px] text-slate-500 block mt-0.5">
+                          {keysStatus?.keys?.encryptionKey?.source
+                            ? `Kaynak: ${keysStatus.keys.encryptionKey.source === 'docker_secret' ? 'Docker Secret (/run/secrets/encryption_key)' : keysStatus.keys.encryptionKey.source === 'data_file' ? 'Yerel Kasa (data/.vault_key)' : keysStatus.keys.encryptionKey.source}`
+                            : 'Geliştirmede otomatik üretilir; üretimde Docker Secret ile sağlanır.'}
+                        </span>
                       </div>
-
-                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Kasa Şifreleme</span>
-                          <span className="font-mono font-bold text-white text-xs">ENCRYPTION_KEY</span>
-                        </div>
-                        {keysStatus?.keys?.encryptionKey?.isConfigured ? (
-                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" /> Hazır
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                            <XCircle className="w-3.5 h-3.5" /> Eksik
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                        <div>
-                          <span className="text-slate-400 block text-[10px]">Firmware OTA İmzası</span>
-                          <span className="font-mono font-bold text-white text-xs">OTA_SIGNING_KEY</span>
-                        </div>
-                        {keysStatus?.keys?.otaSigningKey?.isConfigured ? (
-                          <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" /> Hazır
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                            <XCircle className="w-3.5 h-3.5" /> Eksik
-                          </span>
-                        )}
-                      </div>
+                      {keysStatus?.keys?.encryptionKey?.isConfigured ? (
+                        <span className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Hazır
+                        </span>
+                      ) : (
+                        <span className="text-amber-400 text-xs font-bold flex items-center gap-1">
+                          <XCircle className="w-3.5 h-3.5" /> Eksik
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -1117,12 +1088,12 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                         {keysLoading ? (
                           <>
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Anahtarlar Doğrulanıyor...</span>
+                            <span>Anahtar Doğrulanıyor...</span>
                           </>
                         ) : (
                           <>
                             <Key className="w-3.5 h-3.5" />
-                            <span>✨ Eksik Güvenlik Anahtarlarını Otomatik Üret</span>
+                            <span>✨ Kök Anahtarı Doğrula & Kasayı Başlat</span>
                           </>
                         )}
                       </button>
@@ -1132,10 +1103,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
                       <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl text-xs space-y-2">
                         <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-[11px]">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>Güvenlik anahtarları başarıyla doğrulandı ve Security Vault kasasına kaydedildi!</span>
+                          <span>Kasa Kök Anahtarı doğrulandı ve Security Vault başarıyla başlatıldı!</span>
                         </div>
                         <p className="text-[10px] text-slate-300">
-                          Mevcut anahtarlarınız korundu. Tüm uygulama anahtarları (JWT, OTA vb.) AES-256-GCM ile şifrelenerek doğrudan Security Vault kasasında saklanır; diskte veya ortam değişkenlerinde düz metin olarak barındırılmaz.
+                          Tüm alt sistem sırları (OTA firmware Ed25519 anahtarı, veritabanı parolaları, oturum belirteçleri) tek kök anahtar korumasıyla doğrudan Vault kasasında güvenle işlenir.
                         </p>
                       </div>
                     )}

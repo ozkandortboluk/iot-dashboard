@@ -76,4 +76,24 @@ describe('System Log Simplification & Deduplication Test Suite', () => {
     expect(hasRepair).toBe(true);
     expect(hasWarn).toBe(true);
   });
+
+  it('4. simplifyExistingLogs removes routine Vite dev script and module noise', () => {
+    systemLogger.clearEvents();
+
+    systemLogger.info('http', '[HTTP 200] GET /@vite/client (27ms)', undefined, 'express_http_observer');
+    systemLogger.info('http', '[HTTP 200] GET /src/main.tsx (35ms)', undefined, 'express_http_observer');
+    systemLogger.info('http', '[HTTP 200] GET /node_modules/.vite/deps/react.js (1ms)', undefined, 'express_http_observer');
+    systemLogger.info('security', 'Yönetici oturum açtı');
+    systemLogger.warn('database', 'Veritabanı sağlık uyarısı: yavaş sorgu');
+
+    const result = systemLogger.simplifyExistingLogs();
+    expect(result.removedCount).toBe(3);
+    expect(result.remainingCount).toBe(2);
+
+    const remaining = systemLogger.getEvents().events;
+    expect(remaining.some(e => e.message.includes('/@vite/client'))).toBe(false);
+    expect(remaining.some(e => e.message.includes('/src/main.tsx'))).toBe(false);
+    expect(remaining.some(e => e.message.includes('Yönetici oturum açtı'))).toBe(true);
+    expect(remaining.some(e => e.message.includes('Veritabanı sağlık uyarısı'))).toBe(true);
+  });
 });

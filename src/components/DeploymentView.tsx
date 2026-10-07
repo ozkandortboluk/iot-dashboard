@@ -115,8 +115,6 @@ export const DeploymentView: React.FC = () => {
       POSTGRES_DB: \${POSTGRES_DB:-iot_dashboard}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-${customDbPassword}}
       DATABASE_URL: \${DATABASE_URL:-}
-      JWT_SECRET: \${JWT_SECRET:-}
-      SESSION_SECRET: \${SESSION_SECRET:-}
     volumes:
       - app_data:/app/data
       - ./secrets:/app/secrets:ro
@@ -183,8 +181,7 @@ PORT=${customAppPort}
 POSTGRES_USER=iot_user
 POSTGRES_PASSWORD=${customDbPassword}
 POSTGRES_DB=iot_dashboard
-ENCRYPTION_KEY= # 64-karakter rastgele hex anahtar
-JWT_SECRET= # 64-karakter rastgele hex secret
+ENCRYPTION_KEY= # 64-karakter rastgele hex anahtar (veya Docker Secret: /run/secrets/encryption_key)
 DATABASE_URL=postgresql://iot_user:${customDbPassword}@timescaledb:5432/iot_dashboard
 TRUST_PROXY=loopback`;
 

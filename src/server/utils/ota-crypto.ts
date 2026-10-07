@@ -81,8 +81,27 @@ export function getEd25519KeyPair(): KeyPair {
   }
 
   // In production runtime, Security Vault is strictly the ONLY canonical source!
-  // Refuse fallback to process.env or plaintext disk files.
+  // In Single-Key architecture, auto-provision an Ed25519 keypair directly inside the Vault if missing.
   if (isProd) {
+    try {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      });
+      systemSecretsService.setSecret('ota.signing_key', privateKey, {
+        category: 'ota',
+        label: 'OTA Imzalama Özel Anahtarı',
+        description: 'Ed25519 firmware paketi imzalama özel anahtarı (Vault Auto-Provisioned)',
+        isSensitive: true,
+      }).catch(() => {});
+      const privKeyObj = crypto.createPrivateKey(privateKey);
+      const pubKeyObj = crypto.createPublicKey(privKeyObj);
+      const publicKeyPem = pubKeyObj.export({ type: 'spki', format: 'pem' }).toString();
+      const publicKeyHex = pubKeyObj.export({ type: 'spki', format: 'der' }).toString('hex');
+      cachedKeyPair = { keyId: activeKeyId, privateKeyPem: privateKey, publicKeyPem, publicKeyHex };
+      return cachedKeyPair;
+    } catch {}
+
     throw new Error('[OTA Crypto] Üretim ortamında OTA imzalama özel anahtarı tanımlanmamış veya Vault kasasında bulunamadı.');
   }
 
@@ -91,6 +110,7 @@ export function getEd25519KeyPair(): KeyPair {
     '/run/secrets/ota_signing_key',
     '/run/secrets/ota_private_key',
     process.env.OTA_SIGNING_PRIVATE_KEY_PATH,
+    path.join(SECRETS_DIR, 'ota_signing_key'),
     path.join(SECRETS_DIR, 'ota_signing_key.pem'),
     path.join(KEYS_DIR, 'ed25519_private.pem'),
   ].filter((p): p is string => Boolean(p));

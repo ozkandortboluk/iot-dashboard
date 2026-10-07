@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
+import { masterKeyProvider } from './masterKeyProvider.js';
 import { resetEncryptionKeyCache } from '../utils/crypto.js';
 import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
@@ -195,66 +196,23 @@ export class SystemKeysService {
 
   /**
    * Resolves current ENCRYPTION_KEY status without mutating anything.
-   * PRODUCTION POLICY: Strictly and exclusively /run/secrets/encryption_key (Docker Secret).
-   * In production, all fallbacks (environment variables, local files, custom paths) are strictly rejected.
+   * Single Source of Truth: strictly delegates to MasterKeyProvider.
    */
   public resolveEncryptionKey(): { value: string; source: 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'; sourcePath?: string } {
-    const isProd = isProductionVpsEnvironment();
-
-    // 1. Docker Secret (/run/secrets/encryption_key)
-    const dockerPath = '/run/secrets/encryption_key';
-    try {
-      if (fs.existsSync(dockerPath)) {
-        const val = fs.readFileSync(dockerPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'docker_secret', sourcePath: dockerPath };
-      }
-    } catch {}
-
-    if (isProd) {
-      // In production, no fallback is permitted: fail-closed!
-      return { value: '', source: 'missing' };
-    }
-
-    // Non-production (development / test / local) fallbacks:
-    // 2. Environment variable
-    const envVal = (process.env.ENCRYPTION_KEY || '').trim();
-    if (envVal && !isWeak(envVal)) {
-      return { value: envVal, source: 'env' };
-    }
-
-    // 3. Custom path env
-    const customPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
-    if (customPath) {
-      try {
-        if (fs.existsSync(customPath)) {
-          const val = fs.readFileSync(customPath, 'utf8').trim();
-          if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: customPath };
-        }
-      } catch {}
-    }
-
-    // 4. Development local files
-    const secretPath = path.join(SECRETS_DIR, 'encryption_key');
-    try {
-      if (fs.existsSync(secretPath)) {
-        const val = fs.readFileSync(secretPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'secrets_file', sourcePath: secretPath };
-      }
-    } catch {}
-
-    const dataPath = path.join(DATA_DIR, '.vault_key');
-    try {
-      if (fs.existsSync(dataPath)) {
-        const val = fs.readFileSync(dataPath, 'utf8').trim();
-        if (val && !isWeak(val)) return { value: val, source: 'data_file', sourcePath: dataPath };
-      }
-    } catch {}
-
-    if (envVal) {
-      return { value: envVal, source: 'env' };
-    }
-
-    return { value: '', source: 'missing' };
+    const status = masterKeyProvider.getStatus();
+    const keyBuf = masterKeyProvider.getKey();
+    const sourceMap: Record<string, 'env' | 'docker_secret' | 'secrets_file' | 'data_file' | 'missing'> = {
+      docker_secret: 'docker_secret',
+      secrets_file: 'secrets_file',
+      data_vault_key: 'data_file',
+      env: 'env',
+      missing: 'missing',
+    };
+    return {
+      value: keyBuf ? keyBuf.toString('hex') : '',
+      source: sourceMap[status.source] || 'missing',
+      sourcePath: status.sourcePath,
+    };
   }
 
   /**
@@ -373,8 +331,8 @@ export class SystemKeysService {
       sourcePath: jwt.sourcePath,
       maskedValue: mask(jwt.value),
       isWeakOrDefault: Boolean(jwt.value && isWeak(jwt.value)),
-      requiredForProduction: true,
-      description: 'Kullanıcı oturumları ve API token imzalama anahtarı (HMAC-SHA256).',
+      requiredForProduction: false,
+      description: 'Geriye dönük uyumluluk anahtarı (Oturumlar SHA-256 hashli opak belirteçlerle yönetilir).',
       keyId: jwtRec?.keyId || (jwt.source === 'vault' ? 'jwt_v1' : undefined),
       version: jwtRec?.version || (jwt.source === 'vault' ? 1 : undefined),
       rotatable: false,
@@ -385,8 +343,8 @@ export class SystemKeysService {
       isConfigured: Boolean(enc.value && !isWeak(enc.value)),
       source: enc.source,
       sourcePath: enc.sourcePath,
-      maskedValue: mask(enc.value),
-      isWeakOrDefault: Boolean(enc.value && isWeak(enc.value)),
+      maskedValue: enc.value ? '(AES-256-GCM Root Key Aktif)' : '',
+      isWeakOrDefault: false,
       requiredForProduction: true,
       description: 'Gizli Kasa (Vault) ve veritabanı parolalarını şifreleme anahtarı (AES-256-GCM).',
       keyId: 'root_master_key',
@@ -408,13 +366,10 @@ export class SystemKeysService {
       rotatable: false,
     };
 
-    let missingCount = 0;
-    if (!jwtItem.isConfigured) missingCount++;
-    if (!encItem.isConfigured) missingCount++;
-    if (!otaItem.isConfigured) missingCount++;
+    const missingCount = !encItem.isConfigured ? 1 : 0;
 
     return {
-      allConfigured: jwtItem.isConfigured && encItem.isConfigured,
+      allConfigured: encItem.isConfigured,
       missingCount,
       keys: {
         jwtSecret: jwtItem,
@@ -523,19 +478,11 @@ export class SystemKeysService {
           savedLocations,
         };
       } else {
-        // Development / Test bootstrap only
-        const generatedEnc = crypto.randomBytes(32).toString('hex');
+        // Development / Test bootstrap: delegate directly to MasterKeyProvider
+        masterKeyProvider.getKey();
         generatedItems.encryptionKey = true;
-        process.env.ENCRYPTION_KEY = generatedEnc;
-
-        const dataFile = path.join(DATA_DIR, '.vault_key');
-        try {
-          fs.writeFileSync(dataFile, generatedEnc, { encoding: 'utf8', mode: 0o600 });
-          savedLocations.push('data/.vault_key');
-        } catch {}
-
-        resetEncryptionKeyCache();
-        systemLogger.info('security', '[SystemKeys] Geliştirme modu: Yeni yerel ENCRYPTION_KEY üretildi ve data/.vault_key dosyasına yazıldı.');
+        savedLocations.push('data/.vault_key');
+        systemLogger.info('security', '[SystemKeys] Geliştirme modu: Yerel ENCRYPTION_KEY MasterKeyProvider tarafından sağlandı.');
       }
     }
 
@@ -617,10 +564,9 @@ export class SystemKeysService {
     }
 
     const activeJwt = this.resolveJwtSecret().value || process.env.JWT_SECRET || '';
-    const activeEnc = this.resolveEncryptionKey().value || process.env.ENCRYPTION_KEY || '';
     const envSnippet = [
-      `JWT_SECRET=${activeJwt}`,
-      `ENCRYPTION_KEY=${activeEnc}`,
+      activeJwt ? `JWT_SECRET=${activeJwt}` : '# JWT_SECRET: (Opaque session tokens used; not required)',
+      '# ENCRYPTION_KEY: Root master key is protected and strictly non-exportable from application runtime.',
     ].join('\n');
 
     return {
@@ -644,10 +590,9 @@ export class SystemKeysService {
   } {
     const statuses = this.getKeyStatuses();
     const activeJwt = this.resolveJwtSecret().value || process.env.JWT_SECRET || '';
-    const activeEnc = this.resolveEncryptionKey().value || process.env.ENCRYPTION_KEY || '';
     const envSnippet = [
-      `JWT_SECRET=${activeJwt}`,
-      `ENCRYPTION_KEY=${activeEnc}`,
+      activeJwt ? `JWT_SECRET=${activeJwt}` : '# JWT_SECRET: (Opaque session tokens used; not required)',
+      '# ENCRYPTION_KEY: Root master key is protected and strictly non-exportable from application runtime.',
     ].join('\n');
 
     return {

@@ -575,6 +575,7 @@ class SystemLoggerService {
     const simplified: SystemEvent[] = [];
     let lastEventKey: string | null = null;
     let lastDbState: string | null = null;
+    const seenMessageTimes = new Map<string, number>();
 
     // Process from oldest to newest to preserve natural chronology during dedup
     const chronological = [...this.inMemoryEvents].reverse();
@@ -599,22 +600,45 @@ class SystemLoggerService {
         }
       }
 
-      // 2. Remove routine HTTP 200 GET / or static page pings
+      // 2. Remove routine HTTP 200 / 304 GET static assets, vite dev scripts, and module bundles
       if (
         evt.category === 'http' &&
         evt.level === 'info' &&
-        (msg.includes('GET / ') || msg.includes('GET / (') || msg.includes('GET /index.html'))
+        (
+          msg.includes('GET / ') ||
+          msg.includes('GET / (') ||
+          msg.includes('GET /index.html') ||
+          msg.includes('GET /@') ||
+          msg.includes('GET /src/') ||
+          msg.includes('GET /node_modules/') ||
+          msg.includes('GET /assets/') ||
+          msg.includes('GET /public/') ||
+          msg.includes('GET /favicon.') ||
+          /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|html)\b/i.test(msg) ||
+          (evt.path && (
+            evt.path.startsWith('/@') ||
+            evt.path.startsWith('/src/') ||
+            evt.path.startsWith('/node_modules/') ||
+            evt.path.startsWith('/assets/') ||
+            /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|html)$/i.test(evt.path)
+          ))
+        )
       ) {
         continue;
       }
 
-      // 3. Deduplicate identical messages in rapid succession
+      // 3. Deduplicate identical messages in rapid succession or within a 10-minute window
       const baseMsg = msg.split(' (Önceki')[0].trim();
       const eventKey = `${evt.level}:${evt.category}:${baseMsg}`;
-      if (eventKey === lastEventKey) {
+      const lastTime = seenMessageTimes.get(eventKey);
+      const currentTime = new Date(evt.timestamp).getTime();
+
+      if (eventKey === lastEventKey || (lastTime && currentTime - lastTime < 10 * 60 * 1000)) {
         continue;
       }
+
       lastEventKey = eventKey;
+      seenMessageTimes.set(eventKey, currentTime);
 
       simplified.push(evt);
     }

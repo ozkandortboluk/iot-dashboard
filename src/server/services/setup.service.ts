@@ -84,7 +84,12 @@ const RUNTIME_SECRET_FILE = path.join(RUNTIME_SECRET_DIR, '.db_config.json');
 const SETUP_TOKEN_FILE = path.join(RUNTIME_SECRET_DIR, '.setup_token');
 
 // Docker secret fallback paths
-const DOCKER_SECRET_PASSWORD_PATH = '/run/secrets/db_password';
+const DOCKER_SECRET_PASSWORD_PATHS = [
+  '/run/secrets/postgres_password',
+  '/run/secrets/db_password',
+  path.resolve(process.cwd(), 'secrets', 'postgres_password'),
+  path.resolve(process.cwd(), 'secrets', 'db_password'),
+];
 const DOCKER_SECRET_DATABASE_URL_PATH = '/run/secrets/database_url';
 const DOCKER_SECRET_SETUP_TOKEN_PATH = '/run/secrets/setup_token';
 
@@ -152,8 +157,18 @@ export class SetupService {
             pass = systemSecretsService.getDatabasePassword();
           }
 
-          if (!pass && fs.existsSync(DOCKER_SECRET_PASSWORD_PATH)) {
-            pass = fs.readFileSync(DOCKER_SECRET_PASSWORD_PATH, 'utf8').trim();
+          if (!pass) {
+            for (const p of DOCKER_SECRET_PASSWORD_PATHS) {
+              try {
+                if (fs.existsSync(p)) {
+                  const val = fs.readFileSync(p, 'utf8').trim();
+                  if (val) {
+                    pass = val;
+                    break;
+                  }
+                }
+              } catch {}
+            }
           }
           if (!pass && !isProdEnv && process.env.POSTGRES_PASSWORD) {
             pass = process.env.POSTGRES_PASSWORD;

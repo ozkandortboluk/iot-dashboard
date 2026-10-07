@@ -21,7 +21,8 @@ perform_backup() {
     docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$DB_DUMP_FILE" 2>/dev/null || true
   fi
 
-  log_info "Kasa anahtarları, disk verileri ve konfigürasyon arşivleniyor..."
+  log_info "Şifreli Kasa (Vault), veriler ve konfigürasyon arşivleniyor..."
+  log_warn "GÜVENLİK SINIRI: Root şifreleme anahtarı (encryption_key) Vault kasası ile aynı düz metin arşive konulmaz! Kök anahtarınızı harici güvenli bir kasada ayrı saklayınız."
   local TARGETS=()
   [ -d "./secrets" ] && TARGETS+=("./secrets")
   [ -d "./data" ] && TARGETS+=("./data")
@@ -33,7 +34,8 @@ perform_backup() {
     return 1
   fi
 
-  tar -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
+  # Strictly exclude root master encryption key from the unencrypted archive
+  tar --exclude='./secrets/encryption_key' --exclude='data/.vault_key' -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
   rm -f "$DB_DUMP_FILE"
 
   local SIZE

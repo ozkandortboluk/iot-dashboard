@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { encryptSecret, decryptSecret, maskSecret, isMaskedSecret, sanitizeLogString as sanitizeLogUtil, getVaultStatus } from '../utils/crypto.js';
 import { systemLogger } from './systemLogger.service.js';
 
@@ -535,14 +536,30 @@ export class SystemSecretsService {
     const fromVault = this.getSecret('database.password');
     if (fromVault) return fromVault;
 
+    // Check Docker secrets & local secret mounts fallback
+    const dockerSecretPaths = [
+      '/run/secrets/db_password',
+      '/run/secrets/postgres_password',
+      path.join(process.cwd(), 'secrets', 'db_password'),
+      path.join(process.cwd(), 'secrets', 'postgres_password'),
+    ];
+    for (const p of dockerSecretPaths) {
+      try {
+        if (fs.existsSync(p)) {
+          const val = fs.readFileSync(p, 'utf8').trim();
+          if (val) return val;
+        }
+      } catch {}
+    }
+
     const isProd = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     if (isProd) {
-      // In production runtime: Security Vault is the SINGLE CANONICAL SOURCE
+      // In production runtime: Security Vault or mounted secret is required
       return '';
     }
 
     // Non-production (development / test) local fallback
-    return (process.env.POSTGRES_PASSWORD || '').trim();
+    return (process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD || '').trim();
   }
 
   public getDatabaseConfig(): {
@@ -651,10 +668,23 @@ export class SystemSecretsService {
     // 1. DB password & connection from legacy Docker secret, .db_config.json, or environment
     if (!this.getSecret('database.password')) {
       let candidate = '';
-      const dockerSecretPath = '/run/secrets/db_password';
-      try {
-        if (fs.existsSync(dockerSecretPath)) candidate = fs.readFileSync(dockerSecretPath, 'utf8').trim();
-      } catch {}
+      const secretPaths = [
+        '/run/secrets/postgres_password',
+        '/run/secrets/db_password',
+        path.join(process.cwd(), 'secrets', 'postgres_password'),
+        path.join(process.cwd(), 'secrets', 'db_password'),
+      ];
+      for (const p of secretPaths) {
+        try {
+          if (fs.existsSync(p)) {
+            const v = fs.readFileSync(p, 'utf8').trim();
+            if (v) {
+              candidate = v;
+              break;
+            }
+          }
+        } catch {}
+      }
 
       const dbConfigPath = path.join(process.cwd(), 'data', '.db_config.json');
       if (!candidate && fs.existsSync(dbConfigPath)) {
@@ -784,10 +814,18 @@ export class SystemSecretsService {
         });
         if (this.getSecret('authentication.jwt_secret') === candidate) {
           migratedKeys.push('authentication.jwt_secret');
+          let scrubbed = false;
           if (legacyFilePath && fs.existsSync(legacyFilePath)) {
-            try { fs.unlinkSync(legacyFilePath); } catch {}
+            try {
+              fs.unlinkSync(legacyFilePath);
+              scrubbed = true;
+            } catch {}
           }
-          systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+          if (scrubbed) {
+            systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+          } else {
+            systemLogger.info('security', '[Migration] JWT secret Vault kasasına aktarıldı ve doğrulandı.');
+          }
         }
       }
     }
@@ -797,6 +835,8 @@ export class SystemSecretsService {
       let candidate = '';
       let legacyFilePath = '';
       const fileCandidates = [
+        '/run/secrets/ota_signing_key',
+        path.join(process.cwd(), 'secrets', 'ota_signing_key'),
         path.join(process.cwd(), 'secrets', 'ota_signing_key.pem'),
         path.join(process.cwd(), 'data', '.ota_signing_key'),
         path.join(process.cwd(), 'uploads', 'keys', 'ed25519_private.pem'),
@@ -805,7 +845,7 @@ export class SystemSecretsService {
         if (fs.existsSync(p)) {
           try {
             const v = fs.readFileSync(p, 'utf8').trim();
-            if (v && v.includes('PRIVATE KEY')) {
+            if (v && (v.includes('PRIVATE KEY') || v.length > 30)) {
               candidate = v;
               legacyFilePath = p;
               break;
@@ -816,6 +856,25 @@ export class SystemSecretsService {
       if (!candidate && process.env.OTA_SIGNING_PRIVATE_KEY) {
         candidate = process.env.OTA_SIGNING_PRIVATE_KEY.trim();
       }
+
+      // Single-Key Architecture: If no external key was provided, automatically generate
+      // and securely seal an Ed25519 keypair inside the Vault!
+      if (!candidate && getVaultStatus().configured) {
+        try {
+          const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
+            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+            publicKeyEncoding: { type: 'spki', format: 'pem' },
+          });
+          candidate = privateKey;
+          try {
+            const secretsDir = path.join(process.cwd(), 'secrets');
+            if (!fs.existsSync(secretsDir)) fs.mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
+            const pubFile = path.join(secretsDir, 'ota_signing_key.pub');
+            fs.writeFileSync(pubFile, publicKey, { encoding: 'utf8', mode: 0o644 });
+          } catch {}
+        } catch {}
+      }
+
       if (candidate) {
         await this.setSecret('ota.signing_key', candidate, {
           category: 'ota',
@@ -825,10 +884,18 @@ export class SystemSecretsService {
         });
         if (this.getSecret('ota.signing_key') === candidate) {
           migratedKeys.push('ota.signing_key');
+          let scrubbed = false;
           if (legacyFilePath && fs.existsSync(legacyFilePath)) {
-            try { fs.unlinkSync(legacyFilePath); } catch {}
+            try {
+              fs.unlinkSync(legacyFilePath);
+              scrubbed = true;
+            } catch {}
           }
-          systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+          if (scrubbed) {
+            systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı, doğrulandı ve eski düz metin dosya temizlendi.');
+          } else {
+            systemLogger.info('security', '[Migration] OTA özel anahtarı Vault kasasına aktarıldı ve doğrulandı.');
+          }
         }
       }
     }

@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import bcrypt from 'bcryptjs';
+import { masterKeyProvider } from '../services/masterKeyProvider.js';
 import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
 export function hashPassword(password: string): string {
@@ -38,144 +37,22 @@ export function verifyAndMigratePassword(password: string, hash: string): { isVa
 // AES-256-GCM SECURE VAULT ENCRYPTION INFRASTRUCTURE
 // ============================================================================
 
-const DOCKER_SECRET_KEY_PATH = '/run/secrets/encryption_key';
-const DEDICATED_SECRETS_KEY_PATH = path.resolve(process.cwd(), 'secrets', 'encryption_key');
-const LOCAL_VAULT_KEY_PATH = path.resolve(process.cwd(), 'data', '.vault_key');
-
-let cachedKeyBuffer: Buffer | null = null;
-let keySourceDescription = 'none';
-
 export function resetEncryptionKeyCache(): void {
-  cachedKeyBuffer = null;
-  keySourceDescription = 'none';
+  masterKeyProvider.resetCache();
 }
 
 /**
- * Resolves the 256-bit (32-byte) AES master key:
- * - PRODUCTION POLICY: STRICTLY AND ONLY /run/secrets/encryption_key (Docker Secret).
- *   All fallbacks (environment variables, local files, custom paths, auto-generation) are rejected.
- *   If /run/secrets/encryption_key is absent or empty in production, returns null (fail-closed).
- * - DEVELOPMENT / TEST / PREVIEW ONLY: allows fallback to local files or temporary bootstrap key.
+ * Resolves the 256-bit (32-byte) AES master key via MasterKeyProvider (Single Source of Truth).
  */
 export function resolveEncryptionKey(): Buffer | null {
-  if (cachedKeyBuffer) {
-    return cachedKeyBuffer;
-  }
-
-  const isProd = isProductionVpsEnvironment();
-
-  if (isProd) {
-    // Single Authoritative Production Policy: Docker Secret (/run/secrets/encryption_key)
-    try {
-      if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
-        const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
-        if (secretRaw) {
-          cachedKeyBuffer = derive32ByteKey(secretRaw);
-          keySourceDescription = 'docker_secret:/run/secrets/encryption_key';
-          return cachedKeyBuffer;
-        }
-      }
-    } catch {}
-
-    // In production, no fallback is permitted: fail-closed!
-    keySourceDescription = 'missing';
-    return null;
-  }
-
-  // Non-production (development / test / local) only:
-  // 1. Docker Secret if mounted
-  try {
-    if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
-      const secretRaw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
-      if (secretRaw) {
-        cachedKeyBuffer = derive32ByteKey(secretRaw);
-        keySourceDescription = 'docker_secret:/run/secrets/encryption_key';
-        return cachedKeyBuffer;
-      }
-    }
-  } catch {}
-
-  // 2. Dedicated development secrets mount (secrets/encryption_key)
-  try {
-    if (fs.existsSync(DEDICATED_SECRETS_KEY_PATH)) {
-      const secretRaw = fs.readFileSync(DEDICATED_SECRETS_KEY_PATH, 'utf8').trim();
-      if (secretRaw) {
-        cachedKeyBuffer = derive32ByteKey(secretRaw);
-        keySourceDescription = 'file:secrets/encryption_key';
-        return cachedKeyBuffer;
-      }
-    }
-  } catch {}
-
-  // 3. Custom path via ENCRYPTION_KEY_PATH or ENCRYPTION_KEY_FILE
-  const keyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
-  if (keyPath) {
-    try {
-      if (fs.existsSync(keyPath)) {
-        const fileRaw = fs.readFileSync(keyPath, 'utf8').trim();
-        if (fileRaw) {
-          cachedKeyBuffer = derive32ByteKey(fileRaw);
-          keySourceDescription = `file:${keyPath}`;
-          return cachedKeyBuffer;
-        }
-      }
-    } catch {}
-  }
-
-  // 4. Development environment variable: process.env.ENCRYPTION_KEY
-  const envKey = (process.env.ENCRYPTION_KEY || '').trim();
-  if (envKey) {
-    cachedKeyBuffer = derive32ByteKey(envKey);
-    keySourceDescription = 'env:ENCRYPTION_KEY';
-    return cachedKeyBuffer;
-  }
-
-  // 5. Standalone protected vault key file (data/.vault_key) for dev / test only
-  try {
-    if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
-      const localRaw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
-      if (localRaw) {
-        cachedKeyBuffer = derive32ByteKey(localRaw);
-        keySourceDescription = 'local_file:data/.vault_key';
-        return cachedKeyBuffer;
-      }
-    }
-  } catch {}
-
-  // 6. Bootstrap a high-entropy 256-bit random key isolated in data/.vault_key (DEVELOPMENT / TEST ONLY)
-  try {
-    const dataDir = path.dirname(LOCAL_VAULT_KEY_PATH);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    }
-    const bootstrapKey = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(LOCAL_VAULT_KEY_PATH, bootstrapKey, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    try {
-      fs.chmodSync(LOCAL_VAULT_KEY_PATH, 0o600);
-    } catch {}
-
-    cachedKeyBuffer = derive32ByteKey(bootstrapKey);
-    keySourceDescription = 'bootstrap_generated:data/.vault_key';
-    return cachedKeyBuffer;
-  } catch (err) {
-    // Ephemeral in-memory fallback for read-only sandboxes in test
-    cachedKeyBuffer = crypto.randomBytes(32);
-    keySourceDescription = 'ephemeral_memory';
-    return cachedKeyBuffer;
-  }
+  return masterKeyProvider.getKey();
 }
 
 /**
  * Derives a strict 32-byte (256-bit) Buffer from a string using SHA-256
  */
 export function derive32ByteKey(raw: string): Buffer {
-  if (/^[a-f0-9]{64}$/i.test(raw)) {
-    return Buffer.from(raw, 'hex');
-  }
-  return crypto.createHash('sha256').update(raw, 'utf8').digest();
+  return masterKeyProvider.derive32ByteKey(raw);
 }
 
 /**
@@ -224,15 +101,14 @@ export function getVaultStatus(): {
   isProduction: boolean;
   message?: string;
 } {
-  const isConfigured = isVaultConfigured();
-  const isProd = isProductionVpsEnvironment();
+  const status = masterKeyProvider.getStatus();
   return {
-    configured: isConfigured,
-    source: keySourceDescription,
-    isProduction: isProd,
-    message: isConfigured
+    configured: status.configured,
+    source: status.source,
+    isProduction: status.isProduction,
+    message: status.configured
       ? 'Secret Vault AES-256-GCM şifreleme anahtarı aktif.'
-      : isProd
+      : status.isProduction
         ? 'Secret Vault yapılandırılmamış: Üretim ortamında /run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.'
         : 'Secret Vault geliştirme modunda yapılandırılmamış.',
   };
@@ -242,8 +118,7 @@ export function getVaultStatus(): {
  * Resets cached key for testing
  */
 export function resetKeyCacheForTesting(): void {
-  cachedKeyBuffer = null;
-  keySourceDescription = 'none';
+  masterKeyProvider.resetCache();
 }
 
 /**

@@ -269,6 +269,27 @@ class LocalDatabase {
   private dbState: DatabaseState = DatabaseState.BOOTSTRAP;
   private stateChangeListeners: Array<(newState: DatabaseState, oldState: DatabaseState) => void> = [];
 
+  public async getUserById(userId: string): Promise<(User & { password_hash?: string }) | null> {
+    if (this.postgresRepo?.isReady()) {
+      try {
+        const record = await this.postgresRepo.getUserWithPassword(userId);
+        if (record) {
+          return {
+            ...record.user,
+            password_hash: record.passwordHash,
+          };
+        }
+      } catch {}
+    }
+    const memUser = (this.data.users || []).find((u: any) => u.id === userId);
+    if (!memUser) return null;
+    const passHash = (this.data.passwords || {})[userId];
+    return {
+      ...memUser,
+      password_hash: passHash || (memUser as any).password_hash,
+    };
+  }
+
   public getDatabaseState(): DatabaseState {
     const isPgConfigured = !!this.getPostgresUrl().trim();
     if (isPgConfigured || process.env.NODE_ENV === 'production') {

@@ -464,7 +464,7 @@ export const SystemSecretsPanel: React.FC = () => {
         >
           <Key className="w-4 h-4" />
           <span>Kritik Sistem Anahtarları & Kasa Durumu</span>
-          {secretsState?.systemKeys && (!secretsState.systemKeys.keys.jwtSecret.inVault || !secretsState.systemKeys.keys.otaSigningKey.inVault) && (
+          {secretsState?.systemKeys && !secretsState.systemKeys.keys.otaSigningKey.inVault && (
             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title="Kasaya aktarılmayı bekleyen mevcut anahtar var" />
           )}
         </button>
@@ -545,7 +545,7 @@ export const SystemSecretsPanel: React.FC = () => {
                     </span>
                   </h4>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                    Üretimdeki aktif sisteminizde mevcut çalışan <strong>JWT oturum anahtarları</strong>, sahadaki ESP32/ESP8266 IoT cihazlarınızın kabul ettiği <strong>Ed25519 firmware imza anahtarları</strong> ve <strong>PostgreSQL veritabanı parolanız</strong> asla silinmez ya da yeniden üretilmez. "Kasaya Güvenle Aktar" işlemi, sisteminizdeki mevcut çalışan anahtarları birebir alarak AES-256-GCM ile şifreler ve Vault kasasına kilitler.
+                    Üretimdeki aktif sisteminizde sahadaki ESP32/ESP8266 IoT cihazlarınızın kabul ettiği <strong>Ed25519 firmware imza anahtarları</strong> ve <strong>PostgreSQL veritabanı parolanız</strong> asla silinmez ya da bozulmaz. <strong>Tek Kök Anahtar (ENCRYPTION_KEY)</strong> mimarisi sayesinde tüm bu sırlar doğrudan Vault kasasında AES-256-GCM ile şifrelenir ve korunur.
                   </p>
                 </div>
               </div>
@@ -660,52 +660,38 @@ export const SystemSecretsPanel: React.FC = () => {
 
             {/* 4 Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card 1: JWT Secret */}
+              {/* Card 1: Session Security Architecture */}
               <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="p-2 bg-blue-500/10 text-blue-500 rounded-xl">
+                      <span className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
                         <Fingerprint className="w-4 h-4" />
                       </span>
                       <div>
-                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">JWT_SECRET / SESSION_SECRET</h5>
+                        <h5 className="text-xs font-bold text-slate-900 dark:text-white">Oturum Güvenliği (Session Tokens)</h5>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <p className="text-[11px] text-slate-500">Kullanıcı Oturumları & API İmzası</p>
-                          {secretsState?.systemKeys?.keys.jwtSecret.keyId && (
-                            <span className="font-mono text-[10px] px-1.5 py-0.2 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded">
-                              {secretsState.systemKeys.keys.jwtSecret.keyId}
-                            </span>
-                          )}
+                          <p className="text-[11px] text-slate-500">SHA-256 Hashli Opak Belirteçler</p>
+                          <span className="font-mono text-[10px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded">
+                            SHA-256
+                          </span>
                         </div>
                       </div>
                     </div>
-                    {secretsState?.systemKeys?.keys.jwtSecret.inVault ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        Kasada Korumada
-                      </span>
-                    ) : secretsState?.systemKeys?.keys.jwtSecret.isConfigured ? (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
-                        <Info className="w-3 h-3" />
-                        Ortam Dosyasından Korunuyor
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        Eksik
-                      </span>
-                    )}
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Otomatik & Güvenli
+                    </span>
                   </div>
                   <div className="mt-3 p-2.5 bg-slate-100 dark:bg-slate-950 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                    <span className="text-slate-400">Maskeli Değer:</span>
-                    <span>{secretsState?.systemKeys?.keys.jwtSecret.maskedValue || '••••••••••••••••'}</span>
+                    <span className="text-slate-400">Belirteç Tipi:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">256-bit Kriptografik Rastgele (Opaque)</span>
                   </div>
                 </div>
 
                 <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-                    🛡️ <strong>Güvence:</strong> Oturum anahtarı Vault kasasında AES-256-GCM ile korunur.
+                    🛡️ <strong>Güvence:</strong> Statik JWT anahtarı gerektirmez. Oturumlar veritabanında SHA-256 hash ile saklanır; anında sonlandırılabilir.
                   </p>
                 </div>
               </div>

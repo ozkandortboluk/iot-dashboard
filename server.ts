@@ -200,7 +200,48 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || '3000', 10);
+function resolveServerPort(): number {
+  // 1. Check CLI args: --port <port> or -p <port> or --port=<port>
+  const portArgIdx = process.argv.findIndex((arg) => arg === '--port' || arg === '-p');
+  if (portArgIdx !== -1 && process.argv[portArgIdx + 1]) {
+    const parsed = parseInt(process.argv[portArgIdx + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  const portEqualArg = process.argv.find((arg) => arg.startsWith('--port='));
+  if (portEqualArg) {
+    const parsed = parseInt(portEqualArg.split('=')[1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+
+  // 2. Check explicit SERVER_PORT or DEFAULT_APP_PORT
+  if (process.env.SERVER_PORT) {
+    const parsed = parseInt(process.env.SERVER_PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const parsed = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+
+  // 3. In Cloud Run / Dev Sandbox, if PORT is 8080 (same as NGINX_PORT),
+  // the applet must NOT listen on 8080 (which is Nginx); it must listen on port 3000!
+  if (process.env.PORT) {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      if (process.env.NGINX_PORT && String(parsed) === String(process.env.NGINX_PORT)) {
+        return 3000;
+      }
+      if (parsed === 8080 && process.env.NODE_ENV !== 'production') {
+        return 3000;
+      }
+      return parsed;
+    }
+  }
+
+  return 3000;
+}
+
+const PORT = resolveServerPort();
 const server = http.createServer(app);
 
 // Global Middleware & Body Parsers
@@ -364,7 +405,11 @@ app.use((req, res, next) => {
       req.path === '/favicon.ico' ||
       req.path === '/site.webmanifest' ||
       req.path.startsWith('/assets/') ||
-      req.path.startsWith('/public/');
+      req.path.startsWith('/public/') ||
+      req.path.startsWith('/src/') ||
+      req.path.startsWith('/@') ||
+      req.path.startsWith('/node_modules/') ||
+      /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
 
     if (isSystemLogPath) return;
     if (isStaticAsset && res.statusCode < 400) return;
@@ -541,7 +586,10 @@ async function setupViteOrStatic() {
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

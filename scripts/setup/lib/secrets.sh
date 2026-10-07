@@ -82,15 +82,26 @@ ensure_secrets_initialized() {
     log_success "Yeni Ed25519 Firmware İmzalama Anahtarı üretildi (${OTA_KEY_FILE})."
   fi
 
-  # 4. TimescaleDB / PostgreSQL Bootstrap Password
+  # 4. TimescaleDB / PostgreSQL Bootstrap Password (/run/secrets/postgres_password and /run/secrets/db_password)
   local PG_PASS_FILE="${SECRETS_DIR}/postgres_password"
+  local DB_PASS_FILE="${SECRETS_DIR}/db_password"
   if [ -s "$PG_PASS_FILE" ]; then
     PG_GENERATED_PASS=$(cat "$PG_PASS_FILE")
+    log_info "Veritabanı bootstrap parolası mevcut [KORUNDU]."
+  elif [ -s "$DB_PASS_FILE" ]; then
+    PG_GENERATED_PASS=$(cat "$DB_PASS_FILE")
+    printf "%s" "$PG_GENERATED_PASS" > "$PG_PASS_FILE"
+    chmod 600 "$PG_PASS_FILE"
     log_info "Veritabanı bootstrap parolası mevcut [KORUNDU]."
   else
     PG_GENERATED_PASS=$(generate_random_hex 24)
     printf "%s" "$PG_GENERATED_PASS" > "$PG_PASS_FILE"
     chmod 600 "$PG_PASS_FILE"
     log_success "Yeni yüksek entropili veritabanı parolası üretildi."
+  fi
+  # Ensure db_password mirror exists for unified compatibility
+  if [ ! -s "$DB_PASS_FILE" ]; then
+    printf "%s" "$PG_GENERATED_PASS" > "$DB_PASS_FILE"
+    chmod 600 "$DB_PASS_FILE"
   fi
 }

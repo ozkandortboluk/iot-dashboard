@@ -25,7 +25,7 @@ import { emailService } from '../services/email.service.js';
 import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
-import { verifyMasterEncryptionKey } from '../utils/crypto.js';
+import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
 
 const startTime = Date.now();
@@ -373,6 +373,7 @@ async function handleFactoryReset(req: AuthenticatedRequest, res: any) {
   try {
     const adminUser = req.user || { id: 'usr_admin', name: 'Sistem Yöneticisi' };
     const {
+      adminPassword,
       encryptionKey,
       confirmText,
       wipeDevices,
@@ -390,20 +391,43 @@ async function handleFactoryReset(req: AuthenticatedRequest, res: any) {
       wipeToUnconfigured,
     } = req.body;
 
-    // 1. Strict Encryption Key Authentication
-    const keyVerification = verifyMasterEncryptionKey(encryptionKey);
-    if (!keyVerification.valid) {
+    // 1. Strict Administrator Re-Authentication
+    // Primary & recommended method: Admin Password verification (never exposing root master key to browser).
+    // Backward-compatible fallback: encryptionKey verification.
+    let isAuthorized = false;
+    let authFailureReason = '';
+
+    if (adminPassword && typeof adminPassword === 'string') {
+      const fullAdmin = await db.getUserById(adminUser.id);
+      const hashToCheck = fullAdmin?.password_hash || (adminUser as any).password_hash;
+      if (hashToCheck && verifyPassword(adminPassword, hashToCheck)) {
+        isAuthorized = true;
+      } else {
+        authFailureReason = 'Girilen yönetici parolası hatalı.';
+      }
+    } else if (encryptionKey && typeof encryptionKey === 'string') {
+      const keyVerification = verifyMasterEncryptionKey(encryptionKey);
+      if (keyVerification.valid) {
+        isAuthorized = true;
+      } else {
+        authFailureReason = keyVerification.reason || 'Geçersiz Kasa Şifreleme Anahtarı.';
+      }
+    } else {
+      authFailureReason = 'Sıfırlama işlemi için yönetici parolanız gereklidir.';
+    }
+
+    if (!isAuthorized) {
       await db.addAuditLog(
         adminUser.id,
         adminUser.name,
-        `Sistem Sıfırlama Denemesi REDDEDİLDİ: ${keyVerification.reason || 'Geçersiz Kasa Şifreleme Anahtarı'}`,
+        `Sistem Sıfırlama Denemesi REDDEDİLDİ: ${authFailureReason}`,
         'high'
       );
-      systemLogger.critical('security', `[FactoryReset] Yetkisiz sıfırlama denemesi: ${keyVerification.reason}`);
+      systemLogger.critical('security', `[FactoryReset] Yetkisiz sıfırlama denemesi: ${authFailureReason}`);
       return res.status(403).json({
         success: false,
-        error: keyVerification.reason || 'Geçersiz Kasa Şifreleme Anahtarı (Encryption Key).',
-        code: 'INVALID_ENCRYPTION_KEY',
+        error: authFailureReason,
+        code: 'UNAUTHORIZED_RESET',
       });
     }
 
@@ -488,21 +512,32 @@ async function handleFactoryReset(req: AuthenticatedRequest, res: any) {
   }
 }
 
-// Admin pre-validation endpoint for checking master encryption key
-systemRouter.post('/system/verify-encryption-key', authenticateUser, requireAdmin, (req: AuthenticatedRequest, res: any) => {
+// Admin pre-validation endpoint for checking administrator password or master encryption key
+systemRouter.post('/system/verify-encryption-key', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: any) => {
   try {
-    const { encryptionKey } = req.body;
-    if (!encryptionKey || typeof encryptionKey !== 'string') {
-      return res.status(400).json({
-        valid: false,
-        reason: 'Lütfen bir şifreleme anahtarı giriniz.',
+    const { adminPassword, encryptionKey } = req.body;
+    if (adminPassword && typeof adminPassword === 'string') {
+      const adminUser = req.user!;
+      const fullAdmin = await db.getUserById(adminUser.id);
+      const hashToCheck = fullAdmin?.password_hash || (adminUser as any).password_hash;
+      const valid = hashToCheck ? verifyPassword(adminPassword, hashToCheck) : false;
+      return res.json({
+        valid,
+        reason: valid ? undefined : 'Girilen yönetici parolası hatalı.',
       });
     }
 
-    const verification = verifyMasterEncryptionKey(encryptionKey);
-    return res.json({
-      valid: verification.valid,
-      reason: verification.reason,
+    if (encryptionKey && typeof encryptionKey === 'string') {
+      const verification = verifyMasterEncryptionKey(encryptionKey);
+      return res.json({
+        valid: verification.valid,
+        reason: verification.reason,
+      });
+    }
+
+    return res.status(400).json({
+      valid: false,
+      reason: 'Lütfen yönetici parolanızı giriniz.',
     });
   } catch (err: any) {
     return res.status(500).json({
