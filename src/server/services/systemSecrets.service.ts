@@ -119,7 +119,6 @@ export interface PublicSystemKeysSummary {
   vaultConfigured: boolean;
   vaultSource: string;
   keys: {
-    jwtSecret: PublicSystemKeyItemSummary;
     encryptionKey: PublicSystemKeyItemSummary;
     otaSigningKey: PublicSystemKeyItemSummary;
   };
@@ -1286,38 +1285,21 @@ export class SystemSecretsService {
       }
     }
 
-    // 5. System Keys & Zero-Loss Vault Status
+    // 5. System Keys & Vault Status (Single Root Key Architecture)
     const vaultStatus = getVaultStatus();
-    const jwtRec = this.getSecretRecord('authentication.jwt_secret') || this.getSecretRecord('jwt_secret');
-    const hasVaultJwt = this.inMemorySecrets.has('authentication.jwt_secret') || this.inMemorySecrets.has('jwt_secret');
-    const rawJwt = this.getSecret('authentication.jwt_secret') || this.getSecret('jwt_secret') || process.env.JWT_SECRET || process.env.SESSION_SECRET || '';
-    const jwtSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultJwt ? 'vault' : rawJwt ? 'environment' : 'missing';
-
     const otaRec = this.getSecretRecord('ota.signing_key') || this.getSecretRecord('ota_signing_key');
     const hasVaultOta = this.inMemorySecrets.has('ota.signing_key') || this.inMemorySecrets.has('ota_signing_key');
-    const rawOta = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key') || process.env.OTA_SIGNING_PRIVATE_KEY || '';
-    const otaSource: 'vault' | 'environment' | 'secrets_file' | 'missing' = hasVaultOta ? 'vault' : rawOta ? 'environment' : 'missing';
+    const rawOta = this.getSecret('ota.signing_key') || this.getSecret('ota_signing_key');
 
     const encKeySource: 'vault' | 'environment' | 'secrets_file' | 'missing' = vaultStatus.configured
       ? (vaultStatus.source.includes('docker') || vaultStatus.source.includes('secrets') ? 'secrets_file' : 'environment')
       : 'missing';
 
     const systemKeysSummary: PublicSystemKeysSummary = {
-      allConfigured: Boolean(vaultStatus.configured && (hasVaultJwt || rawJwt) && (hasVaultOta || rawOta)),
+      allConfigured: vaultStatus.configured,
       vaultConfigured: vaultStatus.configured,
       vaultSource: vaultStatus.source,
       keys: {
-        jwtSecret: {
-          keyName: 'JWT_SECRET',
-          isConfigured: Boolean(rawJwt),
-          source: jwtSource,
-          inVault: hasVaultJwt,
-          maskedValue: rawJwt ? maskSecret(rawJwt) : '(Tanımlanmamış)',
-          description: 'Kullanıcı oturumları ve API tokenları imzalama anahtarı (Oturumlar %100 korunur).',
-          keyId: jwtRec?.keyId || (hasVaultJwt ? 'jwt_v1' : undefined),
-          version: jwtRec?.version || (hasVaultJwt ? 1 : undefined),
-          rotatable: hasVaultJwt,
-        },
         encryptionKey: {
           keyName: 'ENCRYPTION_KEY',
           isConfigured: vaultStatus.configured,
@@ -1330,12 +1312,12 @@ export class SystemSecretsService {
           rotatable: false, // Root key rotated via external secrets re-encryption
         },
         otaSigningKey: {
-          keyName: 'OTA_SIGNING_KEY',
-          isConfigured: Boolean(rawOta),
-          source: otaSource,
+          keyName: 'ota.signing_key',
+          isConfigured: Boolean(hasVaultOta || rawOta),
+          source: hasVaultOta ? 'vault' : 'missing',
           inVault: hasVaultOta,
-          maskedValue: rawOta ? '(Ed25519 Özel Anahtar Mevcut)' : '(Tanımlanmamış)',
-          description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Sahadaki cihazlar %100 korunur).',
+          maskedValue: hasVaultOta ? '(Ed25519 Özel Anahtar Mevcut)' : '(Tanımlanmamış)',
+          description: 'Cihaz firmware (OTA) paketlerini imzalama özel anahtarı (Vault dahili sırrı).',
           keyId: otaRec?.keyId || (hasVaultOta ? 'root_ed25519_v1' : undefined),
           version: otaRec?.version || (hasVaultOta ? 1 : undefined),
           rotatable: hasVaultOta,

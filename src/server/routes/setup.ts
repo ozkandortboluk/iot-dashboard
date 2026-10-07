@@ -337,9 +337,10 @@ setupRouter.post('/create-admin', requireSetupAuth, async (req: Request, res: Re
 
 /**
  * POST /api/setup/reset
- * Resets setup lock and state, generates a fresh setup token.
+ * Resets setup lock and state.
  * Optionally preserves configured DB credentials if preserveConfig is true.
- * Requires the server-side setup token and works even in a locked recovery state.
+ * If setup is completed, strictly requires active Admin session or Recovery Token.
+ * Setup token is never returned in HTTP responses.
  */
 setupRouter.post('/reset', requireSetupAuth, (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
@@ -362,7 +363,8 @@ setupRouter.post('/reset', requireSetupAuth, (req: Request, res: Response) => {
 /**
  * POST /api/setup/resume
  * Recovers an interrupted setup wizard session and ensures locks are cleared if admin is missing.
- * Requires the server-side setup token and works for interrupted setup states.
+ * If setup is completed, strictly requires active Admin session or Recovery Token.
+ * Setup token is never returned in HTTP responses.
  */
 setupRouter.post('/resume', requireSetupAuth, (req: Request, res: Response) => {
   const clientIp = getClientIp(req);

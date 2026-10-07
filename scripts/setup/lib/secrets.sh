@@ -105,7 +105,10 @@ ensure_secrets_initialized() {
           const crypto = require('crypto');
           try {
             const keyRaw = fs.readFileSync('$ENC_KEY_FILE', 'utf8').trim();
-            const rootKey = /^[0-9a-fA-F]{64}$/.test(keyRaw) ? Buffer.from(keyRaw, 'hex') : crypto.createHash('sha256').update(keyRaw).digest();
+            if (!/^[0-9a-fA-F]{64}$/.test(keyRaw)) {
+              throw new Error('Geçersiz ENCRYPTION_KEY: Root key tam 64 hexadecimal karakter olmalıdır.');
+            }
+            const rootKey = Buffer.from(keyRaw, 'hex');
             const pass = fs.readFileSync('$PG_PASS_FILE', 'utf8').trim();
             const iv = crypto.randomBytes(12);
             const cipher = crypto.createCipheriv('aes-256-gcm', rootKey, iv);

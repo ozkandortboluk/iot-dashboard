@@ -57,43 +57,35 @@ function buildPublicSecretsWithRuntimeKeys() {
   const state = systemSecretsService.getPublicSecretsState();
   const runtimeStatuses = systemKeysService.getKeyStatuses();
   const encKey = runtimeStatuses.keys.encryptionKey;
+  const otaRec = systemSecretsService.getSecretRecord('ota.signing_key') || systemSecretsService.getSecretRecord('ota_signing_key');
+  const hasVaultOta = Boolean(systemSecretsService.getSecret('ota.signing_key') || systemSecretsService.getSecret('ota_signing_key'));
+
   state.systemKeys = {
     allConfigured: runtimeStatuses.allConfigured,
     vaultConfigured: encKey.isConfigured,
     vaultSource: encKey.source,
     keys: {
-      jwtSecret: {
-        keyName: 'JWT_SECRET',
-        isConfigured: true,
-        source: 'vault',
-        inVault: true,
-        maskedValue: '(Opaque DB Session Tokens)',
-        description: 'Oturumlar veritabanında SHA-256 hash ile saklanan opak belirteçlerle yönetilir.',
-        keyId: 'opaque_tokens',
-        version: 1,
-        rotatable: false,
-      },
       encryptionKey: {
         keyName: 'ENCRYPTION_KEY',
         isConfigured: encKey.isConfigured,
         source: encKey.source,
         inVault: false,
-        maskedValue: encKey.maskedValue,
+        maskedValue: encKey.maskedValue || '(AES-256-GCM Root Key Aktif)',
         description: encKey.description,
         keyId: encKey.keyId,
         version: encKey.version,
         rotatable: false,
       },
       otaSigningKey: {
-        keyName: 'OTA_SIGNING_KEY',
-        isConfigured: true,
+        keyName: 'ota.signing_key',
+        isConfigured: hasVaultOta,
         source: 'vault',
-        inVault: true,
-        maskedValue: '(Ed25519 Vault Korumalı)',
-        description: 'Firmware imzalama anahtarı Security Vault içinde otomatik yönetilir.',
-        keyId: 'vault_internal',
-        version: 1,
-        rotatable: false,
+        inVault: hasVaultOta,
+        maskedValue: hasVaultOta ? '(Ed25519 Vault Korumalı)' : '(Tanımlanmamış)',
+        description: 'Firmware imzalama anahtarı Security Vault içinde dahili sır olarak yönetilir.',
+        keyId: otaRec?.keyId || 'root_ed25519_v1',
+        version: otaRec?.version || 1,
+        rotatable: hasVaultOta,
       },
     },
   };

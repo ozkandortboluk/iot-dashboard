@@ -86,17 +86,6 @@ interface SystemSecretsState {
     vaultConfigured: boolean;
     vaultSource: string;
     keys: {
-      jwtSecret: {
-        keyName: string;
-        isConfigured: boolean;
-        source: 'vault' | 'environment' | 'secrets_file' | 'missing' | 'docker_secret' | 'env' | 'data_file';
-        inVault: boolean;
-        maskedValue: string;
-        description: string;
-        keyId?: string;
-        version?: number;
-        rotatable?: boolean;
-      };
       encryptionKey: {
         keyName: string;
         isConfigured: boolean;
@@ -528,10 +517,10 @@ export const SystemSecretsPanel: React.FC = () => {
 
       {/* Tab Contents */}
       <div className="p-6">
-        {/* TAB 0: Kritik Sistem Anahtarları & Sıfır Veri Kaybı */}
+        {/* TAB 0: Kritik Sistem Anahtarları & Kasa Güvenliği */}
         {activeTab === 'keys' && (
           <div className="space-y-6">
-            {/* Zero-Loss Banner */}
+            {/* Security Architecture Banner */}
             <div className="p-4 bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-start gap-3">
                 <div className="p-2.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0 mt-0.5">
@@ -539,13 +528,13 @@ export const SystemSecretsPanel: React.FC = () => {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <span>Sıfır Veri Kaybı & Mevcut Anahtarları Koruma Politikası</span>
+                    <span>Veri Bütünlüğü & Güvenli Anahtar Yönetimi</span>
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
-                      Geriye Dönük %100 Uyumlu
+                      Merkezi Kasa Mimarisi
                     </span>
                   </h4>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                    Üretimdeki aktif sisteminizde sahadaki ESP32/ESP8266 IoT cihazlarınızın kabul ettiği <strong>Ed25519 firmware imza anahtarları</strong> ve <strong>PostgreSQL veritabanı parolanız</strong> asla silinmez ya da bozulmaz. <strong>Tek Kök Anahtar (ENCRYPTION_KEY)</strong> mimarisi sayesinde tüm bu sırlar doğrudan Vault kasasında AES-256-GCM ile şifrelenir ve korunur.
+                    Üretimdeki aktif sisteminizde sahadaki ESP32/ESP8266 IoT cihazlarınızın kabul ettiği <strong>Ed25519 firmware imza anahtarları</strong> ve <strong>PostgreSQL veritabanı parolanız</strong> güvenle korunur. <strong>Tek Kök Anahtar (ENCRYPTION_KEY)</strong> mimarisi sayesinde tüm bu sırlar doğrudan Vault kasasında AES-256-GCM ile şifrelenir ve korunur.
                   </p>
                 </div>
               </div>
