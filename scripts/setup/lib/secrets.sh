@@ -19,6 +19,42 @@ generate_random_hex() {
   fi
 }
 
+resolve_app_data_volume() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local resolved_vol=""
+
+  # 1. Primary: inspect existing nexus_app container mount for /app/data
+  if docker inspect nexus_app >/dev/null 2>&1; then
+    resolved_vol=$(docker inspect nexus_app --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}{{end}}' 2>/dev/null || true)
+    if [ -n "$resolved_vol" ]; then
+      echo "$resolved_vol"
+      return 0
+    fi
+  fi
+
+  # 2. Secondary: resolve exact volume for this compose project
+  local project_name="${COMPOSE_PROJECT_NAME:-}"
+  if [ -z "$project_name" ]; then
+    project_name=$(basename "$(pwd)" | tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
+  fi
+
+  local project_vol="${project_name}_app_data"
+  if docker volume inspect "$project_vol" >/dev/null 2>&1; then
+    echo "$project_vol"
+    return 0
+  fi
+
+  if docker volume inspect "app_data" >/dev/null 2>&1; then
+    echo "app_data"
+    return 0
+  fi
+
+  return 1
+}
+
 detect_existing_installation() {
   local SECRETS_DIR="./secrets"
   local DATA_DIR="./data"
@@ -32,15 +68,16 @@ detect_existing_installation() {
     return 0
   fi
 
-  # 3. Check Docker volumes and containers
+  # 3. Check Docker volumes and containers specific to NexusNode
   if command -v docker >/dev/null 2>&1; then
-    if docker volume ls -q 2>/dev/null | grep -qE '(^|_)timescaledb_data$'; then
+    if resolve_app_data_volume >/dev/null 2>&1; then
       return 0
     fi
-    if docker volume ls -q 2>/dev/null | grep -qE '(^|_)app_data$'; then
+    local project_name="${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)" | tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')}"
+    if docker volume inspect "${project_name}_timescaledb_data" >/dev/null 2>&1 || docker volume inspect "timescaledb_data" >/dev/null 2>&1; then
       return 0
     fi
-    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qE '^nexus_(timescaledb|app)$'; then
+    if docker inspect nexus_timescaledb >/dev/null 2>&1 || docker inspect nexus_app >/dev/null 2>&1; then
       return 0
     fi
   fi
@@ -73,7 +110,7 @@ ensure_secrets_initialized() {
   # --------------------------------------------------------------------------
   # 1. Root Encryption Key (AES-256-GCM Vault Root: /run/secrets/encryption_key)
   # --------------------------------------------------------------------------
-  if [ ! -s "$ENC_KEY_FILE" ] && [ "$IS_EXISTING" = true ] && ([ -s "$VAULT_DATA_FILE" ] || (command -v docker >/dev/null 2>&1 && docker volume ls -q 2>/dev/null | grep -qE '(^|_)app_data$')); then
+  if [ ! -s "$ENC_KEY_FILE" ] && [ "$IS_EXISTING" = true ] && ([ -s "$VAULT_DATA_FILE" ] || (resolve_app_data_volume >/dev/null 2>&1)); then
     echo "" >&2
     echo "==========================================================================================" >&2
     echo "❌ [KRİTİK GÜVENLİK HATASI] Restore Edilmiş Güvenlik Kasası / Mevcut Sistem Var Ama ENCRYPTION_KEY Yok!" >&2
@@ -114,16 +151,14 @@ ensure_secrets_initialized() {
   # 2. TimescaleDB / PostgreSQL Bootstrap Password (/run/secrets/postgres_password)
   # --------------------------------------------------------------------------
   local TEMP_APP_DATA_VAULT=""
-  if command -v docker >/dev/null 2>&1; then
-    local APP_DATA_VOL
-    APP_DATA_VOL=$(docker volume ls -q 2>/dev/null | grep -E '(^|_)app_data$' | head -n1 || true)
-    if [ -n "$APP_DATA_VOL" ]; then
-      TEMP_APP_DATA_VAULT=$(mktemp 2>/dev/null || echo "/tmp/.app_data_vault_$$.json")
-      docker run --rm -v "${APP_DATA_VOL}:/vdata:ro" -v "$(dirname "$TEMP_APP_DATA_VAULT"):/tmpout" alpine:latest sh -c "if [ -s /vdata/.system_secrets.json ]; then cp /vdata/.system_secrets.json /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); chmod 600 /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); else rm -f /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); fi" 2>/dev/null || rm -f "$TEMP_APP_DATA_VAULT"
-      if [ ! -s "$TEMP_APP_DATA_VAULT" ]; then
-        rm -f "$TEMP_APP_DATA_VAULT"
-        TEMP_APP_DATA_VAULT=""
-      fi
+  local APP_DATA_VOL
+  APP_DATA_VOL=$(resolve_app_data_volume 2>/dev/null || true)
+  if [ -n "$APP_DATA_VOL" ]; then
+    TEMP_APP_DATA_VAULT=$(mktemp 2>/dev/null || echo "/tmp/.app_data_vault_$$.json")
+    docker run --rm -v "${APP_DATA_VOL}:/vdata:ro" -v "$(dirname "$TEMP_APP_DATA_VAULT"):/tmpout" alpine:latest sh -c "if [ -s /vdata/.system_secrets.json ]; then cp /vdata/.system_secrets.json /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); chmod 600 /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); else rm -f /tmpout/$(basename "$TEMP_APP_DATA_VAULT"); fi" 2>/dev/null || rm -f "$TEMP_APP_DATA_VAULT"
+    if [ ! -s "$TEMP_APP_DATA_VAULT" ]; then
+      rm -f "$TEMP_APP_DATA_VAULT"
+      TEMP_APP_DATA_VAULT=""
     fi
   fi
 
@@ -310,9 +345,9 @@ ensure_secrets_initialized() {
     fi
 
     # For FRESH INSTALL ONLY: Seed empty app_data volume if volume exists without a vault
-    if [ "$IS_EXISTING" = false ] && [ -s "$VAULT_DATA_FILE" ] && command -v docker >/dev/null 2>&1; then
+    if [ "$IS_EXISTING" = false ] && [ -s "$VAULT_DATA_FILE" ]; then
       local APP_DATA_VOL
-      APP_DATA_VOL=$(docker volume ls -q 2>/dev/null | grep -E '(^|_)app_data$' | head -n1 || true)
+      APP_DATA_VOL=$(resolve_app_data_volume 2>/dev/null || true)
       if [ -n "$APP_DATA_VOL" ]; then
         docker run --rm -v "${APP_DATA_VOL}:/vdata" -v "$(pwd)/data:/hostdata:ro" alpine:latest sh -c "if [ ! -s /vdata/.system_secrets.json ]; then cp /hostdata/.system_secrets.json /vdata/.system_secrets.json; chmod 600 /vdata/.system_secrets.json; fi" 2>/dev/null || true
       fi

@@ -335,4 +335,70 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
       fs.unlinkSync(targetPassFile);
     } catch {}
   });
+
+  it('8. Update re-exec flow: install.sh --update invokes early self-update hook and avoids re-exec loop', () => {
+    // When _NEXUS_UPDATE_RELOADED=1 is set, it executes the main flow without attempting to re-exec
+    const output = execSync(`_NEXUS_UPDATE_RELOADED=1 bash ${installScriptPath} --init-only --update --quick`, {
+      cwd: rootDir,
+      encoding: 'utf-8'
+    });
+    expect(output).toMatch(/NexusNode IoT Güncelleme ve Dağıtım Akışı Başlatılıyor/i);
+    expect(output).toMatch(/Tüm secretlar, \.env ve dizinler başarıyla hazırlandı/i);
+  });
+
+  it('9. Precise volume scoping: resolve_app_data_volume isolates NexusNode volume and rejects foreign project volumes', () => {
+    // Test the bash function resolve_app_data_volume using a standalone mock script
+    const mockBashScript = `
+      source ./scripts/setup/lib/secrets.sh
+      
+      # Mock docker command with simulated containers & volumes
+      docker() {
+        if [ "$1" = "inspect" ] && [ "$2" = "nexus_app" ]; then
+          echo "/var/lib/docker/volumes/nexusnode_iot_app_data/_data"
+          return 0
+        elif [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then
+          if [ "$3" = "foreign_project_app_data" ]; then
+            return 0
+          elif [ "$3" = "test_compose_app_data" ]; then
+            return 0
+          fi
+          return 1
+        fi
+        return 1
+      }
+      
+      # 1. With nexus_app existing
+      vol=$(resolve_app_data_volume)
+      echo "RESOLVED_CONTAINER_VOL: $vol"
+      
+      # 2. Without nexus_app, with compose project name
+      docker() {
+        if [ "$1" = "inspect" ] && [ "$2" = "nexus_app" ]; then
+          return 1
+        elif [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then
+          if [ "$3" = "foreign_project_app_data" ]; then
+            return 0
+          elif [ "$3" = "test_compose_app_data" ]; then
+            return 0
+          fi
+          return 1
+        fi
+        return 1
+      }
+      COMPOSE_PROJECT_NAME="test_compose"
+      vol2=$(resolve_app_data_volume)
+      echo "RESOLVED_COMPOSE_VOL: $vol2"
+    `;
+
+    const tempTestSh = path.join(rootDir, '.test_vol_scope.sh');
+    fs.writeFileSync(tempTestSh, mockBashScript, { mode: 0o755 });
+
+    try {
+      const output = execSync(`bash ${tempTestSh}`, { cwd: rootDir, encoding: 'utf-8' });
+      expect(output).toContain('RESOLVED_COMPOSE_VOL: test_compose_app_data');
+      expect(output).not.toContain('foreign_project_app_data');
+    } finally {
+      if (fs.existsSync(tempTestSh)) fs.unlinkSync(tempTestSh);
+    }
+  });
 });

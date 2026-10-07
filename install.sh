@@ -8,6 +8,24 @@ set -e
 # Change directory to project root
 cd "$(dirname "$0")" || exit 1
 
+# ------------------------------------------------------------------------------
+# Early Git Self-Update Hook before sourcing libraries
+# Ensures that on './install.sh --update', any newly pulled setup scripts and libraries
+# are sourced and executed in the very same run, preventing stale in-memory code.
+# ------------------------------------------------------------------------------
+if [[ " $* " =~ [[:space:]]--update[[:space:]] ]] && [ "${_NEXUS_UPDATE_RELOADED:-0}" != "1" ]; then
+  if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
+    echo "[NexusNode Update] Git deposundan güncellemeler kontrol ediliyor (git pull)..."
+    if git pull --ff-only 2>/dev/null; then
+      echo "[NexusNode Update] Kod tabanı başarıyla güncellendi. Yeni kodlarla yükleyici yeniden başlatılıyor..."
+      export _NEXUS_UPDATE_RELOADED=1
+      exec "$0" "$@"
+    else
+      echo "[NexusNode Update] Git pull tamamlanamadı veya yerel değişiklikler mevcut; mevcut kod tabanıyla devam ediliyor."
+    fi
+  fi
+fi
+
 # Source Helper Libraries
 SCRIPT_DIR="./scripts/setup/lib"
 # shellcheck disable=SC1091
@@ -162,15 +180,8 @@ fi
 print_banner
 log_info "NexusNode IoT Kurulum Sihirbazı Başlatıldı."
 
-# Controlled Git Update if --update requested
 if [ "$DO_UPDATE" = true ]; then
-  log_step "NexusNode IoT Güncelleme Akışı Başlatılıyor..."
-  if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-    log_info "Git deposundan en son güncellemeler kontrol ediliyor (git pull)..."
-    git pull --ff-only || log_warn "Git pull tamamlanamadı veya yerel değişiklikler mevcut; mevcut kod tabanıyla devam ediliyor."
-  else
-    log_info "Git ortamı bulunamadı; mevcut kaynak kodlar derlenip güncelleniyor."
-  fi
+  log_step "NexusNode IoT Güncelleme ve Dağıtım Akışı Başlatılıyor..."
 fi
 
 # 1. Plugin Pre-Install Hook
