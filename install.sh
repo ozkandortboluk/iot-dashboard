@@ -266,9 +266,8 @@ ${CLR_BOLD}🌐 Web Arayüzü Erişim Adresi:${CLR_RESET}
    ${CLR_CYAN}${CLR_BOLD}${ACCESS_URL}${CLR_RESET} (veya yerel: http://localhost)
 
 ${CLR_BOLD}🔐 Güvenlik Mimarisi & Kasa Durumu:${CLR_RESET}
-   - Vault Root Anahtarı: ${CLR_GREEN}secrets/encryption_key (Docker Secrets Koruma Altında)${CLR_RESET}
-   - JWT & Oturum İmzası: ${CLR_GREEN}secrets/jwt_secret (Kriptografik 256-bit)${CLR_RESET}
-   - OTA Firmware İmza:   ${CLR_GREEN}secrets/ota_signing_key (Ed25519 Eliptik Eğri)${CLR_RESET}
+   - Vault Root Anahtarı: ${CLR_GREEN}secrets/encryption_key (Docker Secret: /run/secrets/encryption_key)${CLR_RESET}
+   - Güvenlik Kasası:     ${CLR_GREEN}Security Vault (AES-256-GCM - Tüm hassas veriler kasa içinde)${CLR_RESET}
    - Veritabanı:          ${CLR_GREEN}TimescaleDB 2.30.1 / PostgreSQL 16 (İzole Ağ)${CLR_RESET}
 
 ${CLR_BOLD}⚡ Faydalı Yönetim Komutları:${CLR_RESET}

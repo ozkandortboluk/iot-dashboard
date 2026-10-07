@@ -202,36 +202,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     }
   }
 
-  // 2. JWT / Session Secret Validation (SEC-13 / OLD-113)
-  // Active session management uses random opaque tokens hashed with SHA-256 in database/memory.
-  // JWT_SECRET is optional. If provided, it must not be a weak or default secret.
-  let sessionSecret = (process.env.SESSION_SECRET || process.env.JWT_SECRET || '').trim();
-  if (!sessionSecret) {
-    try {
-      sessionSecret = (systemSecretsService.getJwtSecret() || '').trim();
-    } catch {}
-  }
-  if (!sessionSecret && !process.env.NO_SECRET_FILES) {
-    try {
-      if (fs.existsSync('/run/secrets/jwt_secret')) {
-        sessionSecret = fs.readFileSync('/run/secrets/jwt_secret', 'utf8').trim();
-      } else if (fs.existsSync('secrets/jwt_secret')) {
-        sessionSecret = fs.readFileSync('secrets/jwt_secret', 'utf8').trim();
-      } else if (fs.existsSync('/run/secrets/session_secret')) {
-        sessionSecret = fs.readFileSync('/run/secrets/session_secret', 'utf8').trim();
-      } else if (fs.existsSync('secrets/session_secret')) {
-        sessionSecret = fs.readFileSync('secrets/session_secret', 'utf8').trim();
-      }
-    } catch {}
-  }
-
-  if (sessionSecret && (isDefaultSecret(sessionSecret) || sessionSecret.trim().length < 16)) {
-    errors.push(
-      `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz oturum/JWT anahtarı kullanımı engellenmiştir (SEC-13 / OLD-113).`
-    );
-  }
-
-  // 3. Vault Encryption Key Validation (Single Production Policy: /run/secrets/encryption_key)
+  // 2. Vault Encryption Key Validation (Single Production Policy: /run/secrets/encryption_key)
   let encKey = '';
   try {
     if (fs.existsSync('/run/secrets/encryption_key')) {
@@ -246,7 +217,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında Vault root encryption key (/run/secrets/encryption_key) bulunamadı (SEC-13 / OLD-115). Uygulama fail-closed olarak durduruldu.`
     );
-  } else if (isDefaultSecret(encKey) || (encKey.length !== 64 && encKey.length < 32)) {
+  } else if (isDefaultSecret(encKey) || !/^[0-9a-fA-F]{64}$/.test(encKey)) {
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında /run/secrets/encryption_key içindeki root key yetersiz entropiye sahip veya varsayılan değer içeriyor (SEC-13 / OLD-115). 256-bit (64 hex karakter) olmalıdır.`
     );

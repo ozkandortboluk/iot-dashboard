@@ -51,17 +51,16 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     expect(errorText).toContain('OLD-112');
   });
 
-  it('4. Rejects startup in production when default JWT secret is set (OLD-113)', () => {
+  it('4. Confirms authentication does not require JWT_SECRET and relies on opaque database session tokens', () => {
     process.env.NODE_ENV = 'production';
-    process.env.JWT_SECRET = 'jwt_secret';
+    delete process.env.JWT_SECRET;
+    delete process.env.SESSION_SECRET;
     process.env.POSTGRES_PASSWORD = 'SuperSecureProductionPass_2026!';
     process.env.ENCRYPTION_KEY = 'a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
 
     const result = validateProductionSecurityPolicy();
-    expect(result.valid).toBe(false);
-    const errorText = result.errors.join(' ');
-    expect(errorText).not.toContain('jwt_secret');
-    expect(errorText).toContain('OLD-113');
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
   it('5. Rejects startup in production when default ENCRYPTION_KEY is used (OLD-115)', () => {
@@ -105,7 +104,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     expect(result.errors.join(' ')).toContain('SEC-12');
   });
 
-  it('8. Safely allows omitted JWT secret (opaque tokens used), but rejects when provided and too short (SEC-13)', () => {
+  it('8. Safely allows production startup without JWT secret using opaque session tokens', () => {
     process.env.NODE_ENV = 'production';
     process.env.NO_SECRET_FILES = 'true';
     process.env.POSTGRES_PASSWORD = 'StrongUniquePass_987654321!';
@@ -116,13 +115,7 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
     // Omitted JWT secret is allowed because authentication uses opaque SHA-256 session tokens
     const result = validateProductionSecurityPolicy();
     expect(result.valid).toBe(true);
-
-    // When explicitly provided, too short (< 16 chars) must be rejected
-    process.env.JWT_SECRET = 'short_secret';
-    delete process.env.SESSION_SECRET;
-    const shortResult = validateProductionSecurityPolicy();
-    expect(shortResult.valid).toBe(false);
-    expect(shortResult.errors.join(' ')).toContain('SEC-13');
+    expect(result.errors).toHaveLength(0);
   });
 
   it('9. Rejects startup in production when ENCRYPTION_KEY is missing or too short (SEC-13)', () => {

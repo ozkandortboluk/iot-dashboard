@@ -79,25 +79,17 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     expect(fs.existsSync(secretsDir)).toBe(true);
 
     const encKeyPath = path.join(secretsDir, 'encryption_key');
-    const jwtKeyPath = path.join(secretsDir, 'jwt_secret');
-    const otaKeyPath = path.join(secretsDir, 'ota_signing_key');
     const pgPassPath = path.join(secretsDir, 'postgres_password');
 
     expect(fs.existsSync(encKeyPath)).toBe(true);
-    expect(fs.existsSync(jwtKeyPath)).toBe(true);
-    expect(fs.existsSync(otaKeyPath)).toBe(true);
     expect(fs.existsSync(pgPassPath)).toBe(true);
 
     const encKey = fs.readFileSync(encKeyPath, 'utf-8').trim();
-    const jwtKey = fs.readFileSync(jwtKeyPath, 'utf-8').trim();
     const pgPass = fs.readFileSync(pgPassPath, 'utf-8').trim();
 
-    // 256-bit AES hex key has 64 hex characters
+    // 256-bit AES hex key has 64 hex characters (32-byte cryptographic random)
     expect(encKey.length).toBe(64);
     expect(/^[0-9a-fA-F]{64}$/.test(encKey)).toBe(true);
-
-    // JWT key has 64 hex characters
-    expect(jwtKey.length).toBe(64);
 
     // Postgres password has high entropy
     expect(pgPass.length).toBeGreaterThanOrEqual(24);

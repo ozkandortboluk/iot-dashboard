@@ -43,9 +43,9 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     const resolved = systemSecretsService.getJwtSecret();
     expect(resolved).toBe(testJwt);
 
-    const keyStatus = systemKeysService.resolveJwtSecret();
-    expect(keyStatus.source).toBe('vault');
-    expect(keyStatus.value).toBe(testJwt);
+    const legacyStatus = systemKeysService.resolveLegacyJwtSecret();
+    expect(legacyStatus.source).toBe('vault');
+    expect(legacyStatus.value).toBe(testJwt);
   });
 
   it('3. OTA private key must be resolved from Central Security Vault as canonical source', async () => {
@@ -58,10 +58,6 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
 
     const resolved = systemSecretsService.getOtaSigningKey();
     expect(resolved).toBe(testOta);
-
-    const keyStatus = systemKeysService.resolveOtaSigningKey();
-    expect(keyStatus.source).toBe('vault');
-    expect(keyStatus.value).toBe(testOta);
   });
 
   it('4. resolvePostgresConnectionString must inject password from Central Security Vault if missing in connection string', async () => {
