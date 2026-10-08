@@ -401,4 +401,77 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
       if (fs.existsSync(tempTestSh)) fs.unlinkSync(tempTestSh);
     }
   });
+
+  it('10. Fail-closed on corrupted/un-decryptable app_data vault: does NOT fall back to stale host vault and does not generate postgres_password', () => {
+    const knownEncryptionKey = 'cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe';
+    const wrongKey = '1111111111111111111111111111111111111111111111111111111111111111';
+    const hostStalePass = 'Stale_Host_Fallback_Should_Never_Be_Used_999!';
+
+    const tempKeyFile = path.join(secretsDir, 'test_failclosed_key');
+    const appDataVaultFile = path.join(dataDir, '.test_app_data_corrupt_vault.json');
+    const hostVaultFile = path.join(dataDir, '.test_host_valid_vault.json');
+    const targetPassFile = path.join(secretsDir, 'test_target_failclosed_pass');
+
+    fs.writeFileSync(tempKeyFile, knownEncryptionKey, { mode: 0o600 });
+
+    // Encrypt host password with valid key
+    const validRootKeyBuffer = Buffer.from(knownEncryptionKey, 'hex');
+    const iv1 = crypto.randomBytes(12);
+    const cipher1 = crypto.createCipheriv('aes-256-gcm', validRootKeyBuffer, iv1);
+    let enc1 = cipher1.update(hostStalePass, 'utf8', 'hex');
+    enc1 += cipher1.final('hex');
+    const tag1 = cipher1.getAuthTag().toString('hex');
+    const hostCiphertext = `enc:v1:${iv1.toString('hex')}:${tag1}:${enc1}`;
+
+    fs.writeFileSync(hostVaultFile, JSON.stringify({
+      version: 1,
+      secrets: {
+        'database.password': {
+          key: 'database.password',
+          encryptedValue: hostCiphertext
+        }
+      }
+    }), { mode: 0o600 });
+
+    // Encrypt app_data password with a DIFFERENT (wrong) key so it cannot be decrypted with knownEncryptionKey
+    const wrongKeyBuffer = Buffer.from(wrongKey, 'hex');
+    const iv2 = crypto.randomBytes(12);
+    const cipher2 = crypto.createCipheriv('aes-256-gcm', wrongKeyBuffer, iv2);
+    let enc2 = cipher2.update('AppData_Password_With_Different_Key', 'utf8', 'hex');
+    enc2 += cipher2.final('hex');
+    const tag2 = cipher2.getAuthTag().toString('hex');
+    const corruptedCiphertext = `enc:v1:${iv2.toString('hex')}:${tag2}:${enc2}`;
+
+    fs.writeFileSync(appDataVaultFile, JSON.stringify({
+      version: 1,
+      secrets: {
+        'database.password': {
+          key: 'database.password',
+          encryptedValue: corruptedCiphertext
+        }
+      }
+    }), { mode: 0o600 });
+
+    // Execute recovery prioritizing app_data vault over host vault
+    const res = recoverDatabasePasswordFromVault({
+      encryptionKeyPath: tempKeyFile,
+      candidateVaultPaths: [appDataVaultFile, hostVaultFile],
+      targetPasswordPath: targetPassFile
+    });
+
+    // Must fail-closed!
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Veritabanı parolası çözülemedi/i);
+
+    // Target password file must NOT be created from host fallback
+    expect(fs.existsSync(targetPassFile)).toBe(false);
+
+    // Clean up
+    try {
+      fs.unlinkSync(tempKeyFile);
+      fs.unlinkSync(appDataVaultFile);
+      fs.unlinkSync(hostVaultFile);
+      if (fs.existsSync(targetPassFile)) fs.unlinkSync(targetPassFile);
+    } catch {}
+  });
 });

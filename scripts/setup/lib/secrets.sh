@@ -47,9 +47,14 @@ resolve_app_data_volume() {
     return 0
   fi
 
+  # 3. Only match un-prefixed "app_data" if verified to belong to this compose project
   if docker volume inspect "app_data" >/dev/null 2>&1; then
-    echo "app_data"
-    return 0
+    local vol_proj
+    vol_proj=$(docker volume inspect app_data --format '{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    if [ "$vol_proj" = "$project_name" ]; then
+      echo "app_data"
+      return 0
+    fi
   fi
 
   return 1
@@ -195,48 +200,37 @@ ensure_secrets_initialized() {
           const rootKey = Buffer.from(encKeyRaw, 'hex');
           
           const candidates = '$CANDIDATE_VAULTS'.split(',').map(s => s.trim()).filter(Boolean);
-          let decryptedPassword = '';
-          let lastErr = '';
-
-          for (const vaultPath of candidates) {
-            if (!fs.existsSync(vaultPath)) continue;
-            try {
-              const vaultData = JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
-              const dbRecord = vaultData?.secrets?.['database.password'];
-              if (!dbRecord || !dbRecord.encryptedValue) {
-                lastErr = 'Vault içinde database.password kaydı yok (' + vaultPath + ')';
-                continue;
-              }
-
-              const cipherText = dbRecord.encryptedValue;
-              const parts = cipherText.split(':');
-              if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
-                lastErr = 'Bilinmeyen şifreli veri formatı (' + vaultPath + ')';
-                continue;
-              }
-
-              const iv = Buffer.from(parts[2], 'hex');
-              const authTag = Buffer.from(parts[3], 'hex');
-              const encData = parts[4];
-
-              const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
-              decipher.setAuthTag(authTag);
-              let dec = decipher.update(encData, 'hex', 'utf8');
-              dec += decipher.final('utf8');
-
-              if (dec && dec.trim().length > 0) {
-                decryptedPassword = dec.trim();
-                break;
-              }
-            } catch (err) {
-              lastErr = err.message;
-              continue;
-            }
+          const existingVault = candidates.find(p => fs.existsSync(p));
+          if (!existingVault) {
+            throw new Error('Hiçbir Vault dosyası bulunamadı.');
           }
 
-          if (!decryptedPassword) {
-            throw new Error(lastErr || 'Hiçbir Vault kaynağından parola çözülemedi.');
+          const vaultData = JSON.parse(fs.readFileSync(existingVault, 'utf8'));
+          const dbRecord = vaultData?.secrets?.['database.password'];
+          if (!dbRecord || !dbRecord.encryptedValue) {
+            throw new Error('Authoritative Vault içinde database.password kaydı yok (' + existingVault + ')');
           }
+
+          const cipherText = dbRecord.encryptedValue;
+          const parts = cipherText.split(':');
+          if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
+            throw new Error('Bilinmeyen şifreli veri formatı (' + existingVault + ')');
+          }
+
+          const iv = Buffer.from(parts[2], 'hex');
+          const authTag = Buffer.from(parts[3], 'hex');
+          const encData = parts[4];
+
+          const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
+          decipher.setAuthTag(authTag);
+          let dec = decipher.update(encData, 'hex', 'utf8');
+          dec += decipher.final('utf8');
+
+          if (!dec || dec.trim().length === 0) {
+            throw new Error('Çözülen parola boş (' + existingVault + ')');
+          }
+
+          const decryptedPassword = dec.trim();
 
           const tempTarget = '${PG_PASS_FILE}.tmp.' + crypto.randomBytes(4).toString('hex');
           fs.writeFileSync(tempTarget, decryptedPassword, { mode: 0o600 });

@@ -57,63 +57,69 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
 
   const rootKeyBuffer = Buffer.from(rootKeyHex, 'hex');
 
-  // 2. Iterate through candidate vaults in priority order
-  let decryptedPassword = '';
-  let successfulSource = '';
-  let lastError = '';
+  // 2. Locate the first existing authoritative candidate vault
+  const existingVaultFile = candidateFiles.find(file => fs.existsSync(file));
 
-  for (const vaultFile of candidateFiles) {
-    if (!fs.existsSync(vaultFile)) {
-      continue;
-    }
-
-    let vaultData: any;
-    try {
-      const raw = fs.readFileSync(vaultFile, 'utf8');
-      vaultData = JSON.parse(raw);
-    } catch (err: any) {
-      lastError = `Vault dosyası okunamadı (${vaultFile}): ${err?.message || 'JSON hatası'}`;
-      continue;
-    }
-
-    const dbSecretRecord = vaultData?.secrets?.['database.password'];
-    if (!dbSecretRecord || !dbSecretRecord.encryptedValue) {
-      lastError = `Vault içinde database.password kaydı bulunamadı (${vaultFile}).`;
-      continue;
-    }
-
-    try {
-      const ciphertext = dbSecretRecord.encryptedValue;
-      const parts = ciphertext.split(':');
-      if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
-        lastError = `Geçersiz şifreli veri formatı (${vaultFile}).`;
-        continue;
-      }
-
-      const iv = Buffer.from(parts[2], 'hex');
-      const authTag = Buffer.from(parts[3], 'hex');
-      const encryptedHex = parts[4];
-
-      const decipher = crypto.createDecipheriv('aes-256-gcm', rootKeyBuffer, iv);
-      decipher.setAuthTag(authTag);
-      let dec = decipher.update(encryptedHex, 'hex', 'utf8');
-      dec += decipher.final('utf8');
-
-      if (dec && dec.trim().length > 0) {
-        decryptedPassword = dec.trim();
-        successfulSource = vaultFile;
-        break; // Successfully decrypted from authoritative candidate
-      }
-    } catch (err: any) {
-      lastError = `Veritabanı parolası çözülemedi (${vaultFile}): ${err?.message || 'Şifre çözme hatası'}`;
-      continue;
-    }
-  }
-
-  if (!decryptedPassword) {
+  if (!existingVaultFile) {
     return {
       success: false,
-      error: lastError || 'Hiçbir geçerli Vault kaynağından veritabanı parolası kurtarılamadı.'
+      error: `Hiçbir Vault dosyası bulunamadı. Denenen yollar: ${candidateFiles.join(', ')}`
+    };
+  }
+
+  // Once an existing vault file is selected as authoritative (e.g. app_data volume vault),
+  // it must NOT silently fall back to other/stale files if decryption fails (strictly fail-closed).
+  let vaultData: any;
+  try {
+    const raw = fs.readFileSync(existingVaultFile, 'utf8');
+    vaultData = JSON.parse(raw);
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Authoritative Vault dosyası okunamadı veya JSON geçersiz (${existingVaultFile}): ${err?.message || 'JSON hatası'}`
+    };
+  }
+
+  const dbSecretRecord = vaultData?.secrets?.['database.password'];
+  if (!dbSecretRecord || !dbSecretRecord.encryptedValue) {
+    return {
+      success: false,
+      error: `Authoritative Vault kasasında 'database.password' kaydı bulunamadı (${existingVaultFile}).`
+    };
+  }
+
+  let decryptedPassword = '';
+  try {
+    const ciphertext = dbSecretRecord.encryptedValue;
+    const parts = ciphertext.split(':');
+    if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
+      return {
+        success: false,
+        error: `Bilinmeyen veya geçersiz şifreli veri formatı (${existingVaultFile}).`
+      };
+    }
+
+    const iv = Buffer.from(parts[2], 'hex');
+    const authTag = Buffer.from(parts[3], 'hex');
+    const encryptedHex = parts[4];
+
+    const decipher = crypto.createDecipheriv('aes-256-gcm', rootKeyBuffer, iv);
+    decipher.setAuthTag(authTag);
+    let dec = decipher.update(encryptedHex, 'hex', 'utf8');
+    dec += decipher.final('utf8');
+
+    if (!dec || dec.trim().length === 0) {
+      return {
+        success: false,
+        error: `Çözülen veritabanı parolası boş (${existingVaultFile}).`
+      };
+    }
+
+    decryptedPassword = dec.trim();
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Veritabanı parolası çözülemedi (${existingVaultFile}): ${err?.message || 'Şifre çözme hatası'}`
     };
   }
 
@@ -139,7 +145,7 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
     };
   }
 
-  return { success: true, recoveredFrom: successfulSource };
+  return { success: true, recoveredFrom: existingVaultFile };
 }
 
 // CLI Execution Support
