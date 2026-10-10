@@ -149,7 +149,22 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
     fs.writeFileSync(vaultFile, JSON.stringify(vaultData, null, 2), { mode: 0o600 });
 
     // Run installer in init-only mode
-    const output = execSync(`bash ${installScriptPath} --init-only --quick`, { cwd: rootDir, encoding: 'utf-8' });
+    // The runner may have a real PostgreSQL instance on port 5432 with an
+    // unrelated password. Simulate an unreachable database deterministically;
+    // offline recovery must preserve the sealed Vault password.
+    const probeDir = fs.mkdtempSync(path.join(dataDir, 'offline-db-'));
+    fs.writeFileSync(path.join(probeDir, 'docker'), '#!/bin/sh\\nexit 1\\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(probeDir, 'psql'), '#!/bin/sh\\necho "connection refused" >&2\\nexit 1\\n', { mode: 0o755 });
+    let output: string;
+    try {
+      output = execSync(`bash ${installScriptPath} --init-only --quick`, {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        env: { ...process.env, PATH: `${probeDir}:${process.env.PATH || ''}` }
+      });
+    } finally {
+      fs.rmSync(probeDir, { recursive: true, force: true });
+    }
     expect(output).toMatch(/Vault Root Anahtarı mevcut ve geçerli/i);
     expect(output).toMatch(/Veritabanı bootstrap parolası Vault kasasından.*kurtarıldı/i);
 
