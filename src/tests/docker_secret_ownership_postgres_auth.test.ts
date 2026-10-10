@@ -10,6 +10,9 @@ import { getVaultStatus } from '../server/utils/crypto.js';
 // /home/runner is not traversable by UID 1000 on GitHub-hosted runners.
 const sourceRoot = path.resolve(__dirname, '../..');
 const sandboxRoot = fs.mkdtempSync('/tmp/nexus-secret-test-');
+// mkdtemp defaults to 0700; the UID 1000 runtime must traverse this parent.
+// Only the disposable parent is traversable: secrets remain private inside.
+fs.chmodSync(sandboxRoot, 0o755);
 const rootDir = path.join(sandboxRoot, 'project');
 fs.cpSync(sourceRoot, rootDir, {
   recursive: true,
