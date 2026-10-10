@@ -4,7 +4,20 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { APP_VERSION } from '../config/version';
 
-const rootDir = path.resolve(__dirname, '../..');
+// Run installer integration checks outside the protected GitHub runner checkout.
+const sourceRoot = path.resolve(__dirname, '../..');
+const sandboxRoot = fs.mkdtempSync('/tmp/nexus-installer-test-');
+fs.chmodSync(sandboxRoot, 0o755);
+const rootDir = path.join(sandboxRoot, 'project');
+fs.cpSync(sourceRoot, rootDir, {
+  recursive: true,
+  filter: (src) => {
+    const rel = path.relative(sourceRoot, src);
+    return !rel.split(path.sep).some((part) => ['.git', 'node_modules', 'secrets', 'data'].includes(part));
+  }
+});
+fs.mkdirSync(path.join(rootDir, 'secrets'), { recursive: true, mode: 0o700 });
+fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true, mode: 0o755 });
 
 describe('Zero-Touch Automated Single-Command Installer & Extensible Architecture', () => {
   const installScriptPath = path.join(rootDir, 'install.sh');
