@@ -239,6 +239,15 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
     const bashScript = `#!/usr/bin/env bash
 source "${secretsLibPath}"
 
+# Force a deterministic offline TCP probe instead of depending on CI runner's
+# PostgreSQL/Docker services. This checks the real return-code handling.
+probe_bin=$(mktemp -d)
+trap 'rm -rf "$probe_bin"' EXIT
+printf '#!/bin/sh\\necho "connection refused" >&2\\nexit 1\\n' > "$probe_bin/psql"
+printf '#!/bin/sh\\nexit 1\\n' > "$probe_bin/docker"
+chmod 755 "$probe_bin/psql" "$probe_bin/docker"
+export PATH="$probe_bin:$PATH"
+
 # Test 1: Empty password must fail
 verify_postgres_password "" && echo "EMPTY_OK" || echo "EMPTY_FAILED"
 
