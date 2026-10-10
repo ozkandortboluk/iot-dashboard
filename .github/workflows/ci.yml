@@ -32,6 +32,7 @@ jobs:
           --health-retries 5
 
     strategy:
+      fail-fast: false
       matrix:
         node-version: [ 20.x, 22.x ]
 
@@ -62,7 +63,7 @@ jobs:
         run: npm run lint
 
       - name: Run Automated Test Suite (Vitest)
-        run: npm test
+        run: npm test -- --exclude src/tests/docker_secret_ownership_postgres_auth.test.ts
 
       - name: Build Production Bundle
         run: npm run build
@@ -85,3 +86,25 @@ jobs:
             test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  privileged-secret-ownership:
+    name: Privileged Secret Ownership Integration (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+      - name: Run UID/GID and ACL integration tests in isolated root container
+        run: |
+          docker run --rm --user 0:0 \
+            -v "$PWD:/source:ro" \
+            -w /tmp/project \
+            node:22-bookworm-slim \
+            bash -ec '
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends acl openssl ca-certificates >/dev/null
+              cp -a /source /tmp/project
+              cd /tmp/project
+              useradd -u 1001 -m deploy
+              npm ci --ignore-scripts
+              npx vitest run src/tests/docker_secret_ownership_postgres_auth.test.ts
+            '
