@@ -62,7 +62,11 @@ services:
     volumes:
       - app_data:/app/data
     secrets:
-      - encryption_key
+      - source: encryption_key
+        target: encryption_key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
@@ -73,6 +77,7 @@ services:
       - nexus_net
 
   proxy:
+    profiles: ["docker-proxy"]
     image: nginx:alpine
     container_name: nexus_proxy
     restart: unless-stopped

@@ -191,6 +191,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
 
     // Service 3: proxy (Nginx)
     expect(composeContent).toMatch(/proxy:/);
+    expect(composeContent).toMatch(/profiles:\s*\["docker-proxy"\]/);
     expect(composeContent).toMatch(/image:\s*nginx/i);
     expect(composeContent).toMatch(/app:[\s\S]*service_healthy/);
     expect(composeContent).toMatch(/nginx\.conf/);

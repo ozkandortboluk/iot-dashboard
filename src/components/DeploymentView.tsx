@@ -129,8 +129,9 @@ export const DeploymentView: React.FC = () => {
     networks:
       - nexus_net
 
-  # Nginx Ters Proxy & TLS Katmanı
+  # Nginx Ters Proxy & TLS Katmanı (Opsiyonel profil: docker-proxy)
   proxy:
+    profiles: ["docker-proxy"]
     image: nginx:alpine
     container_name: nexus_proxy
     restart: unless-stopped

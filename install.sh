@@ -50,6 +50,7 @@ NON_INTERACTIVE=false
 INIT_ONLY=false
 CHECK_ONLY=false
 HTTP_ONLY=false
+USE_DOCKER_PROXY=false
 DO_BACKUP=false
 DO_RESTORE=false
 DO_UPDATE=false
@@ -57,6 +58,14 @@ DO_STATUS=false
 RESTORE_FILE=""
 SETUP_DOMAIN=""
 SETUP_EMAIL=""
+
+# Automatically detect if docker-proxy profile is requested via environment
+if [ -n "${COMPOSE_PROFILES:-}" ] && [[ "$COMPOSE_PROFILES" =~ "docker-proxy" ]]; then
+  USE_DOCKER_PROXY=true
+fi
+if [ "${ENABLE_DOCKER_PROXY:-}" = "true" ]; then
+  USE_DOCKER_PROXY=true
+fi
 
 # Print CLI Help
 show_help() {
@@ -77,6 +86,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
   --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
+  --docker-proxy           Docker Nginx ters proxy servisini başlatır (Varsayılan: kapalı, sistem Nginx kullanılır)
   -h, --help               Bu yardım mesajını gösterir
 
 ${CLR_BOLD}ÖRNEKLER:${CLR_RESET}
@@ -129,6 +139,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --update)
       DO_UPDATE=true
+      shift
+      ;;
+    --docker-proxy|--with-proxy)
+      USE_DOCKER_PROXY=true
       shift
       ;;
     -h|--help)
@@ -250,31 +264,52 @@ if [ ! -s "./secrets/encryption_key" ] || [ ! -s "./secrets/postgres_password" ]
   exit 1
 fi
 
+# Ensure secrets directory and secret files maintain strictly 0600 permissions (never world-readable)
+chmod 700 "./secrets" 2>/dev/null || true
+[ -f "./secrets/encryption_key" ] && chmod 600 "./secrets/encryption_key" 2>/dev/null || true
+[ -f "./secrets/postgres_password" ] && chmod 600 "./secrets/postgres_password" 2>/dev/null || true
+if [ "$IS_ROOT" = true ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  chown "$SUDO_USER":"$SUDO_USER" "./secrets" "./secrets/encryption_key" "./secrets/postgres_password" 2>/dev/null || true
+fi
+
 # Validate Docker Compose configuration
-log_info "Docker Compose yapılandırması doğrulanıyor (${COMPOSE_CMD} config)..."
-if [ "$IS_ROOT" = false ] && ! groups | grep -q "docker"; then
-  $SUDO_CMD $COMPOSE_CMD config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
+COMPOSE_PROFILE_ARGS=()
+if [ "$USE_DOCKER_PROXY" = true ]; then
+  COMPOSE_PROFILE_ARGS=(--profile docker-proxy)
+  log_info "Docker Nginx proxy profili aktif edildi (--profile docker-proxy)."
 else
-  $COMPOSE_CMD config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
+  log_info "Varsayılan profil: Sistem Nginx kullanımı için Docker proxy başlatılmayacak."
+fi
+
+log_info "Docker Compose yapılandırması doğrulanıyor (${COMPOSE_CMD} ${COMPOSE_PROFILE_ARGS[*]} config)..."
+if [ "$IS_ROOT" = false ] && ! groups | grep -q "docker"; then
+  $SUDO_CMD $COMPOSE_CMD "${COMPOSE_PROFILE_ARGS[@]}" config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
+else
+  $COMPOSE_CMD "${COMPOSE_PROFILE_ARGS[@]}" config >/dev/null || { log_fatal "Docker Compose yapılandırma doğrulaması başarısız oldu!"; exit 1; }
 fi
 log_success "Docker Compose yapılandırması ve secret bağlamları doğrulandı."
 
 # Build and start services
 if [ "$DO_UPDATE" = true ]; then
-  log_info "Konteynerler güncelleniyor ve yeniden derleniyor: ${COMPOSE_CMD} up -d --build..."
+  log_info "Konteynerler güncelleniyor ve yeniden derleniyor: ${COMPOSE_CMD} ${COMPOSE_PROFILE_ARGS[*]} up -d --build..."
 else
-  log_info "Konteynerler arka planda başlatılıyor: ${COMPOSE_CMD} up -d --build..."
+  log_info "Konteynerler arka planda başlatılıyor: ${COMPOSE_CMD} ${COMPOSE_PROFILE_ARGS[*]} up -d --build..."
 fi
 
 if [ "$IS_ROOT" = false ] && ! groups | grep -q "docker"; then
-  $SUDO_CMD $COMPOSE_CMD up -d --build
+  $SUDO_CMD $COMPOSE_CMD "${COMPOSE_PROFILE_ARGS[@]}" up -d --build
 else
-  $COMPOSE_CMD up -d --build
+  $COMPOSE_CMD "${COMPOSE_PROFILE_ARGS[@]}" up -d --build
 fi
 
 # 9. Healthcheck Watcher
 log_step "7. Servis Sağlık Denetimleri (Healthcheck) Doğrulanıyor..."
-SERVICES=("nexus_timescaledb" "nexus_app" "nexus_proxy")
+SERVICES=("nexus_timescaledb" "nexus_app")
+if [ "$USE_DOCKER_PROXY" = true ]; then
+  SERVICES+=("nexus_proxy")
+elif command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^nexus_proxy$"; then
+  SERVICES+=("nexus_proxy")
+fi
 MAX_WAIT_SECONDS=60
 START_TIME=$(date +%s)
 

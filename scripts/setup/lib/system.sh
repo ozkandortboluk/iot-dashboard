@@ -123,7 +123,7 @@ check_port_conflicts() {
   done
 
   if [ "$conflict_found" = true ]; then
-    log_warn "Bazı portlar (örn. 80, 443 veya 5432) meşgul görünüyor. Mevcut Apache/Nginx veya eski PostgreSQL servislerini durdurmanız gerekebilir."
+    log_warn "Bazı portlar meşgul görünüyor (Port 80/443 sistem Nginx servisi tarafından kullanılıyorsa, Docker Compose proxy servisi 'docker-proxy' profiliyle izole edildiğinden çakışma yaşanmaz)."
   else
     log_success "Tüm standart servis portları (80, 443, 3000, 5432) kullanılabilir durumda."
   fi

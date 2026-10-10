@@ -153,6 +153,19 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     // Secrets definition must point to encryption_key
     expect(composeContent).toMatch(/encryption_key:/);
     expect(composeContent).toMatch(/\/api\/health\/live/);
+
+    // Docker secret mapping for app service must configure UID 1000, GID 1000, mode 0400
+    // so that unprivileged node user (UID 1000) can securely read /run/secrets/encryption_key
+    expect(composeContent).toMatch(/source:\s*encryption_key/);
+    expect(composeContent).toMatch(/uid:\s*["']?1000["']?/);
+    expect(composeContent).toMatch(/gid:\s*["']?1000["']?/);
+    expect(composeContent).toMatch(/mode:\s*["']?0400["']?/);
+
+    // Dockerfile must maintain non-root USER node and initialize /run/secrets ownership
+    const dockerfilePath = path.join(rootDir, 'Dockerfile');
+    const dockerfileContent = fs.readFileSync(dockerfilePath, 'utf-8');
+    expect(dockerfileContent).toMatch(/USER node/);
+    expect(dockerfileContent).toMatch(/\/run\/secrets/);
   });
 
   // =========================================================================

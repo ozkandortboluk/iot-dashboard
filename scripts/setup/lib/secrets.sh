@@ -499,5 +499,23 @@ ensure_secrets_initialized() {
       fi
     fi
   fi
+
+  # --------------------------------------------------------------------------
+  # 4. Final Security Audit & Ownership Alignment:
+  # --------------------------------------------------------------------------
+  # Enforce strict 0600 permissions on secret files (0700 on secrets directory).
+  # Never make secrets world-readable (0644/0777 are strictly forbidden).
+  chmod 700 "$SECRETS_DIR" 2>/dev/null || true
+  [ -f "$ENC_KEY_FILE" ] && chmod 600 "$ENC_KEY_FILE" 2>/dev/null || true
+  [ -f "$PG_PASS_FILE" ] && chmod 600 "$PG_PASS_FILE" 2>/dev/null || true
+  [ -f "$DB_PASS_FILE" ] && chmod 600 "$DB_PASS_FILE" 2>/dev/null || true
+
+  # Prevent ownership conflicts: If executed via sudo, retain ownership for the invoking operator
+  if [ "${IS_ROOT:-false}" = true ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    chown "$SUDO_USER":"$SUDO_USER" "$SECRETS_DIR" 2>/dev/null || true
+    [ -f "$ENC_KEY_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$ENC_KEY_FILE" 2>/dev/null || true
+    [ -f "$PG_PASS_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$PG_PASS_FILE" 2>/dev/null || true
+    [ -f "$DB_PASS_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$DB_PASS_FILE" 2>/dev/null || true
+  fi
 }
 
