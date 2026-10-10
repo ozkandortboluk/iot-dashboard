@@ -127,7 +127,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
     // Run installer in init-only mode
     const output = execSync(`bash ${installScriptPath} --init-only --quick`, { cwd: rootDir, encoding: 'utf-8' });
     expect(output).toMatch(/Vault Root Anahtarı mevcut ve geçerli/i);
-    expect(output).toMatch(/Veritabanı bootstrap parolası Vault kasasından başarıyla kurtarıldı/i);
+    expect(output).toMatch(/Veritabanı bootstrap parolası Vault kasasından.*kurtarıldı/i);
 
     // Verify recovered password matches original and has 0600 mode
     expect(fs.existsSync(pgPassFile)).toBe(true);

@@ -327,9 +327,25 @@ ensure_secrets_initialized() {
       if [ -n "$vault_decrypted" ]; then
         local v_code=0
         verify_postgres_password "$vault_decrypted" || v_code=$?
-        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+        if [ "$v_code" -eq 0 ]; then
           RECOVERED_PASSWORD="$vault_decrypted"
           RECOVERY_SOURCE="authoritative_vault"
+          RECOVERY_VERIFIED=true
+        elif [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$vault_decrypted"
+          RECOVERY_SOURCE="authoritative_vault"
+          RECOVERY_VERIFIED=false
+          log_warn "PostgreSQL şu anda çevrimdışı veya yanıt vermiyor. Vault içindeki mevcut parola KORUNDU (ilk başlatmada doğrulama bekleniyor)."
+        elif [ "$v_code" -eq 1 ]; then
+          echo "" >&2
+          echo "==========================================================================================" >&2
+          echo "❌ [KRİTİK GÜVENLİK HATASI] Vault Kasasındaki Parola PostgreSQL Tarafından Reddedildi!" >&2
+          echo "------------------------------------------------------------------------------------------" >&2
+          echo "PostgreSQL sunucusu çalışıyor ve Vault kasasındaki veritabanı parolasını reddetti (şifre yanlış)." >&2
+          echo "Yanlış parola ile devam edilmesi veritabanı erişimini engelleyeceğinden işlem durduruldu (fail-closed)." >&2
+          echo "Lütfen PostgreSQL sunucusu için geçerli parolayı '${PG_PASS_FILE}' konumuna sağlayın." >&2
+          echo "==========================================================================================" >&2
+          exit 1
         fi
       fi
     fi
@@ -343,9 +359,18 @@ ensure_secrets_initialized() {
         if [ -n "$ts_env_pass" ]; then
           local v_code=0
           verify_postgres_password "$ts_env_pass" || v_code=$?
-          if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+          if [ "$v_code" -eq 0 ]; then
             RECOVERED_PASSWORD="$ts_env_pass"
             RECOVERY_SOURCE="timescaledb_container_env"
+            RECOVERY_VERIFIED=true
+          elif [ "$v_code" -eq 2 ]; then
+            RECOVERED_PASSWORD="$ts_env_pass"
+            RECOVERY_SOURCE="timescaledb_container_env"
+            RECOVERY_VERIFIED=false
+            log_warn "PostgreSQL şu anda çevrimdışı, konteyner ortamındaki parola KORUNDU (doğrulama bekleniyor)."
+          elif [ "$v_code" -eq 1 ]; then
+            echo "❌ [HATA] TimescaleDB konteynerindeki parola sunucu tarafından reddedildi!" >&2
+            exit 1
           fi
         fi
       fi
@@ -357,9 +382,18 @@ ensure_secrets_initialized() {
         if [ -n "$app_env_pass" ]; then
           local v_code=0
           verify_postgres_password "$app_env_pass" || v_code=$?
-          if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+          if [ "$v_code" -eq 0 ]; then
             RECOVERED_PASSWORD="$app_env_pass"
             RECOVERY_SOURCE="app_container_env"
+            RECOVERY_VERIFIED=true
+          elif [ "$v_code" -eq 2 ]; then
+            RECOVERED_PASSWORD="$app_env_pass"
+            RECOVERY_SOURCE="app_container_env"
+            RECOVERY_VERIFIED=false
+            log_warn "PostgreSQL şu anda çevrimdışı, app konteynerindeki parola KORUNDU (doğrulama bekleniyor)."
+          elif [ "$v_code" -eq 1 ]; then
+            echo "❌ [HATA] App konteynerindeki veritabanı parolası PostgreSQL tarafından reddedildi!" >&2
+            exit 1
           fi
         fi
       fi
@@ -379,9 +413,18 @@ ensure_secrets_initialized() {
       if [ -n "$env_pass" ]; then
         local v_code=0
         verify_postgres_password "$env_pass" || v_code=$?
-        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+        if [ "$v_code" -eq 0 ]; then
           RECOVERED_PASSWORD="$env_pass"
           RECOVERY_SOURCE="host_env_file"
+          RECOVERY_VERIFIED=true
+        elif [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$env_pass"
+          RECOVERY_SOURCE="host_env_file"
+          RECOVERY_VERIFIED=false
+          log_warn "PostgreSQL şu anda çevrimdışı, .env dosyasındaki parola KORUNDU (doğrulama bekleniyor)."
+        elif [ "$v_code" -eq 1 ]; then
+          echo "❌ [HATA] .env dosyasındaki veritabanı parolası PostgreSQL tarafından reddedildi!" >&2
+          exit 1
         fi
       fi
     fi
@@ -401,11 +444,20 @@ ensure_secrets_initialized() {
       if [ -n "$PROMPT_PASS" ]; then
         local v_code=0
         verify_postgres_password "$PROMPT_PASS" || v_code=$?
-        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+        if [ "$v_code" -eq 0 ]; then
           RECOVERED_PASSWORD="$PROMPT_PASS"
           RECOVERY_SOURCE="operator_prompt"
+          RECOVERY_VERIFIED=true
+        elif [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$PROMPT_PASS"
+          RECOVERY_SOURCE="operator_prompt"
+          RECOVERY_VERIFIED=false
+          log_warn "PostgreSQL şu anda çevrimdışı, girilen parola kaydedildi (doğrulama bekleniyor)."
         else
-          log_error "Girilen parola PostgreSQL sunucusu tarafından doğrulanamadı (kimlik doğrulama başarısız)!"
+          echo "" >&2
+          echo "❌ [HATA] Girilen parola PostgreSQL sunucusu tarafından reddedildi (kimlik doğrulama başarısız)!" >&2
+          echo "Yanlış parola tespit edildiği için kurulum güvenli biçimde durduruldu." >&2
+          exit 1
         fi
       fi
     fi
@@ -417,10 +469,18 @@ ensure_secrets_initialized() {
       chmod 600 "$TMP_WRITE"
       mv -f "$TMP_WRITE" "$PG_PASS_FILE"
       chmod 600 "$PG_PASS_FILE"
-      if [ "$RECOVERY_SOURCE" = "authoritative_vault" ]; then
-        log_success "Veritabanı bootstrap parolası Vault kasasından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+      if [ "$RECOVERY_VERIFIED" = true ]; then
+        if [ "$RECOVERY_SOURCE" = "authoritative_vault" ]; then
+          log_success "Veritabanı bootstrap parolası Vault kasasından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+        else
+          log_success "Veritabanı bootstrap parolası (${RECOVERY_SOURCE}) kaynağından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+        fi
       else
-        log_success "Veritabanı bootstrap parolası (${RECOVERY_SOURCE}) kaynağından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+        if [ "$RECOVERY_SOURCE" = "authoritative_vault" ]; then
+          log_warn "Veritabanı bootstrap parolası Vault kasasından kurtarıldı (${PG_PASS_FILE}) [KORUNDU - PostgreSQL çevrimdışı, doğrulama bekleniyor]."
+        else
+          log_warn "Veritabanı bootstrap parolası (${RECOVERY_SOURCE}) kaynağından kurtarıldı (${PG_PASS_FILE}) [KORUNDU - PostgreSQL çevrimdışı, doğrulama bekleniyor]."
+        fi
       fi
       RECOVERY_SUCCESS=true
     fi
@@ -542,69 +602,187 @@ align_secrets_ownership_and_permissions() {
 
   # Container node user requires UID 1000 / GID 1000 read access.
   # Security requirements:
-  # 1. Never make secrets world-readable (0644/0777 are strictly forbidden).
-  # 2. Host operator retains owner read/write access.
-  # 3. If operator UID != 1000 (and != 0), assign group 1000 with 0640 permissions (owner rw-, group r--, others 0)
-  #    and POSIX ACL u:1000:r,g:1000:r so container user 'node' (UID 1000, GID 1000) can read the secret.
-  # 4. If operator UID is 1000 or root without SUDO_USER, maintain strict 0600 (owner only) and 0700.
+  # 1. Never make secrets world-readable (0644, 0777 or any 'other' bits are strictly forbidden).
+  # 2. Host operator retains necessary owner access.
+  # 3. ROOT without SUDO_USER (clean root install):
+  #    Assign ownership 1000:1000 with 0600 (owner rw-, group/others 0) and dir 0700.
+  #    Node process (UID 1000) inside container reads the secret as owner.
+  #    Root retains full read/write via kernel DAC override.
+  # 4. ROOT with SUDO_USER (e.g. SUDO_USER=ubuntu, UID 1001):
+  #    Assign owner $SUDO_USER, group 1000.
+  #    Mode 0640 (owner rw-, group r--, others 0) and dir 0750.
+  #    Node process reads via group 1000.
+  # 5. Non-root user:
+  #    If UID == 1000: mode 0600, dir 0700.
+  #    If UID != 1000: try group 1000 with mode 0640 or setfacl.
+  # 6. FAIL-CLOSED: No '|| true' silently masking errors. Explicit verification that UID 1000 can read the secrets.
 
-  local invoking_uid="${SUDO_UID:-}"
-  if [ -z "$invoking_uid" ] && [ -n "${SUDO_USER:-}" ]; then
-    invoking_uid=$(id -u "$SUDO_USER" 2>/dev/null || echo "")
+  local current_uid
+  current_uid=$(id -u 2>/dev/null || echo "")
+
+  local sudo_user="${SUDO_USER:-}"
+  local sudo_uid="${SUDO_UID:-}"
+  if [ -n "$sudo_user" ] && [ "$sudo_user" = "root" ]; then
+    sudo_user=""
   fi
-  if [ -z "$invoking_uid" ]; then
-    invoking_uid=$(id -u 2>/dev/null || echo "")
+  if [ -n "$sudo_user" ] && [ -z "$sudo_uid" ]; then
+    sudo_uid=$(id -u "$sudo_user" 2>/dev/null || echo "")
   fi
 
-  local is_different_uid=false
-  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && [ "$SUDO_USER" != "node" ]; then
-    is_different_uid=true
-  elif [ -n "$invoking_uid" ] && [ "$invoking_uid" -ne 0 ] && [ "$invoking_uid" -ne 1000 ]; then
-    is_different_uid=true
+  local is_root_exec=false
+  if [ "$current_uid" = "0" ] || [ "${IS_ROOT:-false}" = true ] || [ "$EUID" -eq 0 ]; then
+    is_root_exec=true
   fi
 
-  # Ownership alignment
-  if [ "${IS_ROOT:-false}" = true ] || [ "$EUID" -eq 0 ]; then
-    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-      chown "$SUDO_USER":1000 "$SECRETS_DIR" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$SECRETS_DIR" 2>/dev/null || true
-      [ -f "$ENC_KEY_FILE" ] && (chown "$SUDO_USER":1000 "$ENC_KEY_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$ENC_KEY_FILE" 2>/dev/null || true)
-      [ -f "$PG_PASS_FILE" ] && (chown "$SUDO_USER":1000 "$PG_PASS_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$PG_PASS_FILE" 2>/dev/null || true)
-      [ -f "$DB_PASS_FILE" ] && (chown "$SUDO_USER":1000 "$DB_PASS_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$DB_PASS_FILE" 2>/dev/null || true)
+  if [ "$is_root_exec" = true ]; then
+    if [ -n "$sudo_user" ] && [ "$sudo_user" != "root" ] && [ "$sudo_uid" != "1000" ]; then
+      # Root running on behalf of a non-root host operator (e.g. sudo ./install.sh by UID 1001)
+      local chown_target="${sudo_uid:-$sudo_user}"
+      if [ -n "$sudo_user" ] && ! id -u "$sudo_user" >/dev/null 2>&1 && [ -z "$sudo_uid" ]; then
+        chown_target=""
+      fi
+
+      if [ -n "$chown_target" ]; then
+        if ! chown "$chown_target:1000" "$SECRETS_DIR" 2>/dev/null; then
+          chown :1000 "$SECRETS_DIR" 2>/dev/null || true
+        fi
+      else
+        chown :1000 "$SECRETS_DIR" 2>/dev/null || true
+      fi
+      chmod 750 "$SECRETS_DIR" || {
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0750 izni ayarlanamadı!" >&2
+        return 1
+      }
+      for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
+        if [ -f "$sfile" ]; then
+          if [ -n "$chown_target" ]; then
+            if ! chown "$chown_target:1000" "$sfile" 2>/dev/null; then
+              chown :1000 "$sfile" 2>/dev/null || true
+            fi
+          else
+            chown :1000 "$sfile" 2>/dev/null || true
+          fi
+          chmod 640 "$sfile" || {
+            echo "❌ [KRİTİK HATA] '${sfile}' için 0640 izni ayarlanamadı!" >&2
+            return 1
+          }
+          if command -v setfacl >/dev/null 2>&1; then
+            setfacl -m u:1000:r,g:1000:r "$sfile" 2>/dev/null || true
+            setfacl -m m::r "$sfile" 2>/dev/null || true
+          fi
+        fi
+      done
+      if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
+        setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
+      fi
     else
-      chown :1000 "$SECRETS_DIR" 2>/dev/null || true
-      [ -f "$ENC_KEY_FILE" ] && chown :1000 "$ENC_KEY_FILE" 2>/dev/null || true
-      [ -f "$PG_PASS_FILE" ] && chown :1000 "$PG_PASS_FILE" 2>/dev/null || true
-      [ -f "$DB_PASS_FILE" ] && chown :1000 "$DB_PASS_FILE" 2>/dev/null || true
+      # Pure Root without SUDO_USER or sudo invoked by UID 1000
+      # Assign ownership to UID 1000 so the unprivileged container node user (UID 1000) owns and reads the files!
+      if ! chown 1000:1000 "$SECRETS_DIR"; then
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 1000:1000 sahipliği ayarlanamadı!" >&2
+        return 1
+      fi
+      chmod 700 "$SECRETS_DIR" || {
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0700 izni ayarlanamadı!" >&2
+        return 1
+      }
+      for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
+        if [ -f "$sfile" ]; then
+          if ! chown 1000:1000 "$sfile"; then
+            echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 1000:1000 sahipliği ayarlanamadı!" >&2
+            return 1
+          fi
+          chmod 600 "$sfile" || {
+            echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 0600 izni ayarlanamadı!" >&2
+            return 1
+          }
+        fi
+      done
     fi
   else
-    chgrp 1000 "$SECRETS_DIR" 2>/dev/null || chown :1000 "$SECRETS_DIR" 2>/dev/null || true
-    [ -f "$ENC_KEY_FILE" ] && (chgrp 1000 "$ENC_KEY_FILE" 2>/dev/null || chown :1000 "$ENC_KEY_FILE" 2>/dev/null || true)
-    [ -f "$PG_PASS_FILE" ] && (chgrp 1000 "$PG_PASS_FILE" 2>/dev/null || chown :1000 "$PG_PASS_FILE" 2>/dev/null || true)
-    [ -f "$DB_PASS_FILE" ] && (chgrp 1000 "$DB_PASS_FILE" 2>/dev/null || chown :1000 "$DB_PASS_FILE" 2>/dev/null || true)
+    # Non-root user execution
+    if [ "$current_uid" = "1000" ]; then
+      chmod 700 "$SECRETS_DIR" || {
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0700 izni ayarlanamadı!" >&2
+        return 1
+      }
+      for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
+        if [ -f "$sfile" ]; then
+          chmod 600 "$sfile" || {
+            echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 0600 izni ayarlanamadı!" >&2
+            return 1
+          }
+        fi
+      done
+    else
+      # Operator is non-root with UID != 1000
+      chgrp 1000 "$SECRETS_DIR" 2>/dev/null || true
+      chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+      for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
+        if [ -f "$sfile" ]; then
+          chgrp 1000 "$sfile" 2>/dev/null || true
+          chmod 640 "$sfile" 2>/dev/null || true
+          if command -v setfacl >/dev/null 2>&1; then
+            setfacl -m u:1000:r,g:1000:r "$sfile" 2>/dev/null || true
+            setfacl -m m::r "$sfile" 2>/dev/null || true
+          fi
+        fi
+      done
+      if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
+        setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
+      fi
+    fi
   fi
 
-  # POSIX ACLs: Explicitly grant read access to UID 1000 and GID 1000 if setfacl is supported
-  if command -v setfacl >/dev/null 2>&1; then
-    setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
-    [ -f "$ENC_KEY_FILE" ] && setfacl -m u:1000:r,g:1000:r "$ENC_KEY_FILE" 2>/dev/null || true
-    [ -f "$PG_PASS_FILE" ] && setfacl -m u:1000:r,g:1000:r "$PG_PASS_FILE" 2>/dev/null || true
-    [ -f "$DB_PASS_FILE" ] && setfacl -m u:1000:r,g:1000:r "$DB_PASS_FILE" 2>/dev/null || true
-  fi
+  # --------------------------------------------------------------------------
+  # Post-Alignment Security & Accessibility Audit
+  # --------------------------------------------------------------------------
+  for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE"; do
+    [ ! -f "$sfile" ] && continue
 
-  # Controlled permission enforcement:
-  # - If operator UID != 1000 (different user on host, e.g. UID 1001), use 0640 (owner rw-, group r--, others none) and 0750
-  # - If operator UID is 1000 or root without SUDO_USER, maintain strict 0600 (owner only) and 0700
-  # - Strictly NEVER world-readable (0644/0777 are forbidden)
-  if [ "$is_different_uid" = true ]; then
-    chmod 750 "$SECRETS_DIR" 2>/dev/null || true
-    [ -f "$ENC_KEY_FILE" ] && chmod 640 "$ENC_KEY_FILE" 2>/dev/null || true
-    [ -f "$PG_PASS_FILE" ] && chmod 640 "$PG_PASS_FILE" 2>/dev/null || true
-    [ -f "$DB_PASS_FILE" ] && chmod 640 "$DB_PASS_FILE" 2>/dev/null || true
-  else
-    chmod 700 "$SECRETS_DIR" 2>/dev/null || true
-    [ -f "$ENC_KEY_FILE" ] && chmod 600 "$ENC_KEY_FILE" 2>/dev/null || true
-    [ -f "$PG_PASS_FILE" ] && chmod 600 "$PG_PASS_FILE" 2>/dev/null || true
-    [ -f "$DB_PASS_FILE" ] && chmod 600 "$DB_PASS_FILE" 2>/dev/null || true
-  fi
+    # Check 1: World-readable protection (other bits must be strictly 0)
+    local f_mode
+    f_mode=$(stat -c "%a" "$sfile" 2>/dev/null || stat -f "%Lp" "$sfile" 2>/dev/null || echo "")
+    if [ -n "$f_mode" ]; then
+      local other_octal="${f_mode: -1}"
+      if [ "$other_octal" != "0" ]; then
+        echo "❌ [GÜVENLİK İHLALİ] '${sfile}' (${f_mode}) herkese açık izinlere sahip! Başlatma durduruldu." >&2
+        return 1
+      fi
+    fi
+
+    # Check 2: Verify that container user UID 1000 can access the secret
+    local f_uid f_gid
+    f_uid=$(stat -c "%u" "$sfile" 2>/dev/null || stat -f "%u" "$sfile" 2>/dev/null || echo "")
+    f_gid=$(stat -c "%g" "$sfile" 2>/dev/null || stat -f "%g" "$sfile" 2>/dev/null || echo "")
+
+    local access_ok=false
+    if [ "$f_uid" = "1000" ]; then
+      access_ok=true
+    elif [ "$f_gid" = "1000" ] && [ -n "$f_mode" ] && [ "${f_mode: -2:1}" -ge 4 ]; then
+      access_ok=true
+    elif command -v getfacl >/dev/null 2>&1; then
+      if getfacl -c "$sfile" 2>/dev/null | grep -qE "(user:1000:r|group:1000:r)"; then
+        access_ok=true
+      fi
+    fi
+
+    if [ "$access_ok" = false ]; then
+      if [ "$is_root_exec" = true ]; then
+        # Fallback fix if needed
+        chown 1000:1000 "$sfile" && chmod 600 "$sfile" && access_ok=true
+      fi
+      if [ "$access_ok" = false ]; then
+        echo "❌ [KRİTİK HATA] '${sfile}' secret dosyası UID 1000 (node) konteyner kullanıcısı tarafından okunamıyor!" >&2
+        echo "Dosya Sahibi: UID ${f_uid:-?}, Grup: GID ${f_gid:-?}, İzin: ${f_mode:-?}." >&2
+        echo "Uygulamanın 'node' kullanıcısıyla güvenle çalışabilmesi için lütfen 'sudo ./install.sh' komutunu çalıştırın." >&2
+        return 1
+      fi
+    fi
+  done
+
+  return 0
 }
 

@@ -265,7 +265,10 @@ if [ ! -s "./secrets/encryption_key" ] || [ ! -s "./secrets/postgres_password" ]
 fi
 
 # Align secrets permissions and ownership to guarantee non-root node container (UID 1000) read access
-align_secrets_ownership_and_permissions
+if ! align_secrets_ownership_and_permissions; then
+  echo "❌ [KRİTİK HATA] Secret dosya izinleri ve sahipliği ayarlanamadı. Dağıtım durduruldu." >&2
+  exit 1
+fi
 
 # Validate Docker Compose configuration
 COMPOSE_PROFILE_ARGS=()
