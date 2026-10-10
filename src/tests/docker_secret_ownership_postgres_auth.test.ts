@@ -17,6 +17,17 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
   let backupVault: string | null = null;
 
   beforeEach(() => {
+    // Ensure docker/certs test certificates exist and are valid
+    const certsDir = path.join(rootDir, 'docker/certs');
+    const crtPath = path.join(certsDir, 'server.crt');
+    const keyPath = path.join(certsDir, 'server.key');
+    if (!fs.existsSync(crtPath) || !fs.existsSync(keyPath)) {
+      try {
+        fs.mkdirSync(certsDir, { recursive: true, mode: 0o700 });
+        execSync(`openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "${keyPath}" -out "${crtPath}" -subj "/CN=localhost"`, { stdio: 'ignore' });
+      } catch {}
+    }
+
     backupSecrets = {};
     if (fs.existsSync(secretsDir)) {
       for (const file of fs.readdirSync(secretsDir)) {
