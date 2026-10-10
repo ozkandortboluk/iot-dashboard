@@ -14,6 +14,9 @@ export function isSshTunnelAllowed(): boolean {
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
     return false;
   }
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+    return false;
+  }
   const env = resolveRuntimeEnvironment();
   return env !== 'vps';
 }
@@ -30,6 +33,9 @@ export interface SSHTunnelConfig {
   localPort: number;
   autoConnect?: boolean;
   expectedHostFingerprint?: string; // e.g. SHA256:... or MD5:... for pinning
+  dbUser?: string;
+  dbPassword?: string;
+  dbName?: string;
 }
 
 export type SSHTunnelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -568,28 +574,77 @@ class SSHTunnelService {
               isResolved = true;
               clearTimeout(connectTimeout);
 
-              // Synchronously recycle PostgreSQL pool and test the database connection
+              // 1. If custom database credentials were provided in the tunnel connection, persist to Vault
+              try {
+                const { systemSecretsService } = await import('./systemSecrets.service.js');
+                const updatePayload: any = {};
+                if (config.dbPassword && typeof config.dbPassword === 'string' && config.dbPassword.trim()) {
+                  updatePayload.password = config.dbPassword.trim();
+                }
+                if (config.dbUser && typeof config.dbUser === 'string' && config.dbUser.trim()) {
+                  updatePayload.user = config.dbUser.trim();
+                }
+                if (config.dbName && typeof config.dbName === 'string' && config.dbName.trim()) {
+                  updatePayload.database = config.dbName.trim();
+                }
+                if (Object.keys(updatePayload).length > 0) {
+                  await systemSecretsService.updateDatabaseSecrets(updatePayload, 'ssh_tunnel');
+                }
+              } catch (vaultErr: any) {
+                console.warn('[SSHTunnel] Vault credential save notice:', vaultErr?.message);
+              }
+
+              // 2. Check whether PostgreSQL password is real or a default placeholder
+              const { systemSecretsService } = await import('./systemSecrets.service.js');
+              const { isDefaultPassword } = await import('../utils/startupSecurityPolicy.js');
+              const { recycleSharedPgPool, getSharedPgPool } = await import('../database/connection.js');
+              const currentDbPass = systemSecretsService.getDatabasePassword();
+              const hasValidDbPassword = Boolean(currentDbPass && !isDefaultPassword(currentDbPass));
+
               let isPgConnected = false;
               let dbState = 'DB_UNAVAILABLE';
-              try {
-                this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
-                const { recycleSharedPgPool } = await import('../database/connection.js');
-                await recycleSharedPgPool();
-                const { db } = await import('../db.js');
-                if (db && typeof db.initPostgresRepository === 'function') {
-                  isPgConnected = await db.initPostgresRepository();
-                  dbState = db.getDatabaseState();
+
+              if (!hasValidDbPassword) {
+                this.addLog(`SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). PostgreSQL parolası henüz girilmedi (varsayılan şablon parola kullanılamaz). Lütfen geçerli veritabanı parolanızı kaydedin.`);
+              } else {
+                try {
+                  this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
+                  await recycleSharedPgPool();
+                  const testPool = getSharedPgPool();
+                  if (testPool) {
+                    const testClient = await testPool.connect();
+                    try {
+                      await testClient.query('SELECT 1;');
+                      isPgConnected = true;
+                      this.addLog('PostgreSQL bağlantısı doğrulandı (SELECT 1 başarılı).');
+                    } finally {
+                      testClient.release();
+                    }
+                  }
+                  const { db } = await import('../db.js');
+                  if (db && typeof db.initPostgresRepository === 'function') {
+                    await db.initPostgresRepository();
+                    dbState = db.getDatabaseState();
+                  }
+                } catch (pgErr: any) {
+                  const errMsg = pgErr?.message || String(pgErr);
+                  const lowerMsg = errMsg.toLowerCase();
+                  if (lowerMsg.includes('password authentication failed') || lowerMsg.includes('sasl')) {
+                    this.addLog('PostgreSQL kimlik doğrulama uyarısı: Girilen veritabanı parolası veya kullanıcı adı geçersiz. Lütfen veritabanı şifrenizi kontrol edin.');
+                  } else {
+                    this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${errMsg}`);
+                  }
                 }
-              } catch (pgErr: any) {
-                this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${pgErr?.message || pgErr}`);
               }
 
               const successMsg = isPgConnected
                 ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
+                : !hasValidDbPassword
+                ? `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). Uzak veritabanına bağlanmak için lütfen PostgreSQL parolanızı giriniz.`
                 : `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL veritabanı bağlantısı kurulamadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
 
               resolve({
-                success: isPgConnected,
+                success: isPgConnected || !hasValidDbPassword,
                 transportConnected: true,
                 isPgConnected,
                 databaseState: dbState,

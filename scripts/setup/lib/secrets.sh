@@ -68,8 +68,8 @@ detect_existing_installation() {
   if [ -s "${SECRETS_DIR}/postgres_password" ] || [ -s "${SECRETS_DIR}/db_password" ]; then
     return 0
   fi
-  # 2. Check local vault file containing secrets
-  if [ -s "${DATA_DIR}/.system_secrets.json" ] && grep -q '"secrets"' "${DATA_DIR}/.system_secrets.json" 2>/dev/null; then
+  # 2. Check local vault file containing database credentials or vault with existing encryption key
+  if [ -s "${DATA_DIR}/.system_secrets.json" ] && ([ -s "${SECRETS_DIR}/encryption_key" ] || grep -q '"database\.password"' "${DATA_DIR}/.system_secrets.json" 2>/dev/null); then
     return 0
   fi
 
@@ -110,6 +110,13 @@ ensure_secrets_initialized() {
   local IS_EXISTING=false
   if detect_existing_installation; then
     IS_EXISTING=true
+  fi
+
+  # Auto-adopt data/.vault_key if secrets/encryption_key is missing on existing installation
+  if [ ! -s "$ENC_KEY_FILE" ] && [ -s "${DATA_DIR}/.vault_key" ] && [ "$IS_EXISTING" = true ]; then
+    cp "${DATA_DIR}/.vault_key" "$ENC_KEY_FILE"
+    chmod 600 "$ENC_KEY_FILE"
+    log_success "Root şifreleme anahtarı ${DATA_DIR}/.vault_key konumundan ${ENC_KEY_FILE} konumuna aktarıldı."
   fi
 
   # --------------------------------------------------------------------------

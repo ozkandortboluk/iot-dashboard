@@ -647,7 +647,15 @@ export function terminateSessionSocket(tokenOrId: string, code = 1008, reason = 
 
 export function initWebSocketServer(server: http.Server) {
   // Use noServer: true to cleanly handle HTTP upgrade events and avoid path collision
-  wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
+  wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_WS_PAYLOAD,
+    handleProtocols: (protocols) => {
+      if (protocols.has('nexus-token')) return 'nexus-token';
+      const first = Array.from(protocols)[0];
+      return first || false;
+    },
+  });
   wss.on('error', (err: any) => {
     systemLogger.error('websocket', 'WebSocket sunucu hatası', err?.message || err);
   });
@@ -698,7 +706,7 @@ export function initWebSocketServer(server: http.Server) {
       if (pathname === '/ws' || pathname.startsWith('/ws') || pathname === '/api/ws' || pathname.startsWith('/api/ws')) {
         let connectionToken: string | null = null;
 
-        // 1. Extract Token
+        // 1. Extract Token from Cookie, Authorization header, X-API-KEY, Sec-WebSocket-Protocol, or Query string
         if (request.headers?.cookie) {
           const match = request.headers.cookie.match(/nexus_session_token=([^;]+)/);
           if (match && match[1]) {
@@ -711,10 +719,27 @@ export function initWebSocketServer(server: http.Server) {
         } else if (!connectionToken && request.headers?.['x-api-key']) {
           connectionToken = String(request.headers['x-api-key']).trim();
         } else if (!connectionToken && request.headers?.['sec-websocket-protocol']) {
-          connectionToken = String(request.headers['sec-websocket-protocol']).split(',')[0].trim();
+          const rawProtocols = String(request.headers['sec-websocket-protocol'])
+            .split(',')
+            .map((p) => p.trim());
+          for (const p of rawProtocols) {
+            if (p !== 'nexus-token' && p !== 'bearer' && p !== 'nexus-auth' && p.length > 5) {
+              connectionToken = p;
+              break;
+            }
+          }
+          if (!connectionToken && rawProtocols[0] && rawProtocols[0] !== 'nexus-token') {
+            connectionToken = rawProtocols[0];
+          }
         }
-        // Security: URL query string tokens (?token=..., ?apiKey=...) are explicitly disabled
-        // to prevent sensitive credentials from leaking into Nginx access logs and URL history.
+        // Resilient fallback: Support query token (?token=... or ?apiKey=...) for IoT hardware devices
+        // and browser iframe environments where headers and third-party cookies are restricted
+        if (!connectionToken) {
+          const queryToken = urlObj.searchParams.get('token') || urlObj.searchParams.get('apiKey');
+          if (queryToken && queryToken.trim()) {
+            connectionToken = queryToken.trim();
+          }
+        }
 
         // 2. Validate Token
         let user = null;

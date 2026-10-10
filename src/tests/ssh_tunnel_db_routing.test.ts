@@ -6,6 +6,7 @@ import {
   resolvePostgresConnectionString,
 } from '../server/database/connection.js';
 import { sshTunnelService } from '../server/services/sshTunnel.service.js';
+import { systemSecretsService } from '../server/services/systemSecrets.service.js';
 
 describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
   const originalEnv = { ...process.env };
@@ -28,6 +29,8 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
     process.env.VPS_PRODUCTION = 'true';
     delete process.env.DB_SSH_TUNNEL_ENABLED;
     delete process.env.ENABLE_SSH_TUNNEL;
+
+    vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue('pass');
 
     expect(isSshTunnelAllowed()).toBe(false);
     expect(isSshTunnelRequired('postgresql://postgres:pass@timescaledb:5432/db')).toBe(false);
@@ -102,6 +105,8 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
     process.env.VPS_PRODUCTION = 'true';
     delete process.env.DB_SSH_TUNNEL_ENABLED;
     delete process.env.ENABLE_SSH_TUNNEL;
+
+    vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue('vps_pass');
 
     expect(sshTunnelService.getConfig()).toBeNull();
     expect(sshTunnelService.isConnected()).toBe(false);

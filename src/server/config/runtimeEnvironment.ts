@@ -24,23 +24,34 @@ export interface RuntimeConfig {
  * Resolves the active runtime environment using APP_ENV with robust fallbacks.
  */
 export function resolveRuntimeEnvironment(): RuntimeEnvironment {
-  // 1. Explicit APP_ENV override has highest priority
+  const isTestRunner = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
   const explicitEnv = (process.env.APP_ENV || '').toLowerCase().trim();
-  if (explicitEnv === 'vps' || explicitEnv === 'aistudio' || explicitEnv === 'local' || explicitEnv === 'test') {
-    return explicitEnv;
+
+  // 1. In automated tests (Vitest / NODE_ENV=test), honor explicit APP_ENV overrides strictly
+  if (isTestRunner) {
+    if (explicitEnv === 'vps' || explicitEnv === 'aistudio' || explicitEnv === 'local' || explicitEnv === 'test') {
+      return explicitEnv as RuntimeEnvironment;
+    }
+    if (process.env.VPS_PRODUCTION === 'true') {
+      return 'vps';
+    }
+    return 'test';
   }
 
-  // 2. VPS Production detection (VPS_PRODUCTION=true)
+  // 2. Explicit APP_ENV override in real runtime
+  if (explicitEnv === 'vps') {
+    return 'vps';
+  }
+  if (explicitEnv === 'aistudio') {
+    return 'aistudio';
+  }
+
+  // 3. VPS Production detection (VPS_PRODUCTION=true)
   if (process.env.VPS_PRODUCTION === 'true') {
     return 'vps';
   }
 
-  // 3. Automated test detection (VITEST or NODE_ENV=test)
-  if (process.env.VITEST === 'true' || process.env.NODE_ENV === 'test') {
-    return 'test';
-  }
-
-  // 4. Google AI Studio / Cloud Run detection
+  // 4. Google AI Studio / Cloud Run detection (always aistudio in Cloud Run unless VPS explicitly configured)
   const isCloudRun = Boolean(
     process.env.K_SERVICE ||
     process.env.K_REVISION ||

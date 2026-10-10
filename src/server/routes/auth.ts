@@ -34,33 +34,51 @@ function getClientIp(req: Request): string {
 // Cookie helper: Set secure, HttpOnly, SameSite session cookie based on runtime environment
 export function setSessionCookie(res: Response, token: string) {
   const env = resolveRuntimeEnvironment();
-  // VPS and AI Studio run strictly over HTTPS. Local development and unit tests use HTTP.
-  const isSecure = env === 'vps' || env === 'aistudio';
+  const req = (res as any).req as Request | undefined;
+  // If the request explicitly arrives over plain HTTP (e.g. direct VPS IP or local port), avoid setting Secure
+  const isExplicitHttp = Boolean(req && !req.secure && req.headers?.['x-forwarded-proto'] === 'http');
+  // VPS and AI Studio run strictly over HTTPS in production. Local development and unit tests use HTTP.
+  const isSecure = (env === 'vps' || env === 'aistudio') && !isExplicitHttp;
   // AI Studio runs embedded within a cross-site iframe, requiring SameSite=None and Secure=true.
   // VPS production runs as a first-party site, using SameSite=Lax and Secure=true.
-  const sameSiteMode: 'none' | 'lax' = env === 'aistudio' ? 'none' : 'lax';
+  const sameSiteMode: 'none' | 'lax' = (env === 'aistudio' && isSecure) ? 'none' : 'lax';
 
-  res.cookie('nexus_session_token', token, {
+  const cookieOptions: any = {
     httpOnly: true,
     secure: isSecure,
     sameSite: sameSiteMode,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     path: '/',
-  });
+  };
+
+  // Add CHIPS (Partitioned) support when embedded in iframe / cross-site
+  if (sameSiteMode === 'none' && isSecure) {
+    cookieOptions.partitioned = true;
+  }
+
+  res.cookie('nexus_session_token', token, cookieOptions);
 }
 
 // Cookie helper: Clear session cookie
 export function clearSessionCookie(res: Response) {
   const env = resolveRuntimeEnvironment();
-  const isSecure = env === 'vps' || env === 'aistudio';
-  const sameSiteMode: 'none' | 'lax' = env === 'aistudio' ? 'none' : 'lax';
+  const req = (res as any).req as Request | undefined;
+  const isExplicitHttp = Boolean(req && !req.secure && req.headers?.['x-forwarded-proto'] === 'http');
+  const isSecure = (env === 'vps' || env === 'aistudio') && !isExplicitHttp;
+  const sameSiteMode: 'none' | 'lax' = (env === 'aistudio' && isSecure) ? 'none' : 'lax';
 
-  res.clearCookie('nexus_session_token', {
+  const cookieOptions: any = {
     httpOnly: true,
     secure: isSecure,
     sameSite: sameSiteMode,
     path: '/',
-  });
+  };
+
+  if (sameSiteMode === 'none' && isSecure) {
+    cookieOptions.partitioned = true;
+  }
+
+  res.clearCookie('nexus_session_token', cookieOptions);
 }
 
 // Setup/Onboarding Endpoints
@@ -148,6 +166,7 @@ router.post('/setup', requireSetupAuth, async (req, res) => {
 
     res.json({
       user: result.user,
+      token: result.token,
       message: 'Kurulum başarıyla tamamlandı ve güvenli oturum açıldı.',
     });
   } catch (err: unknown) {
@@ -228,10 +247,27 @@ router.post('/login', async (req, res) => {
     // Set HttpOnly, Secure session cookie
     setSessionCookie(res, result.token);
 
-    res.json({
+    // Expose session token via headers for environments where cross-site cookies are blocked (iframes, etc.)
+    res.setHeader('x-auth-token', result.token);
+    res.setHeader('x-session-token', result.token);
+    res.setHeader('Access-Control-Expose-Headers', 'x-auth-token, x-session-token');
+
+    // Return token in response body for web clients (or when requested via header)
+    const isExplicitWebClient =
+      req.headers['x-client-platform'] === 'web' ||
+      req.headers['x-request-token'] === 'true' ||
+      (process.env.NODE_ENV !== 'production' && !process.env.VITEST);
+
+    const responseBody: any = {
       user: result.user,
       message: 'Giriş başarılı',
-    });
+    };
+
+    if (isExplicitWebClient) {
+      responseBody.token = result.token;
+    }
+
+    res.json(responseBody);
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('PostgreSQL') || msg.includes('veritabanı')) {
@@ -277,7 +313,7 @@ router.post('/register', async (req, res) => {
     const user = await db.registerUser(name, email, password, 'customer', companyName);
     const token = await db.createSession(user);
     setSessionCookie(res, token);
-    res.json({ user, message: 'Hesap başarıyla oluşturuldu.' });
+    res.json({ user, token, message: 'Hesap başarıyla oluşturuldu.' });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Kayıt oluşturulamadı.';
     res.status(400).json({ error: msg });

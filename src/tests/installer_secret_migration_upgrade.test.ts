@@ -337,6 +337,14 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('8. Update re-exec flow: install.sh --update invokes early self-update hook and avoids re-exec loop', () => {
+    // Ensure secrets exist for existing installation update
+    if (!fs.existsSync(path.join(secretsDir, 'encryption_key'))) {
+      fs.writeFileSync(path.join(secretsDir, 'encryption_key'), 'a'.repeat(64), { mode: 0o600 });
+    }
+    if (!fs.existsSync(path.join(secretsDir, 'postgres_password'))) {
+      fs.writeFileSync(path.join(secretsDir, 'postgres_password'), 'UpdateTestDatabasePass123!@#', { mode: 0o600 });
+    }
+
     // When _NEXUS_UPDATE_RELOADED=1 is set, it executes the main flow without attempting to re-exec
     const output = execSync(`_NEXUS_UPDATE_RELOADED=1 bash ${installScriptPath} --init-only --update --quick`, {
       cwd: rootDir,

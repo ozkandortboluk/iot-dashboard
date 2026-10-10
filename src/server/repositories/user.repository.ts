@@ -176,7 +176,6 @@ export class UserRepository {
   public async verifySessionAsync(token: string): Promise<{ user: User; session: UserSession } | null> {
     if (!token) return null;
     const cleanToken = token.trim();
-    const isPgConfigured = Boolean(this.db?.getPostgresUrl?.()?.trim());
     const isProduction = process.env.NODE_ENV === 'production';
 
     if (this.isPgReady()) {
@@ -184,14 +183,19 @@ export class UserRepository {
       if (pgResult) {
         return pgResult;
       }
+      // In non-production, fallback to in-memory session if PostgreSQL doesn't have it
+      if (!isProduction) {
+        return this.verifySession(cleanToken);
+      }
       return null;
     }
 
-    // Fail-Closed: When in production or PostgreSQL is configured and down, reject session verification
-    if (isProduction || isPgConfigured) {
+    // Fail-Closed: When in real production, reject session verification if PostgreSQL is down
+    if (isProduction) {
       return null;
     }
 
+    // In non-production (local/test/aistudio), verify session against in-memory store
     return this.verifySession(cleanToken);
   }
 

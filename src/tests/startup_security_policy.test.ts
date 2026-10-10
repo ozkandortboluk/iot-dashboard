@@ -11,6 +11,10 @@ describe('OLD-112 & OLD-115: Startup Security Policy & Secret Protection', () =>
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    delete process.env.DATABASE_URL;
+    delete process.env.POSTGRES_URL;
+    delete process.env.POSTGRESQL_URL;
+    delete process.env.PG_URL;
     try {
       (systemSecretsService as any).inMemorySecrets?.delete('authentication.jwt_secret');
       (systemSecretsService as any).inMemorySecrets?.delete('jwt_secret');

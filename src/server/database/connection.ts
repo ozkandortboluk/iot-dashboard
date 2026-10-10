@@ -9,7 +9,7 @@ import { isDefaultPassword } from '../utils/startupSecurityPolicy.js';
 import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 
 import { DatabaseState } from '../../types.js';
-export { DatabaseState };
+export { DatabaseState, isDefaultPassword };
 
 export type PgPoolType = pg.Pool;
 
@@ -57,6 +57,9 @@ export function isSshTunnelAllowed(): boolean {
     return true;
   }
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
+    return false;
+  }
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
     return false;
   }
   const env = resolveRuntimeEnvironment();
@@ -430,13 +433,11 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         const pathname = match[5] || '/iot_dashboard';
         const search = match[6] || '';
 
-        if (!existingPass || existingPass === '' || existingPass.includes('••••')) {
-          const vaultPass = systemSecretsService.getDatabasePassword();
-          if (vaultPass) {
-            const encUser = encodeURIComponent(decodeURIComponent(user));
-            const encPass = encodeURIComponent(vaultPass);
-            candidateUrl = `${proto}${encUser}:${encPass}@${hostPort}${pathname}${search}`;
-          }
+        const vaultPass = systemSecretsService.getDatabasePassword();
+        if (vaultPass && (!existingPass || existingPass === '' || existingPass.includes('••••') || isDefaultPassword(existingPass))) {
+          const encUser = encodeURIComponent(decodeURIComponent(user));
+          const encPass = encodeURIComponent(vaultPass);
+          candidateUrl = `${proto}${encUser}:${encPass}@${hostPort}${pathname}${search}`;
         }
       }
     } catch {}
@@ -460,6 +461,21 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
           } else {
             candidateUrl = candidateUrl.replace(/@([^:/]+)(?::\d+)?/, `@127.0.0.1:${localPort}`);
           }
+
+          // Check if candidateUrl has a default placeholder password; if so, replace with Vault password or strip
+          const passMatch = candidateUrl.match(/^postgres(?:ql)?:\/\/[^:]+:([^@]+)@/i);
+          const currentPass = passMatch && passMatch[1] ? decodeURIComponent(passMatch[1]) : '';
+          const isCurrentPassDefaultOrEmpty = !currentPass || isDefaultPassword(currentPass) || currentPass.includes('••••');
+
+          if (isCurrentPassDefaultOrEmpty) {
+            const vaultPass = systemSecretsService.getDatabasePassword();
+            if (vaultPass && !isDefaultPassword(vaultPass)) {
+              candidateUrl = applyPasswordToPostgresUrl(candidateUrl, vaultPass);
+            } else {
+              candidateUrl = applyPasswordToPostgresUrl(candidateUrl, '');
+            }
+          }
+
           if (lastLoggedSshTunnelPort !== localPort) {
             lastLoggedSshTunnelPort = localPort;
             systemLogger.info('database', `PostgreSQL bağlantı adresi SSH tüneli üzerinden yönlendirildi (127.0.0.1:${localPort})`);
@@ -472,7 +488,8 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
         try {
           const vaultDb = systemSecretsService.getDatabaseConfig();
           const user = vaultDb.user || process.env.SQL_USER || process.env.DB_USER || process.env.POSTGRES_USER || 'postgres';
-          const pass = vaultDb.password || systemSecretsService.getDatabasePassword() || process.env.DB_PASSWORD || '';
+          const vaultPass = systemSecretsService.getDatabasePassword();
+          const pass = (vaultPass && !isDefaultPassword(vaultPass)) ? vaultPass : (vaultDb.password && !isDefaultPassword(vaultDb.password) ? vaultDb.password : '');
           const dbName = vaultDb.database || process.env.DB_NAME || process.env.POSTGRES_DB || process.env.SQL_DB_NAME || 'iot_dashboard';
           const encUser = encodeURIComponent(user);
           const encPass = pass ? encodeURIComponent(pass) : '';
@@ -645,24 +662,30 @@ export function getPostgresPoolLimits(): {
  * If the connection URL changes or pool is not initialized, creates a single unified pool.
  */
 export function getSharedPgPool(customUrl?: string): pg.Pool | null {
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
   const url = resolvePostgresConnectionString(customUrl);
   if (!url) {
     return null;
   }
 
-  const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+  const urlMatch = url.match(/^(?:postgres(?:ql)?):\/\/[^:]+:([^@]+)@/);
+  const extractedPass = urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : '';
+
   if (isProduction) {
-    const urlMatch = url.match(/^(?:postgres(?:ql)?):\/\/[^:]+:([^@]+)@/);
-    if (urlMatch && urlMatch[1]) {
-      const extractedPass = decodeURIComponent(urlMatch[1]);
-      if (isDefaultPassword(extractedPass)) {
-        systemLogger.critical(
-          'security',
-          `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası tespiti nedeniyle bağlantı reddedildi (OLD-112).`
-        );
-        console.error(`[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolasıyla bağlantı reddedildi (OLD-112).`);
-        return null;
-      }
+    if (extractedPass && isDefaultPassword(extractedPass)) {
+      systemLogger.critical(
+        'security',
+        `[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolası tespiti nedeniyle bağlantı reddedildi (OLD-112).`
+      );
+      console.error(`[CRITICAL POLICY] Üretim ortamında varsayılan veya güvensiz veritabanı parolasıyla bağlantı reddedildi (OLD-112).`);
+      return null;
+    }
+  }
+
+  // When connecting via SSH tunnel to a remote server, require a non-default password
+  if (sshTunnelService.isConnected()) {
+    if (!extractedPass || isDefaultPassword(extractedPass)) {
+      return null;
     }
   }
 

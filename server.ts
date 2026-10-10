@@ -283,7 +283,8 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
   }
   
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-auth-token, x-api-key, x-token, x-device-id, x-device-ip, x-mac-address, x-setup-token');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-auth-token, x-session-token, x-api-key, x-token, x-device-id, x-device-ip, x-mac-address, x-setup-token, x-client-platform, x-request-token');
+  res.header('Access-Control-Expose-Headers', 'x-auth-token, x-session-token');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   
   if (req.method === 'OPTIONS') {

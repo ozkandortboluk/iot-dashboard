@@ -2914,7 +2914,10 @@ export class PostgresRepository {
     try {
       const session = await this.getSession(token);
       if (!session) return null;
-      const user = await this.getUserById(session.userId);
+      let user = session.userId ? await this.getUserById(session.userId) : null;
+      if (!user && session.userEmail) {
+        user = await this.getUserByEmail(session.userEmail);
+      }
       if (!user || user.status !== 'active' || user.deletedAt) return null;
       return { user, session };
     } catch {
@@ -2940,23 +2943,31 @@ export class PostgresRepository {
     if (targetUserId) {
       const userRes = await this.query(`SELECT 1 FROM users WHERE id = $1 LIMIT 1;`, [targetUserId]).catch(() => null);
       if (!userRes || !userRes.rows || userRes.rows.length === 0) {
-        if (targetUserId === 'usr_test_admin' || targetUserId === 'usr_admin') {
-          const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
-          if (isTestEnv) {
-            const u: User = {
-              id: targetUserId,
-              name: session.userName || (targetUserId === 'usr_admin' ? 'Sistem Yöneticisi' : 'Kanonik Test Yöneticisi'),
-              email: session.userEmail || (targetUserId === 'usr_admin' ? 'admin@system.local' : 'test@nexusnodeiot.com.tr'),
-              role: (session.userRole as any) || 'admin',
-              created_at: new Date().toISOString(),
-            };
-            const pwdHash = '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.';
-            await this.saveUser(u, pwdHash).catch(() => {});
-          } else {
-            targetUserId = null;
+        if (session.userEmail) {
+          const emailCheck = await this.query(`SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;`, [session.userEmail]).catch(() => null);
+          if (emailCheck && emailCheck.rows && emailCheck.rows.length > 0) {
+            targetUserId = emailCheck.rows[0].id;
           }
-        } else {
-          targetUserId = null;
+        }
+        if (!targetUserId || (!userRes?.rows?.length && targetUserId === session.userId)) {
+          if (targetUserId === 'usr_test_admin' || targetUserId === 'usr_admin') {
+            const isTestEnv = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) || process.env.ENABLE_TEST_ACCOUNT === 'true';
+            if (isTestEnv) {
+              const u: User = {
+                id: targetUserId,
+                name: session.userName || (targetUserId === 'usr_admin' ? 'Sistem Yöneticisi' : 'Kanonik Test Yöneticisi'),
+                email: session.userEmail || (targetUserId === 'usr_admin' ? 'admin@system.local' : 'test@nexusnodeiot.com.tr'),
+                role: (session.userRole as any) || 'admin',
+                created_at: new Date().toISOString(),
+              };
+              const pwdHash = '$2b$10$IliwfVRhhq.l39y0sF3qmu/ff6/3GDtHoDXnq9BimrnDqsaIuW/z.';
+              await this.saveUser(u, pwdHash).catch(() => {});
+            } else {
+              targetUserId = session.userId;
+            }
+          } else {
+            targetUserId = session.userId;
+          }
         }
       }
     }

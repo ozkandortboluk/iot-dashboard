@@ -4,9 +4,25 @@
  * Guarantees HttpOnly cookie credentials across all requests and handles graceful 401 logout events.
  */
 
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers || {});
-  const method = (init?.method || 'GET').toUpperCase();
+export interface ApiFetchOptions extends RequestInit {
+  skipUnauthorizedEvent?: boolean;
+}
+
+export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchOptions): Promise<Response> {
+  const { skipUnauthorizedEvent, ...fetchInit } = init || {};
+  const headers = new Headers(fetchInit?.headers || {});
+  if (!headers.has('Authorization')) {
+    const token = typeof window !== 'undefined'
+      ? (sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token'))
+      : null;
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+      if (!headers.has('x-auth-token')) {
+        headers.set('x-auth-token', token);
+      }
+    }
+  }
+  const method = (fetchInit?.method || 'GET').toUpperCase();
   const isIdempotent = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(method);
 
   let attempts = 0;
@@ -23,7 +39,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     try {
       attempts++;
       const res = await fetch(input, {
-        ...init,
+        ...fetchInit,
         credentials: 'include', // Guaranteed credentials AFTER init spread
         headers,
       });
@@ -32,8 +48,8 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
         if (typeof window !== 'undefined' && (import.meta as any).env?.DEV) {
           console.warn(`[apiFetch] 401 Unauthorized for URL: ${urlStr}`);
         }
-        // Only trigger global logout event if the primary authentication profile verification explicitly fails
-        if (typeof window !== 'undefined' && (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me'))) {
+        // Only trigger global logout event if not explicitly silenced and verification fails
+        if (!skipUnauthorizedEvent && typeof window !== 'undefined' && (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me'))) {
           window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { url: urlStr } }));
         }
       }
@@ -49,7 +65,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
 
   const finalRes = await fetch(input, {
-    ...init,
+    ...fetchInit,
     credentials: 'include', // Guaranteed credentials AFTER init spread
     headers,
   });
@@ -58,7 +74,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     if (typeof window !== 'undefined' && (import.meta as any).env?.DEV) {
       console.warn(`[apiFetch] 401 Unauthorized for URL: ${urlStr}`);
     }
-    if (typeof window !== 'undefined' && (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me'))) {
+    if (!skipUnauthorizedEvent && typeof window !== 'undefined' && (urlStr.includes('/api/profile') || urlStr.includes('/api/auth/me'))) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { url: urlStr } }));
     }
   }

@@ -485,6 +485,18 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const connect = () => {
       if (isCleanedUp) return;
 
+      const storedToken = typeof window !== 'undefined'
+        ? (sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token'))
+        : null;
+
+      // Unauthenticated visitor guard: If not logged in and no session token, do not spam WebSocket 401 attempts
+      if (!user && !storedToken) {
+        setConnectionStatus('disconnected');
+        isConnectedRef.current = false;
+        setIsConnected(false);
+        return;
+      }
+
       // Close previous instance if exists
       if (ws) {
         try {
@@ -501,10 +513,14 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setConnectionStatus('reconnecting');
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      let wsUrl = `${protocol}//${window.location.host}/ws`;
+      if (storedToken) {
+        wsUrl += `?token=${encodeURIComponent(storedToken)}`;
+      }
 
       try {
-        ws = new WebSocket(wsUrl);
+        const protocols = storedToken ? ['nexus-token', storedToken] : undefined;
+        ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
         socketRef.current = ws;
 
         let lastMessageReceivedAt = Date.now();
@@ -519,6 +535,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           retryAttempt = 0;
           if (countdownInterval) clearInterval(countdownInterval);
           lastMessageReceivedAt = Date.now();
+
+          // Send explicit in-band authentication frame for secondary confirmation
+          if (storedToken) {
+            try {
+              ws?.send(JSON.stringify({ event: 'auth', token: storedToken }));
+            } catch {}
+          }
 
           // Resubscribe to all active channels (physical, simulation, etc.)
           const channelsToSub = Array.from(activeSubscriptionsRef.current);

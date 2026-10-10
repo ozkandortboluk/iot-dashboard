@@ -45,6 +45,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [expectedHostFingerprint, setExpectedHostFingerprint] = useState('');
   const [discoveredFingerprint, setDiscoveredFingerprint] = useState<string | null>(null);
 
+  // PostgreSQL Database Credentials over SSH Tunnel
+  const [dbUser, setDbUser] = useState('iot_user');
+  const [dbPassword, setDbPassword] = useState('');
+  const [dbName, setDbName] = useState('iot_dashboard');
+  const [showDbPassword, setShowDbPassword] = useState(false);
+
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [connectedAt, setConnectedAt] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -76,6 +82,8 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     const userToken = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
     if (userToken) {
       headers['Authorization'] = `Bearer ${userToken}`;
+      headers['X-Auth-Token'] = userToken;
+      headers['x-auth-token'] = userToken;
     }
     return headers;
   };
@@ -247,6 +255,9 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           remoteDbPort: Number(remoteDbPort) || 5432,
           localPort: Number(localPort) || 5432,
           expectedHostFingerprint: expectedHostFingerprint.trim() || undefined,
+          dbUser: dbUser.trim() || undefined,
+          dbPassword: dbPassword ? dbPassword : undefined,
+          dbName: dbName.trim() || undefined,
         }),
       });
 
@@ -577,6 +588,67 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                   />
                   <p className="text-[10px] text-slate-500">
                     Uygulama tünel üzerinden 127.0.0.1:{localPort || '5432'} adresi ile PostgreSQL veritabanına bağlanır (Standart: 5432).
+                  </p>
+                </div>
+              </div>
+
+              {/* Section 4: PostgreSQL Database Credentials (Optional) */}
+              <div className="space-y-3 bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-cyan-400" /> PostgreSQL Veritabanı Bilgileri
+                  </h4>
+                  <span className="text-[10px] text-cyan-400 bg-cyan-950/50 px-2 py-0.5 rounded border border-cyan-800/60 font-medium">
+                    İsteğe Bağlı / Opsiyonel
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  SSH tüneli yalnızca ağ seviyesinde güvenli bir köprü (Port Forwarding) kurar. Veritabanı kullanıcı adı ve şifreniz zaten sistemde/kasada kayıtlıysa bu alanı <strong className="text-slate-300">boş bırakabilirsiniz</strong>. Yalnızca tünel kurulurken veritabanı kimlik bilgilerini de güncellemek isterseniz doldurunuz:
+                </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-slate-400">DB Kullanıcı (Varsayılan: iot_user)</label>
+                    <input
+                      type="text"
+                      value={dbUser}
+                      onChange={(e) => setDbUser(e.target.value)}
+                      placeholder="iot_user"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-slate-400">DB Adı (Varsayılan: iot_dashboard)</label>
+                    <input
+                      type="text"
+                      value={dbName}
+                      onChange={(e) => setDbName(e.target.value)}
+                      placeholder="iot_dashboard"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400">PostgreSQL Veritabanı Şifresi (Opsiyonel)</label>
+                  <div className="relative">
+                    <input
+                      type={showDbPassword ? 'text' : 'password'}
+                      value={dbPassword}
+                      onChange={(e) => setDbPassword(e.target.value)}
+                      placeholder="Mevcut sistem parolası kullanılır (opsiyonel)"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 pr-9 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDbPassword(!showDbPassword)}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      {showDbPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Belirtilirse Kasa (Vault) içine kaydedilir; boş bırakılırsa mevcut kayıtlı parola kullanılır.
                   </p>
                 </div>
               </div>

@@ -643,7 +643,11 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
         throw new Error(data.message || 'Yönetici hesabı oluşturulamadı.');
       }
 
-      // Save user details to localStorage for instant AuthContext hydration (session token stored in HttpOnly cookie)
+      // Save session token and user details to storage for instant AuthContext hydration
+      if (data.token) {
+        sessionStorage.setItem('nexus_session_token', data.token);
+        localStorage.setItem('nexus_session_token', data.token);
+      }
       if (data.user) {
         localStorage.removeItem('dashboard_token');
         localStorage.setItem('dashboard_user', JSON.stringify(data.user));
@@ -671,7 +675,10 @@ export const DatabaseSetupWizard: React.FC<DatabaseSetupWizardProps> = ({ onComp
       // Verify profile if user state is not in localStorage
       if (!localStorage.getItem('dashboard_user')) {
         try {
-          const profileRes = await fetch('/api/auth/me', { credentials: 'include' });
+          const token = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
+          const headers: Record<string, string> = {};
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const profileRes = await fetch('/api/auth/me', { headers, credentials: 'include' });
           if (profileRes.ok) {
             const profileData = await profileRes.json();
             if (profileData.user) {

@@ -1314,8 +1314,10 @@ void setup() {
   }
   Serial.println("\\n[OK] WiFi Bağlandı! IP: " + WiFi.localIP().toString());
 
-  // WebSocket Başlat (Kalıcı bağlantı)
-  webSocket.begin(WS_HOST, WS_PORT, WS_PATH);
+  // WebSocket Başlat (Kalıcı bağlantı ve API Anahtarı ile Kimlik Doğrulama)
+  String wsPath = String("/ws?token=") + String(API_KEY);
+  webSocket.begin(WS_HOST, WS_PORT, wsPath.c_str());
+  webSocket.setExtraHeaders(String("x-api-key: " + String(API_KEY)).c_str());
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
 }
@@ -1737,9 +1739,11 @@ def periodic_tasks(ws):
 if __name__ == "__main__":
     while True:
         try:
-            print(f">>> NexusNode WebSocket Ajanı Bağlanıyor: {SERVER_WS}")
+            ws_url = f"{SERVER_WS}?token={API_KEY}"
+            print(f">>> NexusNode WebSocket Ajanı Bağlanıyor: {ws_url}")
             ws_app = websocket.WebSocketApp(
-                SERVER_WS,
+                ws_url,
+                header={"x-api-key": API_KEY},
                 on_open=on_open,
                 on_message=on_message,
                 on_error=on_error,

@@ -252,6 +252,9 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
       remoteDbPort,
       localPort,
       expectedHostFingerprint,
+      dbUser,
+      dbPassword,
+      dbName,
     } = req.body || {};
 
     if (!sshHost || !sshUser) {
@@ -277,6 +280,9 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
       remoteDbPort: Number(remoteDbPort) || 5432,
       localPort: Number(localPort) || DEFAULT_SSH_LOCAL_PORT,
       expectedHostFingerprint: expectedHostFingerprint ? String(expectedHostFingerprint).trim() : undefined,
+      dbUser: dbUser ? String(dbUser).trim() : undefined,
+      dbPassword: dbPassword ? String(dbPassword) : undefined,
+      dbName: dbName ? String(dbName).trim() : undefined,
     };
 
     const result = await sshTunnelService.connectTunnel(config);
