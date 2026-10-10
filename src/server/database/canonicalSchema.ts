@@ -1400,26 +1400,26 @@ CREATE TABLE IF NOT EXISTS devices (
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     rate_limit_per_min INT NOT NULL DEFAULT 120,
     encryption_method VARCHAR(64) NOT NULL DEFAULT 'AES-256-GCM',
-    metrics JSONB DEFAULT '{}'::jsonb,
-    data_flow_active BOOLEAN DEFAULT TRUE,
-    is_simulated BOOLEAN DEFAULT FALSE,
-    save_simulated_data_to_db BOOLEAN DEFAULT FALSE,
-    simulated_metrics JSONB DEFAULT '[]'::jsonb,
-    expected_interval_seconds INT DEFAULT 30,
-    auto_detected_interval_seconds INT DEFAULT 30,
-    heartbeat_timeout_seconds INT DEFAULT 60,
-    interval_mode VARCHAR(16) DEFAULT 'auto',
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    data_flow_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_simulated BOOLEAN NOT NULL DEFAULT FALSE,
+    save_simulated_data_to_db BOOLEAN NOT NULL DEFAULT FALSE,
+    simulated_metrics JSONB NOT NULL DEFAULT '[]'::jsonb,
+    expected_interval_seconds INT NOT NULL DEFAULT 30,
+    auto_detected_interval_seconds INT NOT NULL DEFAULT 30,
+    heartbeat_timeout_seconds INT NOT NULL DEFAULT 60,
+    interval_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
     custom_interval_seconds INT,
-    recent_intervals JSONB DEFAULT '[]'::jsonb,
-    websocket_connected BOOLEAN DEFAULT FALSE,
+    recent_intervals JSONB NOT NULL DEFAULT '[]'::jsonb,
+    websocket_connected BOOLEAN NOT NULL DEFAULT FALSE,
     last_message_at TIMESTAMP WITH TIME ZONE,
-    output_definitions JSONB DEFAULT '[]'::jsonb,
-    capabilities JSONB DEFAULT '[]'::jsonb,
+    output_definitions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
     last_telemetry_at TIMESTAMP WITH TIME ZONE,
     last_heartbeat_at TIMESTAMP WITH TIME ZONE,
     last_offline_notified_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CREATE TABLE IF NOT EXISTS does not add columns to pre-existing devices tables.
@@ -1448,6 +1448,24 @@ ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET DEFAULT 120;
 ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN encryption_method SET DEFAULT 'AES-256-GCM';
 ALTER TABLE devices ALTER COLUMN encryption_method SET NOT NULL;
+
+-- Validate existing records rather than silently rewriting NULL values.
+ALTER TABLE devices ALTER COLUMN save_simulated_data_to_db SET DEFAULT FALSE;
+ALTER TABLE devices ALTER COLUMN metrics SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN data_flow_active SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN is_simulated SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN save_simulated_data_to_db SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN simulated_metrics SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN expected_interval_seconds SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN auto_detected_interval_seconds SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN heartbeat_timeout_seconds SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN interval_mode SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN recent_intervals SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN websocket_connected SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN output_definitions SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN capabilities SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN created_at SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN updated_at SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
