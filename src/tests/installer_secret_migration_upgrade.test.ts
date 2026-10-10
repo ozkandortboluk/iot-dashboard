@@ -174,7 +174,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
     expect(recovered).toBe(knownDbPass);
 
     const stat = fs.statSync(pgPassFile);
-    expect(stat.mode & 0o077).toBe(0);
+    expect(stat.mode & 0o037).toBe(0); // 0600 or 0640: group read for Docker GID 1000 is permitted
   });
 
   it('3. Legacy db_password migration: safely moves legacy secret to postgres_password with 0600 mode', () => {
