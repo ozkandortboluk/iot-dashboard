@@ -264,13 +264,8 @@ if [ ! -s "./secrets/encryption_key" ] || [ ! -s "./secrets/postgres_password" ]
   exit 1
 fi
 
-# Ensure secrets directory and secret files maintain strictly 0600 permissions (never world-readable)
-chmod 700 "./secrets" 2>/dev/null || true
-[ -f "./secrets/encryption_key" ] && chmod 600 "./secrets/encryption_key" 2>/dev/null || true
-[ -f "./secrets/postgres_password" ] && chmod 600 "./secrets/postgres_password" 2>/dev/null || true
-if [ "$IS_ROOT" = true ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-  chown "$SUDO_USER":"$SUDO_USER" "./secrets" "./secrets/encryption_key" "./secrets/postgres_password" 2>/dev/null || true
-fi
+# Align secrets permissions and ownership to guarantee non-root node container (UID 1000) read access
+align_secrets_ownership_and_permissions
 
 # Validate Docker Compose configuration
 COMPOSE_PROFILE_ARGS=()

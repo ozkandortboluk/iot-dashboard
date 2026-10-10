@@ -204,6 +204,7 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
 
   // 2. Vault Encryption Key Validation (Single Production Policy: /run/secrets/encryption_key)
   let encKey = '';
+  let keyReadError: string | null = null;
   try {
     if (fs.existsSync('/run/secrets/encryption_key')) {
       encKey = fs.readFileSync('/run/secrets/encryption_key', 'utf8').trim();
@@ -211,9 +212,15 @@ export function validateProductionSecurityPolicy(): SecurityPolicyValidationResu
       // In Vitest test harness where /run/secrets/encryption_key is not mounted on the test host
       encKey = (process.env.ENCRYPTION_KEY || '').trim();
     }
-  } catch {}
+  } catch (err: any) {
+    keyReadError = err.message;
+  }
 
-  if (!encKey || encKey.trim() === '') {
+  if (keyReadError) {
+    errors.push(
+      `[CRITICAL POLICY] Üretim ortamında /run/secrets/encryption_key dosyasına erişilemedi (İzin/Okuma Hatası: ${keyReadError}). Konteyner kullanıcısı (node, UID/GID 1000) için salt-okunur erişim yetkisi (mode 0640 / GID 1000) tanımlanmalıdır.`
+    );
+  } else if (!encKey || encKey.trim() === '') {
     errors.push(
       `[CRITICAL POLICY] Üretim ortamında Vault root encryption key (/run/secrets/encryption_key) bulunamadı (SEC-13 / OLD-115). Uygulama fail-closed olarak durduruldu.`
     );

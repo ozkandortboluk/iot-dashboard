@@ -555,10 +555,15 @@ async function setupViteOrStatic() {
     const vaultStatus = getVaultStatus();
     if (!vaultStatus.configured) {
       console.error(`====================================================`);
-      console.error(`[FATAL SECURITY ERROR] Secret Vault Şifreleme Anahtarı Eksik!`);
-      console.error(`Üretim (Production) modunda /run/secrets/encryption_key Docker Secret dosyası tanımlanmalıdır.`);
+      console.error(`[FATAL SECURITY ERROR] Secret Vault Şifreleme Anahtarı Eksik veya Okunamıyor!`);
+      if (vaultStatus.error) {
+        console.error(`Erişim Hatası: ${vaultStatus.error}`);
+        console.error(`Docker Secret dosya okuma izinlerini (mode 0640 / GID 1000) kontrol ediniz (Konteyner kullanıcısı: node, UID: 1000, GID: 1000).`);
+      } else {
+        console.error(`Üretim (Production) modunda /run/secrets/encryption_key Docker Secret dosyası tanımlanmalıdır.`);
+      }
       console.error(`====================================================`);
-      systemLogger.critical('security', 'Üretim ortamında Secret Vault anahtarı (/run/secrets/encryption_key) eksik olduğu için sunucu fail-closed olarak durduruldu.');
+      systemLogger.critical('security', `Üretim ortamında Secret Vault anahtarı (/run/secrets/encryption_key) ${vaultStatus.error ? 'okunamadığı (' + vaultStatus.error + ')' : 'eksik olduğu'} için sunucu fail-closed olarak durduruldu.`);
       process.exit(1);
     } else {
       console.log(`[Security] Secret Vault AES-256-GCM aktif (Kaynak: ${vaultStatus.source}).`);

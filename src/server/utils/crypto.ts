@@ -100,17 +100,21 @@ export function getVaultStatus(): {
   source: string;
   isProduction: boolean;
   message?: string;
+  error?: string;
 } {
   const status = masterKeyProvider.getStatus();
   return {
     configured: status.configured,
     source: status.source,
     isProduction: status.isProduction,
+    error: status.error,
     message: status.configured
       ? 'Secret Vault AES-256-GCM şifreleme anahtarı aktif.'
-      : status.isProduction
-        ? 'Secret Vault yapılandırılmamış: Üretim ortamında /run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.'
-        : 'Secret Vault geliştirme modunda yapılandırılmamış.',
+      : status.error
+        ? `Secret Vault erişim hatası: ${status.error}. /run/secrets/encryption_key dosya okuma izinlerini (UID/GID 1000) kontrol ediniz.`
+        : status.isProduction
+          ? 'Secret Vault yapılandırılmamış: Üretim ortamında /run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.'
+          : 'Secret Vault geliştirme modunda yapılandırılmamış.',
   };
 }
 

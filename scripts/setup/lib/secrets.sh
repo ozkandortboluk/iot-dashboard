@@ -105,25 +105,51 @@ verify_postgres_password() {
 
   # 1. If nexus_timescaledb container is currently running:
   if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^nexus_timescaledb$'; then
-    # Test authentication inside container via TCP loopback (forces SCRAM/MD5 auth)
-    if docker exec -e PGPASSWORD="$candidate" nexus_timescaledb psql -h 127.0.0.1 -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
-      return 0
+    # Test authentication strictly over TCP loopback inside container (forces SCRAM/MD5 password auth, never Unix socket)
+    local probe_output=""
+    local probe_exit=0
+    probe_output=$(docker exec -e PGPASSWORD="$candidate" nexus_timescaledb psql -h 127.0.0.1 -p 5432 -U "$db_user" -d "$db_name" -c "SELECT 1;" 2>&1) || probe_exit=$?
+
+    if [ "$probe_exit" -eq 0 ] && echo "$probe_output" | grep -qE "(1 row|[[:space:]]1[[:space:]])"; then
+      return 0 # TCP Authentication succeeded with verified password!
     fi
-    # Also test via default socket
-    if docker exec -e PGPASSWORD="$candidate" nexus_timescaledb psql -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
-      return 0
+
+    # Distinguish explicitly rejected password from unreachable/connection failure
+    if echo "$probe_output" | grep -iq "password authentication failed"; then
+      return 1 # Database is active and explicitly rejected this password!
     fi
-    return 1 # Database is active and explicitly rejected this password!
+
+    if echo "$probe_output" | grep -iqE "(could not connect|connection refused|is the server running|timeout)"; then
+      return 2 # Connection could not be established (database offline or unreachable)
+    fi
+
+    if echo "$probe_output" | grep -iqE "FATAL:.*(password|authentication)"; then
+      return 1
+    fi
+
+    return 1
   fi
 
-  # 2. If host psql is available and port 5432 is responsive:
+  # 2. If host psql is available and port 5432 is responsive over TCP:
   if command -v psql >/dev/null 2>&1; then
-    if PGPASSWORD="$candidate" psql -h 127.0.0.1 -p "$db_port" -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
+    local host_output=""
+    local host_exit=0
+    host_output=$(PGPASSWORD="$candidate" psql -h 127.0.0.1 -p "$db_port" -U "$db_user" -d "$db_name" -c "SELECT 1;" 2>&1) || host_exit=$?
+
+    if [ "$host_exit" -eq 0 ] && echo "$host_output" | grep -qE "(1 row|[[:space:]]1[[:space:]])"; then
       return 0
+    fi
+
+    if echo "$host_output" | grep -iq "password authentication failed"; then
+      return 1
+    fi
+
+    if echo "$host_output" | grep -iqE "(could not connect|connection refused|is the server running|timeout)"; then
+      return 2
     fi
   fi
 
-  # 3. Database is offline or not directly reachable for live probe
+  # 3. Database is offline or not directly reachable for TCP live probe
   return 2
 }
 
@@ -503,19 +529,82 @@ ensure_secrets_initialized() {
   # --------------------------------------------------------------------------
   # 4. Final Security Audit & Ownership Alignment:
   # --------------------------------------------------------------------------
-  # Enforce strict 0600 permissions on secret files (0700 on secrets directory).
-  # Never make secrets world-readable (0644/0777 are strictly forbidden).
-  chmod 700 "$SECRETS_DIR" 2>/dev/null || true
-  [ -f "$ENC_KEY_FILE" ] && chmod 600 "$ENC_KEY_FILE" 2>/dev/null || true
-  [ -f "$PG_PASS_FILE" ] && chmod 600 "$PG_PASS_FILE" 2>/dev/null || true
-  [ -f "$DB_PASS_FILE" ] && chmod 600 "$DB_PASS_FILE" 2>/dev/null || true
+  align_secrets_ownership_and_permissions
+}
 
-  # Prevent ownership conflicts: If executed via sudo, retain ownership for the invoking operator
-  if [ "${IS_ROOT:-false}" = true ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-    chown "$SUDO_USER":"$SUDO_USER" "$SECRETS_DIR" 2>/dev/null || true
-    [ -f "$ENC_KEY_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$ENC_KEY_FILE" 2>/dev/null || true
-    [ -f "$PG_PASS_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$PG_PASS_FILE" 2>/dev/null || true
-    [ -f "$DB_PASS_FILE" ] && chown "$SUDO_USER":"$SUDO_USER" "$DB_PASS_FILE" 2>/dev/null || true
+align_secrets_ownership_and_permissions() {
+  local SECRETS_DIR="./secrets"
+  local ENC_KEY_FILE="${SECRETS_DIR}/encryption_key"
+  local PG_PASS_FILE="${SECRETS_DIR}/postgres_password"
+  local DB_PASS_FILE="${SECRETS_DIR}/db_password"
+
+  [ ! -d "$SECRETS_DIR" ] && return 0
+
+  # Container node user requires UID 1000 / GID 1000 read access.
+  # Security requirements:
+  # 1. Never make secrets world-readable (0644/0777 are strictly forbidden).
+  # 2. Host operator retains owner read/write access.
+  # 3. If operator UID != 1000 (and != 0), assign group 1000 with 0640 permissions (owner rw-, group r--, others 0)
+  #    and POSIX ACL u:1000:r,g:1000:r so container user 'node' (UID 1000, GID 1000) can read the secret.
+  # 4. If operator UID is 1000 or root without SUDO_USER, maintain strict 0600 (owner only) and 0700.
+
+  local invoking_uid="${SUDO_UID:-}"
+  if [ -z "$invoking_uid" ] && [ -n "${SUDO_USER:-}" ]; then
+    invoking_uid=$(id -u "$SUDO_USER" 2>/dev/null || echo "")
+  fi
+  if [ -z "$invoking_uid" ]; then
+    invoking_uid=$(id -u 2>/dev/null || echo "")
+  fi
+
+  local is_different_uid=false
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && [ "$SUDO_USER" != "node" ]; then
+    is_different_uid=true
+  elif [ -n "$invoking_uid" ] && [ "$invoking_uid" -ne 0 ] && [ "$invoking_uid" -ne 1000 ]; then
+    is_different_uid=true
+  fi
+
+  # Ownership alignment
+  if [ "${IS_ROOT:-false}" = true ] || [ "$EUID" -eq 0 ]; then
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+      chown "$SUDO_USER":1000 "$SECRETS_DIR" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$SECRETS_DIR" 2>/dev/null || true
+      [ -f "$ENC_KEY_FILE" ] && (chown "$SUDO_USER":1000 "$ENC_KEY_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$ENC_KEY_FILE" 2>/dev/null || true)
+      [ -f "$PG_PASS_FILE" ] && (chown "$SUDO_USER":1000 "$PG_PASS_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$PG_PASS_FILE" 2>/dev/null || true)
+      [ -f "$DB_PASS_FILE" ] && (chown "$SUDO_USER":1000 "$DB_PASS_FILE" 2>/dev/null || chown "$SUDO_USER":"$SUDO_USER" "$DB_PASS_FILE" 2>/dev/null || true)
+    else
+      chown :1000 "$SECRETS_DIR" 2>/dev/null || true
+      [ -f "$ENC_KEY_FILE" ] && chown :1000 "$ENC_KEY_FILE" 2>/dev/null || true
+      [ -f "$PG_PASS_FILE" ] && chown :1000 "$PG_PASS_FILE" 2>/dev/null || true
+      [ -f "$DB_PASS_FILE" ] && chown :1000 "$DB_PASS_FILE" 2>/dev/null || true
+    fi
+  else
+    chgrp 1000 "$SECRETS_DIR" 2>/dev/null || chown :1000 "$SECRETS_DIR" 2>/dev/null || true
+    [ -f "$ENC_KEY_FILE" ] && (chgrp 1000 "$ENC_KEY_FILE" 2>/dev/null || chown :1000 "$ENC_KEY_FILE" 2>/dev/null || true)
+    [ -f "$PG_PASS_FILE" ] && (chgrp 1000 "$PG_PASS_FILE" 2>/dev/null || chown :1000 "$PG_PASS_FILE" 2>/dev/null || true)
+    [ -f "$DB_PASS_FILE" ] && (chgrp 1000 "$DB_PASS_FILE" 2>/dev/null || chown :1000 "$DB_PASS_FILE" 2>/dev/null || true)
+  fi
+
+  # POSIX ACLs: Explicitly grant read access to UID 1000 and GID 1000 if setfacl is supported
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
+    [ -f "$ENC_KEY_FILE" ] && setfacl -m u:1000:r,g:1000:r "$ENC_KEY_FILE" 2>/dev/null || true
+    [ -f "$PG_PASS_FILE" ] && setfacl -m u:1000:r,g:1000:r "$PG_PASS_FILE" 2>/dev/null || true
+    [ -f "$DB_PASS_FILE" ] && setfacl -m u:1000:r,g:1000:r "$DB_PASS_FILE" 2>/dev/null || true
+  fi
+
+  # Controlled permission enforcement:
+  # - If operator UID != 1000 (different user on host, e.g. UID 1001), use 0640 (owner rw-, group r--, others none) and 0750
+  # - If operator UID is 1000 or root without SUDO_USER, maintain strict 0600 (owner only) and 0700
+  # - Strictly NEVER world-readable (0644/0777 are forbidden)
+  if [ "$is_different_uid" = true ]; then
+    chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+    [ -f "$ENC_KEY_FILE" ] && chmod 640 "$ENC_KEY_FILE" 2>/dev/null || true
+    [ -f "$PG_PASS_FILE" ] && chmod 640 "$PG_PASS_FILE" 2>/dev/null || true
+    [ -f "$DB_PASS_FILE" ] && chmod 640 "$DB_PASS_FILE" 2>/dev/null || true
+  else
+    chmod 700 "$SECRETS_DIR" 2>/dev/null || true
+    [ -f "$ENC_KEY_FILE" ] && chmod 600 "$ENC_KEY_FILE" 2>/dev/null || true
+    [ -f "$PG_PASS_FILE" ] && chmod 600 "$PG_PASS_FILE" 2>/dev/null || true
+    [ -f "$DB_PASS_FILE" ] && chmod 600 "$DB_PASS_FILE" 2>/dev/null || true
   fi
 }
 

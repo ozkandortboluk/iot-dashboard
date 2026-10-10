@@ -8,6 +8,7 @@ export interface MasterKeyStatus {
   source: 'docker_secret' | 'secrets_file' | 'data_vault_key' | 'env' | 'missing';
   sourcePath?: string;
   isProduction: boolean;
+  error?: string;
 }
 
 const DOCKER_SECRET_KEY_PATH = '/run/secrets/encryption_key';
@@ -24,6 +25,7 @@ export class MasterKeyProvider {
   private cachedKeyBuffer: Buffer | null = null;
   private cachedSource: 'docker_secret' | 'secrets_file' | 'data_vault_key' | 'env' | 'missing' = 'missing';
   private cachedSourcePath?: string;
+  private lastError: Error | null = null;
 
   private constructor() {}
 
@@ -38,6 +40,7 @@ export class MasterKeyProvider {
     this.cachedKeyBuffer = null;
     this.cachedSource = 'missing';
     this.cachedSourcePath = undefined;
+    this.lastError = null;
   }
 
   public derive32ByteKey(raw: string): Buffer {
@@ -82,10 +85,15 @@ export class MasterKeyProvider {
             this.cachedKeyBuffer = Buffer.from(raw, 'hex');
             this.cachedSource = 'docker_secret';
             this.cachedSourcePath = DOCKER_SECRET_KEY_PATH;
+            this.lastError = null;
             return this.cachedKeyBuffer;
           }
         }
-      } catch {}
+      } catch (err: any) {
+        this.lastError = err;
+        console.error(`[MasterKeyProvider] HATA: '${DOCKER_SECRET_KEY_PATH}' mevcut fakat okunamadı (${err.code || err.message}).`);
+        console.error(`[MasterKeyProvider] Erişim hatası: Konteyner kullanıcısı (node: UID/GID 1000) için dosya okuma izinleri (mode 0640 / GID 1000) yetersiz.`);
+      }
 
       this.cachedSource = 'missing';
       return null;
@@ -184,6 +192,7 @@ export class MasterKeyProvider {
       source: this.cachedSource,
       sourcePath: this.cachedSourcePath,
       isProduction: isProductionVpsEnvironment(),
+      error: this.lastError?.message,
     };
   }
 }
