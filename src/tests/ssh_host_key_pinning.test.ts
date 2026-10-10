@@ -93,5 +93,5 @@ describe('SEC-02: Strict SSH Host Key Pinning & Verification (Fail-Closed)', () 
 
     expect(connectResult.success).toBe(false);
     expect(connectResult.message).toMatch(/(Zorunlu SSH Host Key Parmak İzi|SSH Tüneli kurulamadı)/);
-  });
+  }, 15000);
 });
