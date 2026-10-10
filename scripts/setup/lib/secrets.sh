@@ -718,10 +718,12 @@ align_secrets_ownership_and_permissions() {
       fi
     else
       # Pure Root without SUDO_USER or sudo invoked by UID 1000
-      # Assign ownership to UID 1000 so the unprivileged container node user (UID 1000) owns and reads the files!
-      if ! chown 1000:1000 "$SECRETS_DIR"; then
-        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 1000:1000 sahipliği ayarlanamadı!" >&2
-        return 1
+      # Assign ownership to UID 1000 when root; for non-root test/CI runners, retain current ownership
+      if [ "$current_uid" = "0" ] || [ "${EUID:-0}" -eq 0 ]; then
+        if ! chown 1000:1000 "$SECRETS_DIR"; then
+          echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 1000:1000 sahipliği ayarlanamadı!" >&2
+          return 1
+        fi
       fi
       if ! chmod 700 "$SECRETS_DIR"; then
         echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0700 izni ayarlanamadı!" >&2
@@ -729,9 +731,11 @@ align_secrets_ownership_and_permissions() {
       fi
       for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
         if [ -f "$sfile" ]; then
-          if ! chown 1000:1000 "$sfile"; then
-            echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 1000:1000 sahipliği ayarlanamadı!" >&2
-            return 1
+          if [ "$current_uid" = "0" ] || [ "${EUID:-0}" -eq 0 ]; then
+            if ! chown 1000:1000 "$sfile"; then
+              echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 1000:1000 sahipliği ayarlanamadı!" >&2
+              return 1
+            fi
           fi
           if ! chmod 600 "$sfile"; then
             echo "❌ [KRİTİK HATA] '${sfile}' dosyası için 0600 izni ayarlanamadı!" >&2
