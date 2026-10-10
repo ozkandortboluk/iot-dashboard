@@ -6,7 +6,21 @@ import { execSync } from 'node:child_process';
 import { MasterKeyProvider } from '../server/services/masterKeyProvider.js';
 import { getVaultStatus } from '../server/utils/crypto.js';
 
-const rootDir = path.resolve(__dirname, '../..');
+// Isolate destructive installer/ownership tests from the checked-out repository.
+// /home/runner is not traversable by UID 1000 on GitHub-hosted runners.
+const sourceRoot = path.resolve(__dirname, '../..');
+const sandboxRoot = fs.mkdtempSync('/tmp/nexus-secret-test-');
+const rootDir = path.join(sandboxRoot, 'project');
+fs.cpSync(sourceRoot, rootDir, {
+  recursive: true,
+  filter: (src) => {
+    const rel = path.relative(sourceRoot, src);
+    return !rel.split(path.sep).some((part) => ['.git', 'node_modules', 'secrets', 'data'].includes(part));
+  }
+});
+fs.mkdirSync(path.join(rootDir, 'secrets'), { recursive: true, mode: 0o700 });
+fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true, mode: 0o700 });
+
 const secretsDir = path.join(rootDir, 'secrets');
 const dataDir = path.join(rootDir, 'data');
 const installScriptPath = path.join(rootDir, 'install.sh');
