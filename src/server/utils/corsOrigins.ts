@@ -40,6 +40,7 @@ const LOCAL_LOOPBACK_REGEX = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i
 
 // Multi-segment Cloud Run domain pattern (e.g. https://ais-dev-...europe-west1.run.app)
 const CLOUD_RUN_ORIGIN_REGEX = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app$/i;
+const GOOGLE_ORIGIN_REGEX = /^https:\/\/(?:[a-z0-9-]+\.)*(?:google\.com|googleusercontent\.com)$/i;
 
 /**
  * Checks if a given origin or referer string matches the explicit allowlist for the current environment.
@@ -66,9 +67,9 @@ export function isOriginAllowed(originOrReferer?: string | null): boolean {
     }
   }
 
-  // 3. AI Studio / Preview / Test / Local: Allow Google Cloud Run preview domains (not allowed in VPS production)
+  // 3. AI Studio / Preview / Test / Local: Allow Google Cloud Run & AI Studio preview domains (not allowed in VPS production)
   if (env !== 'vps') {
-    if (CLOUD_RUN_ORIGIN_REGEX.test(clean)) {
+    if (CLOUD_RUN_ORIGIN_REGEX.test(clean) || GOOGLE_ORIGIN_REGEX.test(clean)) {
       return true;
     }
   }

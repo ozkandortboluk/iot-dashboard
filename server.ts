@@ -164,16 +164,22 @@ app.use((_req, res, next) => {
 // Security Headers Middleware (OLD-219: CSP, HSTS, X-Content-Type-Options, etc.)
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+  const isVpsProd = isProductionVpsEnvironment();
+
+  if (isVpsProd) {
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
 
-  // Content-Security-Policy (OLD-219: Secure CSP with allowance for Vite dev/scripts & WebSocket telemetry)
+  // Content-Security-Policy (Allow iframe embedding in AI Studio while securing standalone VPS production)
+  const frameAncestors = isVpsProd
+    ? "'self'"
+    : "'self' https: https://*.google.com https://*.googleusercontent.com https://*.run.app http://localhost:* http://127.0.0.1:*";
+
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'self'; " +
@@ -182,7 +188,7 @@ app.use((_req, res, next) => {
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https:; " +
     "connect-src 'self' ws: wss: http: https:; " +
-    "frame-ancestors 'self' https: http://localhost:* http://127.0.0.1:*;"
+    `frame-ancestors ${frameAncestors};`
   );
   next();
 });

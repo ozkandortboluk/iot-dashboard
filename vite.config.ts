@@ -12,6 +12,7 @@ export default defineConfig(() => {
       },
     },
     server: {
+      hmr: false,
       watch: {
         ignored: ['**/data/**', '**/*.json', path.resolve(__dirname, 'data', '**')],
       },

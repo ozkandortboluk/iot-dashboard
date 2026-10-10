@@ -381,7 +381,7 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
   // =========================================================================
   // 7. Normal Kullanıcı (UID 1001) Senaryoları & İzin İzolasyon Testleri
   // =========================================================================
-  it('11. Normal kullanıcı (UID 1001): POSIX ACL veya kontrollü izin ile node (UID 1000) erişimi sağlanır', () => {
+  it('11. Normal kullanıcı (UID 1001): Fonksiyon ACL ve izinleri kendisi düzenler, node (UID 1000) gerçek okuma yapar', () => {
     const testKey = 'b'.repeat(64);
     const encKeyPath = path.join(secretsDir, 'encryption_key');
     const pgPassPath = path.join(secretsDir, 'postgres_password');
@@ -389,34 +389,52 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
     fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
     fs.writeFileSync(pgPassPath, 'DeployUserPass2026!@#', { mode: 0o600 });
 
-    // Set file owner to deploy (UID 1001) and group to deploy (1001)
+    // Set file owner to deploy (UID 1001), group deploy (GID 1001) with standard restrictive permissions (0700 dir, 0600 files)
+    // IMPORTANT: Absolutely DO NOT pre-configure ACL or group 1000 here!
+    // Strip any existing ACLs to ensure clean state.
     try {
-      execSync(`chown -R 1001:1001 '${secretsDir}' && chmod 750 '${secretsDir}' && chmod 640 '${encKeyPath}' '${pgPassPath}'`);
+      execSync(`chown -R deploy:deploy '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
+      if (execSync('which setfacl 2>/dev/null || true', { encoding: 'utf-8' }).trim()) {
+        execSync(`setfacl -b '${secretsDir}' '${encKeyPath}' '${pgPassPath}' 2>/dev/null || true`);
+      }
     } catch {}
 
-    // Apply alignment simulating non-root execution (e.g. via setfacl or group 1000)
-    const scriptCmd = `
-      source ${secretsLibPath}
+    // Verify unprivileged 'node' user (UID 1000) CANNOT read the file initially
+    let initialReadFailed = false;
+    try {
+      execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8', stdio: 'pipe' });
+    } catch {
+      initialReadFailed = true;
+    }
+    expect(initialReadFailed).toBe(true);
+
+    // Run align_secrets_ownership_and_permissions AS the unprivileged 'deploy' user (UID 1001)
+    // The function itself MUST dynamically configure ACLs / permissions without pre-set privileges!
+    const deployScript = `
+      cd '${rootDir}'
+      . '${secretsLibPath}'
       IS_ROOT=false
-      current_uid=1001
-      # Apply ACL directly as deploy user
-      if command -v setfacl >/dev/null 2>&1; then
-        setfacl -m u:1000:rx '${secretsDir}'
-        setfacl -m u:1000:r '${encKeyPath}'
-        setfacl -m u:1000:r '${pgPassPath}'
-      fi
       align_secrets_ownership_and_permissions
     `;
-    const res = execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir, encoding: 'utf-8' });
+    const res = execSync(`su -s /bin/bash deploy -c "${deployScript.replace(/"/g, '\\"')}"`, {
+      encoding: 'utf-8'
+    });
     expect(res).toBeDefined();
 
-    // Verify unprivileged 'node' user (UID 1000) can read the key
+    // Verify unprivileged 'node' user (UID 1000) CAN NOW ACTUALLY READ the key at runtime!
     const readKey = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
     expect(readKey).toBe(testKey);
 
-    // Verify file is NOT world-readable
+    // Verify file is strictly NOT world-readable
     const stat = fs.statSync(encKeyPath);
     expect(stat.mode & 0o004).toBe(0);
+
+    // Verify ACL entry exists and mask does not suppress read
+    if (execSync('which getfacl 2>/dev/null || true', { encoding: 'utf-8' }).trim()) {
+      const faclOut = execSync(`getfacl -n -c '${encKeyPath}'`, { encoding: 'utf-8' });
+      expect(faclOut).toMatch(/(user|group):1000:r/);
+      expect(faclOut).not.toMatch(/#effective:---/);
+    }
   });
 
   it('12. Normal kullanıcı (UID 1001) yetki yükseltilemediğinde: güvenli şekilde durur (fail-closed, exit 1)', () => {
