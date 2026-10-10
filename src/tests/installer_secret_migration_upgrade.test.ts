@@ -153,8 +153,8 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
     // unrelated password. Simulate an unreachable database deterministically;
     // offline recovery must preserve the sealed Vault password.
     const probeDir = fs.mkdtempSync(path.join(dataDir, 'offline-db-'));
-    fs.writeFileSync(path.join(probeDir, 'docker'), '#!/bin/sh\\nexit 1\\n', { mode: 0o755 });
-    fs.writeFileSync(path.join(probeDir, 'psql'), '#!/bin/sh\\necho "connection refused" >&2\\nexit 1\\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(probeDir, 'docker'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(probeDir, 'psql'), '#!/bin/sh\necho "connection refused" >&2\nexit 1\n', { mode: 0o755 });
     let output: string;
     try {
       output = execSync(`bash ${installScriptPath} --init-only --quick`, {
