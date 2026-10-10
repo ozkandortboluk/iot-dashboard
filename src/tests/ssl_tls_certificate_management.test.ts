@@ -143,12 +143,24 @@ exit $?
     expect(fs.existsSync(testKeyPath)).toBe(false);
   });
 
-  it('6. --http-only seçeneği aktif: TLS kontrolü/üretimi atlanır', () => {
+  it('6. --http-only seçeneği aktif: gerçek install.sh akışında TLS kontrolü/üretimi atlanır', () => {
     if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
     if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
 
-    const res = runSslHelper({ HTTP_ONLY: 'true', USE_DOCKER_PROXY: 'true' });
-    expect(res.exitCode).toBe(0);
+    let output = '';
+    let exitCode = 0;
+    try {
+      output = execSync('bash install.sh --http-only --init-only 2>&1', {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        env: { ...process.env, CERTS_DIR: testCertsDir }
+      });
+    } catch (err: any) {
+      exitCode = err.status || 1;
+      output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+    }
+
+    expect(exitCode).toBe(0);
     expect(fs.existsSync(testCrtPath)).toBe(false);
     expect(fs.existsSync(testKeyPath)).toBe(false);
   });
@@ -219,5 +231,15 @@ exit $?
 
     expect(fs.readFileSync(testCrtPath, 'utf-8')).toBe(crt1);
     expect(fs.readFileSync(testKeyPath, 'utf-8')).toBe(key1);
+  });
+
+  it('10. Eşzamanlı kurulum kilitlemesi (Locking): Kilit dosyası varken yeni kurulum çakışmayı engeller ve güvenli durur', () => {
+    const lockDir = path.join(testCertsDir, '.ssl_setup.lock');
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'pid'), process.pid.toString());
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(1);
+    expect(res.output).toMatch(/Eşzamanlı TLS sertifika kurulumu algılandı/i);
   });
 });

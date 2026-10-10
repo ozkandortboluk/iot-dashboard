@@ -49,6 +49,50 @@ ensure_ssl_certificates() {
 
   mkdir -p "$CERTS_DIR"
 
+  local lock_dir="${CERTS_DIR}/.ssl_setup.lock"
+  local pid_file="${lock_dir}/pid"
+  local lock_acquired=false
+  local tmp_crt=""
+  local tmp_key=""
+
+  cleanup_ssl_temp() {
+    [ -n "${tmp_crt:-}" ] && [ -f "${tmp_crt:-}" ] && rm -f "${tmp_crt}" 2>/dev/null || true
+    [ -n "${tmp_key:-}" ] && [ -f "${tmp_key:-}" ] && rm -f "${tmp_key}" 2>/dev/null || true
+    if [ "${lock_acquired:-false}" = "true" ] && [ -d "${lock_dir:-}" ]; then
+      rm -rf "${lock_dir}" 2>/dev/null || true
+    fi
+  }
+
+  trap cleanup_ssl_temp EXIT INT TERM
+
+  # Attempt to acquire concurrency lock
+  local retry_count=0
+  while [ $retry_count -lt 3 ]; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      lock_acquired=true
+      echo "$$" > "$pid_file" 2>/dev/null || true
+      break
+    fi
+    # Check if lock is stale (PID no longer running)
+    if [ -f "$pid_file" ]; then
+      local lock_pid
+      lock_pid=$(cat "$pid_file" 2>/dev/null || echo "")
+      if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+        continue
+      fi
+    fi
+    sleep 1
+    retry_count=$((retry_count + 1))
+  done
+
+  if [ "$lock_acquired" = false ]; then
+    log_fatal "❌ [KRİTİK HATA] Eşzamanlı TLS sertifika kurulumu algılandı! Kilit alınamadı ('$lock_dir')."
+    cleanup_ssl_temp
+    trap - EXIT INT TERM
+    return 1
+  fi
+
   local crt_exists=false
   local key_exists=false
   [ -s "$CRT_FILE" ] && crt_exists=true
@@ -60,9 +104,13 @@ ensure_ssl_certificates() {
       chmod 600 "$KEY_FILE" 2>/dev/null || true
       chmod 644 "$CRT_FILE" 2>/dev/null || true
       log_info "Mevcut SSL/TLS sertifikası ve özel anahtarı doğrulandı ve eşleşti (${CRT_FILE}) [KORUNDU]."
+      cleanup_ssl_temp
+      trap - EXIT INT TERM
       return 0
     else
       log_fatal "❌ [KRİTİK HATA] SSL sertifikası ('$CRT_FILE') ile özel anahtar ('$KEY_FILE') eşleşmiyor! Mevcut dosyaların üzerine yazılmıyor. Dağıtım durduruldu."
+      cleanup_ssl_temp
+      trap - EXIT INT TERM
       return 1
     fi
   fi
@@ -76,6 +124,8 @@ ensure_ssl_certificates() {
       present_file="$KEY_FILE"
     fi
     log_fatal "❌ [KRİTİK HATA] Eksik TLS sertifika çifti! Yalnızca '$present_file' mevcut, '$missing_file' bulunamadı. Mevcut dosyanın üzerine yazılmasını veya uyumsuz çift üretilmesini önlemek için otomatik üretim yapılmadı."
+    cleanup_ssl_temp
+    trap - EXIT INT TERM
     return 1
   fi
 
@@ -90,12 +140,16 @@ ensure_ssl_certificates() {
 
   if [ "$ssl_required" = false ]; then
     log_info "Docker Nginx proxy kullanılmıyor; self-signed TLS sertifika üretimi atlandı (Sistem Nginx / Let's Encrypt kullanılabilir)."
+    cleanup_ssl_temp
+    trap - EXIT INT TERM
     return 0
   fi
 
   # Generate new Self-Signed Certificate using atomic temporary files
   if ! command -v openssl >/dev/null 2>&1; then
     log_fatal "❌ [KRİTİK HATA] Docker proxy için TLS sertifikası gerekli ancak OpenSSL bulunamadı."
+    cleanup_ssl_temp
+    trap - EXIT INT TERM
     return 1
   fi
 
@@ -103,8 +157,8 @@ ensure_ssl_certificates() {
 
   local rand_suffix
   rand_suffix=$(openssl rand -hex 6 2>/dev/null || echo "$$")
-  local tmp_crt="${CERTS_DIR}/.server.crt.tmp.${rand_suffix}"
-  local tmp_key="${CERTS_DIR}/.server.key.tmp.${rand_suffix}"
+  tmp_crt="${CERTS_DIR}/.server.crt.tmp.${rand_suffix}"
+  tmp_key="${CERTS_DIR}/.server.key.tmp.${rand_suffix}"
 
   rm -f "$tmp_crt" "$tmp_key"
 
@@ -129,34 +183,44 @@ ensure_ssl_certificates() {
 
       # Do not overwrite existing target files if they exist
       if [ -e "$KEY_FILE" ] || [ -e "$CRT_FILE" ]; then
-        rm -f "$tmp_crt" "$tmp_key"
+        cleanup_ssl_temp
+        trap - EXIT INT TERM
         log_fatal "❌ [KRİTİK HATA] Hedef sertifika veya anahtar dosyası zaten mevcut! Üzerine yazma engellendi."
         return 1
       fi
 
       if mv "$tmp_key" "$KEY_FILE"; then
         if mv "$tmp_crt" "$CRT_FILE"; then
+          tmp_crt=""
+          tmp_key=""
+          cleanup_ssl_temp
+          trap - EXIT INT TERM
           log_success "Güvenli TLS sertifika çifti başarıyla üretildi ve doğrulandı (${CRT_FILE}, ${KEY_FILE})."
           return 0
         else
           # First move succeeded, second move failed. Clean up moved KEY_FILE and remaining temp files
           # to ensure no partial or unbalanced certificate pair remains on disk.
-          rm -f "$KEY_FILE" "$tmp_crt" "$tmp_key"
+          rm -f "$KEY_FILE"
+          cleanup_ssl_temp
+          trap - EXIT INT TERM
           log_fatal "❌ [KRİTİK HATA] Sertifika dosyası hedefe taşınamadı. Yarım sertifika çifti kalmaması için geri alındı."
           return 1
         fi
       else
-        rm -f "$tmp_crt" "$tmp_key"
+        cleanup_ssl_temp
+        trap - EXIT INT TERM
         log_fatal "❌ [KRİTİK HATA] Özel anahtar dosyası hedefe taşınamadı."
         return 1
       fi
     else
-      rm -f "$tmp_crt" "$tmp_key"
+      cleanup_ssl_temp
+      trap - EXIT INT TERM
       log_fatal "❌ [KRİTİK HATA] Üretilen geçici TLS sertifikası ve özel anahtar eşleşmedi!"
       return 1
     fi
   else
-    rm -f "$tmp_crt" "$tmp_key"
+    cleanup_ssl_temp
+    trap - EXIT INT TERM
     log_fatal "❌ [KRİTİK HATA] OpenSSL ile TLS sertifikası üretilemedi!"
     return 1
   fi
