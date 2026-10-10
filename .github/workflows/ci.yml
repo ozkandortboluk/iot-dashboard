@@ -70,8 +70,24 @@ jobs:
         env:
           NODE_ENV: production
 
-      - name: Run Production Bundle Smoke Test
-        run: npm run test:smoke
+      - name: Prepare PostgreSQL Schema for Production Smoke Test
+        run: npm run migrate
+
+      - name: Run Production Bundle Smoke Test with Mounted Vault Secret
+        run: |
+          set -euo pipefail
+          smoke_key_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_key_dir"' EXIT
+          openssl rand -hex 32 > "$smoke_key_dir/encryption_key"
+          chmod 600 "$smoke_key_dir/encryption_key"
+          docker run --rm --network host --user 0:0 \
+            -v "$PWD:/workspace" \
+            -v "$smoke_key_dir/encryption_key:/run/secrets/encryption_key:ro" \
+            -w /workspace \
+            -e DATABASE_URL \
+            -e CI=true \
+            node:${{ matrix.node-version }}-bookworm-slim \
+            npm run test:smoke
 
       - name: Run End-to-End Security & Protocol Suite
         run: npm run test:e2e
