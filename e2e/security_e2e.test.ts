@@ -15,57 +15,24 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
   const activeTestEmail = `e2e_admin_${Date.now()}@nexusnode.local`;
   const activeTestPassword = 'testPassword123!';
 
-  let dbConfigBackupCreated = false;
-  let dbJsonBackupCreated = false;
-  let testDbJsonBackupCreated = false;
-  let systemSecretsBackupCreated = false;
-  let sshTunnelBackupCreated = false;
-  const dbConfigPath = 'data/.db_config.json';
-  const backupDbConfigPath = 'data/.db_config.json.e2e_bak';
-  const dbJsonPath = 'data/db.json';
-  const backupDbJsonPath = 'data/db.json.e2e_bak';
-  const testDbJsonPath = 'data/test_db.json';
-  const backupTestDbJsonPath = 'data/test_db.json.e2e_bak';
-  const systemSecretsPath = 'data/.system_secrets.json';
-  const backupSystemSecretsPath = 'data/.system_secrets.json.e2e_bak';
-  const sshTunnelPath = 'data/.ssh_tunnel_config.json';
-  const backupSshTunnelPath = 'data/.ssh_tunnel_config.json.e2e_bak';
+  let isolatedWorkingDir = '';
+  const projectRoot = process.cwd();
 
   beforeAll(async () => {
-    // Temporarily isolate local data files so E2E server boots in clean setup state
+    // Never rename, copy, or delete live Vault/database files during E2E.
     const fs = await import('node:fs');
-    if (fs.existsSync(dbConfigPath)) {
-      fs.copyFileSync(dbConfigPath, backupDbConfigPath);
-      fs.unlinkSync(dbConfigPath);
-      dbConfigBackupCreated = true;
-    }
-    if (fs.existsSync(dbJsonPath)) {
-      fs.copyFileSync(dbJsonPath, backupDbJsonPath);
-      fs.unlinkSync(dbJsonPath);
-      dbJsonBackupCreated = true;
-    }
-    if (fs.existsSync(testDbJsonPath)) {
-      fs.copyFileSync(testDbJsonPath, backupTestDbJsonPath);
-      fs.unlinkSync(testDbJsonPath);
-      testDbJsonBackupCreated = true;
-    }
-    if (fs.existsSync(systemSecretsPath)) {
-      fs.copyFileSync(systemSecretsPath, backupSystemSecretsPath);
-      fs.unlinkSync(systemSecretsPath);
-      systemSecretsBackupCreated = true;
-    }
-    if (fs.existsSync(sshTunnelPath)) {
-      fs.copyFileSync(sshTunnelPath, backupSshTunnelPath);
-      fs.unlinkSync(sshTunnelPath);
-      sshTunnelBackupCreated = true;
-    }
+    const os = await import('node:os');
+    const path = await import('node:path');
+    isolatedWorkingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-e2e-'));
+    fs.mkdirSync(path.join(isolatedWorkingDir, 'data'), { recursive: true });
 
     // Start production bundle if exists, else tsx server.ts
-    const isBundled = fs.existsSync('dist/server.cjs');
+    const isBundled = fs.existsSync(path.join(projectRoot, 'dist/server.cjs'));
     const cmd = isBundled ? 'node' : 'npx';
-    const args = isBundled ? ['dist/server.cjs'] : ['tsx', 'server.ts'];
+    const args = isBundled ? [path.join(projectRoot, 'dist/server.cjs')] : ['tsx', path.join(projectRoot, 'server.ts')];
 
     serverProcess = spawn(cmd, args, {
+      cwd: isolatedWorkingDir,
       env: {
         ...process.env,
         PORT: String(PORT),
@@ -141,25 +108,8 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       serverProcess.kill('SIGTERM');
       await wait(1000);
     }
-    if (dbConfigBackupCreated && fs.existsSync(backupDbConfigPath)) {
-      fs.copyFileSync(backupDbConfigPath, dbConfigPath);
-      fs.unlinkSync(backupDbConfigPath);
-    }
-    if (dbJsonBackupCreated && fs.existsSync(backupDbJsonPath)) {
-      fs.copyFileSync(backupDbJsonPath, dbJsonPath);
-      fs.unlinkSync(backupDbJsonPath);
-    }
-    if (testDbJsonBackupCreated && fs.existsSync(backupTestDbJsonPath)) {
-      fs.copyFileSync(backupTestDbJsonPath, testDbJsonPath);
-      fs.unlinkSync(backupTestDbJsonPath);
-    }
-    if (systemSecretsBackupCreated && fs.existsSync(backupSystemSecretsPath)) {
-      fs.copyFileSync(backupSystemSecretsPath, systemSecretsPath);
-      fs.unlinkSync(backupSystemSecretsPath);
-    }
-    if (sshTunnelBackupCreated && fs.existsSync(backupSshTunnelPath)) {
-      fs.copyFileSync(backupSshTunnelPath, sshTunnelPath);
-      fs.unlinkSync(backupSshTunnelPath);
+    if (isolatedWorkingDir) {
+      fs.rmSync(isolatedWorkingDir, { recursive: true, force: true });
     }
   });
 
