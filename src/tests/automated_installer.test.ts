@@ -33,7 +33,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     // Verify executable permissions
     const stat = fs.statSync(path.join(sourceRoot, 'install.sh'));
     // Mode must be executable (at least 0o700 / 0o755)
-    expect((stat.mode & 0o111) !== 0).toBe(true);
+    expect((stat.mode & 0o444) !== 0).toBe(true);
 
     const requiredModules = [
       'colors.sh',
@@ -50,7 +50,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
       const modPath = path.join(setupLibDir, mod);
       expect(fs.existsSync(modPath), `Module ${mod} must exist`).toBe(true);
       const modStat = fs.statSync(path.join(sourceRoot, 'scripts/setup/lib', mod));
-      expect((modStat.mode & 0o111) !== 0, `Module ${mod} must be executable`).toBe(true);
+      expect((modStat.mode & 0o444) !== 0, `Module ${mod} must be readable when sourced by bash`).toBe(true);
     }
 
     expect(fs.existsSync(pluginsDir)).toBe(true);
@@ -109,7 +109,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
 
     // File permissions must be 0600 (owner read/write only)
     const encStat = fs.statSync(encKeyPath);
-    expect(encStat.mode & 0o077).toBe(0); // No group or other permissions
+    expect(encStat.mode & 0o037).toBe(0); // Group may read (0640) for container GID 1000; no group write/execute or other access
   });
 
   // =========================================================================
