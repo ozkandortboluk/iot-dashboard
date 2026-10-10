@@ -1400,6 +1400,7 @@ CREATE TABLE IF NOT EXISTS devices (
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     rate_limit_per_min INT NOT NULL DEFAULT 120,
     encryption_method VARCHAR(64) NOT NULL DEFAULT 'AES-256-GCM',
+    power_source VARCHAR(32) NOT NULL DEFAULT 'mains',
     metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_simulated BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1450,6 +1451,11 @@ ALTER TABLE devices ALTER COLUMN encryption_method SET DEFAULT 'AES-256-GCM';
 ALTER TABLE devices ALTER COLUMN encryption_method SET NOT NULL;
 
 -- Validate existing records rather than silently rewriting NULL values.
+-- Legacy devices tables can lack this column or carry a different default.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS power_source VARCHAR(32) DEFAULT 'mains';
+ALTER TABLE devices ALTER COLUMN power_source SET DEFAULT 'mains';
+ALTER TABLE devices ALTER COLUMN power_source SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN expected_interval_seconds SET DEFAULT 30;
 ALTER TABLE devices ALTER COLUMN save_simulated_data_to_db SET DEFAULT FALSE;
 ALTER TABLE devices ALTER COLUMN metrics SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN data_flow_active SET NOT NULL;
