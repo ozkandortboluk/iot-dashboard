@@ -87,7 +87,7 @@ jobs:
             -v "$PWD:/workspace" \
             -v "$smoke_key_dir/encryption_key:/run/secrets/encryption_key:ro" \
             -w /workspace \
-            -e DATABASE_URL="\$DATABASE_URL" \
+            -e DATABASE_URL="$DATABASE_URL" \
             -e CI=true \
             node:${{ matrix.node-version }}-bookworm-slim \
             npm run test:smoke
