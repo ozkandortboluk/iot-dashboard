@@ -1384,22 +1384,22 @@ CREATE TABLE IF NOT EXISTS devices (
     api_key_expires_at TIMESTAMP WITH TIME ZONE,
     api_key_revoked BOOLEAN NOT NULL DEFAULT FALSE,
     api_key_last_used_at TIMESTAMP WITH TIME ZONE,
-    api_key_scopes JSONB DEFAULT '["all"]'::jsonb,
+    api_key_scopes JSONB NOT NULL DEFAULT '["all"]'::jsonb,
     api_key_rotated_at TIMESTAMP WITH TIME ZONE,
-    status VARCHAR(32) DEFAULT 'offline',
+    status VARCHAR(32) NOT NULL DEFAULT 'offline',
     location VARCHAR(256),
     ip_address VARCHAR(45),
     mac_address VARCHAR(32),
     hardware_model VARCHAR(64),
     firmware_version VARCHAR(32),
-    ota_status VARCHAR(32) DEFAULT 'IDLE',
+    ota_status VARCHAR(32) NOT NULL DEFAULT 'IDLE',
     ota_target_firmware_id VARCHAR(64),
-    ota_progress INT DEFAULT 0,
+    ota_progress INT NOT NULL DEFAULT 0,
     ota_error_message TEXT,
     ota_last_check_at TIMESTAMP WITH TIME ZONE,
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    rate_limit_per_min INT DEFAULT 120,
-    encryption_method VARCHAR(64) DEFAULT 'AES-256-GCM',
+    rate_limit_per_min INT NOT NULL DEFAULT 120,
+    encryption_method VARCHAR(64) NOT NULL DEFAULT 'AES-256-GCM',
     metrics JSONB DEFAULT '{}'::jsonb,
     data_flow_active BOOLEAN DEFAULT TRUE,
     is_simulated BOOLEAN DEFAULT FALSE,
@@ -1433,6 +1433,21 @@ ALTER TABLE devices ALTER COLUMN device_type SET DEFAULT 'custom';
 ALTER TABLE devices ALTER COLUMN device_type SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN api_key_revoked SET DEFAULT FALSE;
 ALTER TABLE devices ALTER COLUMN api_key_revoked SET NOT NULL;
+
+-- Existing databases may predate the canonical NOT NULL/default contract.
+-- Do not replace invalid existing values silently: fail with a clear constraint error.
+ALTER TABLE devices ALTER COLUMN api_key_scopes SET DEFAULT '["all"]'::jsonb;
+ALTER TABLE devices ALTER COLUMN api_key_scopes SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN status SET DEFAULT 'offline';
+ALTER TABLE devices ALTER COLUMN status SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN ota_status SET DEFAULT 'IDLE';
+ALTER TABLE devices ALTER COLUMN ota_status SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN ota_progress SET DEFAULT 0;
+ALTER TABLE devices ALTER COLUMN ota_progress SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET DEFAULT 120;
+ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN encryption_method SET DEFAULT 'AES-256-GCM';
+ALTER TABLE devices ALTER COLUMN encryption_method SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
