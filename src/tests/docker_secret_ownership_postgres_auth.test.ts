@@ -377,4 +377,162 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
 
     expect(out).toContain('VERIFIED=false');
   });
+
+  // =========================================================================
+  // 7. Normal Kullanıcı (UID 1001) Senaryoları & İzin İzolasyon Testleri
+  // =========================================================================
+  it('11. Normal kullanıcı (UID 1001): POSIX ACL veya kontrollü izin ile node (UID 1000) erişimi sağlanır', () => {
+    const testKey = 'b'.repeat(64);
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
+    fs.writeFileSync(pgPassPath, 'DeployUserPass2026!@#', { mode: 0o600 });
+
+    // Set file owner to deploy (UID 1001) and group to deploy (1001)
+    try {
+      execSync(`chown -R 1001:1001 '${secretsDir}' && chmod 750 '${secretsDir}' && chmod 640 '${encKeyPath}' '${pgPassPath}'`);
+    } catch {}
+
+    // Apply alignment simulating non-root execution (e.g. via setfacl or group 1000)
+    const scriptCmd = `
+      source ${secretsLibPath}
+      IS_ROOT=false
+      current_uid=1001
+      # Apply ACL directly as deploy user
+      if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:1000:rx '${secretsDir}'
+        setfacl -m u:1000:r '${encKeyPath}'
+        setfacl -m u:1000:r '${pgPassPath}'
+      fi
+      align_secrets_ownership_and_permissions
+    `;
+    const res = execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir, encoding: 'utf-8' });
+    expect(res).toBeDefined();
+
+    // Verify unprivileged 'node' user (UID 1000) can read the key
+    const readKey = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
+    expect(readKey).toBe(testKey);
+
+    // Verify file is NOT world-readable
+    const stat = fs.statSync(encKeyPath);
+    expect(stat.mode & 0o004).toBe(0);
+  });
+
+  it('12. Normal kullanıcı (UID 1001) yetki yükseltilemediğinde: güvenli şekilde durur (fail-closed, exit 1)', () => {
+    const testKey = 'c'.repeat(64);
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
+    fs.writeFileSync(pgPassPath, 'UnprivilegedPass2026!@#', { mode: 0o600 });
+
+    // Ensure owned strictly by 1001:1001 with 0640 and NO ACL for 1000
+    try {
+      execSync(`chown -R 1001:1001 '${secretsDir}' && chmod 750 '${secretsDir}' && chmod 640 '${encKeyPath}' '${pgPassPath}'`);
+      if (execSync('which setfacl 2>/dev/null || true', { encoding: 'utf-8' }).trim()) {
+        execSync(`setfacl -b '${encKeyPath}' '${pgPassPath}' '${secretsDir}' 2>/dev/null || true`);
+      }
+    } catch {}
+
+    // Run alignment in an isolated subshell where:
+    // - current_uid is 1001 (non-root)
+    // - sudo is non-functional / not available (PATH without sudo or mocked failure)
+    // - setfacl is masked
+    const testScript = path.join(rootDir, 'data', 'temp_unprivileged_fail_test.sh');
+    const bashScript = `#!/usr/bin/env bash
+source "${secretsLibPath}"
+IS_ROOT=false
+
+# Override environment to simulate normal user without sudo or acl
+id() {
+  if [ "$1" = "-u" ]; then echo "1001"; elif [ "$1" = "-g" ]; then echo "1001"; else command id "$@"; fi
+}
+command() {
+  if [ "$2" = "sudo" ] || [ "$2" = "setfacl" ] || [ "$2" = "getfacl" ]; then return 1; fi
+  builtin command "$@"
+}
+sudo() { return 1; }
+setfacl() { return 1; }
+getfacl() { return 1; }
+chgrp() { return 1; }
+
+align_secrets_ownership_and_permissions
+exit_code=$?
+echo "EXIT_CODE=$exit_code"
+exit $exit_code
+`;
+    fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
+
+    let exitCode = 0;
+    let combinedOutput = '';
+    try {
+      combinedOutput = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+    } catch (err: any) {
+      exitCode = err.status || 1;
+      combinedOutput = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+    } finally {
+      try { fs.unlinkSync(testScript); } catch {}
+    }
+
+    // Must FAIL with exit code 1 (fail-closed)
+    expect(exitCode).toBe(1);
+    expect(combinedOutput).toMatch(/UID 1000 \(node\) konteyner kullanıcısı tarafından (okunamıyor|erişilebilir)/i);
+    expect(combinedOutput).toMatch(/Çözüm/i);
+  });
+
+  it('13. Normal kullanıcı UID 1000: doğrudan 0600 dosya ve 0700 dizin ile güvenli çalışır', () => {
+    const testKey = 'd'.repeat(64);
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
+    fs.writeFileSync(pgPassPath, 'NodeUserPass2026!@#', { mode: 0o600 });
+    try {
+      execSync(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
+    } catch {}
+
+    const testScript = path.join(rootDir, 'data', 'temp_uid1000_test.sh');
+    const bashScript = `#!/usr/bin/env bash
+source "${secretsLibPath}"
+IS_ROOT=false
+id() {
+  if [ "$1" = "-u" ]; then echo "1000"; elif [ "$1" = "-g" ]; then echo "1000"; else command id "$@"; fi
+}
+align_secrets_ownership_and_permissions
+`;
+    fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
+    try {
+      execSync(`bash "${testScript}"`, { cwd: rootDir, encoding: 'utf-8' });
+    } finally {
+      try { fs.unlinkSync(testScript); } catch {}
+    }
+
+    const stat = fs.statSync(encKeyPath);
+    expect(stat.uid).toBe(1000);
+    expect(stat.mode & 0o077).toBe(0); // 0600 strict
+  });
+
+  it('14. Secret içerik bütünlüğü: hizalama ve denetim sırasında anahtar veya parola asla değiştirilmez', () => {
+    const originalKey = 'e'.repeat(64);
+    const originalPass = 'UnalteredPassword123456789!@#';
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    fs.writeFileSync(encKeyPath, originalKey, { mode: 0o600 });
+    fs.writeFileSync(pgPassPath, originalPass, { mode: 0o600 });
+
+    // Run alignment
+    const scriptCmd = `
+      source ${secretsLibPath}
+      IS_ROOT=true
+      SUDO_USER=""
+      align_secrets_ownership_and_permissions
+    `;
+    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+
+    // Verify contents are strictly preserved byte-for-byte
+    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(originalKey);
+    expect(fs.readFileSync(pgPassPath, 'utf8').trim()).toBe(originalPass);
+  });
 });

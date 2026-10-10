@@ -216,7 +216,10 @@ if [ "$INIT_ONLY" = false ]; then
 fi
 
 # 4. Secrets & Vault Initialization
-ensure_secrets_initialized
+if ! ensure_secrets_initialized; then
+  log_fatal "Secret ve Vault ilklendirmesi başarısız oldu. Dağıtım durduruldu."
+  exit 1
+fi
 
 # 5. Environment (.env) Setup
 ensure_env_configured

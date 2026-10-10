@@ -589,7 +589,9 @@ ensure_secrets_initialized() {
   # --------------------------------------------------------------------------
   # 4. Final Security Audit & Ownership Alignment:
   # --------------------------------------------------------------------------
-  align_secrets_ownership_and_permissions
+  if ! align_secrets_ownership_and_permissions; then
+    return 1
+  fi
 }
 
 align_secrets_ownership_and_permissions() {
@@ -608,17 +610,22 @@ align_secrets_ownership_and_permissions() {
   #    Assign ownership 1000:1000 with 0600 (owner rw-, group/others 0) and dir 0700.
   #    Node process (UID 1000) inside container reads the secret as owner.
   #    Root retains full read/write via kernel DAC override.
-  # 4. ROOT with SUDO_USER (e.g. SUDO_USER=ubuntu, UID 1001):
+  # 4. ROOT with SUDO_USER (e.g. sudo ./install.sh by UID 1001):
   #    Assign owner $SUDO_USER, group 1000.
   #    Mode 0640 (owner rw-, group r--, others 0) and dir 0750.
   #    Node process reads via group 1000.
   # 5. Non-root user:
-  #    If UID == 1000: mode 0600, dir 0700.
-  #    If UID != 1000: try group 1000 with mode 0640 or setfacl.
-  # 6. FAIL-CLOSED: No '|| true' silently masking errors. Explicit verification that UID 1000 can read the secrets.
+  #    - If UID == 1000: mode 0600, dir 0700.
+  #    - If UID != 1000:
+  #      * Try group 1000 (if operator is in group 1000) or setfacl (POSIX ACL).
+  #      * If unprivileged access fails, evaluate controlled sudo for permissions adjustment:
+  #        Only use sudo if passwordless (sudo -n) or interactive prompt is safe (avoid hanging in non-interactive environments).
+  #        Set group 1000 (mode 0640 / dir 0750), retaining non-root operator as owner.
+  # 6. FAIL-CLOSED: No '|| true' silently masking errors. Explicit verification that UID 1000 can read the secrets and traverse directory.
 
-  local current_uid
+  local current_uid current_gid
   current_uid=$(id -u 2>/dev/null || echo "")
+  current_gid=$(id -g 2>/dev/null || echo "")
 
   local sudo_user="${SUDO_USER:-}"
   local sudo_uid="${SUDO_UID:-}"
@@ -630,8 +637,28 @@ align_secrets_ownership_and_permissions() {
   fi
 
   local is_root_exec=false
-  if [ "$current_uid" = "0" ] || [ "${IS_ROOT:-false}" = true ] || [ "$EUID" -eq 0 ]; then
+  if [ "${IS_ROOT:-}" = "true" ]; then
     is_root_exec=true
+  elif [ "${IS_ROOT:-}" = "false" ]; then
+    is_root_exec=false
+  elif [ "$current_uid" = "0" ] || [ "${EUID:-0}" -eq 0 ]; then
+    is_root_exec=true
+  fi
+
+  # Helper: evaluate non-interactive safe sudo availability for privilege elevation
+  local sudo_available=false
+  local sudo_cmd=""
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n true 2>/dev/null; then
+      sudo_available=true
+      sudo_cmd="sudo -n"
+    elif [ -t 0 ] && [ -t 1 ]; then
+      # In interactive shell with TTY, test or prompt for sudo
+      if sudo -v 2>/dev/null; then
+        sudo_available=true
+        sudo_cmd="sudo"
+      fi
+    fi
   fi
 
   if [ "$is_root_exec" = true ]; then
@@ -667,13 +694,13 @@ align_secrets_ownership_and_permissions() {
             return 1
           }
           if command -v setfacl >/dev/null 2>&1; then
-            setfacl -m u:1000:r,g:1000:r "$sfile" 2>/dev/null || true
+            setfacl -m u:1000:r "$sfile" 2>/dev/null || true
             setfacl -m m::r "$sfile" 2>/dev/null || true
           fi
         fi
       done
       if command -v setfacl >/dev/null 2>&1; then
-        setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
+        setfacl -m u:1000:rx "$SECRETS_DIR" 2>/dev/null || true
         setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
       fi
     else
@@ -716,29 +743,114 @@ align_secrets_ownership_and_permissions() {
         fi
       done
     else
-      # Operator is non-root with UID != 1000
-      chgrp 1000 "$SECRETS_DIR" 2>/dev/null || true
-      chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+      # Operator is non-root with UID != 1000 (e.g. UID 1001 'deploy')
+      # 1. Try unprivileged access methods (membership in group 1000 or POSIX ACL):
+      local unpriv_group_ok=false
+      if chgrp 1000 "$SECRETS_DIR" 2>/dev/null; then
+        chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+        unpriv_group_ok=true
+      fi
+
       for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
         if [ -f "$sfile" ]; then
-          chgrp 1000 "$sfile" 2>/dev/null || true
-          chmod 640 "$sfile" 2>/dev/null || true
+          if [ "$unpriv_group_ok" = true ]; then
+            chgrp 1000 "$sfile" 2>/dev/null || true
+            chmod 640 "$sfile" 2>/dev/null || true
+          fi
+          # Attempt POSIX ACL unprivileged as file owner:
           if command -v setfacl >/dev/null 2>&1; then
-            setfacl -m u:1000:r,g:1000:r "$sfile" 2>/dev/null || true
-            setfacl -m m::r "$sfile" 2>/dev/null || true
+            if setfacl -m u:1000:r "$sfile" 2>/dev/null; then
+              chmod 640 "$sfile" 2>/dev/null || true
+              setfacl -m m::r "$sfile" 2>/dev/null || true
+            fi
           fi
         fi
       done
       if command -v setfacl >/dev/null 2>&1; then
-        setfacl -m u:1000:rx,g:1000:rx "$SECRETS_DIR" 2>/dev/null || true
-        setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
+        if setfacl -m u:1000:rx "$SECRETS_DIR" 2>/dev/null; then
+          chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+          setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
+        fi
+      fi
+
+      # 2. Check if UID 1000 is still unable to read secrets; if so, evaluate controlled sudo
+      local need_elevation=false
+      for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE"; do
+        [ ! -f "$sfile" ] && continue
+        local check_gid check_mode
+        check_gid=$(stat -c "%g" "$sfile" 2>/dev/null || stat -f "%g" "$sfile" 2>/dev/null || echo "")
+        check_mode=$(stat -c "%a" "$sfile" 2>/dev/null || stat -f "%Lp" "$sfile" 2>/dev/null || echo "")
+        local sfile_ok=false
+        if [ "$check_gid" = "1000" ] && [ -n "$check_mode" ] && [ "${check_mode: -2:1}" -ge 4 ]; then
+          sfile_ok=true
+        elif command -v getfacl >/dev/null 2>&1; then
+          if getfacl -n -c "$sfile" 2>/dev/null | grep -E "^(user|group):1000:r" | grep -qv "#effective:---"; then
+            sfile_ok=true
+          fi
+        fi
+        [ "$sfile_ok" = false ] && need_elevation=true
+      done
+
+      if [ "$need_elevation" = true ] && [ "$sudo_available" = true ]; then
+        # Controlled privilege escalation specifically for aligning secrets permissions
+        $sudo_cmd chgrp 1000 "$SECRETS_DIR" 2>/dev/null || true
+        chmod 750 "$SECRETS_DIR" 2>/dev/null || $sudo_cmd chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+        for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
+          if [ -f "$sfile" ]; then
+            $sudo_cmd chgrp 1000 "$sfile" 2>/dev/null || true
+            chmod 640 "$sfile" 2>/dev/null || $sudo_cmd chmod 640 "$sfile" 2>/dev/null || true
+            if command -v setfacl >/dev/null 2>&1; then
+              $sudo_cmd setfacl -m u:1000:r "$sfile" 2>/dev/null || true
+              $sudo_cmd setfacl -m m::r "$sfile" 2>/dev/null || true
+            fi
+          fi
+        done
+        if command -v setfacl >/dev/null 2>&1; then
+          $sudo_cmd setfacl -m u:1000:rx "$SECRETS_DIR" 2>/dev/null || true
+          $sudo_cmd setfacl -m m::rx "$SECRETS_DIR" 2>/dev/null || true
+        fi
       fi
     fi
   fi
 
   # --------------------------------------------------------------------------
-  # Post-Alignment Security & Accessibility Audit
+  # Post-Alignment Security & Accessibility Audit (FAIL-CLOSED)
   # --------------------------------------------------------------------------
+  # Step A: Audit Directory Permissions ($SECRETS_DIR)
+  local d_mode d_uid d_gid
+  d_mode=$(stat -c "%a" "$SECRETS_DIR" 2>/dev/null || stat -f "%Lp" "$SECRETS_DIR" 2>/dev/null || echo "")
+  d_uid=$(stat -c "%u" "$SECRETS_DIR" 2>/dev/null || stat -f "%u" "$SECRETS_DIR" 2>/dev/null || echo "")
+  d_gid=$(stat -c "%g" "$SECRETS_DIR" 2>/dev/null || stat -f "%g" "$SECRETS_DIR" 2>/dev/null || echo "")
+
+  if [ -n "$d_mode" ]; then
+    local d_other="${d_mode: -1}"
+    if [ "$d_other" != "0" ]; then
+      echo "❌ [GÜVENLİK İHLALİ] '${SECRETS_DIR}' dizini (${d_mode}) herkese açık izinlere sahip! Başlatma durduruldu." >&2
+      return 1
+    fi
+  fi
+
+  local dir_access_ok=false
+  if [ "$d_uid" = "1000" ]; then
+    dir_access_ok=true
+  elif [ "$d_gid" = "1000" ] && [ -n "$d_mode" ] && [[ "${d_mode: -2:1}" =~ [1357] ]]; then
+    dir_access_ok=true
+  elif command -v getfacl >/dev/null 2>&1; then
+    if getfacl -n -c "$SECRETS_DIR" 2>/dev/null | grep -E "^(user|group):1000:.*x" | grep -qv "#effective:---"; then
+      dir_access_ok=true
+    fi
+  fi
+
+  if [ "$dir_access_ok" = false ]; then
+    echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' secret dizini UID 1000 (node) konteyner kullanıcısı tarafından erişilebilir/taranabilir değil!" >&2
+    echo "Dizin Sahibi: UID ${d_uid:-?}, Grup: GID ${d_gid:-?}, İzin: ${d_mode:-?}." >&2
+    echo "Çalıştıran Kullanıcı: UID ${current_uid:-?} (GID ${current_gid:-?}). Sudo Durumu: ${sudo_available}." >&2
+    echo "" >&2
+    echo "Çözüm: Kurulumu 'sudo ./install.sh' ile çalıştırın veya 'sudo chown :1000 ${SECRETS_DIR} && chmod 750 ${SECRETS_DIR}' uygulayın." >&2
+    return 1
+  fi
+
+  # Step B: Audit Secret Files Permissions
   for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE"; do
     [ ! -f "$sfile" ] && continue
 
@@ -764,20 +876,33 @@ align_secrets_ownership_and_permissions() {
     elif [ "$f_gid" = "1000" ] && [ -n "$f_mode" ] && [ "${f_mode: -2:1}" -ge 4 ]; then
       access_ok=true
     elif command -v getfacl >/dev/null 2>&1; then
-      if getfacl -c "$sfile" 2>/dev/null | grep -qE "(user:1000:r|group:1000:r)"; then
+      if getfacl -n -c "$sfile" 2>/dev/null | grep -E "^(user|group):1000:r" | grep -qv "#effective:---"; then
         access_ok=true
       fi
     fi
 
     if [ "$access_ok" = false ]; then
       if [ "$is_root_exec" = true ]; then
-        # Fallback fix if needed
-        chown 1000:1000 "$sfile" && chmod 600 "$sfile" && access_ok=true
+        # Fallback fix if root
+        chown 1000:1000 "$sfile" 2>/dev/null && chmod 600 "$sfile" 2>/dev/null && access_ok=true
       fi
       if [ "$access_ok" = false ]; then
         echo "❌ [KRİTİK HATA] '${sfile}' secret dosyası UID 1000 (node) konteyner kullanıcısı tarafından okunamıyor!" >&2
         echo "Dosya Sahibi: UID ${f_uid:-?}, Grup: GID ${f_gid:-?}, İzin: ${f_mode:-?}." >&2
-        echo "Uygulamanın 'node' kullanıcısıyla güvenle çalışabilmesi için lütfen 'sudo ./install.sh' komutunu çalıştırın." >&2
+        echo "Dizin Sahibi: UID ${d_uid:-?}, Grup: GID ${d_gid:-?}, İzin: ${d_mode:-?}." >&2
+        echo "Çalıştıran Kullanıcı: UID ${current_uid:-?} (GID ${current_gid:-?}). Sudo Durumu: ${sudo_available}." >&2
+        echo "" >&2
+        echo "Olası Neden:" >&2
+        echo "  - Normal kullanıcı (UID ${current_uid:-?}) root veya UID 1000 değil." >&2
+        echo "  - GID 1000 grubuna üye olunmadığı için dosya grubu '1000' yapılamadı." >&2
+        echo "  - 'setfacl' (POSIX ACL) aracı bulunamadı veya uygulanamadı." >&2
+        echo "  - Etkileşimsiz ortamda şifresiz 'sudo' (NOPASSWD) yetkisi bulunmadığından yetki yükseltilemedi." >&2
+        echo "" >&2
+        echo "Çözüm Seçenekleri:" >&2
+        echo "  1. Kurulumu 'sudo ./install.sh' (veya 'sudo -E ./install.sh') ile çalıştırın." >&2
+        echo "  2. Veya dosyaların grubunu manuel olarak GID 1000 yapın:" >&2
+        echo "     sudo chown -R :1000 ${SECRETS_DIR} && chmod 750 ${SECRETS_DIR} && chmod 640 ${SECRETS_DIR}/*" >&2
+        echo "  3. Veya kullanıcınızı sudoers listesine ekleyin (NOPASSWD) ya da 'acl' paketini kurun (örn: apt install acl)." >&2
         return 1
       fi
     fi
