@@ -1684,6 +1684,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Earlier migrations can create notifications without the event deduplication column.
+-- Heal before the partial unique index is evaluated.
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(256);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_tenant ON notifications(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_device ON notifications(device_id);
