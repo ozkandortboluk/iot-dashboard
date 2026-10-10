@@ -103,7 +103,8 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
   });
 
   it('6. validateProductionSecurityPolicy must accept Vault secrets without requiring .env leakage', async () => {
-    process.env.NODE_ENV = 'production';
+    // Populate the fixture Vault in test mode; production intentionally forbids env-only master keys.
+    process.env.NODE_ENV = 'test';
     delete process.env.JWT_SECRET;
     delete process.env.SESSION_SECRET;
     delete process.env.POSTGRES_PASSWORD;
@@ -126,6 +127,17 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
       isSensitive: true,
     });
 
+    // Simulate a mounted Docker secret, without relaxing production key resolution.
+    const realExistsSync = fs.existsSync.bind(fs);
+    const realReadFileSync = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((p: any) =>
+      p === '/run/secrets/encryption_key' ? true : realExistsSync(p)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((p: any, ...args: any[]) =>
+      p === '/run/secrets/encryption_key' ? process.env.ENCRYPTION_KEY! : (realReadFileSync as any)(p, ...args)
+    ) as typeof fs.readFileSync);
+    process.env.NODE_ENV = 'production';
+    resetKeyCacheForTesting();
     const result = validateProductionSecurityPolicy();
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
