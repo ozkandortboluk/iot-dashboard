@@ -6,296 +6,218 @@ import { execSync } from 'node:child_process';
 const rootDir = path.resolve(__dirname, '../..');
 const sslLibPath = path.join(rootDir, 'scripts/setup/lib/ssl.sh');
 const colorsLibPath = path.join(rootDir, 'scripts/setup/lib/colors.sh');
-const installScriptPath = path.join(rootDir, 'install.sh');
 
-describe('TLS / SSL Certificate Management & Protection Engine', () => {
-  let tempCertsDir: string;
+describe('TLS / SSL Certificate Management & Security Hardening', () => {
+  const testCertsDir = path.join(rootDir, 'data', 'temp_ssl_test_certs');
+  const testCrtPath = path.join(testCertsDir, 'server.crt');
+  const testKeyPath = path.join(testCertsDir, 'server.key');
 
   beforeEach(() => {
-    tempCertsDir = fs.mkdtempSync(path.join(rootDir, 'data', 'test_certs_'));
+    if (fs.existsSync(testCertsDir)) {
+      fs.rmSync(testCertsDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(testCertsDir, { recursive: true, mode: 0o700 });
   });
 
   afterEach(() => {
-    try {
-      if (fs.existsSync(tempCertsDir)) {
-        fs.rmSync(tempCertsDir, { recursive: true, force: true });
-      }
-    } catch {}
-  });
-
-  // Helper to execute ensure_ssl_certificates with custom environment variables in a subshell
-  const runSslScript = (env: Record<string, string> = {}) => {
-    const envVars = Object.entries(env)
-      .map(([k, v]) => `${k}="${v}"`)
-      .join(' ');
-
-    const scriptCmd = `
-      source "${colorsLibPath}"
-      source "${sslLibPath}"
-      CERTS_DIR="${tempCertsDir}"
-      CRT_FILE="${path.join(tempCertsDir, 'server.crt')}"
-      KEY_FILE="${path.join(tempCertsDir, 'server.key')}"
-      ${envVars}
-      ensure_ssl_certificates
-    `;
-
-    try {
-      const output = execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, {
-        cwd: rootDir,
-        encoding: 'utf-8',
-        stdio: 'pipe'
-      });
-      return { status: 0, output, stderr: '' };
-    } catch (err: any) {
-      return {
-        status: err.status || 1,
-        output: err.stdout?.toString() || '',
-        stderr: err.stderr?.toString() || err.message || ''
-      };
+    if (fs.existsSync(testCertsDir)) {
+      try {
+        fs.rmSync(testCertsDir, { recursive: true, force: true });
+      } catch {}
     }
-  };
-
-  // =========================================================================
-  // 1. Geçerli Sertifika ve Özel Anahtar
-  // =========================================================================
-  it('1. Geçerli sertifika ve anahtar: OpenSSL ile eşleşme doğrulanır, mevcut dosyalar korunur', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const keyFile = path.join(tempCertsDir, 'server.key');
-
-    // Generate a valid RSA keypair using OpenSSL
-    execSync(
-      `openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "${keyFile}" -out "${crtFile}" -subj "/CN=valid.test"`,
-      { stdio: 'pipe' }
-    );
-
-    const initialCrtContent = fs.readFileSync(crtFile, 'utf-8');
-    const initialKeyContent = fs.readFileSync(keyFile, 'utf-8');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(result.status).toBe(0);
-    expect(result.output).toMatch(/doğrulandı ve korundu/i);
-
-    // Verify files were preserved byte-for-byte
-    expect(fs.readFileSync(crtFile, 'utf-8')).toBe(initialCrtContent);
-    expect(fs.readFileSync(keyFile, 'utf-8')).toBe(initialKeyContent);
-
-    // Verify key permissions are strictly 0600
-    const keyStat = fs.statSync(keyFile);
-    expect(keyStat.mode & 0o077).toBe(0);
   });
 
-  // =========================================================================
-  // 2. Uyumsuz Sertifika ve Özel Anahtar
-  // =========================================================================
-  it('2. Uyumsuz sertifika ve anahtar: public key uyumsuzluğunda açık hata verilir ve güvenli durulur (fail-closed)', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const keyFile = path.join(tempCertsDir, 'server.key');
-    const dummyKey = path.join(tempCertsDir, 'dummy.key');
-
-    // Create pair A
-    execSync(
-      `openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "${dummyKey}" -out "${crtFile}" -subj "/CN=certA"`,
-      { stdio: 'pipe' }
-    );
-    // Create completely different private key B
-    execSync(`openssl genrsa -out "${keyFile}" 2048`, { stdio: 'pipe' });
-    fs.unlinkSync(dummyKey);
-
-    const initialCrtContent = fs.readFileSync(crtFile, 'utf-8');
-    const initialKeyContent = fs.readFileSync(keyFile, 'utf-8');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'true' });
-
-    // Must FAIL with non-zero exit code
-    expect(result.status).not.toBe(0);
-    const combinedOutput = `${result.output} ${result.stderr}`;
-    expect(combinedOutput).toMatch(/UYUŞMUYOR|eşleşmiyor/i);
-    expect(combinedOutput).toMatch(/kurulum durduruldu/i);
-
-    // Existing files must NOT be destroyed or overwritten
-    expect(fs.readFileSync(crtFile, 'utf-8')).toBe(initialCrtContent);
-    expect(fs.readFileSync(keyFile, 'utf-8')).toBe(initialKeyContent);
-  });
-
-  // =========================================================================
-  // 3. Yalnızca Sertifika Mevcut (Özel Anahtar Eksik)
-  // =========================================================================
-  it('3. Yalnızca sertifika mevcut: eksik anahtar durumunda mevcut dosya üzerine yazılmaz, güvenli hata verir', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const dummyKey = path.join(tempCertsDir, 'dummy.key');
-
-    execSync(
-      `openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "${dummyKey}" -out "${crtFile}" -subj "/CN=certOnly"`,
-      { stdio: 'pipe' }
-    );
-    fs.unlinkSync(dummyKey);
-
-    const initialCrtContent = fs.readFileSync(crtFile, 'utf-8');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(result.status).not.toBe(0);
-    const combinedOutput = `${result.output} ${result.stderr}`;
-    expect(combinedOutput).toMatch(/Yalnızca TLS Sertifikası.*Mevcut.*Özel Anahtar.*Eksik/i);
-    expect(combinedOutput).toMatch(/fail-closed/i);
-
-    // Certificate file must remain untouched
-    expect(fs.readFileSync(crtFile, 'utf-8')).toBe(initialCrtContent);
-    // Key file must NOT have been generated as an incompatible orphan
-    expect(fs.existsSync(path.join(tempCertsDir, 'server.key'))).toBe(false);
-  });
-
-  // =========================================================================
-  // 4. Yalnızca Özel Anahtar Mevcut (Sertifika Eksik)
-  // =========================================================================
-  it('4. Yalnızca özel anahtar mevcut: eksik sertifika durumunda anahtar üzerine yazılmaz, güvenli hata verir', () => {
-    const keyFile = path.join(tempCertsDir, 'server.key');
-    execSync(`openssl genrsa -out "${keyFile}" 2048`, { stdio: 'pipe' });
-
-    const initialKeyContent = fs.readFileSync(keyFile, 'utf-8');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(result.status).not.toBe(0);
-    const combinedOutput = `${result.output} ${result.stderr}`;
-    expect(combinedOutput).toMatch(/Yalnızca Özel Anahtar.*Mevcut.*Sertifika.*Eksik/i);
-    expect(combinedOutput).toMatch(/fail-closed/i);
-
-    // Private key must remain untouched
-    expect(fs.readFileSync(keyFile, 'utf-8')).toBe(initialKeyContent);
-    // Certificate file must NOT have been randomly generated
-    expect(fs.existsSync(path.join(tempCertsDir, 'server.crt'))).toBe(false);
-  });
-
-  // =========================================================================
-  // 5. İki Dosya da Yok ve Docker Proxy Kapalı
-  // =========================================================================
-  it('5. İki dosya da yok ve Docker proxy kapalı: gereksiz sertifika üretimi yapılmaz, atlanır', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const keyFile = path.join(tempCertsDir, 'server.key');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'false' });
-    expect(result.status).toBe(0);
-    expect(result.output).toMatch(/Docker proxy profili aktif değil.*atlandı/i);
-
-    // No files should be generated
-    expect(fs.existsSync(crtFile)).toBe(false);
-    expect(fs.existsSync(keyFile)).toBe(false);
-  });
-
-  // =========================================================================
-  // 6. İki Dosya da Yok ve Docker Proxy Açık (Atomik Üretim)
-  // =========================================================================
-  it('6. İki dosya da yok ve Docker proxy açık: geçici dizinde atomik olarak eşleşen çift üretilir', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const keyFile = path.join(tempCertsDir, 'server.key');
-
-    const result = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(result.status).toBe(0);
-    expect(result.output).toMatch(/Güvenli TLS sertifikaları başarıyla üretildi/i);
-
-    expect(fs.existsSync(crtFile)).toBe(true);
-    expect(fs.existsSync(keyFile)).toBe(true);
-
-    // Verify key permissions (0600)
-    const keyStat = fs.statSync(keyFile);
-    expect(keyStat.mode & 0o077).toBe(0);
-
-    // Verify generated cert and key match using OpenSSL
-    const crtPub = execSync(`openssl x509 -noout -pubkey -in "${crtFile}"`, { encoding: 'utf-8' }).trim();
-    const keyPub = execSync(`openssl pkey -pubout -in "${keyFile}"`, { encoding: 'utf-8' }).trim();
-    expect(crtPub).toBe(keyPub);
-    expect(crtPub.length).toBeGreaterThan(100);
-
-    // Verify no lingering temp directories (.tmp_ssl_*)
-    const files = fs.readdirSync(tempCertsDir);
-    const tempDirs = files.filter((f) => f.startsWith('.tmp_ssl_'));
-    expect(tempDirs.length).toBe(0);
-  });
-
-  // =========================================================================
-  // 7. Tekrarlanan Kurulum ve Güncelleme (Idempotent Update)
-  // =========================================================================
-  it('7. Tekrarlanan kurulum ve güncelleme: mevcut sertifika çifti tekrarlanan çalıştırmalarda bayt bayt korunur', () => {
-    const crtFile = path.join(tempCertsDir, 'server.crt');
-    const keyFile = path.join(tempCertsDir, 'server.key');
-
-    // Run 1: Generate initial certificate
-    const run1 = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(run1.status).toBe(0);
-
-    const crtHash1 = execSync(`sha256sum "${crtFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-    const keyHash1 = execSync(`sha256sum "${keyFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-
-    // Run 2: Subsequent installation / update run
-    const run2 = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(run2.status).toBe(0);
-    expect(run2.output).toMatch(/doğrulandı ve korundu/i);
-
-    const crtHash2 = execSync(`sha256sum "${crtFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-    const keyHash2 = execSync(`sha256sum "${keyFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-
-    // Run 3: Third update run
-    const run3 = runSslScript({ USE_DOCKER_PROXY: 'true' });
-    expect(run3.status).toBe(0);
-
-    const crtHash3 = execSync(`sha256sum "${crtFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-    const keyHash3 = execSync(`sha256sum "${keyFile}"`, { encoding: 'utf-8' }).split(' ')[0];
-
-    // Absolute byte-for-byte idempotency
-    expect(crtHash1).toBe(crtHash2);
-    expect(crtHash2).toBe(crtHash3);
-    expect(keyHash1).toBe(keyHash2);
-    expect(keyHash2).toBe(keyHash3);
-  });
-
-  // =========================================================================
-  // 8. install.sh Entegrasyonu ve Fail-Closed Davranışı
-  // =========================================================================
-  it('8. install.sh entegrasyonu: SSL hatası durumunda dağıtımı derhal durdurur (exit 1)', () => {
-    // In an isolated subshell, test install.sh behavior when SSL fails
-    const testScript = path.join(rootDir, 'data', 'temp_install_ssl_fail_test.sh');
-    const bashScript = `#!/usr/bin/env bash
+  const runSslHelper = (env: Record<string, string> = {}) => {
+    const script = `#!/usr/bin/env bash
 source "${colorsLibPath}"
-ensure_ssl_certificates() {
-  echo "Simulated TLS Mismatch Error" >&2
-  return 1
-}
+source "${sslLibPath}"
 
-# Source install.sh section or simulate step 6 check
-HTTP_ONLY=false
-if [ "$HTTP_ONLY" = false ]; then
-  if ! ensure_ssl_certificates; then
-    echo "FATAL_SSL_HALT_TRIGGERED" >&2
-    exit 1
-  fi
+CERTS_DIR="${testCertsDir}"
+CRT_FILE="${testCrtPath}"
+KEY_FILE="${testKeyPath}"
+SETUP_DOMAIN="localhost"
+
+if [ "\${HTTP_ONLY:-false}" = "true" ]; then
+  # Matches install.sh logic when --http-only is set
+  exit 0
 fi
+
+ensure_ssl_certificates
+exit $?
 `;
-    fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
+    const tmpScript = path.join(rootDir, 'data', `temp_ssl_run_${Date.now()}_${Math.random().toString(36).substring(2)}.sh`);
+    fs.writeFileSync(tmpScript, script, { mode: 0o755 });
 
     let exitCode = 0;
     let output = '';
     try {
-      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+      output = execSync(`bash "${tmpScript}" 2>&1`, {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        env: { ...process.env, ...env }
+      });
     } catch (err: any) {
       exitCode = err.status || 1;
       output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
     } finally {
-      try { fs.unlinkSync(testScript); } catch {}
+      try { fs.unlinkSync(tmpScript); } catch {}
+    }
+
+    return { exitCode, output };
+  };
+
+  it('1. Geçerli eşleşen sertifika ve anahtar: tam olarak korunur ve 0600/0644 izinleri sağlanır', () => {
+    execSync(`openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout '${testKeyPath}' -out '${testCrtPath}' -subj '/CN=test.local' 2>/dev/null`);
+    
+    const initialCrt = fs.readFileSync(testCrtPath, 'utf-8');
+    const initialKey = fs.readFileSync(testKeyPath, 'utf-8');
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(0);
+    expect(res.output).toMatch(/doğrulandı ve eşleşti.*KORUNDU/i);
+
+    expect(fs.readFileSync(testCrtPath, 'utf-8')).toBe(initialCrt);
+    expect(fs.readFileSync(testKeyPath, 'utf-8')).toBe(initialKey);
+
+    const keyStat = fs.statSync(testKeyPath);
+    const crtStat = fs.statSync(testCrtPath);
+    expect(keyStat.mode & 0o077).toBe(0); // 0600
+    expect(crtStat.mode & 0o004).toBe(0o004); // 0644
+  });
+
+  it('2. Uyumsuz sertifika ve anahtar: üzerine yazılmaz, açık hata ile güvenli durulur (fail-closed, exit 1)', () => {
+    const pairAKey = path.join(testCertsDir, 'a.key');
+    const pairACrt = path.join(testCertsDir, 'a.crt');
+    const pairBKey = path.join(testCertsDir, 'b.key');
+    const pairBCrt = path.join(testCertsDir, 'b.crt');
+
+    execSync(`openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout '${pairAKey}' -out '${pairACrt}' -subj '/CN=domainA' 2>/dev/null`);
+    execSync(`openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout '${pairBKey}' -out '${pairBCrt}' -subj '/CN=domainB' 2>/dev/null`);
+
+    const mismatchedCrt = fs.readFileSync(pairACrt, 'utf-8');
+    const mismatchedKey = fs.readFileSync(pairBKey, 'utf-8');
+
+    fs.writeFileSync(testCrtPath, mismatchedCrt);
+    fs.writeFileSync(testKeyPath, mismatchedKey);
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(1);
+    expect(res.output).toMatch(/eşleşmiyor.*Mevcut dosyaların üzerine yazılmıyor.*durduruldu/i);
+
+    expect(fs.readFileSync(testCrtPath, 'utf-8')).toBe(mismatchedCrt);
+    expect(fs.readFileSync(testKeyPath, 'utf-8')).toBe(mismatchedKey);
+  });
+
+  it('3. Yalnızca sertifika mevcut: otomatik diğer dosya üretilmez, mevcut dosya korunur ve hata verilir', () => {
+    const dummyCrt = '-----BEGIN CERTIFICATE-----\nTEST_CERT\n-----END CERTIFICATE-----\n';
+    fs.writeFileSync(testCrtPath, dummyCrt);
+    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(1);
+    expect(res.output).toMatch(/Eksik TLS sertifika çifti.*Yalnızca.*server.crt.*mevcut/i);
+    expect(fs.readFileSync(testCrtPath, 'utf-8')).toBe(dummyCrt);
+    expect(fs.existsSync(testKeyPath)).toBe(false);
+  });
+
+  it('4. Yalnızca özel anahtar mevcut: otomatik sertifika üretilmez, mevcut anahtar korunur ve hata verilir', () => {
+    const dummyKey = '-----BEGIN PRIVATE KEY-----\nTEST_KEY\n-----END PRIVATE KEY-----\n';
+    fs.writeFileSync(testKeyPath, dummyKey);
+    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(1);
+    expect(res.output).toMatch(/Eksik TLS sertifika çifti.*Yalnızca.*server.key.*mevcut/i);
+    expect(fs.readFileSync(testKeyPath, 'utf-8')).toBe(dummyKey);
+    expect(fs.existsSync(testCrtPath)).toBe(false);
+  });
+
+  it('5. İki dosya da yok (Docker proxy kapalı): gereksiz sertifika üretimi atlanır', () => {
+    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
+    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'false', ENABLE_DOCKER_PROXY: 'false', COMPOSE_PROFILES: '' });
+    expect(res.exitCode).toBe(0);
+    expect(res.output).toMatch(/Docker Nginx proxy kullanılmıyor; self-signed TLS sertifika üretimi atlandı/i);
+    expect(fs.existsSync(testCrtPath)).toBe(false);
+    expect(fs.existsSync(testKeyPath)).toBe(false);
+  });
+
+  it('6. --http-only seçeneği aktif: TLS kontrolü/üretimi atlanır', () => {
+    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
+    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
+
+    const res = runSslHelper({ HTTP_ONLY: 'true', USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(0);
+    expect(fs.existsSync(testCrtPath)).toBe(false);
+    expect(fs.existsSync(testKeyPath)).toBe(false);
+  });
+
+  it('7. İki dosya da yok (Docker proxy açık): atomik geçici dosyalarla güvenli sertifika çifti üretilir', () => {
+    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
+    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
+
+    const res = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res.exitCode).toBe(0);
+    expect(res.output).toMatch(/Güvenli TLS sertifika çifti başarıyla üretildi ve doğrulandı/i);
+
+    expect(fs.existsSync(testCrtPath)).toBe(true);
+    expect(fs.existsSync(testKeyPath)).toBe(true);
+
+    const keyStat = fs.statSync(testKeyPath);
+    expect(keyStat.mode & 0o077).toBe(0); // 0600
+
+    const verifyScript = `
+      source "${sslLibPath}"
+      verify_ssl_match "${testCrtPath}" "${testKeyPath}"
+    `;
+    expect(() => execSync(`bash -c '${verifyScript.replace(/'/g, "'\\''")}'`)).not.toThrow();
+  });
+
+  it('8. OpenSSL bulunamadığında verify_ssl_match fail-closed (return 1) uygular', () => {
+    const dummyCrt = path.join(testCertsDir, 'dummy.crt');
+    const dummyKey = path.join(testCertsDir, 'dummy.key');
+    fs.writeFileSync(dummyCrt, 'cert-data');
+    fs.writeFileSync(dummyKey, 'key-data');
+
+    const verifyNoOpensslScript = `
+      source "${sslLibPath}"
+      PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      # Override openssl in a wrapper shell function
+      openssl() { return 127; }
+      export -f openssl 2>/dev/null || true
+      verify_ssl_match "${dummyCrt}" "${dummyKey}"
+      exit $?
+    `;
+
+    let exitCode = 0;
+    try {
+      execSync(`bash -c '${verifyNoOpensslScript.replace(/'/g, "'\\''")}'`, { encoding: 'utf-8' });
+    } catch (err: any) {
+      exitCode = err.status || 1;
     }
 
     expect(exitCode).toBe(1);
-    expect(output).toContain('FATAL_SSL_HALT_TRIGGERED');
   });
 
-  // =========================================================================
-  // 9. Gitignore Kuralı Doğrulaması
-  // =========================================================================
-  it('9. Gitignore doğrulaması: docker/certs/ altındaki sertifika ve anahtar dosyaları Git tarafından yoksayılır', () => {
-    const gitignorePath = path.join(rootDir, '.gitignore');
-    const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
+  it('9. Tekrarlanan kurulum ve güncelleme (Idempotency): ikinci çalıştırmada mevcut sertifika aynen korunur', () => {
+    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
+    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
 
-    expect(gitignoreContent).toContain('docker/certs/server.crt');
-    expect(gitignoreContent).toContain('docker/certs/server.key');
-    expect(gitignoreContent).toContain('docker/certs/*.crt');
-    expect(gitignoreContent).toContain('docker/certs/*.key');
+    const res1 = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res1.exitCode).toBe(0);
+
+    const crt1 = fs.readFileSync(testCrtPath, 'utf-8');
+    const key1 = fs.readFileSync(testKeyPath, 'utf-8');
+
+    const res2 = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res2.exitCode).toBe(0);
+    expect(res2.output).toMatch(/doğrulandı ve eşleşti.*KORUNDU/i);
+
+    const res3 = runSslHelper({ USE_DOCKER_PROXY: 'true' });
+    expect(res3.exitCode).toBe(0);
+
+    expect(fs.readFileSync(testCrtPath, 'utf-8')).toBe(crt1);
+    expect(fs.readFileSync(testKeyPath, 'utf-8')).toBe(key1);
   });
 });

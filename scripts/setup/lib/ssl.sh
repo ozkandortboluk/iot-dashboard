@@ -13,9 +13,9 @@ verify_ssl_match() {
   fi
 
   if ! command -v openssl >/dev/null 2>&1; then
-    # If OpenSSL is missing on host, we cannot perform cryptographic verification.
-    # Return 0 if both non-empty files exist.
-    return 0
+    # If OpenSSL is missing on host, cryptographic verification cannot be performed.
+    # Return 1 to fail closed.
+    return 1
   fi
 
   # Primary check: Compare public key exports (works for RSA, ECDSA, Ed25519, etc.)
@@ -126,10 +126,30 @@ ensure_ssl_certificates() {
     if verify_ssl_match "$tmp_crt" "$tmp_key"; then
       chmod 600 "$tmp_key"
       chmod 644 "$tmp_crt"
-      mv "$tmp_key" "$KEY_FILE"
-      mv "$tmp_crt" "$CRT_FILE"
-      log_success "Güvenli TLS sertifika çifti başarıyla üretildi ve doğrulandı (${CRT_FILE}, ${KEY_FILE})."
-      return 0
+
+      # Do not overwrite existing target files if they exist
+      if [ -e "$KEY_FILE" ] || [ -e "$CRT_FILE" ]; then
+        rm -f "$tmp_crt" "$tmp_key"
+        log_fatal "❌ [KRİTİK HATA] Hedef sertifika veya anahtar dosyası zaten mevcut! Üzerine yazma engellendi."
+        return 1
+      fi
+
+      if mv "$tmp_key" "$KEY_FILE"; then
+        if mv "$tmp_crt" "$CRT_FILE"; then
+          log_success "Güvenli TLS sertifika çifti başarıyla üretildi ve doğrulandı (${CRT_FILE}, ${KEY_FILE})."
+          return 0
+        else
+          # First move succeeded, second move failed. Clean up moved KEY_FILE and remaining temp files
+          # to ensure no partial or unbalanced certificate pair remains on disk.
+          rm -f "$KEY_FILE" "$tmp_crt" "$tmp_key"
+          log_fatal "❌ [KRİTİK HATA] Sertifika dosyası hedefe taşınamadı. Yarım sertifika çifti kalmaması için geri alındı."
+          return 1
+        fi
+      else
+        rm -f "$tmp_crt" "$tmp_key"
+        log_fatal "❌ [KRİTİK HATA] Özel anahtar dosyası hedefe taşınamadı."
+        return 1
+      fi
     else
       rm -f "$tmp_crt" "$tmp_key"
       log_fatal "❌ [KRİTİK HATA] Üretilen geçici TLS sertifikası ve özel anahtar eşleşmedi!"
