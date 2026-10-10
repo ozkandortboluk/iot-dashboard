@@ -52,36 +52,67 @@ ensure_ssl_certificates() {
   local lock_dir="${CERTS_DIR}/.ssl_setup.lock"
   local pid_file="${lock_dir}/pid"
   local lock_acquired=false
+  local publishing=false
+  local published_ok=false
   local tmp_crt=""
   local tmp_key=""
 
   cleanup_ssl_temp() {
+    local exit_code=$?
+    # Remove temporary generation files
     [ -n "${tmp_crt:-}" ] && [ -f "${tmp_crt:-}" ] && rm -f "${tmp_crt}" 2>/dev/null || true
     [ -n "${tmp_key:-}" ] && [ -f "${tmp_key:-}" ] && rm -f "${tmp_key}" 2>/dev/null || true
-    if [ "${lock_acquired:-false}" = "true" ] && [ -d "${lock_dir:-}" ]; then
-      rm -rf "${lock_dir}" 2>/dev/null || true
+
+    # Roll back partial publication if interrupted mid-publish
+    if [ "${publishing:-false}" = "true" ] && [ "${published_ok:-false}" = "false" ]; then
+      if [ -f "${KEY_FILE:-}" ] && [ ! -f "${CRT_FILE:-}" ]; then
+        rm -f "${KEY_FILE}" 2>/dev/null || true
+      elif [ -f "${CRT_FILE:-}" ] && [ ! -f "${KEY_FILE:-}" ]; then
+        rm -f "${CRT_FILE}" 2>/dev/null || true
+      fi
     fi
+
+    # Safely release lock directory ONLY if acquired by us and pid_file contains our PID ($$)
+    if [ "${lock_acquired:-false}" = "true" ] && [ -d "${lock_dir:-}" ]; then
+      if [ -f "${pid_file:-}" ]; then
+        local current_pid
+        current_pid=$(cat "${pid_file}" 2>/dev/null || echo "")
+        if [ "${current_pid}" = "$$" ]; then
+          rm -f "${pid_file}" 2>/dev/null || true
+          rmdir "${lock_dir}" 2>/dev/null || rm -rf "${lock_dir}" 2>/dev/null || true
+        fi
+      fi
+    fi
+    return $exit_code
   }
 
-  trap cleanup_ssl_temp EXIT INT TERM
+  trap cleanup_ssl_temp EXIT INT TERM HUP
 
   # Attempt to acquire concurrency lock
   local retry_count=0
-  while [ $retry_count -lt 3 ]; do
+  local max_retries=3
+  while [ $retry_count -lt $max_retries ]; do
     if mkdir "$lock_dir" 2>/dev/null; then
       lock_acquired=true
       echo "$$" > "$pid_file" 2>/dev/null || true
       break
     fi
-    # Check if lock is stale (PID no longer running)
+
+    # Lock directory exists. Check if lock is stale.
     if [ -f "$pid_file" ]; then
       local lock_pid
       lock_pid=$(cat "$pid_file" 2>/dev/null || echo "")
       if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-        rm -rf "$lock_dir" 2>/dev/null || true
-        continue
+        local recheck_pid
+        recheck_pid=$(cat "$pid_file" 2>/dev/null || echo "")
+        if [ "$recheck_pid" = "$lock_pid" ]; then
+          rm -f "$pid_file" 2>/dev/null || true
+          rmdir "$lock_dir" 2>/dev/null || rm -rf "$lock_dir" 2>/dev/null || true
+          continue
+        fi
       fi
     fi
+
     sleep 1
     retry_count=$((retry_count + 1))
   done
@@ -89,7 +120,7 @@ ensure_ssl_certificates() {
   if [ "$lock_acquired" = false ]; then
     log_fatal "❌ [KRİTİK HATA] Eşzamanlı TLS sertifika kurulumu algılandı! Kilit alınamadı ('$lock_dir')."
     cleanup_ssl_temp
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     return 1
   fi
 
@@ -105,12 +136,12 @@ ensure_ssl_certificates() {
       chmod 644 "$CRT_FILE" 2>/dev/null || true
       log_info "Mevcut SSL/TLS sertifikası ve özel anahtarı doğrulandı ve eşleşti (${CRT_FILE}) [KORUNDU]."
       cleanup_ssl_temp
-      trap - EXIT INT TERM
+      trap - EXIT INT TERM HUP
       return 0
     else
       log_fatal "❌ [KRİTİK HATA] SSL sertifikası ('$CRT_FILE') ile özel anahtar ('$KEY_FILE') eşleşmiyor! Mevcut dosyaların üzerine yazılmıyor. Dağıtım durduruldu."
       cleanup_ssl_temp
-      trap - EXIT INT TERM
+      trap - EXIT INT TERM HUP
       return 1
     fi
   fi
@@ -125,7 +156,7 @@ ensure_ssl_certificates() {
     fi
     log_fatal "❌ [KRİTİK HATA] Eksik TLS sertifika çifti! Yalnızca '$present_file' mevcut, '$missing_file' bulunamadı. Mevcut dosyanın üzerine yazılmasını veya uyumsuz çift üretilmesini önlemek için otomatik üretim yapılmadı."
     cleanup_ssl_temp
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     return 1
   fi
 
@@ -141,7 +172,7 @@ ensure_ssl_certificates() {
   if [ "$ssl_required" = false ]; then
     log_info "Docker Nginx proxy kullanılmıyor; self-signed TLS sertifika üretimi atlandı (Sistem Nginx / Let's Encrypt kullanılabilir)."
     cleanup_ssl_temp
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     return 0
   fi
 
@@ -149,7 +180,7 @@ ensure_ssl_certificates() {
   if ! command -v openssl >/dev/null 2>&1; then
     log_fatal "❌ [KRİTİK HATA] Docker proxy için TLS sertifikası gerekli ancak OpenSSL bulunamadı."
     cleanup_ssl_temp
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     return 1
   fi
 
@@ -178,49 +209,49 @@ ensure_ssl_certificates() {
 
   if [ "$gen_ok" = true ] && [ -s "$tmp_crt" ] && [ -s "$tmp_key" ]; then
     if verify_ssl_match "$tmp_crt" "$tmp_key"; then
-      chmod 600 "$tmp_key"
-      chmod 644 "$tmp_crt"
+      chmod 600 "$tmp_key" 2>/dev/null || true
+      chmod 644 "$tmp_crt" 2>/dev/null || true
 
       # Do not overwrite existing target files if they exist
       if [ -e "$KEY_FILE" ] || [ -e "$CRT_FILE" ]; then
         cleanup_ssl_temp
-        trap - EXIT INT TERM
+        trap - EXIT INT TERM HUP
         log_fatal "❌ [KRİTİK HATA] Hedef sertifika veya anahtar dosyası zaten mevcut! Üzerine yazma engellendi."
         return 1
       fi
 
+      publishing=true
       if mv "$tmp_key" "$KEY_FILE"; then
         if mv "$tmp_crt" "$CRT_FILE"; then
+          published_ok=true
           tmp_crt=""
           tmp_key=""
           cleanup_ssl_temp
-          trap - EXIT INT TERM
+          trap - EXIT INT TERM HUP
           log_success "Güvenli TLS sertifika çifti başarıyla üretildi ve doğrulandı (${CRT_FILE}, ${KEY_FILE})."
           return 0
         else
-          # First move succeeded, second move failed. Clean up moved KEY_FILE and remaining temp files
-          # to ensure no partial or unbalanced certificate pair remains on disk.
-          rm -f "$KEY_FILE"
+          rm -f "$KEY_FILE" 2>/dev/null || true
           cleanup_ssl_temp
-          trap - EXIT INT TERM
+          trap - EXIT INT TERM HUP
           log_fatal "❌ [KRİTİK HATA] Sertifika dosyası hedefe taşınamadı. Yarım sertifika çifti kalmaması için geri alındı."
           return 1
         fi
       else
         cleanup_ssl_temp
-        trap - EXIT INT TERM
+        trap - EXIT INT TERM HUP
         log_fatal "❌ [KRİTİK HATA] Özel anahtar dosyası hedefe taşınamadı."
         return 1
       fi
     else
       cleanup_ssl_temp
-      trap - EXIT INT TERM
+      trap - EXIT INT TERM HUP
       log_fatal "❌ [KRİTİK HATA] Üretilen geçici TLS sertifikası ve özel anahtar eşleşmedi!"
       return 1
     fi
   else
     cleanup_ssl_temp
-    trap - EXIT INT TERM
+    trap - EXIT INT TERM HUP
     log_fatal "❌ [KRİTİK HATA] OpenSSL ile TLS sertifikası üretilemedi!"
     return 1
   fi

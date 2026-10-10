@@ -143,26 +143,46 @@ exit $?
     expect(fs.existsSync(testKeyPath)).toBe(false);
   });
 
-  it('6. --http-only seçeneği aktif: gerçek install.sh akışında TLS kontrolü/üretimi atlanır', () => {
-    if (fs.existsSync(testCrtPath)) fs.unlinkSync(testCrtPath);
-    if (fs.existsSync(testKeyPath)) fs.unlinkSync(testKeyPath);
+  it('6. --http-only seçeneği aktif: izole ortamda install.sh akışında TLS kontrolü/üretimi atlanır', () => {
+    const isolatedInstallDir = path.join(rootDir, 'data', 'temp_isolated_install');
+    const isolatedCertsDir = path.join(isolatedInstallDir, 'docker/certs');
+    const isolatedCrt = path.join(isolatedCertsDir, 'server.crt');
+    const isolatedKey = path.join(isolatedCertsDir, 'server.key');
 
-    let output = '';
-    let exitCode = 0;
-    try {
-      output = execSync('bash install.sh --http-only --init-only 2>&1', {
-        cwd: rootDir,
-        encoding: 'utf-8',
-        env: { ...process.env, CERTS_DIR: testCertsDir }
-      });
-    } catch (err: any) {
-      exitCode = err.status || 1;
-      output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+    if (fs.existsSync(isolatedInstallDir)) {
+      fs.rmSync(isolatedInstallDir, { recursive: true, force: true });
     }
+    fs.mkdirSync(isolatedInstallDir, { recursive: true, mode: 0o755 });
 
-    expect(exitCode).toBe(0);
-    expect(fs.existsSync(testCrtPath)).toBe(false);
-    expect(fs.existsSync(testKeyPath)).toBe(false);
+    try {
+      fs.cpSync(path.join(rootDir, 'scripts'), path.join(isolatedInstallDir, 'scripts'), { recursive: true });
+      fs.copyFileSync(path.join(rootDir, 'install.sh'), path.join(isolatedInstallDir, 'install.sh'));
+      if (fs.existsSync(path.join(rootDir, '.env.example'))) {
+        fs.copyFileSync(path.join(rootDir, '.env.example'), path.join(isolatedInstallDir, '.env.example'));
+      }
+
+      let output = '';
+      let exitCode = 0;
+      try {
+        output = execSync('bash install.sh --http-only --init-only 2>&1', {
+          cwd: isolatedInstallDir,
+          encoding: 'utf-8',
+          env: { ...process.env }
+        });
+      } catch (err: any) {
+        exitCode = err.status || 1;
+        output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+      }
+
+      expect(exitCode).toBe(0);
+      expect(output).toMatch(/--init-only modunda tamamlandı/i);
+      expect(fs.existsSync(isolatedCrt)).toBe(false);
+      expect(fs.existsSync(isolatedKey)).toBe(false);
+    } finally {
+      if (fs.existsSync(isolatedInstallDir)) {
+        try { fs.rmSync(isolatedInstallDir, { recursive: true, force: true }); } catch {}
+      }
+    }
   });
 
   it('7. İki dosya da yok (Docker proxy açık): atomik geçici dosyalarla güvenli sertifika çifti üretilir', () => {
