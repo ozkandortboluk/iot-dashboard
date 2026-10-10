@@ -495,7 +495,7 @@ exit $exit_code
 
     // Must FAIL with exit code 1 (fail-closed)
     expect(exitCode).toBe(1);
-    expect(combinedOutput).toMatch(/UID 1000 \(node\) konteyner kullanıcısı tarafından (okunamıyor|erişilebilir)/i);
+    expect(combinedOutput).toMatch(/UID 1000.*konteyner kullanıcısı tarafından (okunamıyor|erişilebilir)/i);
     expect(combinedOutput).toMatch(/Çözüm/i);
   });
 
@@ -552,5 +552,106 @@ align_secrets_ownership_and_permissions
     // Verify contents are strictly preserved byte-for-byte
     expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(originalKey);
     expect(fs.readFileSync(pgPassPath, 'utf8').trim()).toBe(originalPass);
+  });
+
+  it('15. Proje dışındaki üst dizinler: izinler otomatik DEĞİŞTİRİLMEZ, erişim yoksa açık hata ile güvenli durulur', () => {
+    // Create an isolated parent directory simulating a private user home (e.g. /home/deploy with mode 0700)
+    const testParentDir = path.join(rootDir, 'data', 'temp_parent_test');
+    const testProjectSecrets = path.join(testParentDir, 'project', 'secrets');
+    fs.mkdirSync(testProjectSecrets, { recursive: true, mode: 0o700 });
+
+    const keyPath = path.join(testProjectSecrets, 'encryption_key');
+    const passPath = path.join(testProjectSecrets, 'postgres_password');
+    fs.writeFileSync(keyPath, 'f'.repeat(64), { mode: 0o600 });
+    fs.writeFileSync(passPath, 'ParentDirPass2026!@#', { mode: 0o600 });
+
+    // Restrict parent directory to 0700 (UID 1000 cannot search/traverse)
+    try {
+      execSync(`chown -R 1001:1001 '${testParentDir}' && chmod 700 '${testParentDir}'`);
+    } catch {}
+
+    const testScript = path.join(rootDir, 'data', 'temp_parent_audit_test.sh');
+    const bashScript = `#!/usr/bin/env bash
+source "${secretsLibPath}"
+IS_ROOT=false
+SECRETS_DIR="${testProjectSecrets}"
+ENC_KEY_FILE="${keyPath}"
+PG_PASS_FILE="${passPath}"
+DB_PASS_FILE="${passPath}"
+
+align_secrets_ownership_and_permissions
+exit $?
+`;
+    fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
+
+    let exitCode = 0;
+    let output = '';
+    try {
+      output = execSync(`su -s /bin/bash deploy -c "bash '${testScript}'" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+    } catch (err: any) {
+      exitCode = err.status || 1;
+      output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+    } finally {
+      try { fs.unlinkSync(testScript); } catch {}
+      try { execSync(`rm -rf '${testParentDir}'`); } catch {}
+    }
+
+    // Must FAIL with exit code 1 because parent directory is not traversable
+    expect(exitCode).toBe(1);
+    expect(output).toMatch(/üst dizin.*UID 1000 tarafından taranabilir.*değil/i);
+    expect(output).toMatch(/Proje dışındaki üst dizinlerin izinleri ve ACL'leri otomatik olarak değiştirilmez/i);
+    expect(output).toMatch(/Çözüm/i);
+  });
+
+  it('16. "node" isimli kullanıcıdan bağımsız UID 1000 doğrulama: kullanıcı adı farklı olsa bile UID 1000 erişimi doğrulanır', () => {
+    const testKey = '16'.repeat(32);
+    const encKeyPath = path.join(secretsDir, 'encryption_key');
+    const pgPassPath = path.join(secretsDir, 'postgres_password');
+
+    fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
+    fs.writeFileSync(pgPassPath, 'DifferentUsernamePass123!@#', { mode: 0o600 });
+
+    // Set ownership to UID 1000, GID 1000 with 0600 mode
+    try {
+      execSync(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
+    } catch {}
+
+    // Run alignment in an environment where username 'node' does not exist or is hidden
+    const testScript = path.join(rootDir, 'data', 'temp_nonode_test.sh');
+    const bashScript = `#!/usr/bin/env bash
+source "${secretsLibPath}"
+IS_ROOT=true
+SUDO_USER=""
+
+# Mock 'id node' and 'getent passwd node' to fail, simulating VPS where user is named 'ubuntu' or 'debian'
+getent() {
+  if [ "$1" = "passwd" ] && [ "$2" = "node" ]; then return 1; fi
+  builtin getent "$@"
+}
+id() {
+  if [ "$1" = "node" ]; then return 1; fi
+  command id "$@"
+}
+
+align_secrets_ownership_and_permissions
+exit $?
+`;
+    fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
+
+    let exitCode = 0;
+    let output = '';
+    try {
+      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+    } catch (err: any) {
+      exitCode = err.status || 1;
+      output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
+    } finally {
+      try { fs.unlinkSync(testScript); } catch {}
+    }
+
+    expect(exitCode).toBe(0);
+
+    // Verify key is still valid and readable
+    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(testKey);
   });
 });

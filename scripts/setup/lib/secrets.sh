@@ -794,21 +794,6 @@ align_secrets_ownership_and_permissions() {
               fi
             fi
           done
-
-          # Traverse parent directories up to / and ensure UID 1000 has traversal permission (x)
-          local p_dir
-          p_dir=$(cd "$SECRETS_DIR" 2>/dev/null && pwd -P || echo "")
-          local p_curr
-          p_curr=$(dirname "$p_dir" 2>/dev/null || echo "")
-          while [ "$p_curr" != "/" ] && [ -n "$p_curr" ]; do
-            local p_owner
-            p_owner=$(stat -c "%u" "$p_curr" 2>/dev/null || echo "")
-            if [ "$p_owner" = "$current_uid" ]; then
-              # We own this parent directory. Ensure UID 1000 can traverse it via ACL without exposing to world
-              setfacl -m u:1000:x,m::x "$p_curr" 2>/dev/null || true
-            fi
-            p_curr=$(dirname "$p_curr")
-          done
         else
           method_errors+=("setfacl ($SECRETS_DIR): POSIX ACL uygulanamadı (${acl_err:-hata})")
         fi
@@ -909,9 +894,13 @@ align_secrets_ownership_and_permissions() {
   done
 
   if [ "$ancestor_blocked" = true ]; then
-    echo "❌ [KRİTİK HATA] '${blocked_ancestor_path}' üst dizini UID 1000 (node) tarafından taranabilir (execute/search) değil!" >&2
+    echo "❌ [KRİTİK HATA] Üst dizin '${blocked_ancestor_path}' UID 1000 tarafından taranabilir (search/execute) değil!" >&2
     echo "Dizin Sahibi: UID ${p_uid:-?}, Grup: GID ${p_gid:-?}, İzin: ${p_mode:-?}." >&2
-    echo "Çözüm: Bu üst dizin için UID 1000'e geçiş izni verin: 'setfacl -m u:1000:x ${blocked_ancestor_path}' veya 'chmod a+x ${blocked_ancestor_path}'." >&2
+    echo "Güvenlik Politikası: Proje dışındaki üst dizinlerin izinleri ve ACL'leri otomatik olarak değiştirilmez." >&2
+    echo "Çözüm: Konteyner kullanıcısının (UID 1000) erişebilmesi için bu üst dizine manuel geçiş izni verin:" >&2
+    echo "  setfacl -m u:1000:x '${blocked_ancestor_path}'" >&2
+    echo "  veya" >&2
+    echo "  chmod a+x '${blocked_ancestor_path}'" >&2
     return 1
   fi
 
@@ -946,7 +935,7 @@ align_secrets_ownership_and_permissions() {
   fi
 
   if [ "$dir_access_ok" = false ]; then
-    echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' secret dizini UID 1000 (node) konteyner kullanıcısı tarafından erişilebilir/taranabilir değil!" >&2
+    echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' secret dizini UID 1000 konteyner kullanıcısı tarafından erişilebilir/taranabilir değil!" >&2
     echo "Dizin Sahibi: UID ${d_uid:-?}, Grup: GID ${d_gid:-?}, İzin: ${d_mode:-?}." >&2
     echo "Çalıştıran Kullanıcı: UID ${current_uid:-?} (GID ${current_gid:-?}). Sudo Durumu: ${sudo_available}." >&2
     echo "" >&2
@@ -980,41 +969,63 @@ align_secrets_ownership_and_permissions() {
     fi
 
     # Check 2: Verify that container user UID 1000 can access the secret
-    # Strategy A: Real runtime execution test by UID 1000 (node) when possible
+    # Strategy A: Real runtime execution test by UID 1000 when possible
     local access_ok=false
     local real_test_executed=false
+
+    # Dynamically find any host username mapped to UID 1000 (e.g. ubuntu, debian, node, admin)
+    local u1000_name=""
+    u1000_name=$(getent passwd 1000 2>/dev/null | cut -d: -f1 || id -nu 1000 2>/dev/null || echo "")
 
     if [ "$current_uid" = "1000" ]; then
       real_test_executed=true
       if [ -x "$SECRETS_DIR" ] && [ -r "$sfile" ] && head -c 1 "$sfile" >/dev/null 2>&1; then
         access_ok=true
       fi
-    elif [ "$is_root_exec" = true ] && id node >/dev/null 2>&1; then
-      real_test_executed=true
-      if su -s /bin/sh node -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
-        access_ok=true
+    elif [ "$is_root_exec" = true ]; then
+      # Root execution can test access as numeric UID 1000 without requiring a username named 'node'
+      if command -v setpriv >/dev/null 2>&1; then
+        real_test_executed=true
+        if setpriv --reuid 1000 --regid 1000 --clear-groups sh -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
+          access_ok=true
+        fi
+      elif [ -n "$u1000_name" ]; then
+        real_test_executed=true
+        if su -s /bin/sh "$u1000_name" -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
+          access_ok=true
+        fi
+      elif command -v node >/dev/null 2>&1; then
+        real_test_executed=true
+        if node -e "try { process.setgid(1000); process.setuid(1000); const fs = require('fs'); fs.accessSync(process.argv[1], fs.constants.R_OK); const fd = fs.openSync(process.argv[1], 'r'); const buf = Buffer.alloc(1); fs.readSync(fd, buf, 0, 1, 0); fs.closeSync(fd); process.exit(0); } catch(e) { process.exit(1); }" "$sfile" 2>/dev/null; then
+          access_ok=true
+        fi
       fi
-    elif [ "$sudo_available" = true ] && id node >/dev/null 2>&1; then
-      real_test_executed=true
-      if $sudo_cmd -u node sh -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
+    elif [ "$sudo_available" = true ]; then
+      if $sudo_cmd -u '#1000' sh -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
+        real_test_executed=true
+        access_ok=true
+      elif [ -n "$u1000_name" ] && $sudo_cmd -u "$u1000_name" sh -c "test -x '$SECRETS_DIR' && test -r '$sfile' && head -c 1 '$sfile' >/dev/null" 2>/dev/null; then
+        real_test_executed=true
         access_ok=true
       fi
     fi
 
     # Strategy B: Strict Alternative Verification (when switching to UID 1000 is not permitted by kernel DAC)
     if [ "$real_test_executed" = false ]; then
-      if [ "$f_uid" = "1000" ] && [ "${f_mode: -3:1}" -ge 4 ]; then
-        access_ok=true
-      elif [ "$f_gid" = "1000" ] && [ -n "$f_mode" ] && [ "${f_mode: -2:1}" -ge 4 ]; then
-        access_ok=true
-      elif command -v getfacl >/dev/null 2>&1; then
-        local file_facl
-        file_facl=$(getfacl -n -c "$sfile" 2>/dev/null || echo "")
-        if echo "$file_facl" | grep -E "^(user|group):1000:r" | grep -qv "#effective:---"; then
-          local f_mask
-          f_mask=$(echo "$file_facl" | grep -E "^mask::" | cut -d: -f3 2>/dev/null || echo "")
-          if [ -z "$f_mask" ] || [[ "$f_mask" =~ [r] ]]; then
-            access_ok=true
+      if [ "$ancestor_blocked" = false ] && [ "$dir_access_ok" = true ]; then
+        if [ "$f_uid" = "1000" ] && [ "${f_mode: -3:1}" -ge 4 ]; then
+          access_ok=true
+        elif [ "$f_gid" = "1000" ] && [ -n "$f_mode" ] && [ "${f_mode: -2:1}" -ge 4 ]; then
+          access_ok=true
+        elif command -v getfacl >/dev/null 2>&1; then
+          local file_facl
+          file_facl=$(getfacl -n -c "$sfile" 2>/dev/null || echo "")
+          if echo "$file_facl" | grep -E "^(user|group):1000:r" | grep -qv "#effective:---"; then
+            local f_mask
+            f_mask=$(echo "$file_facl" | grep -E "^mask::" | cut -d: -f3 2>/dev/null || echo "")
+            if [ -z "$f_mask" ] || [[ "$f_mask" =~ [r] ]]; then
+              access_ok=true
+            fi
           fi
         fi
       fi
@@ -1025,13 +1036,19 @@ align_secrets_ownership_and_permissions() {
         # Fallback fix if root
         chown 1000:1000 "$sfile" 2>/dev/null && chmod 600 "$sfile" 2>/dev/null
         if [ "$real_test_executed" = true ]; then
-          su -s /bin/sh node -c "test -x '$SECRETS_DIR' && test -r '$sfile'" 2>/dev/null && access_ok=true
+          if command -v setpriv >/dev/null 2>&1; then
+            setpriv --reuid 1000 --regid 1000 --clear-groups sh -c "test -x '$SECRETS_DIR' && test -r '$sfile'" 2>/dev/null && access_ok=true
+          elif [ -n "$u1000_name" ]; then
+            su -s /bin/sh "$u1000_name" -c "test -x '$SECRETS_DIR' && test -r '$sfile'" 2>/dev/null && access_ok=true
+          elif command -v node >/dev/null 2>&1; then
+            node -e "try { process.setgid(1000); process.setuid(1000); const fs = require('fs'); fs.accessSync(process.argv[1], fs.constants.R_OK); process.exit(0); } catch(e) { process.exit(1); }" "$sfile" 2>/dev/null && access_ok=true
+          fi
         else
           access_ok=true
         fi
       fi
       if [ "$access_ok" = false ]; then
-        echo "❌ [KRİTİK HATA] '${sfile}' secret dosyası UID 1000 (node) konteyner kullanıcısı tarafından okunamıyor!" >&2
+        echo "❌ [KRİTİK HATA] '${sfile}' secret dosyası UID 1000 konteyner kullanıcısı tarafından okunamıyor!" >&2
         echo "Dosya Sahibi: UID ${f_uid:-?}, Grup: GID ${f_gid:-?}, İzin: ${f_mode:-?}." >&2
         echo "Dizin Sahibi: UID ${d_uid:-?}, Grup: GID ${d_gid:-?}, İzin: ${d_mode:-?}." >&2
         echo "Çalıştıran Kullanıcı: UID ${current_uid:-?} (GID ${current_gid:-?}). Sudo Durumu: ${sudo_available}." >&2
