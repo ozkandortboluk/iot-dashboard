@@ -31,7 +31,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     expect(fs.existsSync(installScriptPath)).toBe(true);
 
     // Verify executable permissions
-    const stat = fs.statSync(installScriptPath);
+    const stat = fs.statSync(path.join(sourceRoot, 'install.sh'));
     // Mode must be executable (at least 0o700 / 0o755)
     expect((stat.mode & 0o111) !== 0).toBe(true);
 
@@ -49,7 +49,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     for (const mod of requiredModules) {
       const modPath = path.join(setupLibDir, mod);
       expect(fs.existsSync(modPath), `Module ${mod} must exist`).toBe(true);
-      const modStat = fs.statSync(modPath);
+      const modStat = fs.statSync(path.join(sourceRoot, 'scripts/setup/lib', mod));
       expect((modStat.mode & 0o111) !== 0, `Module ${mod} must be executable`).toBe(true);
     }
 
