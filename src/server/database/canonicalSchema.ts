@@ -1808,6 +1808,10 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     expires_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')
 );
 
+-- Earlier schemas may store sessions with raw tokens only.
+-- Add the hashed-token field before creating its lookup index.
+ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS token_hash VARCHAR(128);
+
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash ON user_sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
