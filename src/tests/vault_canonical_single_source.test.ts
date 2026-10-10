@@ -109,6 +109,9 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     delete process.env.POSTGRES_PASSWORD;
     delete process.env.DATABASE_URL;
     process.env.NO_SECRET_FILES = 'true';
+    // Explicitly mark the Vitest harness so the production policy can read
+    // the fixture encryption key without a Docker /run/secrets mount.
+    process.env.VITEST = 'true';
     process.env.ENCRYPTION_KEY = 'a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1a8f7c6e5d4c3b2a1';
 
     // Store secure credentials in Vault
