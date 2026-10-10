@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import crypto from 'node:crypto';
 import { db } from '../server/db.js';
 import { processOtaJobsWorker } from '../server/services/otaWorker.js';
@@ -12,12 +12,22 @@ import {
   signBinaryBuffer,
   verifyBinarySignature,
   getTrustedPublicKeys,
+  setMockKeyPairForTesting,
 } from '../server/utils/ota-crypto.js';
 import type { Device, Firmware, OtaDeploymentJob } from '../types.js';
 
 describe('P1 - 2.5: OTA Complete Lifecycle, Security & Rollout State Machine', () => {
   const targetDevId = 'dev_test_01';
   const testFirmwareId = 'fw_test_canonical';
+
+  beforeAll(() => {
+    const pair = crypto.generateKeyPairSync('ed25519');
+    const privateKeyPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    setMockKeyPairForTesting({ keyId: 'test_lifecycle_ed25519', privateKeyPem, publicKeyPem,
+      publicKeyHex: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('hex') });
+  });
+  afterAll(() => setMockKeyPairForTesting(null));
 
   beforeEach(() => {
     // Configure canonical test device
