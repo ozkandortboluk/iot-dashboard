@@ -236,7 +236,17 @@ fi
 
 # Verify secrets readiness before starting containers
 if [ ! -s "./secrets/encryption_key" ] || [ ! -s "./secrets/postgres_password" ]; then
-  log_fatal "Kritik Docker secret dosyaları (encryption_key veya postgres_password) eksik! Konteynerler başlatılamaz."
+  echo "" >&2
+  echo "==========================================================================================" >&2
+  echo "❌ [KRİTİK DOCKER SECRET EKSİK] Docker Compose Başlatılamaz!" >&2
+  echo "------------------------------------------------------------------------------------------" >&2
+  echo "Docker Compose mimarisi aşağıdaki secret dosyalarının diskte bulunmasını şart koşar:" >&2
+  [ ! -s "./secrets/encryption_key" ] && echo "  - ./secrets/encryption_key [EKSİK]" >&2
+  [ ! -s "./secrets/postgres_password" ] && echo "  - ./secrets/postgres_password [EKSİK]" >&2
+  echo "" >&2
+  echo "Bu dosyalar olmadan 'docker compose up -d --build' çalıştırılamaz." >&2
+  echo "Lütfen kurulum sihirbazını çalıştırarak secret yönetimini tamamlayın: ./install.sh --update" >&2
+  echo "==========================================================================================" >&2
   exit 1
 fi
 

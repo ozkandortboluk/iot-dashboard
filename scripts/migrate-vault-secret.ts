@@ -57,34 +57,47 @@ export function recoverDatabasePasswordFromVault(options?: MigrateSecretOptions)
 
   const rootKeyBuffer = Buffer.from(rootKeyHex, 'hex');
 
-  // 2. Locate the first existing authoritative candidate vault
-  const existingVaultFile = candidateFiles.find(file => fs.existsSync(file));
+  // 2. Locate authoritative candidate vault containing database.password
+  let existingVaultFile: string | undefined;
+  let dbSecretRecord: any;
 
-  if (!existingVaultFile) {
-    return {
-      success: false,
-      error: `Hiçbir Vault dosyası bulunamadı. Denenen yollar: ${candidateFiles.join(', ')}`
-    };
+  for (const file of candidateFiles) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      const raw = fs.readFileSync(file, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed?.secrets?.['database.password']?.encryptedValue) {
+        existingVaultFile = file;
+        dbSecretRecord = parsed.secrets['database.password'];
+        break;
+      }
+    } catch {}
   }
 
-  // Once an existing vault file is selected as authoritative (e.g. app_data volume vault),
-  // it must NOT silently fall back to other/stale files if decryption fails (strictly fail-closed).
-  let vaultData: any;
-  try {
-    const raw = fs.readFileSync(existingVaultFile, 'utf8');
-    vaultData = JSON.parse(raw);
-  } catch (err: any) {
-    return {
-      success: false,
-      error: `Authoritative Vault dosyası okunamadı veya JSON geçersiz (${existingVaultFile}): ${err?.message || 'JSON hatası'}`
-    };
-  }
+  if (!existingVaultFile || !dbSecretRecord) {
+    // If no candidate vault yielded database.password, check environment variables as fallback
+    const envPass = process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD || process.env.SQL_ADMIN_PASSWORD;
+    if (envPass && envPass.trim()) {
+      const plainPass = envPass.trim();
+      const targetDir = path.dirname(targetFile);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+      }
+      const tempFile = path.join(targetDir, `.postgres_password.tmp.${crypto.randomBytes(6).toString('hex')}`);
+      try {
+        fs.writeFileSync(tempFile, plainPass, { mode: 0o600, encoding: 'utf8' });
+        fs.chmodSync(tempFile, 0o600);
+        fs.renameSync(tempFile, targetFile);
+        fs.chmodSync(targetFile, 0o600);
+      } catch (err: any) {
+        return { success: false, error: `Parola dosyası yazılamadı: ${err?.message || 'I/O hatası'}` };
+      }
+      return { success: true, recoveredFrom: 'environment' };
+    }
 
-  const dbSecretRecord = vaultData?.secrets?.['database.password'];
-  if (!dbSecretRecord || !dbSecretRecord.encryptedValue) {
     return {
       success: false,
-      error: `Authoritative Vault kasasında 'database.password' kaydı bulunamadı (${existingVaultFile}).`
+      error: `Authoritative Vault kasasında 'database.password' kaydı bulunamadı. Denenen yollar: ${candidateFiles.join(', ')}`
     };
   }
 

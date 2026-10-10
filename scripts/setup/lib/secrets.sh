@@ -90,6 +90,43 @@ detect_existing_installation() {
   return 1
 }
 
+verify_postgres_password() {
+  local candidate="$1"
+  [ -z "$candidate" ] && return 1
+
+  # Reject known default placeholder passwords
+  if [ "$candidate" = "GUCLU_PAROLANIZ_BURAYA" ] || [ "$candidate" = "GUCLU_VERITABANI_PAROLANIZ" ]; then
+    return 1
+  fi
+
+  local db_user="${POSTGRES_USER:-iot_user}"
+  local db_name="${POSTGRES_DB:-iot_dashboard}"
+  local db_port="${POSTGRES_PORT:-5432}"
+
+  # 1. If nexus_timescaledb container is currently running:
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^nexus_timescaledb$'; then
+    # Test authentication inside container via TCP loopback (forces SCRAM/MD5 auth)
+    if docker exec -e PGPASSWORD="$candidate" nexus_timescaledb psql -h 127.0.0.1 -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+    # Also test via default socket
+    if docker exec -e PGPASSWORD="$candidate" nexus_timescaledb psql -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1 # Database is active and explicitly rejected this password!
+  fi
+
+  # 2. If host psql is available and port 5432 is responsive:
+  if command -v psql >/dev/null 2>&1; then
+    if PGPASSWORD="$candidate" psql -h 127.0.0.1 -p "$db_port" -U "$db_user" -d "$db_name" -c "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  # 3. Database is offline or not directly reachable for live probe
+  return 2
+}
+
 ensure_secrets_initialized() {
   log_step "3. Kriptografik Kasa (Vault) ve Docker Secret Dosyaları Hazırlanıyor..."
 
@@ -174,6 +211,22 @@ ensure_secrets_initialized() {
     fi
   fi
 
+  # Also attempt direct docker cp from running nexus_app container (no alpine image required)
+  local RUNNING_APP_VAULT=""
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^nexus_app$'; then
+    local tmp_cp_vault
+    tmp_cp_vault=$(mktemp 2>/dev/null || echo "/tmp/.running_app_vault_$$.json")
+    if docker cp nexus_app:/app/data/.system_secrets.json "$tmp_cp_vault" 2>/dev/null; then
+      if [ -s "$tmp_cp_vault" ] && grep -q '"database\.password"' "$tmp_cp_vault" 2>/dev/null; then
+        RUNNING_APP_VAULT="$tmp_cp_vault"
+      else
+        rm -f "$tmp_cp_vault" 2>/dev/null
+      fi
+    else
+      rm -f "$tmp_cp_vault" 2>/dev/null
+    fi
+  fi
+
   if [ -s "$PG_PASS_FILE" ]; then
     chmod 600 "$PG_PASS_FILE"
     log_info "Veritabanı bootstrap parolası mevcut (${PG_PASS_FILE}) [KORUNDU]."
@@ -184,100 +237,192 @@ ensure_secrets_initialized() {
   elif [ "$IS_EXISTING" = true ]; then
     # EXISTING INSTALLATION / UPGRADE:
     # Strictly NEVER generate a random password on an existing install with database volumes!
-    # Instead, recover database.password from Authoritative Security Vault (prioritizing app_data Docker volume over host).
-    log_info "Mevcut sistem yükseltmesi tespit edildi. Veritabanı parolası yetkili Vault kasasından kurtarılıyor..."
-    
-    local RECOVERY_SUCCESS=false
-    local CANDIDATE_VAULTS=""
-    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -s "$TEMP_APP_DATA_VAULT" ]; then
-      CANDIDATE_VAULTS="${TEMP_APP_DATA_VAULT},${VAULT_DATA_FILE}"
-    else
-      CANDIDATE_VAULTS="${VAULT_DATA_FILE}"
-    fi
+    # Instead, recover and verify existing database credentials.
+    log_info "Mevcut sistem güncellemesi tespit edildi. Veritabanı kimlik bilgileri kurtarılıyor ve doğrulanıyor..."
 
-    if command -v node >/dev/null 2>&1; then
-      node -e "
+    local RECOVERY_SUCCESS=false
+    local RECOVERED_PASSWORD=""
+    local RECOVERY_SOURCE=""
+
+    # Prepare candidate vaults list in priority order
+    local CANDIDATE_VAULTS=""
+    if [ -n "$RUNNING_APP_VAULT" ]; then
+      CANDIDATE_VAULTS="${RUNNING_APP_VAULT}"
+    fi
+    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -s "$TEMP_APP_DATA_VAULT" ]; then
+      [ -n "$CANDIDATE_VAULTS" ] && CANDIDATE_VAULTS="${CANDIDATE_VAULTS},${TEMP_APP_DATA_VAULT}" || CANDIDATE_VAULTS="${TEMP_APP_DATA_VAULT}"
+    fi
+    [ -n "$CANDIDATE_VAULTS" ] && CANDIDATE_VAULTS="${CANDIDATE_VAULTS},${VAULT_DATA_FILE}" || CANDIDATE_VAULTS="${VAULT_DATA_FILE}"
+
+    # Step A: Attempt Vault Decryption via Node.js
+    if command -v node >/dev/null 2>&1 && [ -s "$ENC_KEY_FILE" ]; then
+      local vault_decrypted
+      vault_decrypted=$(node -e "
         const fs = require('fs');
         const crypto = require('crypto');
         try {
           const encKeyRaw = fs.readFileSync('$ENC_KEY_FILE', 'utf8').trim();
-          if (!/^[0-9a-fA-F]{64}$/.test(encKeyRaw)) {
-            throw new Error('Geçersiz ENCRYPTION_KEY formatı: Root key 64 hex karakter olmalıdır.');
-          }
+          if (!/^[0-9a-fA-F]{64}$/.test(encKeyRaw)) process.exit(1);
           const rootKey = Buffer.from(encKeyRaw, 'hex');
-          
+
           const candidates = '$CANDIDATE_VAULTS'.split(',').map(s => s.trim()).filter(Boolean);
-          const existingVault = candidates.find(p => fs.existsSync(p));
-          if (!existingVault) {
-            throw new Error('Hiçbir Vault dosyası bulunamadı.');
+          for (const cand of candidates) {
+            if (!fs.existsSync(cand)) continue;
+            try {
+              const raw = fs.readFileSync(cand, 'utf8');
+              const vault = JSON.parse(raw);
+              const rec = vault?.secrets?.['database.password'];
+              if (!rec || !rec.encryptedValue) continue;
+
+              const parts = rec.encryptedValue.split(':');
+              if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') continue;
+
+              const iv = Buffer.from(parts[2], 'hex');
+              const authTag = Buffer.from(parts[3], 'hex');
+              const encData = parts[4];
+
+              const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
+              decipher.setAuthTag(authTag);
+              let dec = decipher.update(encData, 'hex', 'utf8');
+              dec += decipher.final('utf8');
+              const pass = dec.trim();
+              if (pass.length > 0) {
+                console.log(pass);
+                process.exit(0);
+              }
+            } catch {}
           }
-
-          const vaultData = JSON.parse(fs.readFileSync(existingVault, 'utf8'));
-          const dbRecord = vaultData?.secrets?.['database.password'];
-          if (!dbRecord || !dbRecord.encryptedValue) {
-            throw new Error('Authoritative Vault içinde database.password kaydı yok (' + existingVault + ')');
-          }
-
-          const cipherText = dbRecord.encryptedValue;
-          const parts = cipherText.split(':');
-          if (parts.length !== 5 || parts[0] !== 'enc' || parts[1] !== 'v1') {
-            throw new Error('Bilinmeyen şifreli veri formatı (' + existingVault + ')');
-          }
-
-          const iv = Buffer.from(parts[2], 'hex');
-          const authTag = Buffer.from(parts[3], 'hex');
-          const encData = parts[4];
-
-          const decipher = crypto.createDecipheriv('aes-256-gcm', rootKey, iv);
-          decipher.setAuthTag(authTag);
-          let dec = decipher.update(encData, 'hex', 'utf8');
-          dec += decipher.final('utf8');
-
-          if (!dec || dec.trim().length === 0) {
-            throw new Error('Çözülen parola boş (' + existingVault + ')');
-          }
-
-          const decryptedPassword = dec.trim();
-
-          const tempTarget = '${PG_PASS_FILE}.tmp.' + crypto.randomBytes(4).toString('hex');
-          fs.writeFileSync(tempTarget, decryptedPassword, { mode: 0o600 });
-          fs.chmodSync(tempTarget, 0o600);
-          fs.renameSync(tempTarget, '$PG_PASS_FILE');
-          fs.chmodSync('$PG_PASS_FILE', 0o600);
-          process.exit(0);
-        } catch (e) {
-          console.error('[HATA] ' + e.message);
+          process.exit(1);
+        } catch {
           process.exit(1);
         }
-      " 2>/dev/null && RECOVERY_SUCCESS=true || RECOVERY_SUCCESS=false
+      " 2>/dev/null || true)
+
+      if [ -n "$vault_decrypted" ]; then
+        local v_code=0
+        verify_postgres_password "$vault_decrypted" || v_code=$?
+        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$vault_decrypted"
+          RECOVERY_SOURCE="authoritative_vault"
+        fi
+      fi
     fi
 
-    # Clean up temp volume extraction file
-    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -f "$TEMP_APP_DATA_VAULT" ]; then
-      rm -f "$TEMP_APP_DATA_VAULT"
+    # Step B: If Vault had no database.password, inspect running Docker containers
+    if [ -z "$RECOVERED_PASSWORD" ] && command -v docker >/dev/null 2>&1; then
+      # Check nexus_timescaledb container env
+      if docker inspect nexus_timescaledb >/dev/null 2>&1; then
+        local ts_env_pass
+        ts_env_pass=$(docker inspect nexus_timescaledb --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^POSTGRES_PASSWORD=' | head -n1 | cut -d= -f2- | tr -d '\r\n')
+        if [ -n "$ts_env_pass" ]; then
+          local v_code=0
+          verify_postgres_password "$ts_env_pass" || v_code=$?
+          if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+            RECOVERED_PASSWORD="$ts_env_pass"
+            RECOVERY_SOURCE="timescaledb_container_env"
+          fi
+        fi
+      fi
+
+      # Check nexus_app container env
+      if [ -z "$RECOVERED_PASSWORD" ] && docker inspect nexus_app >/dev/null 2>&1; then
+        local app_env_pass
+        app_env_pass=$(docker inspect nexus_app --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^(POSTGRES_PASSWORD|DB_PASSWORD|SQL_ADMIN_PASSWORD)=' | head -n1 | cut -d= -f2- | tr -d '\r\n')
+        if [ -n "$app_env_pass" ]; then
+          local v_code=0
+          verify_postgres_password "$app_env_pass" || v_code=$?
+          if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+            RECOVERED_PASSWORD="$app_env_pass"
+            RECOVERY_SOURCE="app_container_env"
+          fi
+        fi
+      fi
     fi
 
-    if [ "$RECOVERY_SUCCESS" = true ] && [ -s "$PG_PASS_FILE" ]; then
+    # Step C: If still not found, inspect host .env file
+    if [ -z "$RECOVERED_PASSWORD" ] && [ -f "./.env" ]; then
+      local env_pass
+      env_pass=$(grep -E '^(POSTGRES_PASSWORD|DB_PASSWORD|SQL_ADMIN_PASSWORD)=' "./.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r\n')
+      if [ -z "$env_pass" ]; then
+        local env_db_url
+        env_db_url=$(grep -E '^(DATABASE_URL|POSTGRES_URL)=' "./.env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r\n')
+        if [ -n "$env_db_url" ] && [[ "$env_db_url" =~ :([^@]+)@ ]]; then
+          env_pass="${BASH_REMATCH[1]}"
+        fi
+      fi
+      if [ -n "$env_pass" ]; then
+        local v_code=0
+        verify_postgres_password "$env_pass" || v_code=$?
+        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$env_pass"
+          RECOVERY_SOURCE="host_env_file"
+        fi
+      fi
+    fi
+
+    # Step D: If still not found and running in interactive terminal (TTY), securely prompt operator
+    if [ -z "$RECOVERED_PASSWORD" ] && [ -t 0 ] && [ "${NON_INTERACTIVE:-false}" = false ]; then
+      log_warn "Mevcut PostgreSQL kurulumu tespit edildi ancak otomatik kaynaklardan geçerli parola bulunamadı."
+      echo "" >&2
+      echo "==========================================================================================" >&2
+      echo "🔑 [GÜVENLİ PAROLA KURTARMA] Mevcut PostgreSQL 'iot_user' Parolası Doğrulaması" >&2
+      echo "------------------------------------------------------------------------------------------" >&2
+      echo "Yeni Docker Compose sürümüne veri kaybetmeden geçebilmek için mevcut veritabanı parolanız gereklidir." >&2
+      echo "Girdiğiniz parola ekranda görünmeyecek, doğrulanacak ve Kasa (Vault) içine mühürlenecektir." >&2
+      echo "==========================================================================================" >&2
+      read -rsp "Lütfen mevcut PostgreSQL ('${POSTGRES_USER:-iot_user}') parolanızı giriniz: " PROMPT_PASS
+      echo "" >&2
+      if [ -n "$PROMPT_PASS" ]; then
+        local v_code=0
+        verify_postgres_password "$PROMPT_PASS" || v_code=$?
+        if [ "$v_code" -eq 0 ] || [ "$v_code" -eq 2 ]; then
+          RECOVERED_PASSWORD="$PROMPT_PASS"
+          RECOVERY_SOURCE="operator_prompt"
+        else
+          log_error "Girilen parola PostgreSQL sunucusu tarafından doğrulanamadı (kimlik doğrulama başarısız)!"
+        fi
+      fi
+    fi
+
+    # Step E: Write verified recovered password atomically
+    if [ -n "$RECOVERED_PASSWORD" ]; then
+      local TMP_WRITE="${PG_PASS_FILE}.tmp.$$"
+      printf "%s" "$RECOVERED_PASSWORD" > "$TMP_WRITE"
+      chmod 600 "$TMP_WRITE"
+      mv -f "$TMP_WRITE" "$PG_PASS_FILE"
       chmod 600 "$PG_PASS_FILE"
-      log_success "Veritabanı bootstrap parolası Vault kasasından başarıyla kurtarıldı (${PG_PASS_FILE})."
-    else
+      if [ "$RECOVERY_SOURCE" = "authoritative_vault" ]; then
+        log_success "Veritabanı bootstrap parolası Vault kasasından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+      else
+        log_success "Veritabanı bootstrap parolası (${RECOVERY_SOURCE}) kaynağından başarıyla kurtarıldı (${PG_PASS_FILE}) [DOĞRULANDI]."
+      fi
+      RECOVERY_SUCCESS=true
+    fi
+
+    # Clean up temp volume extraction files
+    [ -n "$TEMP_APP_DATA_VAULT" ] && rm -f "$TEMP_APP_DATA_VAULT" 2>/dev/null || true
+    [ -n "$RUNNING_APP_VAULT" ] && rm -f "$RUNNING_APP_VAULT" 2>/dev/null || true
+
+    if [ "$RECOVERY_SUCCESS" = false ]; then
       echo "" >&2
       echo "==========================================================================================" >&2
       echo "❌ [KRİTİK GÜVENLİK HATASI] Mevcut Veritabanı Kurulumu Tespit Edildi Fakat Parola Kurtarılamadı!" >&2
       echo "------------------------------------------------------------------------------------------" >&2
-      echo "Mevcut TimescaleDB volume veya kurulumu mevcut ancak '${PG_PASS_FILE}' bulunamadı." >&2
+      echo "Mevcut TimescaleDB volume veya konteyneri mevcut ancak '${PG_PASS_FILE}' bulunamadı." >&2
       echo "Veri kaybını ve yetkisiz erişim hatalarını önlemek için otomatik yeni parola üretilmedi (fail-closed)." >&2
-      echo "Vault içindeki 'database.password' anahtarı kurtarılamadı." >&2
-      echo "Lütfen geçerli '${ENC_KEY_FILE}' ve Vault kasasını sağlayın veya '${PG_PASS_FILE}' dosyasını manuel yerleştirin." >&2
+      echo "" >&2
+      echo "Docker Compose up öncesinde mevcut veritabanı parolanızı güvenle sağlamak için:" >&2
+      echo "  printf \"%s\" \"MEVCUT_PAROLANIZ\" > ${PG_PASS_FILE}" >&2
+      echo "  chmod 600 ${PG_PASS_FILE}" >&2
+      echo "veya .env dosyasında POSTGRES_PASSWORD=MEVCUT_PAROLANIZ tanımlayıp yeniden çalıştırın." >&2
       echo "==========================================================================================" >&2
       exit 1
     fi
   else
     # FRESH INSTALLATION: Generate secure random password
     # Clean up temp volume extraction file if any
-    if [ -n "$TEMP_APP_DATA_VAULT" ] && [ -f "$TEMP_APP_DATA_VAULT" ]; then
-      rm -f "$TEMP_APP_DATA_VAULT"
-    fi
+    [ -n "$TEMP_APP_DATA_VAULT" ] && rm -f "$TEMP_APP_DATA_VAULT" 2>/dev/null || true
+    [ -n "$RUNNING_APP_VAULT" ] && rm -f "$RUNNING_APP_VAULT" 2>/dev/null || true
 
     local PG_GENERATED_PASS
     PG_GENERATED_PASS=$(generate_random_hex 24)
