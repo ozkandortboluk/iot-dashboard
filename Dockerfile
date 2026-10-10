@@ -3,8 +3,8 @@ FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Copy package files (both package.json and package-lock.json if present)
-COPY package*.json ./
+# Copy package files (package.json and package-lock.json)
+COPY package.json package-lock.json ./
 
 # Install dependencies deterministically via npm ci
 RUN npm ci --legacy-peer-deps
@@ -34,7 +34,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy package definition and lockfile
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
 # Install production dependencies deterministically via npm ci
 RUN npm ci --omit=dev --legacy-peer-deps
