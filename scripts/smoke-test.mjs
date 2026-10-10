@@ -98,6 +98,11 @@ async function cleanupSampleDeviceApiKey() {
 async function runSmokeTest() {
   console.log('🏗️ Starting production server bundle (dist/server.cjs) for CI smoke test...');
 
+  // CI production smoke must exercise the migrated PostgreSQL database.
+  if (process.env.CI && !process.env.DATABASE_URL) {
+    throw new Error('[Smoke Test] CI requires DATABASE_URL; refusing local/setup fallback.');
+  }
+
   // SEC-11 / RUN-01: Provision device fixture BEFORE server boot
   const apiKey = await getSampleDeviceApiKey();
   
