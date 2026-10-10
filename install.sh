@@ -226,7 +226,10 @@ ensure_env_configured
 
 # 6. SSL / TLS Setup
 if [ "$HTTP_ONLY" = false ]; then
-  ensure_ssl_certificates
+  if ! ensure_ssl_certificates; then
+    log_fatal "SSL / TLS sertifikasyonu veya doğrulaması başarısız oldu. Dağıtım durduruldu."
+    exit 1
+  fi
 fi
 
 # 7. Plugin Pre-Start Hook

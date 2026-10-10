@@ -13,6 +13,10 @@ data/.vault_key
 *.secret*
 *.pem
 *.key
+*.crt
+docker/certs/*.crt
+docker/certs/*.key
+docker/certs/*.pem
 secrets/
 db.json
 uploads/keys/
