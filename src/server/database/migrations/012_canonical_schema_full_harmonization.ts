@@ -19,6 +19,15 @@ export const migration012: Migration = {
   async up(client: pg.PoolClient): Promise<void> {
     console.log('[Migration 012] Starting Full Canonical Schema Harmonization...');
 
+    // Existing databases may have a devices table created by earlier migrations.
+    // CREATE TABLE IF NOT EXISTS does not add new columns, while canonical DDL
+    // creates indexes on these columns immediately. Heal them before DDL.
+    await client.query(`
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
+    `);
+
     // 1. Execute Canonical DDL
     await client.query(generateCanonicalSchemaDDL());
 
