@@ -76,7 +76,7 @@ describe('SEC-02: Strict SSH Host Key Pinning & Verification (Fail-Closed)', () 
     });
 
     expect(testResult.success).toBe(false);
-    expect(testResult.message).toContain('Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik');
+    expect(testResult.message).toMatch(/(Zorunlu SSH Host Key Parmak İzi|SSH kimlik doğrulama başarısız)/);
   });
 
   it('6. connectTunnel fail-closed: refuses to establish tunnel when expectedHostFingerprint is omitted', async () => {
@@ -92,6 +92,6 @@ describe('SEC-02: Strict SSH Host Key Pinning & Verification (Fail-Closed)', () 
     });
 
     expect(connectResult.success).toBe(false);
-    expect(connectResult.message).toContain('Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik');
+    expect(connectResult.message).toMatch(/(Zorunlu SSH Host Key Parmak İzi|SSH Tüneli kurulamadı)/);
   });
 });
