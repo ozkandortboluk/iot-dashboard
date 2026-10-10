@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'node:crypto';
 import {
   isValidSemver,
@@ -16,6 +16,7 @@ import {
   getTrustedPublicKeys,
   verifyBinarySignature,
   getPublicKeyByKeyId,
+  setMockKeyPairForTesting,
 } from './utils/ota-crypto.js';
 
 describe('OTA SemVer Version Utility Tests', () => {
@@ -53,6 +54,14 @@ describe('OTA SemVer Version Utility Tests', () => {
 });
 
 describe('OTA Crypto & Root of Trust Safety Tests', () => {
+  beforeAll(() => {
+    const pair = crypto.generateKeyPairSync('ed25519');
+    const privateKeyPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    setMockKeyPairForTesting({ keyId: 'test_ed25519_v1', privateKeyPem, publicKeyPem,
+      publicKeyHex: pair.publicKey.export({ type: 'spki', format: 'der' }).toString('hex') });
+  });
+  afterAll(() => setMockKeyPairForTesting(null));
   it('should perform timing-safe token comparison (Requirement 1 & 3)', () => {
     const token = 'otatkn_1234567890abcdef';
     const tokenHash = hashDownloadToken(token);
