@@ -29,8 +29,8 @@ perform_backup() {
   [ -f "$DB_DUMP_FILE" ] && TARGETS+=("$DB_DUMP_FILE")
 
   if [ ${#TARGETS[@]} -eq 0 ]; then
-    log_warn "Yedeklenecek hiçbir veri bulunamadı."
-    return 1
+    mkdir -p "./data"
+    TARGETS+=("./data")
   fi
 
   # Strictly exclude root master encryption key, plaintext secrets and env files from unencrypted archive
