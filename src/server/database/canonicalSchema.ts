@@ -1337,13 +1337,13 @@ CREATE TABLE IF NOT EXISTS users (
     whatsapp_number VARCHAR(32),
     telegram_chat_id VARCHAR(64),
     password_hash VARCHAR(256) NOT NULL,
-    role VARCHAR(32) DEFAULT 'operator',
+    role VARCHAR(32) NOT NULL DEFAULT 'operator',
     company_name VARCHAR(128),
-    notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
-    status VARCHAR(32) DEFAULT 'active',
+    notification_preferences JSONB NOT NULL DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
+    status VARCHAR(32) NOT NULL DEFAULT 'active',
     deleted_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Keep legacy user tables aligned with the canonical role/status contract.
@@ -1353,7 +1353,14 @@ ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ('admin', 'operat
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_status;
 ALTER TABLE users ADD CONSTRAINT chk_users_status CHECK (status IN ('active', 'suspended', 'pending', 'deleted'));
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+-- Align legacy installations with the canonical contract without silently rewriting data.
+ALTER TABLE users ALTER COLUMN role SET NOT NULL;
+ALTER TABLE users ALTER COLUMN notification_preferences SET NOT NULL;
+ALTER TABLE users ALTER COLUMN status SET NOT NULL;
+ALTER TABLE users ALTER COLUMN created_at SET NOT NULL;
+ALTER TABLE users ALTER COLUMN updated_at SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 
@@ -1375,7 +1382,7 @@ CREATE TABLE IF NOT EXISTS devices (
     api_key_prefix VARCHAR(32),
     api_key_hash VARCHAR(128),
     api_key_expires_at TIMESTAMP WITH TIME ZONE,
-    api_key_revoked BOOLEAN DEFAULT FALSE,
+    api_key_revoked BOOLEAN NOT NULL DEFAULT FALSE,
     api_key_last_used_at TIMESTAMP WITH TIME ZONE,
     api_key_scopes JSONB DEFAULT '["all"]'::jsonb,
     api_key_rotated_at TIMESTAMP WITH TIME ZONE,
@@ -1420,6 +1427,12 @@ CREATE TABLE IF NOT EXISTS devices (
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_notified_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE devices ALTER COLUMN tenant_id SET DEFAULT 'usr_admin';
+ALTER TABLE devices ALTER COLUMN device_type SET DEFAULT 'custom';
+ALTER TABLE devices ALTER COLUMN device_type SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN api_key_revoked SET DEFAULT FALSE;
+ALTER TABLE devices ALTER COLUMN api_key_revoked SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_devices_tenant_id ON devices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
