@@ -3,7 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
-const rootDir = path.resolve(__dirname, '../..');
+const sourceRoot = path.resolve(__dirname, '../..');
+const sandboxRoot = fs.mkdtempSync('/tmp/nexus-tls-test-');
+fs.chmodSync(sandboxRoot, 0o755);
+const rootDir = path.join(sandboxRoot, 'project');
+fs.cpSync(sourceRoot, rootDir, { recursive: true, filter: (src) => {
+  const rel = path.relative(sourceRoot, src);
+  return !rel.split(path.sep).some((part) => ['.git', 'node_modules', 'secrets', 'data'].includes(part));
+} });
+fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true, mode: 0o755 });
 const sslLibPath = path.join(rootDir, 'scripts/setup/lib/ssl.sh');
 const colorsLibPath = path.join(rootDir, 'scripts/setup/lib/colors.sh');
 
