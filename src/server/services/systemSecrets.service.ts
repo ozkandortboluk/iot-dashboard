@@ -927,7 +927,10 @@ export class SystemSecretsService {
                 if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
               }
             }
-          } catch {}
+          } catch (err: any) {
+            systemLogger.error('security', '[Migration] Legacy runtime config scrub failed; manual review required: ' + (err?.code || 'write_error'));
+            throw err;
+          }
         }
       }
     }
