@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — OTA PEM satır sonu regresyonu (35 test yeniden doğrulanacak)**
+> **📍 ŞU ANKİ KONUM: 05 — DB test izolasyonu ve master key uyarıları (35/35 geçti)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -102,3 +102,5 @@
 > OTA incelemesi: `1f479f2` — hatalı özel anahtar örneği yerine test sırasında geçerli, geçici Ed25519 anahtarı oluşturuluyor. Test sayısı değişmedi (35); yeni doğrulama bekleniyor. ENCRYPTION_KEY üretim fail-closed kuralı değiştirilmedi.
 
 > `95c8a4f` testi: 34 geçti, 1 başarısız. OTA geçerli Ed25519 anahtarı artık ayrıştırılıyor; başarısızlık yalnızca PEM sondaki satır sonunun Vault'da trim edilmesinden kaynaklandı. `4ca7a99` test beklentisini normalize etti; yeniden doğrulama bekliyor. Üretim master key davranışı değiştirilmedi.
+
+> `65d8fa5` doğrulaması: TypeScript ve 35/35 test başarılı; OTA ayrıştırma uyarısı giderildi. PostgreSQL havuzu uyarısının kaynağı `quickInitDocker` testinin `configureDatabase` içinde gerçek Pool oluşturmaya çalışmasıdır; izole test bunu engelliyor. Teste özel düzeltme yazma girişimi engellendi, henüz uygulanmadı. ENCRYPTION_KEY eksik uyarıları üretim modu taklit testinde görülüyor; üretim fail-closed politikası korunacak.
