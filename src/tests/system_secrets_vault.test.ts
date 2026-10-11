@@ -271,6 +271,26 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(setupService.loadRuntimeSecretConfig()?.password).toBe(testSecretPassword);
     });
 
+    it('keeps the previous runtime config if atomic rename fails', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('simulated rename failure');
+      });
+      try {
+        expect(() => setupService.saveRuntimeSecretConfig({
+          host: '127.0.0.2', port: 5432, database: 'failure_test',
+          user: 'failure_test', sslMode: 'disable',
+        })).toThrow();
+        expect(fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null).toBe(original);
+        const leftovers = fs.readdirSync(process.env.NEXUS_TEST_DATA_DIR!)
+          .filter(name => name.startsWith('.db_config.json.tmp.'));
+        expect(leftovers).toEqual([]);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('should automatically migrate legacy plaintext password from .db_config.json to Vault and scrub disk', () => {
       const dbConfigPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
 
