@@ -32,6 +32,7 @@
 │   ├── Testte DB başlatma ve zamanlayıcıları kapat         ✅
 │   ├── Sahte PostgreSQL URL ihtiyacını kaldır              ✅
 │   ├── Tanımsız test değişkenini düzelt                    ✅
+│   ├── Testte PostgreSQL Pool oluşturmayı engelle         ✅
 │   └── Test izolasyonunu doğrula                           ⏳
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
@@ -70,6 +71,7 @@
 | `df0c130`, `25229a7` | Testte DB başlangıcı ve arka plan zamanlayıcılarını devre dışı bırakma |
 | `fe750c7`, `eed96bd` | İzole config okuma; sahte PostgreSQL URL kaldırma |
 | `0df2533` | Vault testinde tanımsız değişkeni düzeltme |
+| `9c81218` | İzole Vault testlerinde PostgreSQL Pool koruması |
 
 ## Güncelleme kuralı
 
