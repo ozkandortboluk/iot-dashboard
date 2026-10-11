@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 10 — 61/61 doğrulandı; Nginx scanner regex düzeltmesi ve 5 test doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 11 — 66/66 doğrulandı; HTTP proxy güvenliği için 6 yeni test bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -158,3 +158,5 @@
 > Yedinci paket (`1b1249b`): array, number, boolean, eksik database ve eksik host içeren runtime config girdileri için 5 regresyon testi eklendi. Önceki 56/56 doğrulandı, yeni hedef 61/61. Vault migration scrub hata enjeksiyonu testleri hâlâ yapılacak; bu paket doğrudan o yolu sınamıyor. Canlı ortam ve main değişmedi.
 
 > Sekizinci paket: `3d87e44` için izole VPS TypeScript ve Vitest 61/61 başarılı. Nginx hassas dosya probe engelleme regexindeki iki kat ters eğik çizgi `7069a1f` ile düzeltildi; 5 bağımsız statik regresyon testi `ba5d319` ile eklendi ve `adebf9f` ile güvenlik test paketine alındı. Hedef 66 test. Nginx gerçek konfigürasyon doğrulaması (`nginx -t`) ve HTTP entegrasyon testi ayrıca gerekli. Canlı VPS/main değişmedi.
+
+> Dokuzuncu paket: izole VPS `ebb310e` üzerinde TypeScript ve 66/66 test başarılı. `TRUST_PROXY=true` VPS üretiminde herkesi güvenilir proxy sayma riskini önlemek üzere `trustProxyPolicy.ts` eklendi ve `server.ts` bağlandı (`cacde04`). Altı yeni regresyon testi (`a4de443`) test paketine dahil (`b71a29d`). Hedef 72 test; henüz doğrulanmadı. Kalan öncelik: istek başına IP rate limit, WebSocket yetkilendirme, SSRF ve gerçek HTTP/Nginx entegrasyon testleri. Canlı ortam/main değişmedi.
