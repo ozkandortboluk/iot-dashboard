@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import './helpers/vault-test-data-dir.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
