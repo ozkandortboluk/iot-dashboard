@@ -68,6 +68,18 @@ if [ "$MODE" = "--apply" ]; then
   done
   ufw allow 80/tcp
   ufw allow 443/tcp
+  # Default policies may be prepared only on an explicitly confirmed fresh host.
+  # Never change defaults of an active firewall or an existing installation.
+  if [ "${NEXUS_FRESH_HOST_CONFIRM:-}" = "THIS_IS_A_FRESH_VPS" ]; then
+    if ufw status | grep -q '^Status: active'; then
+      echo "ERROR: Refusing to change default policies on active UFW" >&2
+      exit 1
+    fi
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw default deny routed
+    echo "Fresh-host UFW defaults prepared (firewall not activated)."
+  fi
   if ! ufw status | grep -q '^Status: active'; then
     echo "UFW is inactive. Activation requires a separate manual console-side action."
     echo "After verifying SSH rules and alternate access, run: sudo ufw enable"
