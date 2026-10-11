@@ -126,4 +126,20 @@ describe('Master key / persistent key protection', () => {
     expect(masterKeyProvider.getStatus().source).toBe('missing');
   });
 
+  it('rejects invalid Docker secret contents in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    const originalExists = fs.existsSync.bind(fs);
+    const originalRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === '/run/secrets/encryption_key' ? true : originalExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      String(file) === '/run/secrets/encryption_key' ? 'invalid-key' : (originalRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()).toBeNull();
+    expect(masterKeyProvider.getStatus().configured).toBe(false);
+  });
+
 });
