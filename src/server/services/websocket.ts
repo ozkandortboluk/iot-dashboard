@@ -9,7 +9,7 @@ import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 import { tenantSecurityService } from './tenantSecurity.service.js';
 import { systemLogger } from './systemLogger.service.js';
 import { isAllowedWsOrigin } from '../utils/corsOrigins.js';
-import { isWebSocketUpgradePath } from '../utils/wsUpgradePath.js';
+import { parseWebSocketUpgradeUrl } from '../utils/wsUpgradePath.js';
 export { isAllowedWsOrigin };
 
 export interface AuthenticatedWebSocket extends WebSocket {
@@ -703,10 +703,9 @@ export function initWebSocketServer(server: http.Server) {
       }
 
       // Parse relative upgrade targets against a fixed base, never an untrusted Host header.
-      const urlObj = new URL(request.url || '', 'http://127.0.0.1');
-      const pathname = urlObj.pathname;
+      const urlObj = parseWebSocketUpgradeUrl(request.url);
 
-      if (isWebSocketUpgradePath(pathname)) {
+      if (urlObj) {
         let connectionToken: string | null = null;
 
         // 1. Extract Token from Cookie, Authorization header, X-API-KEY, Sec-WebSocket-Protocol, or Query string
