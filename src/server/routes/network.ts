@@ -86,7 +86,8 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
           job.status = 'completed';
           job.completedAt = new Date().toISOString();
           // In real app, agent reports discovered devices here
-          activeScans.delete(jobId);
+          activeScans.set(jobId, job);
+          setTimeout(() => activeScans.delete(jobId), 5 * 60 * 1000).unref();
         } else {
           job.progress = progress;
           job.updatedAt = new Date().toISOString();
