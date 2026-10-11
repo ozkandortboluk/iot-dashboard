@@ -1683,6 +1683,8 @@ class LocalDatabase {
   }
 
   public saveData(dataToSave: DatabaseSchema, forceWrite = false) {
+    // Isolated Vault tests exercise in-memory state only; never start file writes.
+    if (process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR) return;
     const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     if (isProduction) {
       // Security Invariant: In production, NEVER persist auth/users/devices/credentials to local disk db.json!
