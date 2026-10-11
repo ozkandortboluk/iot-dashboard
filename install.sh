@@ -55,6 +55,7 @@ DO_BACKUP=false
 DO_RESTORE=false
 DO_UPDATE=false
 DO_STATUS=false
+HOST_SECURITY_CHECK=false
 RESTORE_FILE=""
 SETUP_DOMAIN=""
 SETUP_EMAIL=""
@@ -83,6 +84,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --init-only              Yalnızca secrets, .env ve dizinleri hazırlar, Docker konteynerlerini başlatmaz
   --check                  Yalnızca sistem gereksinimlerini ve port çakışmalarını denetler
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
+  --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
   --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
@@ -128,6 +130,10 @@ while [[ $# -gt 0 ]]; do
       DO_STATUS=true
       shift
       ;;
+    --host-security-check)
+      HOST_SECURITY_CHECK=true
+      shift
+      ;;
     --backup)
       DO_BACKUP=true
       shift
@@ -156,6 +162,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [ "$HOST_SECURITY_CHECK" = true ]; then
+  exec bash ./scripts/security/setup-host-security.sh --check
+fi
 
 # Execute Status Check if Requested
 if [ "$DO_STATUS" = true ]; then
