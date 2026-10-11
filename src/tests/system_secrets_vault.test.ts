@@ -271,6 +271,37 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(setupService.loadRuntimeSecretConfig()?.password).toBe(testSecretPassword);
     });
 
+    it('rejects a corrupted authoritative Vault instead of silently loading an empty one', () => {
+      const vaultPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.system_secrets.test.json');
+      const previous = fs.existsSync(vaultPath) ? fs.readFileSync(vaultPath, 'utf8') : null;
+      try {
+        fs.writeFileSync(vaultPath, '{broken json', { mode: 0o600 });
+        expect(() => systemSecretsService.loadFromLocalVault()).toThrow('Authoritative local Secret Vault could not be loaded');
+        expect(fs.readFileSync(vaultPath, 'utf8')).toBe('{broken json');
+      } finally {
+        if (previous === null) fs.rmSync(vaultPath, { force: true });
+        else fs.writeFileSync(vaultPath, previous, { mode: 0o600 });
+        systemSecretsService.loadFromLocalVault();
+      }
+    });
+
+    it('preserves the previous Vault password when disk replacement fails', () => {
+      const existing = 'vault_existing_password_for_rollback';
+      systemSecretsService.persistDatabasePasswordLocally(existing, 'test');
+      const vaultPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.system_secrets.test.json');
+      const before = fs.readFileSync(vaultPath, 'utf8');
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('simulated Vault rename failure');
+      });
+      try {
+        expect(() => systemSecretsService.persistDatabasePasswordLocally('vault_new_password_must_not_persist', 'test')).toThrow();
+        expect(fs.readFileSync(vaultPath, 'utf8')).toBe(before);
+        expect(systemSecretsService.getDatabasePassword()).toBe(existing);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
