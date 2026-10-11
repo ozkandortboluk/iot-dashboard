@@ -40,8 +40,8 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   
-  const { subnet, agentId } = req.body;
-  if (!subnet || typeof subnet !== 'string' || !subnet.includes('/')) {
+  const { subnet, agentId } = req.body || {};
+  if (!subnet || typeof subnet !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(subnet) || subnet.split('/')[0].split('.').some((octet: string) => Number(octet) > 255)) {
     return res.status(400).json({ error: 'Geçerli bir subnet belirtilmelidir (Örn: 192.168.1.0/24)' });
   }
 
