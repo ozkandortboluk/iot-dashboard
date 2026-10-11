@@ -1,0 +1,24 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll } from 'vitest';
+
+// Runs before test modules import singleton services. Refuse any environment
+// that could accidentally target a live database.
+const connectionVariables = ['DATABASE_URL', 'POSTGRES_URL', 'TEST_POSTGRES_URL'];
+for (const key of connectionVariables) {
+  if (process.env[key]) {
+    throw new Error('Vault test isolation requires unset database connection variables');
+  }
+}
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Vault isolation setup requires NODE_ENV=test');
+}
+
+const isolatedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-vault-tests-'));
+process.env.NEXUS_TEST_DATA_DIR = isolatedDirectory;
+
+afterAll(() => {
+  fs.rmSync(isolatedDirectory, { recursive: true, force: true });
+  delete process.env.NEXUS_TEST_DATA_DIR;
+});
