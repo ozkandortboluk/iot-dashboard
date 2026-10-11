@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Kalan riskler ve regresyon incelemesi (34/34 geçti)**
+> **📍 ŞU ANKİ KONUM: 05 — İlk parola rollback testi (35 hedef, doğrulama bekliyor)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -49,6 +49,7 @@
 │   ├── npm run type-check (b4397fa)                       ✅
 │   ├── İzole Vault testleri (b4397fa: 34/34)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
+│   ├── İlk parola rollback testi (35 hedef)                ⏳
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -95,3 +96,5 @@
 > Son doğrulama: `e89787d` — TypeScript başarılı, 31/31 Vault testi geçti. Metadata yazma hatası regresyon testi henüz eklenmedi.
 
 > Toplu doğrulama tamamlandı: `b4397fa` — TypeScript kontrolü ve 34/34 izole Vault testi başarılı. Kalan risk: ilk kez parola oluşturulurken config kaydı başarısız olursa Vault'daki yeni parolanın geri alınması; ayrıca OTA/DB test uyarılarının ayrıştırılması.
+
+> Yeni değişiklikler: `7bdbd78`, `af8b0a6`, `d73b847` — ilk Vault parolasının config yazma hatasında geri alınması ve deterministik test. 35 testlik toplu doğrulama bekliyor. PostgreSQL havuzu/OTA test uyarıları henüz çözülmedi.
