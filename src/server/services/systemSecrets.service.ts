@@ -913,7 +913,19 @@ export class SystemSecretsService {
               const scrubbed = { ...raw };
               delete scrubbed.password;
               scrubbed.passwordRef = 'vault:database.password';
-              fs.writeFileSync(dbConfigPath, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
+              const temporary = dbConfigPath + '.scrub.' + process.pid + '.' + crypto.randomBytes(6).toString('hex');
+              try {
+                const fd = fs.openSync(temporary, 'wx', 0o600);
+                try {
+                  fs.writeFileSync(fd, JSON.stringify(scrubbed, null, 2), 'utf8');
+                  fs.fsyncSync(fd);
+                } finally {
+                  fs.closeSync(fd);
+                }
+                fs.renameSync(temporary, dbConfigPath);
+              } finally {
+                if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+              }
             }
           } catch {}
         }
