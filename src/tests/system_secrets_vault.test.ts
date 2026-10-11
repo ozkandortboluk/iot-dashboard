@@ -302,6 +302,29 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('restores the old Vault password if runtime config replacement fails', () => {
+      const oldPassword = 'old_runtime_password_for_rollback';
+      systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'test');
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      const realRename = fs.renameSync;
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        if (String(to) === configPath) throw new Error('runtime config rename failed');
+        return realRename(from, to);
+      });
+      try {
+        expect(() => setupService.saveRuntimeSecretConfig({
+          host: 'rollback-host', port: 5432, database: 'rollback_db',
+          user: 'rollback_user', password: 'new_password_must_rollback',
+          sslMode: 'disable',
+        })).toThrow();
+        expect(systemSecretsService.getDatabasePassword()).toBe(oldPassword);
+        expect(fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null).toBe(before);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('rolls back all database metadata if Vault snapshot replacement fails', async () => {
       await systemSecretsService.updateDatabaseSecrets({
         host: 'old-host', port: 5432, database: 'old_db', user: 'old_user',
