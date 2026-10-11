@@ -3,6 +3,11 @@ services:
     image: timescale/timescaledb:2.30.1-pg16
     container_name: nexus_timescaledb
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-iot_user}
@@ -34,6 +39,11 @@ services:
     image: iot-dashboard-app
     container_name: nexus_app
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -81,6 +91,11 @@ services:
     image: nginx:alpine
     container_name: nexus_proxy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       app:
         condition: service_healthy
@@ -103,6 +118,11 @@ services:
     image: adminer:4.8.1
     container_name: nexus_adminer
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Security: Restrict Adminer to localhost interface only to prevent public web exposure
     ports:
       - "${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}"
