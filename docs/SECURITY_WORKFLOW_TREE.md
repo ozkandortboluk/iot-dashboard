@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — OTA test anahtarı doğrulaması (36 değil, 35 test yeniden çalışacak)**
+> **📍 ŞU ANKİ KONUM: 05 — OTA PEM satır sonu regresyonu (35 test yeniden doğrulanacak)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -100,3 +100,5 @@
 > Doğrulama tamamlandı: `9f87ff1` — TypeScript kontrolü ve 35/35 izole Vault testi geçti. İlk parola rollback regresyonu başarılı. PostgreSQL havuzu/OTA/ENCRYPTION_KEY test uyarıları henüz ayrı değerlendirilmedi.
 
 > OTA incelemesi: `1f479f2` — hatalı özel anahtar örneği yerine test sırasında geçerli, geçici Ed25519 anahtarı oluşturuluyor. Test sayısı değişmedi (35); yeni doğrulama bekleniyor. ENCRYPTION_KEY üretim fail-closed kuralı değiştirilmedi.
+
+> `95c8a4f` testi: 34 geçti, 1 başarısız. OTA geçerli Ed25519 anahtarı artık ayrıştırılıyor; başarısızlık yalnızca PEM sondaki satır sonunun Vault'da trim edilmesinden kaynaklandı. `4ca7a99` test beklentisini normalize etti; yeniden doğrulama bekliyor. Üretim master key davranışı değiştirilmedi.
