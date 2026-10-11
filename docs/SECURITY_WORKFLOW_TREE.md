@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 03 — Test izolasyonu / veritabanı dosyaları ve servis bağımlılıkları**
+> **📍 ŞU ANKİ KONUM: 05 — Test doğrulama / asenkron yazma düzeltmesinin yeniden testi**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -9,7 +9,7 @@
 > **Durumlar:** ✅ Tamamlandı · 🔄 Devam ediyor · ⏳ Bekliyor · ⚠️ Engelli / doğrulama gerekiyor
 
 ```text
-📍 03 TEST İZOLASYONU — ŞU AN BURADAYIZ
+📍 05 TEST DOĞRULAMA — ŞU AN BURADAYIZ
 │
 ├── 01. İlk teşhis ve risk analizi                         ✅
 │   ├── Vault parola taşıma / erken temizleme riski         ✅
@@ -22,7 +22,7 @@
 │   └── Çift parola yazımını kaldır                        ✅
 │       └── TypeScript kontrolü (d8ef5a6): başarılı        ✅
 │
-├── 03. Test izolasyonu                                     🔄 📍
+├── 03. Test izolasyonu                                     🔄
 │   ├── Ayrı test veri dizini desteği (setup/Vault)         ✅
 │   ├── Geçici dizin ve özel Vitest yapılandırması          ✅
 │   ├── Test dosyalarının DB config yollarını ayır          ✅
@@ -33,7 +33,8 @@
 │   ├── Sahte PostgreSQL URL ihtiyacını kaldır              ✅
 │   ├── Tanımsız test değişkenini düzelt                    ✅
 │   ├── Testte PostgreSQL Pool oluşturmayı engelle         ✅
-│   └── Test izolasyonunu doğrula                           ⏳
+│   ├── Testte asenkron yerel DB yazmasını kapat            ✅
+│   └── Test izolasyonunu yeniden doğrula                   ⏳
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
 │   ├── Legacy .db_config.json temizliğini atomik yap       ⚠️
@@ -42,9 +43,10 @@
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
 │
-├── 05. Doğrulama                                           ⏳
-│   ├── npm run type-check                                  ⏳
-│   ├── İzole Vault testleri (27 test ve yeni hata testleri)⏳
+├── 05. Doğrulama                                           🔄 📍
+│   ├── npm run type-check (önceki commit)                  ✅
+│   ├── İzole Vault testleri (önceki commit: 27/27)         ✅
+│   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ⏳
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
 │
@@ -72,6 +74,7 @@
 | `fe750c7`, `eed96bd` | İzole config okuma; sahte PostgreSQL URL kaldırma |
 | `0df2533` | Vault testinde tanımsız değişkeni düzeltme |
 | `9c81218` | İzole Vault testlerinde PostgreSQL Pool koruması |
+| `c0dc864` | Testte asenkron yerel DB dosyası yazımını devre dışı bırakma |
 
 ## Güncelleme kuralı
 
