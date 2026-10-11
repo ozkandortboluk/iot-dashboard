@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Kalan güvenlik riskleri ve test uyarıları (35/35 geçti)**
+> **📍 ŞU ANKİ KONUM: 05 — OTA test anahtarı doğrulaması (36 değil, 35 test yeniden çalışacak)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -98,3 +98,5 @@
 > Toplu doğrulama tamamlandı: `b4397fa` — TypeScript kontrolü ve 34/34 izole Vault testi başarılı. Kalan risk: ilk kez parola oluşturulurken config kaydı başarısız olursa Vault'daki yeni parolanın geri alınması; ayrıca OTA/DB test uyarılarının ayrıştırılması.
 
 > Doğrulama tamamlandı: `9f87ff1` — TypeScript kontrolü ve 35/35 izole Vault testi geçti. İlk parola rollback regresyonu başarılı. PostgreSQL havuzu/OTA/ENCRYPTION_KEY test uyarıları henüz ayrı değerlendirilmedi.
+
+> OTA incelemesi: `1f479f2` — hatalı özel anahtar örneği yerine test sırasında geçerli, geçici Ed25519 anahtarı oluşturuluyor. Test sayısı değişmedi (35); yeni doğrulama bekleniyor. ENCRYPTION_KEY üretim fail-closed kuralı değiştirilmedi.
