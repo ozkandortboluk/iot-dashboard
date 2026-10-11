@@ -2,6 +2,8 @@
 # Opt-in host-security preflight. No firewall or SSH changes are made.
 set -euo pipefail
 export LC_ALL=C
+# Administrative binaries may be absent from unprivileged users\x27 PATH.
+export PATH="/usr/local/sbin:/usr/sbin:/sbin:$PATH"
 
 MODE="${1:-}"
 if [ "$MODE" != "--check" ] && [ "$MODE" != "--apply" ]; then
