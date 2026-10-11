@@ -117,7 +117,7 @@ export class SetupService {
    * Safely reads Docker secrets, environment variables, or server-side protected runtime secret file
    */
   public loadRuntimeSecretConfig(): DatabaseConfigPayload | null {
-    if ((process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) && !process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.TEST_POSTGRES_URL) {
+    if ((process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) && !process.env.NEXUS_TEST_DATA_DIR && !process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.TEST_POSTGRES_URL) {
       return null;
     }
     try {
