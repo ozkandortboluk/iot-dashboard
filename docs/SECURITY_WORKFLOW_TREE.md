@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 15 — 100/100 güvenlik testi, TypeScript, Compose ve Nginx sözdizimi doğrulandı; WebSocket ve dış bağlantı incelemesi sürüyor**
+> **📍 ŞU ANKİ KONUM: 15 — cd36abd üzerinde 100/100 test, TypeScript ve Compose doğrulandı; WebSocket uçtan uca ve dış bağlantı incelemesi sürüyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -182,3 +182,5 @@
 > WebSocket alt protokol güvenliği `b93f2bd`: sunucu artık istemciden gelen rastgele ilk subprotocol değerini (potansiyel token) `Sec-WebSocket-Protocol` yanıtında yansıtmaz; yalnızca sabit `nexus-token` değerini seçer. **Uyumluluk riski:** yalnızca token subprotocol gönderen istemcilerin handshake davranışı kontrol edilmeli; değişiklik henüz test edilmedi. WS/HTTP dış bağlantı incelemesi sürüyor, canlı/main değişmedi.
 
 > **15. aşama ek bulgular:** `c335561` çoklu slash içeren CIDR girdilerini reddeder. `57a962c` ve `4478b7c` WebSocket cihaz API anahtarının üretimde PostgreSQL tarafından doğrulanamadığı durumda eski in-memory kayıt üzerinden kabul edilmesini engeller (NODE_ENV ve VPS_PRODUCTION kontrolü). Önceki WS değişiklikleri dahil **toplu TypeScript, 100 güvenlik testi ve WS entegrasyon doğrulaması henüz yapılmadı**. Kalan SSRF/dış HTTP bağlantı envanteri ve gerçek Docker çalışma zamanı kontrolü. `main`/canlı ortam değiştirilmedi.
+
+> **2026-10-11 toplu test sonucu (`cd36abd`):** Kullanıcının izole `/tmp/nexus-security-test` checkout çıktısında `npm run type-check` başarılı, Vitest 8 dosyada 100/100 başarılı ve `docker compose config -q` başarılı. Beklenen negatif Vault senaryolarının hata logları test başarısızlığı değildir. Gerçek WebSocket handshake/kimlik doğrulama entegrasyon testi, SSRF/outbound envanteri ve canlı Docker ağ doğrulaması hâlâ açık. Üretime dağıtım veya `main` birleştirmesi yapılmadı.
