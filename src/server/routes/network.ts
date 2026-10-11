@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import net from 'node:net';
 import { authenticateUser, AuthenticatedRequest } from '../middleware/auth.js';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
@@ -42,7 +43,7 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
   const currentUser = authReq.user!;
   
   const { subnet, agentId } = req.body || {};
-  if (!subnet || typeof subnet !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(subnet) || subnet.split('/')[0].split('.').some((octet: string) => Number(octet) > 255)) {
+  if (!subnet || typeof subnet !== 'string' || !/\/\d{1,2}$/.test(subnet) || Number(subnet.split('/')[1]) > 32 || net.isIP(subnet.split('/')[0]) !== 4) {
     return res.status(400).json({ error: 'Geçerli bir subnet belirtilmelidir (Örn: 192.168.1.0/24)' });
   }
 
@@ -125,7 +126,7 @@ networkRouter.get('/scans/:id', authenticateUser, requireNetworkAdminOrOperator,
 // 4. POST /api/network/ping - Issues a real ICMP ping (delegated to agent)
 networkRouter.post('/ping', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
   const { ip, agentId } = req.body || {};
-  if (!ip || typeof ip !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip) || ip.split('.').some((octet: string) => Number(octet) > 255)) {
+  if (!ip || typeof ip !== 'string' || net.isIP(ip) !== 4) {
     return res.status(400).json({ error: 'Geçerli bir IP adresi belirtilmelidir.' });
   }
 
