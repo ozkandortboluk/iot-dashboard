@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Master key kategori paketi tamamlandı; 43 test toplu doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 05 — 43/43 doğrulandı; sonraki güvenlik risk paketi hazırlanıyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -46,13 +46,13 @@
 │   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (99c4359)                       ✅
-│   ├── İzole Vault testleri (99c4359: 37/37)              ✅
+│   ├── npm run type-check (afce214)                       ✅
+│   ├── İzole Vault testleri (afce214: 43/43)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
-│   ├── Restart, yarış ve izin testleri (3 yeni test)       ⏳
-│   ├── Üretim Docker secret testleri (3 yeni test)         ⏳
+│   ├── Restart, yarış ve izin testleri (3/3 geçti)         ✅
+│   ├── Üretim Docker secret testleri (3/3 geçti)           ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -128,3 +128,5 @@
 
 
 > Paket genişletmesi: `3a76c83` eksik üretim Docker secret durumunda ortam anahtarına düşmeme; `00b2219` geçersiz üretim secret'ını reddetme; `a86df99` üretim anahtarının cache sıfırlamada korunması. Master Key 8 test; genel toplam 43 test. Bu 6 yeni test henüz çalıştırılmadı; sonuç bekleniyor.
+
+> VPS izole checkout doğrulaması (`afce214`): `npm run type-check` başarılı; Vitest 3 dosya, 43/43 test başarılı (Vault 25, canonical 10, Master Key 8). Hata logları beklenen negatif senaryolardır. Gerçek Docker/PostgreSQL üretim entegrasyonu henüz doğrulanmadı.
