@@ -62,7 +62,15 @@ echo "SSH listening port configuration:"
 printf '%s\n' "$SSH_PORTS"
 echo "UFW:"
 if command -v ufw >/dev/null 2>&1; then
-  ufw status | head -n 3
+  if [ "${EUID}" -eq 0 ]; then
+    ufw status | head -n 3
+  elif command -v sudo >/dev/null 2>&1; then
+    if ! sudo ufw status | head -n 3; then
+      echo "WARNING: UFW installed, but status requires elevated privileges" >&2
+    fi
+  else
+    echo "WARNING: UFW installed, but status requires elevated privileges" >&2
+  fi
 else
   echo "not installed"
 fi
