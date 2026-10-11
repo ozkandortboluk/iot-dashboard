@@ -419,6 +419,40 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('does not mark setup complete when its runtime config is absent', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const previous = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      try {
+        fs.rmSync(configPath, { force: true });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is missing');
+        expect(fs.existsSync(configPath)).toBe(false);
+      } finally {
+        if (previous !== null) fs.writeFileSync(configPath, previous, { mode: 0o600 });
+      }
+    });
+
+    it('preserves existing setup config when completion rename fails', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      setupService.saveRuntimeSecretConfig({
+        host: '127.0.0.1', port: 5432, database: 'completion_test',
+        user: 'completion_user', sslMode: 'disable',
+      });
+      const before = fs.readFileSync(configPath, 'utf8');
+      const originalRename = fs.renameSync;
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        if (String(to) === configPath) throw new Error('simulated completion rename failure');
+        return originalRename(from, to);
+      });
+      try {
+        expect(() => setupService.markSetupCompleted()).toThrow('simulated completion rename failure');
+        expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+        expect(fs.readdirSync(process.env.NEXUS_TEST_DATA_DIR!)
+          .filter(name => name.startsWith('.db_config.json.tmp.'))).toEqual([]);
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
