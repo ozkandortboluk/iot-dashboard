@@ -5,6 +5,8 @@ import { isSshTunnelAllowed } from '../database/connection.js';
 import { authenticateUser, requireAdmin } from '../middleware/auth.js';
 import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
+import { db } from '../db.js';
+import { setupService } from '../services/setup.service.js';
 
 export const sshTunnelRouter = Router();
 
