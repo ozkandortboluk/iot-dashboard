@@ -775,6 +775,10 @@ export function initWebSocketServer(server: http.Server) {
           ws.sessionToken = connectionToken || undefined;
           wss!.emit('connection', ws, request);
         });
+      } else {
+        // Reject unsupported upgrade paths instead of leaving sockets open.
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+        socket.destroy();
       }
     } catch (err) {
       console.error('[WebSocket] Upgrade error:', err);
