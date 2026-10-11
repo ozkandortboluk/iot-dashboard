@@ -302,6 +302,43 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('rolls back all database metadata if Vault snapshot replacement fails', async () => {
+      await systemSecretsService.updateDatabaseSecrets({
+        host: 'old-host', port: 5432, database: 'old_db', user: 'old_user',
+      }, 'test');
+      const vaultFile = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.system_secrets.test.json');
+      const snapshot = fs.readFileSync(vaultFile, 'utf8');
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+        throw new Error('metadata rename failed');
+      });
+      try {
+        await expect(systemSecretsService.updateDatabaseSecrets({
+          host: 'new-host', port: 6432, database: 'new_db', user: 'new_user',
+        }, 'test')).rejects.toThrow();
+        expect(fs.readFileSync(vaultFile, 'utf8')).toBe(snapshot);
+        expect(systemSecretsService.getSecret('database.host')).toBe('old-host');
+        expect(systemSecretsService.getSecret('database.port')).toBe('5432');
+        expect(systemSecretsService.getSecret('database.database')).toBe('old_db');
+        expect(systemSecretsService.getSecret('database.user')).toBe('old_user');
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
+    it('commits database metadata fields together on successful Vault update', async () => {
+      await systemSecretsService.updateDatabaseSecrets({
+        host: 'batch-host', port: 5544, database: 'batch_db', user: 'batch_user',
+        sslMode: 'disable',
+      }, 'test');
+      const vaultFile = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.system_secrets.test.json');
+      const snapshot = JSON.parse(fs.readFileSync(vaultFile, 'utf8'));
+      for (const key of ['host', 'port', 'database', 'user', 'sslMode']) {
+        expect(snapshot.secrets['database.' + key]).toBeDefined();
+      }
+      expect(systemSecretsService.getSecret('database.host')).toBe('batch-host');
+      expect(systemSecretsService.getSecret('database.port')).toBe('5544');
+    });
+
     it('preserves the actual Vault password when saving a masked password placeholder', () => {
       const password = 'existing_secret_for_masked_config_test';
       systemSecretsService.persistDatabasePasswordLocally(password, 'test');
