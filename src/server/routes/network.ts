@@ -118,8 +118,8 @@ networkRouter.get('/scans/:id', authenticateUser, requireNetworkAdminOrOperator,
 
 // 4. POST /api/network/ping - Issues a real ICMP ping (delegated to agent)
 networkRouter.post('/ping', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
-  const { ip, agentId } = req.body;
-  if (!ip || typeof ip !== 'string') {
+  const { ip, agentId } = req.body || {};
+  if (!ip || typeof ip !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip) || ip.split('.').some((octet: string) => Number(octet) > 255)) {
     return res.status(400).json({ error: 'Geçerli bir IP adresi belirtilmelidir.' });
   }
 
