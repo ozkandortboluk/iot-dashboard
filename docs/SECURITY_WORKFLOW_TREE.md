@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Kurulum hata senaryoları paketi; 49 test toplu doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 05 — 49/49 doğrulandı; sonraki toplu güvenlik incelemesi**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -46,8 +46,8 @@
 │   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (73523f0)                       ✅
-│   ├── İzole Vault testleri (73523f0: 46/46)              ✅
+│   ├── npm run type-check (741b11e)                       ✅
+│   ├── İzole Vault testleri (741b11e: 49/49)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
@@ -140,3 +140,5 @@
 > Üçüncü paket ön inceleme: kurulum tamamlanması için bozuk JSON, eksik DB koordinatları ve başarılı kayıtta plaintext parolanın temizlenmesi senaryolarına regresyon testleri önerildi. GitHub'a test ekleme işlemi güvenlik kontrolü tarafından engellendi; hiçbir test eklenmiş sayılmıyor. Son doğrulanan sayı 46/46, yeni test çalıştırma talebi yok. Önceki kod değişiklikleri korunuyor.
 
 > Yeni toplu regresyon paketi: `1c5cdbd` dosya fsync hatasında mevcut runtime config ve geçici dosya temizliği; `b3532f0` bozuk JSON ile kurulum tamamlanmasının reddi; `1f30b5a` eksik host bilgisinde kurulum tamamlanmasının reddi. Son başarılı 46/46, yeni hedef 49/49. Bu üç yeni test henüz çalıştırılmadı. Canlı sunucu ve main değişmedi.
+
+> VPS izole checkout doğrulaması (`741b11e`): TypeScript başarılı; Vitest 3 dosya, 49/49 test başarılı (Vault 31, canonical 10, Master Key 8). Bozuk JSON, eksik DB koordinatları, disk fsync ve rename başarısızlığı logları beklenen negatif test çıktılarıdır. Üretim entegrasyon testi ve canlı dağıtım yapılmadı.
