@@ -612,6 +612,76 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('rejects array runtime configuration', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      try {
+        const invalidContent = [];
+        fs.writeFileSync(file, invalidContent, { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
+      } finally {
+        if (before === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, before, { mode: 0o600 });
+      }
+    });
+
+    it('rejects numeric runtime configuration', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      try {
+        const invalidContent = 42;
+        fs.writeFileSync(file, invalidContent, { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
+      } finally {
+        if (before === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, before, { mode: 0o600 });
+      }
+    });
+
+    it('rejects boolean runtime configuration', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      try {
+        const invalidContent = true;
+        fs.writeFileSync(file, invalidContent, { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
+      } finally {
+        if (before === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, before, { mode: 0o600 });
+      }
+    });
+
+    it('rejects missing database field', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      try {
+        const invalidContent = JSON.stringify({ host: 'localhost' });
+        fs.writeFileSync(file, invalidContent, { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
+      } finally {
+        if (before === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, before, { mode: 0o600 });
+      }
+    });
+
+    it('rejects missing host field', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      try {
+        const invalidContent = JSON.stringify({ database: 'example' });
+        fs.writeFileSync(file, invalidContent, { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
+      } finally {
+        if (before === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, before, { mode: 0o600 });
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
