@@ -113,4 +113,17 @@ describe('Master key / persistent key protection', () => {
     expect(masterKeyProvider.getStatus().configured).toBe(false);
   });
 
+  it('rejects missing Docker secret in production without using an environment fallback', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    process.env.ENCRYPTION_KEY = 'ab'.repeat(32);
+    const originalExists = fs.existsSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === '/run/secrets/encryption_key' ? false : originalExists(file)
+    );
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()).toBeNull();
+    expect(masterKeyProvider.getStatus().source).toBe('missing');
+  });
+
 });
