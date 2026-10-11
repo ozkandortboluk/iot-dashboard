@@ -82,6 +82,18 @@ export interface DbTestResult {
 // Location of persistent server-side runtime secret file (inside data/ which is volume mounted and gitignored)
 const RUNTIME_SECRET_DIR = process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR ? path.resolve(process.env.NEXUS_TEST_DATA_DIR) : path.resolve(process.cwd(), 'data');
 const RUNTIME_SECRET_FILE = path.join(RUNTIME_SECRET_DIR, '.db_config.json');
+
+function writeRuntimeConfigAtomically(payload: unknown): void {
+  fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+  const temporary = path.join(RUNTIME_SECRET_DIR, `.db_config.json.tmp.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, RUNTIME_SECRET_FILE);
+    fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+}
 const SETUP_TOKEN_FILE = path.join(RUNTIME_SECRET_DIR, '.setup_token');
 
 // Docker secret fallback paths
@@ -146,8 +158,7 @@ export class SetupService {
               scrubbed.hasPassword = true;
               scrubbed.passwordRef = 'vault:database.password';
               scrubbed.updatedAt = new Date().toISOString();
-              fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
-              fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+              writeRuntimeConfigAtomically(scrubbed);
             } catch (migrationError: any) {
               systemLogger.error('security', 'Legacy PostgreSQL parola taşıma veya dosya temizleme işlemi başarısız oldu; manuel kontrol gerekli.');
               // Do not silently report a successful migration. The original
@@ -319,11 +330,7 @@ export class SetupService {
         systemSecretsService.persistDatabasePasswordLocally(config.password, 'setup_wizard');
       }
 
-      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(payload, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+      writeRuntimeConfigAtomically(payload);
 
       this.runtimeConfig = { ...config };
       this.isCompletedState = payload.isCompleted;
