@@ -224,7 +224,7 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     expect(nginxContent).toMatch(/client_max_body_size\s+50M;/i);
 
     // 4. WebSocket location block
-    expect(nginxContent).toMatch(/location\s+~\s+\^\/\(ws\|api\/ws\)/i);
+    expect(nginxContent).toMatch(/location\s+~\s+\^\/\(\?:ws\|api\/ws\)\$/i);
     expect(nginxContent).toMatch(/proxy_pass\s+http:\/\/nexus_backend;/i);
     expect(nginxContent).toMatch(/proxy_http_version\s+1\.1;/i);
     expect(nginxContent).toMatch(/proxy_set_header\s+Upgrade\s+\$http_upgrade;/i);
