@@ -57,3 +57,32 @@ perform_restore() {
   log_error "Otomatik geri yükleme güvenlik nedeniyle devre dışı: SQL veritabanı ve uygulama volume verileri henüz doğrulanmış bir kurtarma akışıyla geri yüklenmiyor. Mevcut veriler değiştirilmedi."
   return 1
 }
+
+# Read-only archive validation. Never extracts into the live installation.
+perform_restore_check() {
+  local archive="${1:-}" listing
+  if [ -z "$archive" ] || [ ! -f "$archive" ]; then
+    log_error "Arşiv bulunamadı."
+    return 1
+  fi
+  if ! tar -tzf "$archive" >/dev/null 2>&1; then
+    log_error "Arşiv bozuk veya okunamıyor."
+    return 1
+  fi
+  listing=$(tar -tzf "$archive") || return 1
+  if ! printf '%s\n' "$listing" | grep -Fxq 'db_dump.sql' ||
+     ! printf '%s\n' "$listing" | grep -Fxq 'app_data/' ; then
+    log_error "SQL dökümü veya uygulama verileri eksik."
+    return 1
+  fi
+  # Reject traversal and absolute paths before inspecting any member.
+  if printf '%s\n' "$listing" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    log_error "Arşivde güvensiz dosya yolu var."
+    return 1
+  fi
+  if ! tar -xOzf "$archive" db_dump.sql | grep -q '[^[:space:]]'; then
+    log_error "SQL dökümü boş veya okunamıyor."
+    return 1
+  fi
+  log_success "Arşiv yapısı doğrulandı (SQL içeriğinin veritabanına yüklenebilirliği henüz test edilmedi)."
+}
