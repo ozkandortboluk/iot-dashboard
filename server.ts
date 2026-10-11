@@ -20,6 +20,7 @@ import { recycleSharedPgPool } from './src/server/database/connection.js';
 import { getVaultStatus } from './src/server/utils/crypto.js';
 import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from './src/server/utils/startupSecurityPolicy.js';
 import { isProductionVpsEnvironment } from './src/server/config/runtimeEnvironment.js';
+import { resolveTrustProxy } from './src/server/config/trustProxyPolicy.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
 
 // Bootstrap runtime security secrets early in dev/test only
@@ -144,8 +145,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 const app = express();
 // Configure Trust Proxy: Trust container reverse proxy (1 hop / loopback + private docker subnets)
-const trustProxyConfig = process.env.TRUST_PROXY || 'loopback, 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16';
-const parsedTrustProxy = trustProxyConfig === 'true' ? (isProductionVpsEnvironment() ? 'loopback, 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16' : true) : trustProxyConfig === 'false' ? false : (!isNaN(Number(trustProxyConfig)) ? Number(trustProxyConfig) : trustProxyConfig);
+const parsedTrustProxy = resolveTrustProxy(process.env.TRUST_PROXY, isProductionVpsEnvironment());
 app.set('trust proxy', parsedTrustProxy);
 
 // Fast 503 Service Unavailable rejection for new incoming requests when shutting down
