@@ -27,7 +27,7 @@
 │   ├── Geçici dizin ve özel Vitest yapılandırması          ✅
 │   ├── Test dosyalarının DB config yollarını ayır          ✅
 │   ├── Dış bağlantı ortam değişkenlerini engelle           ✅
-│   ├── db.ts veri dosyalarını da geçici dizine yönlendir   ⚠️
+│   ├── db.ts veri dosyalarını da geçici dizine yönlendir   ✅
 │   ├── Gerçek DB ve arka plan servislerini mock/izole et   ⏳
 │   └── Test izolasyonunu doğrula                           ⏳
 │
@@ -62,6 +62,7 @@
 | `25d4d5e`, `4c6716e` | Geçici dizin ve Vitest yapılandırması |
 | `1f143bd`, `6bcc2d0` | Test dosyası yolları |
 | `6791518` | DB bağlantı değişkeni korumaları |
+| `8a8b0cf` | db.ts test verilerini geçici dizine yönlendirme |
 
 ## Güncelleme kuralı
 
