@@ -193,7 +193,7 @@ export interface CustomSecretInput {
   value: string;
 }
 
-const VAULT_DIR = path.resolve(process.cwd(), 'data');
+const VAULT_DIR = process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR ? path.resolve(process.env.NEXUS_TEST_DATA_DIR) : path.resolve(process.cwd(), 'data');
 
 export function getVaultFilePath(): string {
   const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
