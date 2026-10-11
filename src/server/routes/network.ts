@@ -43,7 +43,7 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
   const currentUser = authReq.user!;
   
   const { subnet, agentId } = req.body || {};
-  if (!subnet || typeof subnet !== 'string' || !/\/\d{1,2}$/.test(subnet) || Number(subnet.split('/')[1]) > 32 || net.isIP(subnet.split('/')[0]) !== 4) {
+  if (!subnet || typeof subnet !== 'string' || subnet.split('/').length !== 2 || !/^\d{1,2}$/.test(subnet.split('/')[1]) || Number(subnet.split('/')[1]) > 32 || net.isIP(subnet.split('/')[0]) !== 4) {
     return res.status(400).json({ error: 'Geçerli bir subnet belirtilmelidir (Örn: 192.168.1.0/24)' });
   }
 
