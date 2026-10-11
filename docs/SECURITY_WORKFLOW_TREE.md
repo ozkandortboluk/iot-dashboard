@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 04 — Vault hata senaryoları (30 test doğrulaması bekliyor)**
+> **📍 ŞU ANKİ KONUM: 04 — Metadata tutarlılığı ve kısmi kayıt riski**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -40,13 +40,13 @@
 │   ├── Legacy .db_config.json temizliğini atomik yap       ✅
 │   ├── Normal config kaydını atomik yap                    ✅
 │   ├── Atomik rename hatası regresyon testi               ✅
-│   ├── Vault yazma hatasında eski parolayı koru            ⏳
-│   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
+│   ├── Vault yazma hatasında eski parolayı koru            ✅
+│   ├── Vault bozuk/okunamıyor durumunda fail-closed        ✅
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
 │
 ├── 05. Doğrulama                                           🔄
 │   ├── npm run type-check (a7b3b91)                       ✅
-│   ├── İzole Vault testleri (549d102: 28/28)              ✅
+│   ├── İzole Vault testleri (841ea31: 31/31)              ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -79,7 +79,8 @@
 | `010244f` | Runtime DB config ve legacy temizliği için atomik değiştirme (mevcut 27 test geçti) |
 | `0fa8b3b` | Atomik rename hatasında eski config ve geçici dosya temizliği testi (28/28 geçti) |
 | `0ee645d` | Bozuk Vault dosyasını fail-closed reddetme |
-| `5a24e5b` | Bozuk Vault ve parola rollback testleri (30 test, çalıştırılmadı) |
+| `5a24e5b` | Bozuk Vault ve parola rollback testleri (30/30 geçti) |
+| `f23ef13`, `841ea31` | Maskeli parola düzeltmesi ve regresyon testi (31/31 geçti) |
 
 ## Güncelleme kuralı
 
