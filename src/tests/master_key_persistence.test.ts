@@ -46,4 +46,71 @@ describe('Master key / persistent key protection', () => {
     expect(masterKeyProvider.getKey()).toBeNull();
     expect(write).not.toHaveBeenCalled();
   });
+  it('keeps the same persisted development key after cache reset', () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.VPS_PRODUCTION;
+    const keyHex = 'ab'.repeat(32);
+    const realExists = fs.existsSync.bind(fs);
+    const realRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === keyPath ? true : realExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      String(file) === keyPath ? keyHex : (realRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    const write = vi.spyOn(fs, 'writeFileSync');
+    masterKeyProvider.resetCache();
+    const first = masterKeyProvider.getKey();
+    masterKeyProvider.resetCache();
+    const second = masterKeyProvider.getKey();
+    expect(first?.toString('hex')).toBe(keyHex);
+    expect(second?.toString('hex')).toBe(keyHex);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('uses the existing key when another process wins exclusive creation', () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.VPS_PRODUCTION;
+    const keyHex = 'cd'.repeat(32);
+    const realExists = fs.existsSync.bind(fs);
+    const realRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === keyPath ? false : realExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      String(file) === keyPath ? keyHex : (realRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    const write = vi.spyOn(fs, 'writeFileSync').mockImplementation(((file: any, ...args: any[]) => {
+      if (String(file) === keyPath) {
+        const err = new Error('already exists') as NodeJS.ErrnoException;
+        err.code = 'EEXIST';
+        throw err;
+      }
+      throw new Error('Unexpected write during master key test');
+    }) as typeof fs.writeFileSync);
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()?.toString('hex')).toBe(keyHex);
+    expect(write).toHaveBeenCalledWith(keyPath, expect.any(String), expect.objectContaining({ flag: 'wx', mode: 0o600 }));
+  });
+
+  it('fails closed when persistent key creation is denied', () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.VPS_PRODUCTION;
+    const realExists = fs.existsSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === keyPath ? false : realExists(file)
+    );
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((file: any) => {
+      if (String(file) === keyPath) {
+        const err = new Error('permission denied') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      }
+      throw new Error('Unexpected write during master key test');
+    }) as typeof fs.writeFileSync);
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()).toBeNull();
+    expect(masterKeyProvider.getStatus().configured).toBe(false);
+  });
+
 });
