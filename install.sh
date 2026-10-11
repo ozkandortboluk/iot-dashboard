@@ -53,6 +53,7 @@ HTTP_ONLY=false
 USE_DOCKER_PROXY=false
 DO_BACKUP=false
 DO_RESTORE=false
+DO_RESTORE_CHECK=false
 DO_UPDATE=false
 DO_STATUS=false
 HOST_SECURITY_CHECK=false
@@ -86,6 +87,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
   --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
+  --restore-check <arsiv.tar.gz> Arşiv yapısını salt-okunur doğrular (geri yüklemez)
   --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
   --docker-proxy           Docker Nginx ters proxy servisini başlatır (Varsayılan: kapalı, sistem Nginx kullanılır)
@@ -137,6 +139,15 @@ while [[ $# -gt 0 ]]; do
     --backup)
       DO_BACKUP=true
       shift
+      ;;
+    --restore-check)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        echo "HATA: --restore-check için arşiv yolu gereklidir." >&2
+        exit 2
+      fi
+      DO_RESTORE_CHECK=true
+      RESTORE_FILE="$2"
+      shift 2
       ;;
     --restore)
       DO_RESTORE=true
@@ -190,6 +201,12 @@ fi
 if [ "$DO_BACKUP" = true ]; then
   print_banner
   perform_backup
+  exit $?
+fi
+
+# Validate archive without changing services or files.
+if [ "$DO_RESTORE_CHECK" = true ]; then
+  perform_restore_check "$RESTORE_FILE"
   exit $?
 fi
 
