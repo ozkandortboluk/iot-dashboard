@@ -72,7 +72,7 @@ async function resolveUser(token?: string | null): Promise<User | null> {
 
   const clean = token.trim();
   // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
-  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+  if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
     return null;
   }
 
