@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 12 — Kullanıcı 72/72 doğruladı; HTTP origin ve Nginx throttling paketi doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 13 — 72/72 doğrulandı; HTTP Origin, Nginx throttling ve WebSocket endpoint güvenliği toplu test bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -162,3 +162,5 @@
 > Dokuzuncu paket: izole VPS `ebb310e` üzerinde TypeScript ve 66/66 test başarılı. `TRUST_PROXY=true` VPS üretiminde herkesi güvenilir proxy sayma riskini önlemek üzere `trustProxyPolicy.ts` eklendi ve `server.ts` bağlandı (`cacde04`). Altı yeni regresyon testi (`a4de443`) test paketine dahil (`b71a29d`). Hedef 72 test; henüz doğrulanmadı. Kalan öncelik: istek başına IP rate limit, WebSocket yetkilendirme, SSRF ve gerçek HTTP/Nginx entegrasyon testleri. Canlı ortam/main değişmedi.
 
 > Toplu HTTP koruma paketi: kullanıcı `98b231b` sürümünde 72/72 testin geçtiğini bildirdi. `fe2674c` HTTP/WS Origin ayrıştırmasını katılaştırdı; `b94580f` 9 senaryo ekledi; `9649003` Nginx API/WS IP bazlı istek ve bağlantı sınırları getirdi; `479b7ec` 4 yeni statik regresyon testi ekledi. Toplam hedef 85 test. Bunlar henüz çalıştırılmadı; `nginx -t` ve gerçek HTTP yük testi ayrıca gerekli. Açık incelemeler: SSRF/dış bağlantılar, WebSocket protokolü ve yetkilendirme, Docker çalışma zamanı/SSH kontrolleri. `main` ve canlı sistem değiştirilmedi.
+
+> WebSocket endpoint paketi: `c57e5d0` ile sunucuda yalnızca `/ws` ve `/api/ws` upgrade yolları kabul ediliyor; `29522f7` Nginx rotasını aynı kural ile eşledi; `cd47c02` 7 regresyon testi ekledi, `2120710` test konfigürasyonuna aldı. Önceki doğrulanmış 72 test üzerine 20 yeni test eklenmiş durumda (hedef 92). Bu paket henüz test edilmedi. SSRF ve Docker/SSH üretim çalışma zamanı incelemeleri açık; gerçek Nginx ve HTTP entegrasyon testleri ayrıca gerekli. Canlı/main değiştirilmedi.
