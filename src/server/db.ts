@@ -355,8 +355,10 @@ class LocalDatabase {
 
     this.setupFirestoreSync();
     this.startAutoQuotaCheck();
-    this.startQueueWorker();
-    this.startAutoRetentionWorker();
+    if (process.env.NODE_ENV !== 'test') {
+      this.startQueueWorker();
+      this.startAutoRetentionWorker();
+    }
     
     // In production or when PostgreSQL is configured, start in DB_CONNECTING.
     // In development without PostgreSQL configured, default to READY for local WAL / in-memory development.
