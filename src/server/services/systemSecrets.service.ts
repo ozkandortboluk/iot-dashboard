@@ -312,14 +312,35 @@ export class SystemSecretsService {
       };
 
       const vaultPath = getVaultFilePath();
-      fs.writeFileSync(vaultPath, JSON.stringify(payload, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-
+      // Write a complete snapshot before replacing the authoritative vault.
+      // The temporary file must be on the same filesystem for atomic rename.
+      const tempPath = path.join(
+        VAULT_DIR,
+        `.${path.basename(vaultPath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`,
+      );
+      let fd: number | undefined;
       try {
-        fs.chmodSync(vaultPath, 0o600);
-      } catch {}
+        fd = fs.openSync(tempPath, 'wx', 0o600);
+        fs.writeFileSync(fd, JSON.stringify(payload, null, 2), { encoding: 'utf8' });
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fd = undefined;
+        fs.renameSync(tempPath, vaultPath);
+        // Persist the directory entry where supported.
+        try {
+          const dirFd = fs.openSync(VAULT_DIR, 'r');
+          try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+        } catch {
+          // Directory fsync may not be supported by every filesystem.
+        }
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+        try { fs.unlinkSync(tempPath); } catch (err: any) {
+          if (err?.code !== 'ENOENT') {
+            systemLogger.warn('security', 'Vault geçici dosyası temizlenemedi.');
+          }
+        }
+      }
     } catch (err: any) {
       systemLogger.error('security', `Lokal secret kasası kaydedilemedi: ${err?.message || err}`);
       throw new Error(`Secret kasası dosyaya yazılamadı: ${err?.message || err}`, { cause: err });
