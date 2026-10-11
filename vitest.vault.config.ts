@@ -13,6 +13,7 @@ export default defineConfig({
       'src/tests/master_key_persistence.test.ts',
       'src/tests/nginx_scanner_protection.test.ts',
       'src/tests/trust_proxy_policy.test.ts',
+      'src/tests/http_origin_security.test.ts',
     ],
   },
 });
