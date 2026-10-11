@@ -10,6 +10,7 @@ export const networkRouter = Router();
 // In-memory store for active scan jobs and field agents (for MVP/architecture)
 const activeScans = new Map<string, NetworkScanJob>();
 const connectedAgents = new Map<string, NetworkAgent>();
+const MAX_PENDING_SCAN_JOBS = 100;
 
 // Role check middleware for network ops
 const requireNetworkAdminOrOperator = (req: Request, res: Response, next: NextFunction) => {
@@ -43,6 +44,10 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
   const { subnet, agentId } = req.body || {};
   if (!subnet || typeof subnet !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(subnet) || subnet.split('/')[0].split('.').some((octet: string) => Number(octet) > 255)) {
     return res.status(400).json({ error: 'Geçerli bir subnet belirtilmelidir (Örn: 192.168.1.0/24)' });
+  }
+
+  if (activeScans.size >= MAX_PENDING_SCAN_JOBS) {
+    return res.status(429).json({ error: 'Ağ tarama görev kapasitesi dolu.' });
   }
 
   // Create an async job
@@ -81,7 +86,7 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
           job.status = 'completed';
           job.completedAt = new Date().toISOString();
           // In real app, agent reports discovered devices here
-          activeScans.set(jobId, job);
+          activeScans.delete(jobId);
         } else {
           job.progress = progress;
           job.updatedAt = new Date().toISOString();
