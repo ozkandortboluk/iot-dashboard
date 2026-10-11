@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Master key risk incelemesi; 40 test toplu doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 05 — Master key kategori paketi tamamlandı; 43 test toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -52,6 +52,7 @@
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
 │   ├── Restart, yarış ve izin testleri (3 yeni test)       ⏳
+│   ├── Üretim Docker secret testleri (3 yeni test)         ⏳
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -125,3 +126,5 @@
 - **Öncelik P2:** Eşzamanlı oluşturma yarışında `EEXIST` sonrası mevcut dosya içeriği okunurken kısmi yazım ihtimali ve güvenli yeniden deneme politikası incelenmeli.
 - **Doğrulama:** Son başarılı sonuç 37/37; sonraki 3 Master Key testiyle toplam 40 test henüz çalıştırılmadı. Üretim Docker secret testlerini ekleme girişimi engellendi, tamamlandı olarak işaretlenmedi.
 
+
+> Paket genişletmesi: `3a76c83` eksik üretim Docker secret durumunda ortam anahtarına düşmeme; `00b2219` geçersiz üretim secret'ını reddetme; `a86df99` üretim anahtarının cache sıfırlamada korunması. Master Key 8 test; genel toplam 43 test. Bu 6 yeni test henüz çalıştırılmadı; sonuç bekleniyor.
