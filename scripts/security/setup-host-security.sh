@@ -31,9 +31,26 @@ if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
   exit 1
 fi
 SSHD_BIN=$(command -v sshd || printf /usr/sbin/sshd)
-if ! SSH_PORTS=$("$SSHD_BIN" -T 2>/dev/null | awk '$1=="port" {print $2}'); then
-  echo "ERROR: sshd -T failed; inspect SSH configuration" >&2
+# sshd -T may require root to read host keys. Keep --check read-only.
+SSHD_ERROR=$(mktemp)
+trap 'rm -f "$SSHD_ERROR"' EXIT
+if [ "${EUID}" -eq 0 ]; then
+  SSHD_OUTPUT=$("$SSHD_BIN" -T 2>"$SSHD_ERROR") || SSHD_OUTPUT=""
+else
+  SSHD_OUTPUT=$("$SSHD_BIN" -T 2>"$SSHD_ERROR") || SSHD_OUTPUT=""
+  if [ -z "$SSHD_OUTPUT" ] && command -v sudo >/dev/null 2>&1; then
+    SSHD_OUTPUT=$(sudo "$SSHD_BIN" -T 2>"$SSHD_ERROR") || SSHD_OUTPUT=""
+  fi
+fi
+if [ -z "$SSHD_OUTPUT" ]; then
+  echo "ERROR: sshd -T failed; run --check with sudo or inspect SSH configuration" >&2
+  cat "$SSHD_ERROR" >&2
   exit 1
+fi
+SSH_PORTS=$(printf '%s\n' "$SSHD_OUTPUT" | awk '$1=="port" {print $2}')
+ROOT_LOGIN=$(printf '%s\n' "$SSHD_OUTPUT" | awk '$1=="permitrootlogin" {print $2; exit}')
+if [ "$ROOT_LOGIN" = "yes" ]; then
+  echo "WARNING: SSH root login is enabled (permitrootlogin yes). Review before hardening." >&2
 fi
 if [ -z "$SSH_PORTS" ]; then
   echo "ERROR: No SSH port discovered" >&2
