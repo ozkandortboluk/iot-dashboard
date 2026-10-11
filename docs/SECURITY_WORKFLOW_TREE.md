@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — 46/46 doğrulandı; kurulum entegrasyon senaryoları bekliyor**
+> **📍 ŞU ANKİ KONUM: 05 — Kurulum hata senaryoları paketi; 49 test toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -138,3 +138,5 @@
 > VPS izole checkout doğrulaması (`73523f0`): TypeScript başarılı; 3 Vitest dosyası, 46/46 test geçti (Vault 28, canonical 10, Master Key 8). Eksik config ve rename hatası stack trace'leri kasıtlı negatif test senaryolarıdır. Canlı dağıtım veya kurulum entegrasyon testi yapılmadı.
 
 > Üçüncü paket ön inceleme: kurulum tamamlanması için bozuk JSON, eksik DB koordinatları ve başarılı kayıtta plaintext parolanın temizlenmesi senaryolarına regresyon testleri önerildi. GitHub'a test ekleme işlemi güvenlik kontrolü tarafından engellendi; hiçbir test eklenmiş sayılmıyor. Son doğrulanan sayı 46/46, yeni test çalıştırma talebi yok. Önceki kod değişiklikleri korunuyor.
+
+> Yeni toplu regresyon paketi: `1c5cdbd` dosya fsync hatasında mevcut runtime config ve geçici dosya temizliği; `b3532f0` bozuk JSON ile kurulum tamamlanmasının reddi; `1f30b5a` eksik host bilgisinde kurulum tamamlanmasının reddi. Son başarılı 46/46, yeni hedef 49/49. Bu üç yeni test henüz çalıştırılmadı. Canlı sunucu ve main değişmedi.
