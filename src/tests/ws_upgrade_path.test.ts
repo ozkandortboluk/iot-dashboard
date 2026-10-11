@@ -28,6 +28,16 @@ describe('Production device authentication policy', () => {
     const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toMatch(/\(process\.env\.NODE_ENV === 'production' \|\| process\.env\.VPS_PRODUCTION === 'true'\) && !db\.postgresRepo\?\.isReady\(\)/);
   });
+  it('enforces PostgreSQL readiness on upgrades for VPS production', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source.match(/\(process\.env\.NODE_ENV === 'production' \|\| process\.env\.VPS_PRODUCTION === 'true'\) && !db\.postgresRepo\?\.isReady\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+  it('rejects user heartbeat without session credentials', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).toContain("ws.close(1008, 'Session credentials missing')");
+  });
   it('does not use in-memory device fallback with VPS_PRODUCTION enabled', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
