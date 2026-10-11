@@ -449,6 +449,7 @@ class SSHTunnelService {
     databaseState?: string;
     hostFingerprint?: string | null;
   }> {
+    if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }
