@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 08 — Beş yeni kurulum regresyon testi eklendi; 56 test doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 08 — 56/56 doğrulandı; sıradaki paket en az beş yeni test**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -152,3 +152,5 @@
 > VPS izole checkout doğrulaması (`7c7126d`): TypeScript başarılı; Vitest 3 dosya, 51/51 başarılı (Vault 33, canonical 10, Master Key 8). Yeni migration scrub kodu mevcut testlerle uyumlu; scrub rename/fsync başarısızlığına özel yeni regresyon testi henüz yok. Canlı dağıtım yapılmadı.
 
 > Altıncı toplu paket: `f0a2900` metadata korunması; `6a8252f` kurulum fsync hatasında eski config korunması; `0467eeb` fsync hatasında temp dosya temizliği; `ac372fd` null config reddi; `d4aad25` boş veritabanı adının reddi. Son doğrulanan 51/51; yeni hedef 56/56. Yeni testler henüz çalıştırılmadı. Vault migration scrub için doğrudan hata enjeksiyonu testleri ayrıca bekliyor.
+
+> İzole VPS checkout `4ae9493`: `npm run type-check` başarılı; Vitest 3 dosya, 56/56 başarılı (System Secrets 38, Canonical 10, Master Key 8). Beş yeni test doğrulandı. Vault migration scrub hata enjeksiyonu testleri henüz bekliyor. Canlı Docker veya main değiştirilmedi.
