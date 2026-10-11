@@ -101,7 +101,8 @@ async function resolveDevice(token?: string | null): Promise<Device | null> {
   if (db.postgresRepo?.isReady()) {
     foundDev = await db.postgresRepo.getDeviceByApiKey(cleanToken).catch(() => null);
   }
-  if (!foundDev) {
+  // Production must not accept a stale in-memory device after PostgreSQL rejects its key.
+  if (!foundDev && process.env.NODE_ENV !== 'production') {
     foundDev = db.getDeviceByApiKey(cleanToken) || null;
   }
   if (!foundDev) return null;
