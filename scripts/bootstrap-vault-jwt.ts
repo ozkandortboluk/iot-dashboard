@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     description: 'Production JWT authentication secret',
     isSensitive: true,
     updatedBy: 'vault_bootstrap_cli',
+    skipPostgresBackup: true,
   });
 
   if (systemSecretsService.getSecret('authentication.jwt_secret') !== secret) {
