@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Toplu regresyon doğrulaması (34 test bekliyor)**
+> **📍 ŞU ANKİ KONUM: 05 — Kalan riskler ve regresyon incelemesi (34/34 geçti)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -43,12 +43,12 @@
 │   ├── Vault yazma hatasında eski parolayı koru            ✅
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ✅
 │   ├── Metadata senkronizasyonu ve kısmi kayıt riski       🔄
-│   └── Config yazma hatasında Vault parola rollback       🔄
+│   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (e89787d)                       ✅
-│   ├── İzole Vault testleri (e89787d: 31/31)              ✅
-│   ├── Üç yeni regresyon testi (34 hedef)                  ⏳
+│   ├── npm run type-check (b4397fa)                       ✅
+│   ├── İzole Vault testleri (b4397fa: 34/34)              ✅
+│   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -94,4 +94,4 @@
 
 > Son doğrulama: `e89787d` — TypeScript başarılı, 31/31 Vault testi geçti. Metadata yazma hatası regresyon testi henüz eklenmedi.
 
-> Toplu doğrulama bekliyor: `e404007` metadata başarılı/başarısız kaydı testleri; `a28279a` config başarısızlığında Vault parola geri yükleme; `61e1d28` rollback testi. Önceki 31 test geçti, yeni toplam 34 test henüz çalıştırılmadı.
+> Toplu doğrulama tamamlandı: `b4397fa` — TypeScript kontrolü ve 34/34 izole Vault testi başarılı. Kalan risk: ilk kez parola oluşturulurken config kaydı başarısız olursa Vault'daki yeni parolanın geri alınması; ayrıca OTA/DB test uyarılarının ayrıştırılması.
