@@ -15,6 +15,7 @@ export default defineConfig({
       'src/tests/trust_proxy_policy.test.ts',
       'src/tests/http_origin_security.test.ts',
       'src/tests/ws_upgrade_path.test.ts',
+      'src/tests/docker_runtime_security.test.ts',
     ],
   },
 });
