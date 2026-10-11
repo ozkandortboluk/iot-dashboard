@@ -336,9 +336,13 @@ export class SetupService {
       try {
         writeRuntimeConfigAtomically(payload);
       } catch (error) {
-        if (hasNewPassword && oldPassword && oldPassword !== config.password) {
+        if (hasNewPassword && oldPassword !== config.password) {
           try {
-            systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'setup_rollback');
+            if (systemSecretsService.getSecret('database.password') && !oldPassword) {
+              systemSecretsService.rollbackNewDatabasePasswordLocally(config.password!);
+            } else if (oldPassword) {
+              systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'setup_rollback');
+            }
           } catch (rollbackError) {
             systemLogger.error('security', 'Runtime config failure: Vault password rollback failed');
             throw new Error('Runtime config failed and Vault password rollback failed', { cause: rollbackError });
