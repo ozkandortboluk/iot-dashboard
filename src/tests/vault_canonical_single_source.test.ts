@@ -180,7 +180,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     }));
 
     // Verify .db_config.json on disk contains no plaintext password
-    const runtimeConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+    const runtimeConfigPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
     if (fs.existsSync(runtimeConfigPath)) {
       const savedConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
       expect(savedConfig.password).toBeUndefined();
