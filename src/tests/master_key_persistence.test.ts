@@ -142,4 +142,23 @@ describe('Master key / persistent key protection', () => {
     expect(masterKeyProvider.getStatus().configured).toBe(false);
   });
 
+  it('retains the same production Docker master key across cache resets', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    const keyHex = 'cd'.repeat(32);
+    const originalExists = fs.existsSync.bind(fs);
+    const originalRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      String(file) === '/run/secrets/encryption_key' ? true : originalExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      String(file) === '/run/secrets/encryption_key' ? keyHex : (originalRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()?.toString('hex')).toBe(keyHex);
+    masterKeyProvider.resetCache();
+    expect(masterKeyProvider.getKey()?.toString('hex')).toBe(keyHex);
+    expect(masterKeyProvider.getStatus().source).toBe('docker_secret');
+  });
+
 });
