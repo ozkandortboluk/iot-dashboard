@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Test doğrulama / asenkron yazma düzeltmesinin yeniden testi**
+> **📍 ŞU ANKİ KONUM: 04 — Güvenli dosya işlemleri ve hata senaryoları**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -9,7 +9,7 @@
 > **Durumlar:** ✅ Tamamlandı · 🔄 Devam ediyor · ⏳ Bekliyor · ⚠️ Engelli / doğrulama gerekiyor
 
 ```text
-📍 05 TEST DOĞRULAMA — ŞU AN BURADAYIZ
+📍 04 GÜVENLİ DOSYA İŞLEMLERİ — ŞU AN BURADAYIZ
 │
 ├── 01. İlk teşhis ve risk analizi                         ✅
 │   ├── Vault parola taşıma / erken temizleme riski         ✅
@@ -22,7 +22,7 @@
 │   └── Çift parola yazımını kaldır                        ✅
 │       └── TypeScript kontrolü (d8ef5a6): başarılı        ✅
 │
-├── 03. Test izolasyonu                                     🔄
+├── 03. Test izolasyonu                                     ✅
 │   ├── Ayrı test veri dizini desteği (setup/Vault)         ✅
 │   ├── Geçici dizin ve özel Vitest yapılandırması          ✅
 │   ├── Test dosyalarının DB config yollarını ayır          ✅
@@ -34,19 +34,19 @@
 │   ├── Tanımsız test değişkenini düzelt                    ✅
 │   ├── Testte PostgreSQL Pool oluşturmayı engelle         ✅
 │   ├── Testte asenkron yerel DB yazmasını kapat            ✅
-│   └── Test izolasyonunu yeniden doğrula                   ⏳
+│   └── Test izolasyonunu yeniden doğrula                   ✅
 │
-├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
+├── 04. Hata senaryoları ve güvenli dosya işlemleri         🔄 📍
 │   ├── Legacy .db_config.json temizliğini atomik yap       ⚠️
 │   ├── Normal config kaydını atomik yap                    ⚠️
 │   ├── Vault yazma hatasında eski parolayı koru            ⏳
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
 │
-├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (önceki commit)                  ✅
-│   ├── İzole Vault testleri (önceki commit: 27/27)         ✅
-│   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ⏳
+├── 05. Doğrulama                                           🔄
+│   ├── npm run type-check (a7b3b91)                       ✅
+│   ├── İzole Vault testleri (a7b3b91: 27/27)              ✅
+│   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
 │
