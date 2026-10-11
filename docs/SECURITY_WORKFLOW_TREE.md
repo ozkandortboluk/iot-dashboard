@@ -42,11 +42,11 @@
 │   ├── Atomik rename hatası regresyon testi               ✅
 │   ├── Vault yazma hatasında eski parolayı koru            ✅
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ✅
-│   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
+│   └── Metadata senkronizasyonu ve kısmi kayıt riski       🔄
 │
 ├── 05. Doğrulama                                           🔄
-│   ├── npm run type-check (a7b3b91)                       ✅
-│   ├── İzole Vault testleri (841ea31: 31/31)              ✅
+│   ├── npm run type-check (e89787d)                       ✅
+│   ├── İzole Vault testleri (e89787d: 31/31)              ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -89,3 +89,5 @@
 - Engellenen değişiklikler tamamlandı olarak gösterilmez.
 - Çalışmalar yalnızca bu güvenlik dalında sürer. `main` ve çalışan Docker ortamı kullanıcı onayı olmadan değiştirilmez.
 - Kullanıcıya ilerleme bildirirken bu dosyanın yolu ve mevcut 📍 adımı belirtilir.
+
+> Son doğrulama: `e89787d` — TypeScript başarılı, 31/31 Vault testi geçti. Metadata yazma hatası regresyon testi henüz eklenmedi.
