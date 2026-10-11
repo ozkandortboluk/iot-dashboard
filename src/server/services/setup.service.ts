@@ -137,22 +137,23 @@ export class SetupService {
           if (parsed.password && typeof parsed.password === 'string' && !parsed.password.includes('••••')) {
             pass = parsed.password;
             systemLogger.warn('security', '[Security Migration] .db_config.json içinde eski plaintext şifre tespit edildi. Güvenli Vault kasasına taşınıyor.');
-            systemSecretsService.setSecret('database.password', parsed.password, {
-              category: 'database',
-              label: 'PostgreSQL Password',
-              isSensitive: true,
-              updatedBy: 'legacy_migration',
-            }).catch(() => {});
-
-            // Scrub password from disk immediately
             try {
+              // Only scrub the legacy file after the encrypted password is durably
+              // written and read back from the authoritative local Vault.
+              systemSecretsService.migrateLegacyDatabasePassword(parsed.password);
               const scrubbed = { ...parsed };
               delete scrubbed.password;
               scrubbed.hasPassword = true;
               scrubbed.passwordRef = 'vault:database.password';
               scrubbed.updatedAt = new Date().toISOString();
               fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
-            } catch {}
+              fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+            } catch (migrationError: any) {
+              systemLogger.error('security', 'Legacy PostgreSQL parola taşıma veya dosya temizleme işlemi başarısız oldu; manuel kontrol gerekli.');
+              // Do not silently report a successful migration. The original
+              // plaintext remains when Vault persistence fails.
+              throw migrationError;
+            }
           } else {
             // In normal operation, retrieve password securely from Central Security Vault
             pass = systemSecretsService.getDatabasePassword();
