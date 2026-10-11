@@ -39,14 +39,14 @@
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         🔄 📍
 │   ├── Legacy .db_config.json temizliğini atomik yap       ✅
 │   ├── Normal config kaydını atomik yap                    ✅
-│   ├── Atomik rename hatası regresyon testi               🔄
+│   ├── Atomik rename hatası regresyon testi               ✅
 │   ├── Vault yazma hatasında eski parolayı koru            ⏳
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
 │
 ├── 05. Doğrulama                                           🔄
 │   ├── npm run type-check (a7b3b91)                       ✅
-│   ├── İzole Vault testleri (d8ac714: 27/27)              ✅
+│   ├── İzole Vault testleri (549d102: 28/28)              ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -77,7 +77,7 @@
 | `9c81218` | İzole Vault testlerinde PostgreSQL Pool koruması |
 | `c0dc864` | Testte asenkron yerel DB dosyası yazımını devre dışı bırakma |
 | `010244f` | Runtime DB config ve legacy temizliği için atomik değiştirme (mevcut 27 test geçti) |
-| `0fa8b3b` | Atomik rename hatasında eski config ve geçici dosya temizliği testi (çalıştırılmadı) |
+| `0fa8b3b` | Atomik rename hatasında eski config ve geçici dosya temizliği testi (28/28 geçti) |
 
 ## Güncelleme kuralı
 
