@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — 49/49 doğrulandı; sonraki toplu güvenlik incelemesi**
+> **📍 ŞU ANKİ KONUM: 06 — Kurulum tamamlama paketi; 51 test toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -142,3 +142,5 @@
 > Yeni toplu regresyon paketi: `1c5cdbd` dosya fsync hatasında mevcut runtime config ve geçici dosya temizliği; `b3532f0` bozuk JSON ile kurulum tamamlanmasının reddi; `1f30b5a` eksik host bilgisinde kurulum tamamlanmasının reddi. Son başarılı 46/46, yeni hedef 49/49. Bu üç yeni test henüz çalıştırılmadı. Canlı sunucu ve main değişmedi.
 
 > VPS izole checkout doğrulaması (`741b11e`): TypeScript başarılı; Vitest 3 dosya, 49/49 test başarılı (Vault 31, canonical 10, Master Key 8). Bozuk JSON, eksik DB koordinatları, disk fsync ve rename başarısızlığı logları beklenen negatif test çıktılarıdır. Üretim entegrasyon testi ve canlı dağıtım yapılmadı.
+
+> Dördüncü paket: `443e72a` kurulumun başarılı tamamlanması ve runtime config içinden legacy plaintext parolanın çıkarılması; `3b26772` kurulum tamamlama commit hatasında disk üzerinde completed=true yazılmaması. Önceki doğrulama 49/49, yeni hedef 51/51. Yeni testler henüz çalıştırılmadı. Canlı kurulum entegrasyonu ayrıca bekliyor.
