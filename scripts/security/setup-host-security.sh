@@ -73,5 +73,31 @@ if [ "$MODE" = "--apply" ]; then
     echo "After verifying SSH rules and alternate access, run: sudo ufw enable"
   fi
   systemctl enable --now fail2ban
-  echo "Host rules prepared; existing rules preserved. No automatic UFW activation."
+  if ! fail2ban-client status sshd >/dev/null 2>&1; then
+    JAIL_FILE=/etc/fail2ban/jail.d/nexusnode-sshd.local
+    if [ -e "$JAIL_FILE" ]; then
+      echo "ERROR: SSH jail unavailable; existing NexusNode jail file will not be overwritten" >&2
+      exit 1
+    fi
+    cat > "$JAIL_FILE" <<'JAIL'
+[sshd]
+enabled = true
+backend = systemd
+bantime = 3600
+findtime = 600
+maxretry = 3
+JAIL
+    chmod 0644 "$JAIL_FILE"
+    if ! fail2ban-client -t; then
+      rm -f "$JAIL_FILE"
+      echo "ERROR: Fail2ban configuration test failed; new jail file removed" >&2
+      exit 1
+    fi
+    systemctl restart fail2ban
+  fi
+  if ! fail2ban-client status sshd >/dev/null 2>&1; then
+    echo "ERROR: SSH jail is not active" >&2
+    exit 1
+  fi
+  echo "SSH jail active. Host rules prepared; existing rules preserved. No automatic UFW activation."
 fi
