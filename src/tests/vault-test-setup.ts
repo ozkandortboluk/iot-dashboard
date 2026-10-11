@@ -19,11 +19,16 @@ const isolatedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-vault-tes
 process.env.NEXUS_TEST_DATA_DIR = isolatedDirectory;
 
 // Guard against unexpected attempts to open a real PostgreSQL socket.
-vi.mock('pg', () => ({
-  default: { Pool: class {
-    constructor() { throw new Error('Vault unit tests must not create a PostgreSQL pool'); }
-  } },
-}));
+vi.mock('pg', async (importOriginal) => {
+  const original = await importOriginal<typeof import('pg')>();
+  const GuardedPool = class extends original.Pool {
+    constructor(...args: ConstructorParameters<typeof original.Pool>) {
+      super(...args);
+      throw new Error('Vault unit tests must not create a PostgreSQL pool');
+    }
+  };
+  return { ...original, Pool: GuardedPool, default: { ...original.default, Pool: GuardedPool } };
+});
 
 afterAll(() => {
   fs.rmSync(isolatedDirectory, { recursive: true, force: true });
