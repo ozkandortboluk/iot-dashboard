@@ -4,10 +4,7 @@ import { systemLogger } from '../services/systemLogger.service.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { authenticateUser, requireAdmin } from '../middleware/auth.js';
 import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
-import { setupService } from '../services/setup.service.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
-import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
-import { db } from '../db.js';
 
 export const sshTunnelRouter = Router();
 
@@ -59,21 +56,9 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
     return next();
   }
 
-  // 2. Allow SSH tunnel management in development/preview environments (e.g. AI Studio preview, local dev)
-  // or when setup is incomplete or when PostgreSQL is not connected/ready.
-  const env = resolveRuntimeEnvironment();
-  const isDevOrPreview = env !== 'vps';
-  const isDbReady = Boolean(db.postgresRepo?.isReady()) && db.getDatabaseState() === 'READY';
-  const isSetupDone = setupService.isSetupCompleted();
-
-  if (isDevOrPreview || !isDbReady || !isSetupDone) {
-    return next();
-  }
-
-  // 3. In production with active DB and completed setup, verify authenticated Admin session
-  return authenticateUser(req, res, () => {
-    return requireAdmin(req, res, next);
-  });
+  // No anonymous bypass in development, during setup, or when PostgreSQL is unavailable.
+  // A valid setup/recovery token (checked above) or an authenticated admin is mandatory.
+  return authenticateUser(req, res, () => requireAdmin(req, res, next));
 }
 
 /**
