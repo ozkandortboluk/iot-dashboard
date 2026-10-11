@@ -55,3 +55,24 @@ describe('Production device authentication policy', () => {
     expect(source).toContain("process.env.VPS_PRODUCTION !== 'true'");
   });
 });
+
+
+describe('Unified device message production authorization safeguards', () => {
+  it('does not authorize device messages from unauthenticated sockets', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    expect(source).toContain('if (!ws.isAuth || (!ws.device && !ws.user)) return null;');
+  });
+  it('requires PostgreSQL readiness before production device lookup', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    expect(source).toContain('if (production && !db.postgresRepo?.isReady()) return null;');
+    expect(source).toContain('let targetDevice = production ? null :');
+  });
+  it('rejects revoked and malformed-expiry device credentials during dispatch', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    expect(source).toContain('targetDevice.apiKeyRevoked === true');
+    expect(source).toContain('!Number.isFinite(new Date(targetDevice.apiKeyExpiresAt).getTime())');
+  });
+});
