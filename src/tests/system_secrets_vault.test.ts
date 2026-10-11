@@ -487,6 +487,19 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('rejects incomplete database coordinates when completing setup', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const previous = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      try {
+        fs.writeFileSync(configPath, JSON.stringify({ host: ' ', database: 'test' }), { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
+        expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).isCompleted).toBeUndefined();
+      } finally {
+        if (previous === null) fs.rmSync(configPath, { force: true });
+        else fs.writeFileSync(configPath, previous, { mode: 0o600 });
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
