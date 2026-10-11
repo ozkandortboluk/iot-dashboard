@@ -314,38 +314,31 @@ export class SetupService {
         updatedAt: new Date().toISOString(),
       };
 
+      // Persist and verify the password in the authoritative local Vault first.
+      if (config.password && !config.password.includes('••••')) {
+        systemSecretsService.persistDatabasePasswordLocally(config.password, 'setup_wizard');
+      }
+
+      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(payload, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+
       this.runtimeConfig = { ...config };
       this.isCompletedState = payload.isCompleted;
       if (payload.completedAt) this.completedAtDate = payload.completedAt;
 
-      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(payload, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600, // Read/Write only by owner process
-      });
-
-      // Ensure permissions in case umask relaxed it
-      try {
-        fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
-      } catch {}
-
-      // Synchronize password to AES-256-GCM encrypted system secrets vault
-      if (config.password && !config.password.includes('••••')) {
-        systemSecretsService.setSecret('database.password', config.password, {
-          category: 'database',
-          label: 'PostgreSQL Password',
-          isSensitive: true,
-          updatedBy: 'setup_wizard',
-        }).catch(() => {});
-      }
-
+      // Mirror non-password metadata; report failures rather than hiding them.
       systemSecretsService.updateDatabaseSecrets({
         host: config.host,
         port: config.port,
         database: config.database,
         user: config.user,
-        password: config.password,
         sslMode: config.sslMode,
-      }, 'setup_wizard').catch(() => {});
+      }, 'setup_wizard').catch((err: any) => {
+        systemLogger.error('database', 'Vault database metadata synchronization failed');
+      });
 
       // Synchronize databaseSettings into persistent db.json store
       // SEC-07: Passwords must NEVER be stored in plaintext in db.json!
