@@ -1413,24 +1413,45 @@ export class SystemSecretsService {
   // ============================================================================
 
   public async updateDatabaseSecrets(input: DatabaseSecretsUpdateInput, updatedBy?: string): Promise<void> {
-    if (input.host !== undefined) {
-      await this.setSecret('database.host', input.host, { category: 'database', label: 'PostgreSQL Host', isSensitive: false, updatedBy });
-    }
-    if (input.port !== undefined) {
-      await this.setSecret('database.port', String(input.port), { category: 'database', label: 'PostgreSQL Port', isSensitive: false, updatedBy });
-    }
-    if (input.database !== undefined) {
-      await this.setSecret('database.database', input.database, { category: 'database', label: 'PostgreSQL Database', isSensitive: false, updatedBy });
-    }
-    if (input.user !== undefined) {
-      await this.setSecret('database.user', input.user, { category: 'database', label: 'PostgreSQL User', isSensitive: false, updatedBy });
-    }
-    if (input.sslMode !== undefined) {
-      await this.setSecret('database.sslMode', input.sslMode, { category: 'database', label: 'PostgreSQL SSL Mode', isSensitive: false, updatedBy });
-    }
+    if (!this.isLoaded) this.loadFromLocalVault();
+
+    const updates: Array<[string, string, string, boolean]> = [];
+    if (input.host !== undefined) updates.push(['database.host', input.host, 'PostgreSQL Host', false]);
+    if (input.port !== undefined) updates.push(['database.port', String(input.port), 'PostgreSQL Port', false]);
+    if (input.database !== undefined) updates.push(['database.database', input.database, 'PostgreSQL Database', false]);
+    if (input.user !== undefined) updates.push(['database.user', input.user, 'PostgreSQL User', false]);
+    if (input.sslMode !== undefined) updates.push(['database.sslMode', input.sslMode, 'PostgreSQL SSL Mode', false]);
     if (input.password !== undefined && !isMaskedSecret(input.password)) {
-      await this.setSecret('database.password', input.password, { category: 'database', label: 'PostgreSQL Password', isSensitive: true, updatedBy });
+      updates.push(['database.password', input.password, 'PostgreSQL Password', true]);
     }
+    if (updates.length === 0) return;
+
+    const previous = new Map(this.inMemorySecrets);
+    try {
+      for (const [key, value, label, isSensitive] of updates) {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          this.inMemorySecrets.delete(key);
+          continue;
+        }
+        const existing = this.inMemorySecrets.get(key);
+        const version = existing?.version ?? 1;
+        this.inMemorySecrets.set(key, {
+          key, category: 'database', label,
+          encryptedValue: encryptSecret(trimmed), isSensitive,
+          keyId: existing?.keyId ?? `${key.replace(/[^a-zA-Z0-9]/g, '_')}_v${version}`,
+          version, previousVersions: existing?.previousVersions,
+          updatedAt: new Date().toISOString(), updatedBy,
+        });
+      }
+      // One authoritative snapshot: all fields commit together or none do.
+      this.saveToLocalVault();
+    } catch (error) {
+      this.inMemorySecrets = previous;
+      throw error;
+    }
+    // PostgreSQL is only a best-effort secondary mirror.
+    await this.persistToPostgres();
   }
 
   public async updateEmailSecrets(input: EmailSecretsUpdateInput, updatedBy?: string): Promise<void> {
