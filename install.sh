@@ -325,29 +325,41 @@ if [ "$USE_DOCKER_PROXY" = true ]; then
 elif command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^nexus_proxy$"; then
   SERVICES+=("nexus_proxy")
 fi
-MAX_WAIT_SECONDS=60
-START_TIME=$(date +%s)
+MAX_WAIT_SECONDS=120
+HEALTH_FAILURE=false
 
 for svc in "${SERVICES[@]}"; do
   log_info "Servis bekleniyor: ${CLR_BOLD}${svc}${CLR_RESET}..."
+  START_TIME=$(date +%s)
   while true; do
     CURRENT_TIME=$(date +%s)
     ELAPSED=$((CURRENT_TIME - START_TIME))
 
     if [ "$ELAPSED" -gt "$MAX_WAIT_SECONDS" ]; then
-      log_warn "Servis (${svc}) beklenen sürede healthy durumuna geçmedi. Loglar için: docker logs ${svc}"
+      log_error "Servis (${svc}) zaman asimi. Loglar: docker logs ${svc}"
+      HEALTH_FAILURE=true
       break
     fi
 
-    STATUS=$(docker inspect --format='{{json .State.Health.Status}}' "$svc" 2>/dev/null || echo "\"running\"")
-    if [ "$STATUS" = "\"healthy\"" ] || [ "$STATUS" = "\"running\"" ]; then
+    STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing-healthcheck{{end}}' "$svc" 2>/dev/null || echo missing-container)
+    if [ "$STATUS" = "healthy" ]; then
       log_success "Servis çalışıyor ve sağlıklı: ${svc}"
       break
     fi
 
+    if [ "$STATUS" = "unhealthy" ] || [ "$STATUS" = "missing-healthcheck" ] || [ "$STATUS" = "missing-container" ]; then
+      log_error "Servis (${svc}) saglik kontrolu basarisiz: ${STATUS}"
+      HEALTH_FAILURE=true
+      break
+    fi
     sleep 2
   done
 done
+
+if [ "$HEALTH_FAILURE" = true ]; then
+  log_fatal "Zorunlu servisler healthy olmadi; kurulum basarisiz."
+  exit 1
+fi
 
 # 10. Plugin Post-Start Hook
 run_setup_hooks "post-start"
