@@ -353,6 +353,8 @@ export class SystemSecretsService {
       updatedBy?: string;
       keyId?: string;
       version?: number;
+      /** One-shot maintenance tools may skip the optional PostgreSQL backup. */
+      skipPostgresBackup?: boolean;
     }
   ): Promise<void> {
     if (!this.isLoaded) this.loadFromLocalVault();
@@ -406,7 +408,9 @@ export class SystemSecretsService {
 
     this.inMemorySecrets.set(key, record);
     this.saveToLocalVault();
-    await this.persistToPostgres();
+    if (!meta.skipPostgresBackup) {
+      await this.persistToPostgres();
+    }
   }
 
   /**
