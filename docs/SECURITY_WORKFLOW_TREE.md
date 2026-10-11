@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — 43/43 doğrulandı; sonraki güvenlik risk paketi hazırlanıyor**
+> **📍 ŞU ANKİ KONUM: 05 — İkinci paket: runtime config dayanıklılığı; 44 test doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -130,3 +130,5 @@
 > Paket genişletmesi: `3a76c83` eksik üretim Docker secret durumunda ortam anahtarına düşmeme; `00b2219` geçersiz üretim secret'ını reddetme; `a86df99` üretim anahtarının cache sıfırlamada korunması. Master Key 8 test; genel toplam 43 test. Bu 6 yeni test henüz çalıştırılmadı; sonuç bekleniyor.
 
 > VPS izole checkout doğrulaması (`afce214`): `npm run type-check` başarılı; Vitest 3 dosya, 43/43 test başarılı (Vault 25, canonical 10, Master Key 8). Hata logları beklenen negatif senaryolardır. Gerçek Docker/PostgreSQL üretim entegrasyonu henüz doğrulanmadı.
+
+> İkinci paket: `1986f46` — `.db_config.json` atomik yazımında dosya fsync + desteklenen dosya sistemlerinde dizin fsync; `markSetupCompleted()` artık atomik yazıcıyı kullanıyor. `dde14d9` — fsync, 0600 izin ve JSON içeriği regresyon testi. Son başarılı test 43/43; yeni hedef 44/44, henüz doğrulanmadı.
