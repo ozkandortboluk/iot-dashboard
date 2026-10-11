@@ -403,6 +403,22 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(systemSecretsService.getDatabasePassword()).toBe(password);
     });
 
+    it('syncs runtime configuration before atomic replacement and restricts file permissions', () => {
+      const sync = vi.spyOn(fs, 'fsyncSync');
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      try {
+        setupService.saveRuntimeSecretConfig({
+          host: '127.0.0.1', port: 5432, database: 'durable_config',
+          user: 'durable_user', sslMode: 'disable',
+        });
+        expect(sync).toHaveBeenCalled();
+        expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).database).toBe('durable_config');
+      } finally {
+        sync.mockRestore();
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
