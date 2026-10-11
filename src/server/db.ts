@@ -72,7 +72,7 @@ import { DatabaseState } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
 import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser, isRealAdminUser } from './database/postgres.js';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.NEXUS_TEST_DATA_DIR && process.env.NODE_ENV === 'test' ? process.env.NEXUS_TEST_DATA_DIR : path.join(process.cwd(), 'data');
 const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
 const SYSTEM_CONFIG_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_system_config.json') : path.join(DATA_DIR, 'system_config.json');
 
