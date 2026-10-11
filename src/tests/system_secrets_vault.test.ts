@@ -453,6 +453,27 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('preserves the previous runtime configuration when disk synchronization fails', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const before = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      const originalSync = fs.fsyncSync;
+      const sync = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+        if (fs.fstatSync(fd).isFile()) throw new Error('simulated file sync failure');
+        return originalSync(fd);
+      });
+      try {
+        expect(() => setupService.saveRuntimeSecretConfig({
+          host: '127.0.0.3', port: 5432, database: 'sync_failure',
+          user: 'sync_failure', sslMode: 'disable',
+        })).toThrow('simulated file sync failure');
+        expect(fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null).toBe(before);
+        expect(fs.readdirSync(process.env.NEXUS_TEST_DATA_DIR!)
+          .filter(name => name.startsWith('.db_config.json.tmp.'))).toEqual([]);
+      } finally {
+        sync.mockRestore();
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
