@@ -833,6 +833,25 @@ export function initWebSocketServer(server: http.Server) {
         }
       }
 
+      // Device credentials can be revoked after the handshake; revalidate each heartbeat.
+      if (ws.device) {
+        if (!ws.sessionToken) {
+          try { ws.close(1008, 'Device credentials missing'); ws.terminate(); } catch {}
+          continue;
+        }
+        try {
+          const currentDevice = await resolveDevice(ws.sessionToken);
+          if (!currentDevice || currentDevice.id !== ws.device.id) {
+            try { ws.close(1008, 'Device credentials revoked or expired'); ws.terminate(); } catch {}
+            continue;
+          }
+          ws.device = currentDevice;
+        } catch {
+          try { ws.close(1008, 'Device verification failed'); ws.terminate(); } catch {}
+          continue;
+        }
+      }
+
       try {
         ws.ping();
       } catch {
