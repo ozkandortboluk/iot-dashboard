@@ -302,6 +302,20 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('preserves the actual Vault password when saving a masked password placeholder', () => {
+      const password = 'existing_secret_for_masked_config_test';
+      systemSecretsService.persistDatabasePasswordLocally(password, 'test');
+      setupService.saveRuntimeSecretConfig({
+        host: '10.0.0.7', port: 5432, database: 'masked_config_test',
+        user: 'masked_user', password: '••••••••', sslMode: 'disable',
+      });
+      const file = JSON.parse(fs.readFileSync(path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json'), 'utf8'));
+      expect(file.password).toBeUndefined();
+      expect(file.hasPassword).toBe(true);
+      expect(setupService.getRuntimeConfig()?.password).toBe(password);
+      expect(systemSecretsService.getDatabasePassword()).toBe(password);
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
