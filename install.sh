@@ -232,6 +232,17 @@ if [ "$HTTP_ONLY" = false ]; then
   fi
 fi
 
+# 6a. Apply hardening to an existing host Nginx site (Docker proxy is separate).
+# Do not install or replace system Nginx or its TLS certificates.
+if [ "$USE_DOCKER_PROXY" = false ] && [ -f /etc/nginx/sites-available/iot-dashboard ]; then
+  log_info "Mevcut sistem Nginx guvenlik kurallari kontrol ediliyor..."
+  if [ "${IS_ROOT:-false}" = true ]; then
+    bash ./scripts/setup/harden-system-nginx.sh
+  else
+    ${SUDO_CMD:-sudo} bash ./scripts/setup/harden-system-nginx.sh
+  fi
+fi
+
 # 7. Plugin Pre-Start Hook
 run_setup_hooks "pre-start"
 
