@@ -391,10 +391,14 @@ class LocalDatabase {
       }
     });
 
-    this.initPromise = this.initPostgresRepository().catch(() => false);
-    this.startPostgresAutoReconnect();
-    this.startAutoBackupWorker();
-    this.autoHealer.startWatchdog(30000);
+    if (process.env.NODE_ENV === 'test') {
+      this.initPromise = Promise.resolve(false);
+    } else {
+      this.initPromise = this.initPostgresRepository().catch(() => false);
+      this.startPostgresAutoReconnect();
+      this.startAutoBackupWorker();
+      this.autoHealer.startWatchdog(30000);
+    }
   }
 
   private initPromise: Promise<boolean> | null = null;
