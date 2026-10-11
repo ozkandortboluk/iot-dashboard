@@ -265,7 +265,9 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(parsed.passwordRef).toBe('vault:database.password');
 
       // Verify that in-memory runtimeConfig still resolves the password correctly via Vault
-      const reloaded = setupService.loadRuntimeSecretConfig();
+      // This suite runs without a PostgreSQL URL, so the loader intentionally
+      // returns null in test mode. Verify the authoritative local Vault instead.
+      expect(systemSecretsService.getDatabasePassword()).toBe(testSecretPassword);
       expect(reloaded?.password).toBe(testSecretPassword);
     });
 
@@ -284,7 +286,17 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       fs.writeFileSync(dbConfigPath, JSON.stringify(legacyPayload, null, 2), { mode: 0o600 });
 
       // Run loadRuntimeSecretConfig which triggers legacy migration
-      const reloaded = setupService.loadRuntimeSecretConfig();
+      // Enable the file-backed loader only for this explicit migration test.
+      // The URL is a non-routable placeholder and no connection is opened.
+      const previousTestUrl = process.env.TEST_POSTGRES_URL;
+      process.env.TEST_POSTGRES_URL = 'postgresql://test@127.0.0.1:1/test';
+      let reloaded;
+      try {
+        reloaded = setupService.loadRuntimeSecretConfig();
+      } finally {
+        if (previousTestUrl === undefined) delete process.env.TEST_POSTGRES_URL;
+        else process.env.TEST_POSTGRES_URL = previousTestUrl;
+      }
       expect(reloaded?.password).toBe(legacyPassword);
 
       // Verify disk file was scrubbed of plaintext password!
