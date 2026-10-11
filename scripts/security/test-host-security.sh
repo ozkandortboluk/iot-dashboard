@@ -95,3 +95,41 @@ fail2ban-client() {
         assert "ufw enable" not in lines, lines
     print("HOST_SECURITY_FRESH_HOST_MOCK_OK")
 PY
+
+# Simulate a missing SSH jail. Redirect jail writes into a temporary directory.
+python3 - "$PWD/scripts/security/setup-host-security.sh" <<'PY'
+import pathlib, subprocess, sys, tempfile
+s = pathlib.Path(sys.argv[1]).read_text()
+block = s[s.rfind('if [ "$MODE" = "--apply" ]; then'):]
+with tempfile.TemporaryDirectory() as d:
+    jail = pathlib.Path(d) / "nexusnode-sshd.local"
+    log = pathlib.Path(d) / "events"
+    block = block.replace('/etc/fail2ban/jail.d/nexusnode-sshd.local', str(jail))
+    stub = """set -euo pipefail
+MODE=--apply
+SSH_PORTS=22
+EVENTS="$1"
+ufw() {
+  printf 'ufw %s\\n' "$*" >> "$EVENTS"
+  if [ "${1:-}" = status ]; then echo 'Status: active'; fi
+}
+systemctl() { printf 'systemctl %s\\n' "$*" >> "$EVENTS"; }
+fail2ban-client() {
+  printf 'fail2ban-client %s\\n' "$*" >> "$EVENTS"
+  if [ "${1:-}" = status ] && [ "${2:-}" = sshd ]; then
+    if [ ! -f "$EVENTS.restarted" ]; then return 1; fi
+  fi
+  return 0
+}
+""" + block
+    # Restart marks the jail as available, without calling real systemctl.
+    stub = stub.replace('systemctl() { printf', 'systemctl() { if [ "${1:-}" = restart ]; then touch "$EVENTS.restarted"; fi; printf')
+    r = subprocess.run(["bash", "-c", stub, "test", str(log)], capture_output=True, text=True)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert jail.is_file(), "missing jail file"
+    cfg = jail.read_text()
+    assert "[sshd]" in cfg and "enabled = true" in cfg and "maxretry = 3" in cfg
+    calls = log.read_text()
+    assert "fail2ban-client -t" in calls and "systemctl restart fail2ban" in calls
+    print("HOST_SECURITY_MISSING_JAIL_MOCK_OK")
+PY
