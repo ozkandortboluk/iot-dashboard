@@ -364,7 +364,7 @@ export class SystemSecretsService {
    * Synchronous local-only migration: persist and verify before deleting legacy plaintext.
    * Does not depend on PostgreSQL availability during startup.
    */
-  public migrateLegacyDatabasePassword(password: string): void {
+  public persistDatabasePasswordLocally(password: string, updatedBy: string = 'setup_wizard'): void {
     if (!this.isLoaded) this.loadFromLocalVault();
     if (!password || isMaskedSecret(password)) {
       throw new Error('Legacy database password is empty or masked');
@@ -381,7 +381,7 @@ export class SystemSecretsService {
       version: previous?.version ?? 1,
       previousVersions: previous?.previousVersions,
       updatedAt: new Date().toISOString(),
-      updatedBy: 'legacy_migration',
+      updatedBy,
     };
     this.inMemorySecrets.set(key, record);
     try {
@@ -397,6 +397,10 @@ export class SystemSecretsService {
       else this.inMemorySecrets.delete(key);
       throw err;
     }
+  }
+
+  public migrateLegacyDatabasePassword(password: string): void {
+    this.persistDatabasePasswordLocally(password, 'legacy_migration');
   }
 
   /**
