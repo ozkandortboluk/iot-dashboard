@@ -5,52 +5,40 @@
 # ==============================================================================
 
 perform_backup() {
-  log_step "Yedekleme İşlemi (Disaster Recovery Backup) Başlatılıyor..."
-
-  local BACKUP_DIR="./backups"
-  local TIMESTAMP
-  TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-  local BACKUP_ARCHIVE="${BACKUP_DIR}/nexus_backup_${TIMESTAMP}.tar.gz"
-
-  mkdir -p "$BACKUP_DIR"
-
-  # Dump database if container is healthy
-  local DB_DUMP_FILE="${BACKUP_DIR}/db_dump_${TIMESTAMP}.sql"
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "nexus_timescaledb"; then
-    log_info "TimescaleDB veritabanı yedeği alınıyor (pg_dump)..."
-    docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$DB_DUMP_FILE" 2>/dev/null || true
+  log_step "Yedekleme başlatılıyor..."
+  local dir="./backups" stamp archive stage ok=false
+  stamp=$(date +"%Y%m%d_%H%M%S")
+  archive="$dir/nexus_backup_$stamp.tar.gz"
+  mkdir -p "$dir" || return 1
+  stage=$(mktemp -d "$dir/.backup-stage.XXXXXXXX") || return 1
+  chmod 700 "$stage"
+  if ! docker inspect nexus_timescaledb >/dev/null 2>&1 ||
+     ! docker inspect nexus_app >/dev/null 2>&1; then
+    log_error "Veritabanı veya uygulama konteyneri bulunamadı."
+  elif ! docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$stage/db_dump.sql"; then
+    log_error "pg_dump başarısız."
+  elif [ ! -s "$stage/db_dump.sql" ]; then
+    log_error "pg_dump boş dosya oluşturdu."
+  elif ! mkdir -p "$stage/app_data" ||
+       ! docker cp nexus_app:/app/data/. "$stage/app_data/"; then
+    log_error "Uygulama volume verileri kopyalanamadı."
+  else
+    log_warn "Ana şifreleme anahtarı ve PostgreSQL parolası arşive alınmaz; ayrı güvenli yedek gerekir."
+    # Store only the SQL dump and app volume snapshot; never include plaintext host secrets.
+    if (umask 077; tar -C "$stage" -czf "$PWD/${archive#./}.part" db_dump.sql app_data) &&
+       tar -tzf "$archive.part" >/dev/null &&
+       mv "$archive.part" "$archive"; then
+      chmod 600 "$archive"
+      ok=true
+    fi
   fi
-
-  log_info "Şifreli Kasa (Vault), veriler ve veritabanı yedeği arşivleniyor..."
-  log_warn "GÜVENLİK SINIRI: Root şifreleme anahtarı (encryption_key), düz metin parolalar ve .env arşive konulmaz! Orijinal ENCRYPTION_KEY kök anahtarınızı harici güvenli bir kasada ayrı saklayınız."
-  local TARGETS=()
-  [ -d "./data" ] && TARGETS+=("./data")
-  [ -d "./docker/certs" ] && TARGETS+=("./docker/certs")
-  [ -f "$DB_DUMP_FILE" ] && TARGETS+=("$DB_DUMP_FILE")
-
-  if [ ${#TARGETS[@]} -eq 0 ]; then
-    mkdir -p "./data"
-    TARGETS+=("./data")
+  rm -f "$archive.part"
+  rm -rf "$stage"
+  if [ "$ok" != true ]; then
+    log_error "Yedekleme başarısız; eksik arşiv bırakılmadı."
+    return 1
   fi
-
-  # Strictly exclude root master encryption key, plaintext secrets and env files from unencrypted archive
-  tar \
-    --exclude='./secrets/encryption_key' \
-    --exclude='data/.vault_key' \
-    --exclude='./secrets/postgres_password' \
-    --exclude='./secrets/db_password' \
-    --exclude='./secrets/ota_signing_key' \
-    --exclude='./secrets/ota_private_key' \
-    --exclude='./secrets/jwt_secret' \
-    --exclude='./secrets/session_secret' \
-    --exclude='./.env' \
-    --exclude='./.env.*' \
-    -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
-  rm -f "$DB_DUMP_FILE"
-
-  local SIZE
-  SIZE=$(du -h "$BACKUP_ARCHIVE" | awk '{print $1}')
-  log_success "Yedekleme tamamlandı! Dosya: ${CLR_BOLD}${BACKUP_ARCHIVE}${CLR_RESET} (${SIZE})"
+  log_success "Yedekleme tamamlandı: $archive"
 }
 
 perform_restore() {
