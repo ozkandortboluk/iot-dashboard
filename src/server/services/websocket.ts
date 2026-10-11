@@ -823,6 +823,11 @@ export function initWebSocketServer(server: http.Server) {
           const users = await db.getUsersAsync();
           currentUser = users.find((u: any) => u.id === ws.user!.id);
         } catch {
+          // Production must not authorize an account using stale in-memory state.
+          if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+            try { ws.close(1008, 'Account verification failed'); ws.terminate(); } catch {}
+            continue;
+          }
           currentUser = db.getUsers().find((u: any) => u.id === ws.user!.id);
         }
         if (!currentUser || currentUser.status === 'suspended' || currentUser.deletedAt) {
