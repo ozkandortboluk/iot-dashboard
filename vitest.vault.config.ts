@@ -10,6 +10,7 @@ export default defineConfig({
     include: [
       'src/tests/system_secrets_vault.test.ts',
       'src/tests/vault_canonical_single_source.test.ts',
+      'src/tests/master_key_persistence.test.ts',
     ],
   },
 });
