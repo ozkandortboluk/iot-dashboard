@@ -28,7 +28,8 @@
 │   ├── Test dosyalarının DB config yollarını ayır          ✅
 │   ├── Dış bağlantı ortam değişkenlerini engelle           ✅
 │   ├── db.ts veri dosyalarını da geçici dizine yönlendir   ✅
-│   ├── Gerçek DB ve arka plan servislerini mock/izole et   ⏳
+│   ├── Gerçek DB ve arka plan servislerini mock/izole et   🔄
+│   ├── Testte DB başlatma ve zamanlayıcıları kapat         ✅
 │   └── Test izolasyonunu doğrula                           ⏳
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
@@ -63,6 +64,7 @@
 | `1f143bd`, `6bcc2d0` | Test dosyası yolları |
 | `6791518` | DB bağlantı değişkeni korumaları |
 | `8a8b0cf` | db.ts test verilerini geçici dizine yönlendirme |
+| `df0c130`, `25229a7` | Testte DB başlangıcı ve arka plan zamanlayıcılarını devre dışı bırakma |
 
 ## Güncelleme kuralı
 
