@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Master key yeniden başlatma / yarış / izin testleri (40 hedef, bekliyor)**
+> **📍 ŞU ANKİ KONUM: 05 — Master key risk incelemesi; 40 test toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -116,3 +116,12 @@
 > `99c4359` izole VPS checkout doğrulaması: TypeScript geçti; 3 test dosyasında toplam 37/37 test geçti (Vault 25, canonical 10, master key 2). Üretim entegrasyon testi değildir. Kalan: kalıcı anahtarın restart ve izin davranışları ile dosya yarışları için ilave risk değerlendirmesi.
 
 > `7e90f86`: geliştirmede kalıcı anahtar oluşturma `wx` ile özel; eşzamanlı EEXIST halinde var olan anahtarı kullanır; yazma hatasında ephemeral anahtar üretmez. `9fd3bb2`: yeniden başlatma, yarış ve izin hatası için 3 Master Key testi. TypeScript ve 40/40 hedefi henüz doğrulanmadı. Üretim Docker secret yolu değişmedi.
+
+## Master Key — sonraki çalışma paketi için risk kaydı
+
+- **Öncelik P1:** Üretim Docker secret dosyası yokken veya geçersizken alternatif kaynağa düşülmediği ayrıca regresyon testiyle doğrulanmalı. Mevcut kod bunu amaçlıyor; yeni test henüz eklenemedi.
+- **Öncelik P1:** Geliştirme ortamında üst öncelikli Docker/yerel secret dosyası mevcut ama okunamazsa alt öncelikli kaynağa geçişin, önceki şifreli Vault verilerini erişilemez bırakma riski incelenmeli.
+- **Öncelik P1:** Master key dosyası için sembolik bağlantı, sahiplik ve dosya izinleri değerlendirmesi gerekiyor; yalnızca `mode: 0o600` ile oluşturma tüm tehditleri kapsamaz.
+- **Öncelik P2:** Eşzamanlı oluşturma yarışında `EEXIST` sonrası mevcut dosya içeriği okunurken kısmi yazım ihtimali ve güvenli yeniden deneme politikası incelenmeli.
+- **Doğrulama:** Son başarılı sonuç 37/37; sonraki 3 Master Key testiyle toplam 40 test henüz çalıştırılmadı. Üretim Docker secret testlerini ekleme girişimi engellendi, tamamlandı olarak işaretlenmedi.
+
