@@ -241,7 +241,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
 
   describe('4. P0 Security Hardening & Zero-Plaintext Storage Validation', () => {
     it('should never write plaintext password to .db_config.json on disk', () => {
-      const dbConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+      const dbConfigPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
 
       const testSecretPassword = 'my_super_secret_pg_pass_9988_unique!';
       setupService.saveRuntimeSecretConfig({
@@ -272,7 +272,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
     });
 
     it('should automatically migrate legacy plaintext password from .db_config.json to Vault and scrub disk', () => {
-      const dbConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+      const dbConfigPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
 
       const legacyPassword = 'legacy_unencrypted_password_to_migrate_123';
       const legacyPayload = {
