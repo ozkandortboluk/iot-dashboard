@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 14 — 72/72 doğrulandı; HTTP/WS, Nginx ve Docker hardening toplu doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 15 — 100/100 güvenlik testi, TypeScript, Compose ve Nginx sözdizimi doğrulandı; WebSocket ve dış bağlantı incelemesi sürüyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -9,7 +9,7 @@
 > **Durumlar:** ✅ Tamamlandı · 🔄 Devam ediyor · ⏳ Bekliyor · ⚠️ Engelli / doğrulama gerekiyor
 
 ```text
-📍 05 MASTER KEY KALICILIĞI — ŞU AN BURADAYIZ
+05 MASTER KEY KALICILIĞI — KISMİ DOĞRULAMA TAMAMLANDI
 │
 ├── 01. İlk teşhis ve risk analizi                         ✅
 │   ├── Vault parola taşıma / erken temizleme riski         ✅
@@ -174,3 +174,7 @@
 > Ağ işlemleri sınırlandırma paketi: `4a5c032` CIDR formatını, `df47f3e` ping IPv4 formatını doğrular; `035b14e` bellek içi tarama işi sayısını 100 ile sınırlar; `0fb1f90` tamamlanan taramaların 5 dakika daha sorgulanabilmesini sağlar ve ardından temizler. Bu uç noktalar gerçek ağ taraması değil simülasyon üretir. Kısıtlamalar henüz type-check ve işlevsel testten geçmedi. SSH servis doğrudan bağlantı koruması ve uygulama dış HTTP isteklerinin kapsamlı analizi hâlâ açık. Yeni test eklenmedi; toplu test bekleniyor.
 
 > 2026-10-11 SSH servis iç korumaları tamamlandı: `c935f41` testConnection, `09141f2` probeHostFingerprint, `3883020` connectTunnel; üretimde/kapalı politikada servis seviyesinde dış SSH bağlantısını engeller. `a6f37cb` ağ ping ve CIDR adreslerini Node `net.isIP` ile doğrular. Toplu doğrulama **henüz çalıştırılmadı**; kullanıcı toplu test sonuçlarına daha sonra bakmak istiyor. `main` ve canlı sunucu değişmedi.
+
+> **Güncel doğrulama (2026-10-11):** İzole checkout `9e8d936` üzerinde TypeScript hatasız, 100/100 güvenlik testi başarılı, `docker compose config -q` başarılı; Nginx `nginx -t` önceki izole ağ doğrulamasında başarılı. Sonradan yapılan `2e6efab` ve `3344352` WebSocket değişiklikleri **henüz test edilmedi**. Bu testler canlı çalışma zamanı/SSRF denetimi değildir.
+
+> **15. WebSocket güvenlik paketi (devam ediyor):** `2e6efab` desteklenmeyen upgrade yollarındaki soketleri 404 ile kapatır; `3344352` URL ayrıştırmasında istemcinin Host başlığı yerine sabit taban kullanır. Açık işler: WebSocket kimlik doğrulama ve token taşıma yolları, dış HTTP/SSRF incelemesi, gerçek çalışma zamanı entegrasyon testleri, Vault metadata ve izolasyon risklerinin son değerlendirmesi. **Toplu test zamanı yeni değişiklikler tamamlanınca bildirilecek.**
