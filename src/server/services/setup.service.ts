@@ -80,7 +80,7 @@ export interface DbTestResult {
 }
 
 // Location of persistent server-side runtime secret file (inside data/ which is volume mounted and gitignored)
-const RUNTIME_SECRET_DIR = path.resolve(process.cwd(), 'data');
+const RUNTIME_SECRET_DIR = process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR ? path.resolve(process.env.NEXUS_TEST_DATA_DIR) : path.resolve(process.cwd(), 'data');
 const RUNTIME_SECRET_FILE = path.join(RUNTIME_SECRET_DIR, '.db_config.json');
 const SETUP_TOKEN_FILE = path.join(RUNTIME_SECRET_DIR, '.setup_token');
 
