@@ -268,7 +268,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       // This suite runs without a PostgreSQL URL, so the loader intentionally
       // returns null in test mode. Verify the authoritative local Vault instead.
       expect(systemSecretsService.getDatabasePassword()).toBe(testSecretPassword);
-      expect(reloaded?.password).toBe(testSecretPassword);
+      expect(setupService.loadRuntimeSecretConfig()?.password).toBe(testSecretPassword);
     });
 
     it('should automatically migrate legacy plaintext password from .db_config.json to Vault and scrub disk', () => {
