@@ -35,6 +35,7 @@ p = Path(sys.argv[1])
 s = p.read_text()
 tag = '    # NexusNode application'
 signature = '    # NexusNode host Nginx sensitive-path protection'
+legacy_signature = '    # Block sensitive files before proxying to the application.'
 rules = r'''    # NexusNode host Nginx sensitive-path protection
     location ~ (^|/)\.(?!well-known(?:/|$)) {
         return 404;
@@ -45,7 +46,7 @@ rules = r'''    # NexusNode host Nginx sensitive-path protection
     }
 
 '''
-if signature in s:
+if signature in s or legacy_signature in s:
     print('')
 elif s.count(tag) != 1:
     raise SystemExit('NexusNode HTTPS location bulunamadi veya belirsiz; degisiklik yok.')
