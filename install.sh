@@ -88,7 +88,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
   --restore-check <arsiv.tar.gz> Arşiv yapısını salt-okunur doğrular (geri yüklemez)
-  --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
+  --restore <arsiv.tar.gz> Güvenlik nedeniyle devre dışı (tam geri yükleme henüz uygulanmadı)
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
   --docker-proxy           Docker Nginx ters proxy servisini başlatır (Varsayılan: kapalı, sistem Nginx kullanılır)
   -h, --help               Bu yardım mesajını gösterir
