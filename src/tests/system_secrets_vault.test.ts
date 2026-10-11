@@ -303,8 +303,12 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
     });
 
     it('removes a newly created Vault password if runtime config commit fails', () => {
-      const prior = systemSecretsService.getSecret('database.password');
-      const firstPassword = 'first_password_must_be_removed';
+      const vaultFile = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.system_secrets.test.json');
+      const original = fs.readFileSync(vaultFile, 'utf8');
+      const parsed = JSON.parse(original);
+      delete parsed.secrets['database.password'];
+      fs.writeFileSync(vaultFile, JSON.stringify(parsed), { mode: 0o600 });
+      systemSecretsService.loadFromLocalVault();
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const originalRename = fs.renameSync;
       const rename = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
@@ -312,16 +316,16 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
         return originalRename(from, to);
       });
       try {
-        // This regression applies only when no password existed in the Vault.
-        if (!prior && !systemSecretsService.getDatabasePassword()) {
-          expect(() => setupService.saveRuntimeSecretConfig({
-            host: 'first-host', port: 5432, database: 'first_db',
-            user: 'first_user', password: firstPassword, sslMode: 'disable',
-          })).toThrow();
-          expect(systemSecretsService.getSecret('database.password')).toBeNull();
-        }
+        expect(systemSecretsService.getSecret('database.password')).toBeNull();
+        expect(() => setupService.saveRuntimeSecretConfig({
+          host: 'first-host', port: 5432, database: 'first_db',
+          user: 'first_user', password: 'first_password_must_be_removed', sslMode: 'disable',
+        })).toThrow();
+        expect(systemSecretsService.getSecret('database.password')).toBeNull();
       } finally {
         rename.mockRestore();
+        fs.writeFileSync(vaultFile, original, { mode: 0o600 });
+        systemSecretsService.loadFromLocalVault();
       }
     });
 
