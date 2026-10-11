@@ -341,7 +341,7 @@ for svc in "${SERVICES[@]}"; do
       break
     fi
 
-    STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing-healthcheck{{end}}' "$svc" 2>/dev/null || echo missing-container)
+    STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing-healthcheck{{end}}' "$svc" 2>/dev/null) || STATUS="missing-container"
     if [ "$STATUS" = "healthy" ]; then
       log_success "Servis çalışıyor ve sağlıklı: ${svc}"
       break
