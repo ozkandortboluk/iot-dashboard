@@ -764,7 +764,7 @@ export function initWebSocketServer(server: http.Server) {
 
         // Strict Fail-Closed Check in Production:
         // When in production (or strict maintenance mode), PostgreSQL must be READY before accepting authenticated WebSocket connections.
-        if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+        if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
           console.warn('[WebSocket Security] WebSocket upgrade reddedildi (503 Service Unavailable): PostgreSQL üretim modunda hazır değil.');
           socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\n\r\n');
           socket.destroy();
@@ -804,6 +804,10 @@ export function initWebSocketServer(server: http.Server) {
       // Periodic security validation of active sessions and accounts
       if (ws.user) {
         // SEC-06: Authoritatively verify session token against database/state
+        if (!ws.sessionToken) {
+          try { ws.close(1008, 'Session credentials missing'); ws.terminate(); } catch {}
+          continue;
+        }
         if (ws.sessionToken) {
           try {
             const verifiedSession = await db.verifySessionAsync(ws.sessionToken);
