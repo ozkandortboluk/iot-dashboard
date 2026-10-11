@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — 46/46 doğrulandı; sıradaki risk incelemesi ve entegrasyon kontrolleri**
+> **📍 ŞU ANKİ KONUM: 05 — 46/46 doğrulandı; kurulum entegrasyon senaryoları bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -136,3 +136,5 @@
 > İkinci paket devamı: `a53d302` kurulum tamamlandı durumunu yalnızca geçerli runtime config atomik biçimde kaydedildikten sonra işaretler, hata durumunda istisna yükseltir. `27eaa9b` eksik config ve rename başarısızlığı için iki regresyon testi ekler. Toplam hedef 46 test, henüz çalıştırılmadı. Davranış değişikliği nedeniyle kurulum akışının entegrasyon testi ayrıca gereklidir.
 
 > VPS izole checkout doğrulaması (`73523f0`): TypeScript başarılı; 3 Vitest dosyası, 46/46 test geçti (Vault 28, canonical 10, Master Key 8). Eksik config ve rename hatası stack trace'leri kasıtlı negatif test senaryolarıdır. Canlı dağıtım veya kurulum entegrasyon testi yapılmadı.
+
+> Üçüncü paket ön inceleme: kurulum tamamlanması için bozuk JSON, eksik DB koordinatları ve başarılı kayıtta plaintext parolanın temizlenmesi senaryolarına regresyon testleri önerildi. GitHub'a test ekleme işlemi güvenlik kontrolü tarafından engellendi; hiçbir test eklenmiş sayılmıyor. Son doğrulanan sayı 46/46, yeni test çalıştırma talebi yok. Önceki kod değişiklikleri korunuyor.
