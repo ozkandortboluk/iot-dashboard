@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll } from 'vitest';
+import { afterAll, vi } from 'vitest';
 
 // Runs before test modules import singleton services. Refuse any environment
 // that could accidentally target a live database.
@@ -17,6 +17,13 @@ if (process.env.NODE_ENV !== 'test') {
 
 const isolatedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-vault-tests-'));
 process.env.NEXUS_TEST_DATA_DIR = isolatedDirectory;
+
+// Guard against unexpected attempts to open a real PostgreSQL socket.
+vi.mock('pg', () => ({
+  default: { Pool: class {
+    constructor() { throw new Error('Vault unit tests must not create a PostgreSQL pool'); }
+  } },
+}));
 
 afterAll(() => {
   fs.rmSync(isolatedDirectory, { recursive: true, force: true });
