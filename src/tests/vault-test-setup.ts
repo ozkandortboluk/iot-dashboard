@@ -5,7 +5,7 @@ import { afterAll } from 'vitest';
 
 // Runs before test modules import singleton services. Refuse any environment
 // that could accidentally target a live database.
-const connectionVariables = ['DATABASE_URL', 'POSTGRES_URL', 'TEST_POSTGRES_URL'];
+const connectionVariables = ['DATABASE_URL', 'POSTGRES_URL', 'TEST_POSTGRES_URL', 'POSTGRES_HOST', 'DB_HOST', 'DATABASE_HOST'];
 for (const key of connectionVariables) {
   if (process.env[key]) {
     throw new Error('Vault test isolation requires unset database connection variables');
