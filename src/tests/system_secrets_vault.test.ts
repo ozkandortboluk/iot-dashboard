@@ -616,7 +616,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
       try {
-        const invalidContent = [];
+        const invalidContent = JSON.stringify([]);
         fs.writeFileSync(file, invalidContent, { mode: 0o600 });
         expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
         expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
@@ -630,7 +630,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
       try {
-        const invalidContent = 42;
+        const invalidContent = JSON.stringify(42);
         fs.writeFileSync(file, invalidContent, { mode: 0o600 });
         expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
         expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
@@ -644,7 +644,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
       try {
-        const invalidContent = true;
+        const invalidContent = JSON.stringify(true);
         fs.writeFileSync(file, invalidContent, { mode: 0o600 });
         expect(() => setupService.markSetupCompleted()).toThrow('Runtime database configuration is invalid');
         expect(fs.readFileSync(file, 'utf8')).toBe(invalidContent);
