@@ -25,3 +25,10 @@ Status: **preparation only**. This branch does not remediate an already-compromi
 - No Docker socket mount into the app, no privileged containers, no secrets in Git or diagnostic output.
 - Do not automatically mutate host firewall/SSH rules from app startup or routine `docker compose up`.
 - Review the live host separately; code review cannot establish the origin of the abuse report.
+
+## Opt-in Compose hardening (pending runtime tests)
+- `docker-compose.hardened.yml` adds no-new-privileges, process limits and log rotation; `app` and `adminer` also drop all Linux capabilities. These settings are **not** merged into default Compose.
+- Run `bash scripts/security/verify-compose.sh` after initializing secret files; it checks syntax only.
+- On staging, use `docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d --build` and verify API readiness, Adminer, DB initialization, migrations, backups, HTTPS and proxy health.
+- The database and proxy intentionally retain default capabilities pending integration testing. Do not enable read-only rootfs or blanket egress deny without verifying write paths and external dependencies.
+- Ensure host firewall and provider-level outbound restrictions are managed independently of Docker Compose.
