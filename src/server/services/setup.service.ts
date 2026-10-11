@@ -316,8 +316,8 @@ export class SetupService {
         database: config.database,
         user: config.user,
         // Plaintext password is NEVER written to .db_config.json
-        hasPassword: Boolean(config.password),
-        passwordRef: config.password ? 'vault:database.password' : undefined,
+        hasPassword: Boolean(config.password && !config.password.includes('••••')) || Boolean(systemSecretsService.getDatabasePassword()),
+        passwordRef: (config.password || systemSecretsService.getDatabasePassword()) ? 'vault:database.password' : undefined,
         sslMode: config.sslMode || 'disable',
         rejectUnauthorized: config.rejectUnauthorized ?? (config.sslMode && config.sslMode !== 'disable'),
         isCompleted: Boolean(isCompleted),
@@ -332,7 +332,11 @@ export class SetupService {
 
       writeRuntimeConfigAtomically(payload);
 
-      this.runtimeConfig = { ...config };
+      // A masked UI placeholder is never a usable database credential.
+      const effectivePassword = config.password?.includes('••••')
+        ? systemSecretsService.getDatabasePassword()
+        : (config.password || systemSecretsService.getDatabasePassword());
+      this.runtimeConfig = { ...config, password: effectivePassword };
       this.isCompletedState = payload.isCompleted;
       if (payload.completedAt) this.completedAtDate = payload.completedAt;
 
