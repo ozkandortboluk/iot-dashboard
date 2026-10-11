@@ -14,6 +14,7 @@ export default defineConfig({
       'src/tests/nginx_scanner_protection.test.ts',
       'src/tests/trust_proxy_policy.test.ts',
       'src/tests/http_origin_security.test.ts',
+      'src/tests/ws_upgrade_path.test.ts',
     ],
   },
 });
