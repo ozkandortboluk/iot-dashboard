@@ -203,6 +203,18 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     process.env.DB_PASSWORD = 'insecure_db_password_should_be_ignored';
     process.env.DATABASE_URL = 'postgresql://iot_user:env_url_password@timescaledb:5432/iot_dashboard';
 
+    // Production key resolution must use the Docker secret, not the env fixture.
+    // Supply a disposable mounted-secret fixture without changing fail-closed policy.
+    const actualExists = fs.existsSync.bind(fs);
+    const actualRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      file === '/run/secrets/encryption_key' ? true : actualExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      file === '/run/secrets/encryption_key' ? process.env.ENCRYPTION_KEY! : (actualRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    resetKeyCacheForTesting();
+
     const vaultCanonicalPassword = 'CanonicalVaultPass_StrictProd_9988!';
     const getPassSpy = vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue(vaultCanonicalPassword);
 
