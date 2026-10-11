@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — İkinci paket commit edildi; 46 test toplu doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 05 — 46/46 doğrulandı; sıradaki risk incelemesi ve entegrasyon kontrolleri**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -46,8 +46,8 @@
 │   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (afce214)                       ✅
-│   ├── İzole Vault testleri (afce214: 43/43)              ✅
+│   ├── npm run type-check (73523f0)                       ✅
+│   ├── İzole Vault testleri (73523f0: 46/46)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
@@ -134,3 +134,5 @@
 > İkinci paket: `1986f46` — `.db_config.json` atomik yazımında dosya fsync + desteklenen dosya sistemlerinde dizin fsync; `markSetupCompleted()` artık atomik yazıcıyı kullanıyor. `dde14d9` — fsync, 0600 izin ve JSON içeriği regresyon testi. Son başarılı test 43/43; yeni hedef 44/44, henüz doğrulanmadı.
 
 > İkinci paket devamı: `a53d302` kurulum tamamlandı durumunu yalnızca geçerli runtime config atomik biçimde kaydedildikten sonra işaretler, hata durumunda istisna yükseltir. `27eaa9b` eksik config ve rename başarısızlığı için iki regresyon testi ekler. Toplam hedef 46 test, henüz çalıştırılmadı. Davranış değişikliği nedeniyle kurulum akışının entegrasyon testi ayrıca gereklidir.
+
+> VPS izole checkout doğrulaması (`73523f0`): TypeScript başarılı; 3 Vitest dosyası, 46/46 test geçti (Vault 28, canonical 10, Master Key 8). Eksik config ve rename hatası stack trace'leri kasıtlı negatif test senaryolarıdır. Canlı dağıtım veya kurulum entegrasyon testi yapılmadı.
