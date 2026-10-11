@@ -652,9 +652,9 @@ export function initWebSocketServer(server: http.Server) {
     noServer: true,
     maxPayload: MAX_WS_PAYLOAD,
     handleProtocols: (protocols) => {
+      // Never reflect a credential supplied as a subprotocol into the response headers.
       if (protocols.has('nexus-token')) return 'nexus-token';
-      const first = Array.from(protocols)[0];
-      return first || false;
+      return false;
     },
   });
   wss.on('error', (err: any) => {
