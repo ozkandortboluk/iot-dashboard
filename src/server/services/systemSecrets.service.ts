@@ -403,6 +403,26 @@ export class SystemSecretsService {
     }
   }
 
+  /**
+   * Undo a newly created database password after runtime config commit failure.
+   * Only for the no-previous-Vault-password case; never delete an existing credential.
+   */
+  public rollbackNewDatabasePasswordLocally(expectedPassword: string): void {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    const key = 'database.password';
+    const current = this.inMemorySecrets.get(key);
+    if (!current || decryptSecret(current.encryptedValue) !== expectedPassword) {
+      throw new Error('Vault password changed before rollback');
+    }
+    this.inMemorySecrets.delete(key);
+    try {
+      this.saveToLocalVault();
+    } catch (error) {
+      this.inMemorySecrets.set(key, current);
+      throw error;
+    }
+  }
+
   public migrateLegacyDatabasePassword(password: string): void {
     this.persistDatabasePasswordLocally(password, 'legacy_migration');
   }
