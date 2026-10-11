@@ -474,6 +474,19 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('does not finalize setup when the runtime configuration is malformed', () => {
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const previous = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
+      try {
+        fs.writeFileSync(configPath, '{malformed', { mode: 0o600 });
+        expect(() => setupService.markSetupCompleted()).toThrow();
+        expect(fs.readFileSync(configPath, 'utf8')).toBe('{malformed');
+      } finally {
+        if (previous === null) fs.rmSync(configPath, { force: true });
+        else fs.writeFileSync(configPath, previous, { mode: 0o600 });
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
