@@ -640,29 +640,31 @@ export class SetupService {
    * Marks installation as permanently completed and persists state to disk
    */
   public markSetupCompleted(): void {
-    this.isCompletedState = true;
-    this.completedAtDate = this.completedAtDate || new Date().toISOString();
-    this.invalidateSetupToken();
+    // Do not report completion in memory until its durable record is committed.
     try {
-      if (!fs.existsSync(RUNTIME_SECRET_DIR)) {
-        fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+      if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
+        throw new Error('Runtime database configuration is missing');
       }
-      let existingPayload: any = {};
-      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
-        try {
-          existingPayload = JSON.parse(fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8'));
-        } catch {}
+      const existingPayload = JSON.parse(fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8'));
+      if (!existingPayload || typeof existingPayload.host !== 'string' || !existingPayload.host.trim()
+        || typeof existingPayload.database !== 'string' || !existingPayload.database.trim()) {
+        throw new Error('Runtime database configuration is invalid');
       }
+      const completedAt = this.completedAtDate || new Date().toISOString();
       const updated = {
         ...existingPayload,
         isCompleted: true,
-        completedAt: this.completedAtDate,
+        completedAt,
         updatedAt: new Date().toISOString(),
       };
       delete updated.password; // Ensure password is never in .db_config.json
       writeRuntimeConfigAtomically(updated);
+      this.completedAtDate = completedAt;
+      this.isCompletedState = true;
+      this.invalidateSetupToken();
     } catch (e) {
       console.warn('[SetupService] Could not persist completed flag:', e);
+      throw e;
     }
   }
 
