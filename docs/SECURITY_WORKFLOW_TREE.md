@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 09 — 5 yeni geçersiz yapılandırma testi eklendi; 61 test doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 10 — 61/61 doğrulandı; Nginx scanner regex düzeltmesi ve 5 test doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -156,3 +156,5 @@
 > İzole VPS checkout `4ae9493`: `npm run type-check` başarılı; Vitest 3 dosya, 56/56 başarılı (System Secrets 38, Canonical 10, Master Key 8). Beş yeni test doğrulandı. Vault migration scrub hata enjeksiyonu testleri henüz bekliyor. Canlı Docker veya main değiştirilmedi.
 
 > Yedinci paket (`1b1249b`): array, number, boolean, eksik database ve eksik host içeren runtime config girdileri için 5 regresyon testi eklendi. Önceki 56/56 doğrulandı, yeni hedef 61/61. Vault migration scrub hata enjeksiyonu testleri hâlâ yapılacak; bu paket doğrudan o yolu sınamıyor. Canlı ortam ve main değişmedi.
+
+> Sekizinci paket: `3d87e44` için izole VPS TypeScript ve Vitest 61/61 başarılı. Nginx hassas dosya probe engelleme regexindeki iki kat ters eğik çizgi `7069a1f` ile düzeltildi; 5 bağımsız statik regresyon testi `ba5d319` ile eklendi ve `adebf9f` ile güvenlik test paketine alındı. Hedef 66 test. Nginx gerçek konfigürasyon doğrulaması (`nginx -t`) ve HTTP entegrasyon testi ayrıca gerekli. Canlı VPS/main değişmedi.
