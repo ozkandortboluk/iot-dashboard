@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 11 — 66/66 doğrulandı; HTTP proxy güvenliği için 6 yeni test bekliyor**
+> **📍 ŞU ANKİ KONUM: 12 — Kullanıcı 72/72 doğruladı; HTTP origin ve Nginx throttling paketi doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -160,3 +160,5 @@
 > Sekizinci paket: `3d87e44` için izole VPS TypeScript ve Vitest 61/61 başarılı. Nginx hassas dosya probe engelleme regexindeki iki kat ters eğik çizgi `7069a1f` ile düzeltildi; 5 bağımsız statik regresyon testi `ba5d319` ile eklendi ve `adebf9f` ile güvenlik test paketine alındı. Hedef 66 test. Nginx gerçek konfigürasyon doğrulaması (`nginx -t`) ve HTTP entegrasyon testi ayrıca gerekli. Canlı VPS/main değişmedi.
 
 > Dokuzuncu paket: izole VPS `ebb310e` üzerinde TypeScript ve 66/66 test başarılı. `TRUST_PROXY=true` VPS üretiminde herkesi güvenilir proxy sayma riskini önlemek üzere `trustProxyPolicy.ts` eklendi ve `server.ts` bağlandı (`cacde04`). Altı yeni regresyon testi (`a4de443`) test paketine dahil (`b71a29d`). Hedef 72 test; henüz doğrulanmadı. Kalan öncelik: istek başına IP rate limit, WebSocket yetkilendirme, SSRF ve gerçek HTTP/Nginx entegrasyon testleri. Canlı ortam/main değişmedi.
+
+> Toplu HTTP koruma paketi: kullanıcı `98b231b` sürümünde 72/72 testin geçtiğini bildirdi. `fe2674c` HTTP/WS Origin ayrıştırmasını katılaştırdı; `b94580f` 9 senaryo ekledi; `9649003` Nginx API/WS IP bazlı istek ve bağlantı sınırları getirdi; `479b7ec` 4 yeni statik regresyon testi ekledi. Toplam hedef 85 test. Bunlar henüz çalıştırılmadı; `nginx -t` ve gerçek HTTP yük testi ayrıca gerekli. Açık incelemeler: SSRF/dış bağlantılar, WebSocket protokolü ve yetkilendirme, Docker çalışma zamanı/SSH kontrolleri. `main` ve canlı sistem değiştirilmedi.
