@@ -11,6 +11,7 @@ export default defineConfig({
       'src/tests/system_secrets_vault.test.ts',
       'src/tests/vault_canonical_single_source.test.ts',
       'src/tests/master_key_persistence.test.ts',
+      'src/tests/nginx_scanner_protection.test.ts',
     ],
   },
 });
