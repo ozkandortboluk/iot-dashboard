@@ -20,3 +20,17 @@ describe('WebSocket HTTP upgrade request target validation', () => {
   it('rejects unsupported paths', () => expect(parseWebSocketUpgradeUrl('/api/admin')).toBeNull());
   it('rejects missing request targets', () => expect(parseWebSocketUpgradeUrl(undefined)).toBeNull());
 });
+
+// Regression guard: VPS_PRODUCTION must enforce authoritative PostgreSQL device lookup.
+describe('Production device authentication policy', () => {
+  it('requires PostgreSQL readiness for both production flags', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/\(process\.env\.NODE_ENV === 'production' \|\| process\.env\.VPS_PRODUCTION === 'true'\) && !db\.postgresRepo\?\.isReady\(\)/);
+  });
+  it('does not use in-memory device fallback with VPS_PRODUCTION enabled', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).toContain("process.env.VPS_PRODUCTION !== 'true'");
+  });
+});
