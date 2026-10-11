@@ -38,6 +38,17 @@ describe('Production device authentication policy', () => {
     const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toContain("ws.close(1008, 'Session credentials missing')");
   });
+  it('rejects malformed device key expiry timestamps', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).toContain('!Number.isFinite(new Date(foundDev.apiKeyExpiresAt).getTime())');
+  });
+  it('rechecks active device credentials without metadata writes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).toContain('resolveDevice(ws.sessionToken, false)');
+    expect(source).toContain("ws.close(1008, 'Device credentials revoked or expired')");
+  });
   it('does not use in-memory device fallback with VPS_PRODUCTION enabled', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
