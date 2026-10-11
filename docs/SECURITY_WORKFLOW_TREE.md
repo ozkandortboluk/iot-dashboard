@@ -30,6 +30,7 @@
 │   ├── db.ts veri dosyalarını da geçici dizine yönlendir   ✅
 │   ├── Gerçek DB ve arka plan servislerini mock/izole et   🔄
 │   ├── Testte DB başlatma ve zamanlayıcıları kapat         ✅
+│   ├── Sahte PostgreSQL URL ihtiyacını kaldır              ✅
 │   └── Test izolasyonunu doğrula                           ⏳
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
@@ -65,6 +66,7 @@
 | `6791518` | DB bağlantı değişkeni korumaları |
 | `8a8b0cf` | db.ts test verilerini geçici dizine yönlendirme |
 | `df0c130`, `25229a7` | Testte DB başlangıcı ve arka plan zamanlayıcılarını devre dışı bırakma |
+| `fe750c7`, `eed96bd` | İzole config okuma; sahte PostgreSQL URL kaldırma |
 
 ## Güncelleme kuralı
 
