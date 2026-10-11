@@ -53,7 +53,10 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
   });
 
   it('3. OTA private key must be resolved from Central Security Vault as canonical source', async () => {
-    const testOta = '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTestKeyPlaceholder1234567890abcdef\n-----END PRIVATE KEY-----';
+    // Generate a valid disposable Ed25519 key; never use a production OTA key in tests.
+    const { generateKeyPairSync } = await import('node:crypto');
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const testOta = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
     await systemSecretsService.setSecret('ota.signing_key', testOta, {
       category: 'ota',
       label: 'OTA Signing Key',
