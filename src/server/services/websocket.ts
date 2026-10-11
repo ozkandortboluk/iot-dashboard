@@ -701,7 +701,8 @@ export function initWebSocketServer(server: http.Server) {
         return;
       }
 
-      const urlObj = new URL(request.url || '', `http://${request.headers.host || '127.0.0.1'}`);
+      // Parse relative upgrade targets against a fixed base, never an untrusted Host header.
+      const urlObj = new URL(request.url || '', 'http://127.0.0.1');
       const pathname = urlObj.pathname;
 
       if (isWebSocketUpgradePath(pathname)) {
