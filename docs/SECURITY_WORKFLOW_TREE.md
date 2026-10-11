@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 04 — Metadata tutarlılığı ve kısmi kayıt riski**
+> **📍 ŞU ANKİ KONUM: 05 — Toplu regresyon doğrulaması (34 test bekliyor)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -9,7 +9,7 @@
 > **Durumlar:** ✅ Tamamlandı · 🔄 Devam ediyor · ⏳ Bekliyor · ⚠️ Engelli / doğrulama gerekiyor
 
 ```text
-📍 04 GÜVENLİ DOSYA İŞLEMLERİ — ŞU AN BURADAYIZ
+📍 05 TOPLU REGRESYON TESTLERİ — ŞU AN BURADAYIZ
 │
 ├── 01. İlk teşhis ve risk analizi                         ✅
 │   ├── Vault parola taşıma / erken temizleme riski         ✅
@@ -36,17 +36,19 @@
 │   ├── Testte asenkron yerel DB yazmasını kapat            ✅
 │   └── Test izolasyonunu yeniden doğrula                   ✅
 │
-├── 04. Hata senaryoları ve güvenli dosya işlemleri         🔄 📍
+├── 04. Hata senaryoları ve güvenli dosya işlemleri         🔄
 │   ├── Legacy .db_config.json temizliğini atomik yap       ✅
 │   ├── Normal config kaydını atomik yap                    ✅
 │   ├── Atomik rename hatası regresyon testi               ✅
 │   ├── Vault yazma hatasında eski parolayı koru            ✅
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ✅
-│   └── Metadata senkronizasyonu ve kısmi kayıt riski       🔄
+│   ├── Metadata senkronizasyonu ve kısmi kayıt riski       🔄
+│   └── Config yazma hatasında Vault parola rollback       🔄
 │
-├── 05. Doğrulama                                           🔄
+├── 05. Doğrulama                                           🔄 📍
 │   ├── npm run type-check (e89787d)                       ✅
 │   ├── İzole Vault testleri (e89787d: 31/31)              ✅
+│   ├── Üç yeni regresyon testi (34 hedef)                  ⏳
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -91,3 +93,5 @@
 - Kullanıcıya ilerleme bildirirken bu dosyanın yolu ve mevcut 📍 adımı belirtilir.
 
 > Son doğrulama: `e89787d` — TypeScript başarılı, 31/31 Vault testi geçti. Metadata yazma hatası regresyon testi henüz eklenmedi.
+
+> Toplu doğrulama bekliyor: `e404007` metadata başarılı/başarısız kaydı testleri; `a28279a` config başarısızlığında Vault parola geri yükleme; `61e1d28` rollback testi. Önceki 31 test geçti, yeni toplam 34 test henüz çalıştırılmadı.
