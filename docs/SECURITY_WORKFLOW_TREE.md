@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 04 — Güvenli dosya işlemleri ve hata senaryoları**
+> **📍 ŞU ANKİ KONUM: 04 — Vault hata senaryoları (30 test doğrulaması bekliyor)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -78,6 +78,8 @@
 | `c0dc864` | Testte asenkron yerel DB dosyası yazımını devre dışı bırakma |
 | `010244f` | Runtime DB config ve legacy temizliği için atomik değiştirme (mevcut 27 test geçti) |
 | `0fa8b3b` | Atomik rename hatasında eski config ve geçici dosya temizliği testi (28/28 geçti) |
+| `0ee645d` | Bozuk Vault dosyasını fail-closed reddetme |
+| `5a24e5b` | Bozuk Vault ve parola rollback testleri (30 test, çalıştırılmadı) |
 
 ## Güncelleme kuralı
 
