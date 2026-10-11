@@ -85,7 +85,7 @@ async function resolveUser(token?: string | null): Promise<User | null> {
 }
 
 // Physical device API key / Token verification helper for WebSocket connections
-async function resolveDevice(token?: string | null): Promise<Device | null> {
+async function resolveDevice(token?: string | null, updateLastUsed = true): Promise<Device | null> {
   if (!token || typeof token !== 'string' || token.trim() === '') {
     return null;
   }
@@ -120,8 +120,10 @@ async function resolveDevice(token?: string | null): Promise<Device | null> {
   }
 
   // 3. Update Last-Used Timestamp
-  foundDev.apiKeyLastUsedAt = new Date().toISOString();
-  db.updateDevice(foundDev.id, { apiKeyLastUsedAt: foundDev.apiKeyLastUsedAt });
+  if (updateLastUsed) {
+    foundDev.apiKeyLastUsedAt = new Date().toISOString();
+    db.updateDevice(foundDev.id, { apiKeyLastUsedAt: foundDev.apiKeyLastUsedAt });
+  }
 
   return foundDev;
 }
@@ -840,7 +842,7 @@ export function initWebSocketServer(server: http.Server) {
           continue;
         }
         try {
-          const currentDevice = await resolveDevice(ws.sessionToken);
+          const currentDevice = await resolveDevice(ws.sessionToken, false);
           if (!currentDevice || currentDevice.id !== ws.device.id) {
             try { ws.close(1008, 'Device credentials revoked or expired'); ws.terminate(); } catch {}
             continue;
