@@ -35,7 +35,8 @@
 │   └── Test izolasyonunu doğrula                           ⏳
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         ⏳
-│   ├── Legacy .db_config.json temizliğini atomik yap       ⏳
+│   ├── Legacy .db_config.json temizliğini atomik yap       ⚠️
+│   ├── Normal config kaydını atomik yap                    ⚠️
 │   ├── Vault yazma hatasında eski parolayı koru            ⏳
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
