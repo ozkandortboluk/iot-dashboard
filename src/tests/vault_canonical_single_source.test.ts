@@ -171,6 +171,13 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
       migratedTables: ['users', 'devices'],
     } as any);
 
+    // Keep this lifecycle test focused on canonical Vault credentials and
+    // passwordless runtime config; pool construction belongs to integration tests.
+    const configureSpy = vi.spyOn(setupService, 'configureDatabase').mockImplementation(async (config) => {
+      setupService.saveRuntimeSecretConfig(config, false);
+      return { success: true, message: 'Vault fixture configured' };
+    });
+
     // Call quickInitDocker without passing password argument and without process.env.POSTGRES_PASSWORD
     const result = await setupService.quickInitDocker();
     expect(result.success).toBe(true);
@@ -192,6 +199,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     }
 
     testConnSpy.mockRestore();
+    configureSpy.mockRestore();
     initDbSpy.mockRestore();
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
