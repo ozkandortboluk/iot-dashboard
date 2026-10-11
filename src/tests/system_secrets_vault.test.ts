@@ -302,6 +302,29 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('removes a newly created Vault password if runtime config commit fails', () => {
+      const prior = systemSecretsService.getSecret('database.password');
+      const firstPassword = 'first_password_must_be_removed';
+      const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      const originalRename = fs.renameSync;
+      const rename = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        if (String(to) === configPath) throw new Error('first config rename failure');
+        return originalRename(from, to);
+      });
+      try {
+        // This regression applies only when no password existed in the Vault.
+        if (!prior && !systemSecretsService.getDatabasePassword()) {
+          expect(() => setupService.saveRuntimeSecretConfig({
+            host: 'first-host', port: 5432, database: 'first_db',
+            user: 'first_user', password: firstPassword, sslMode: 'disable',
+          })).toThrow();
+          expect(systemSecretsService.getSecret('database.password')).toBeNull();
+        }
+      } finally {
+        rename.mockRestore();
+      }
+    });
+
     it('restores the old Vault password if runtime config replacement fails', () => {
       const oldPassword = 'old_runtime_password_for_rollback';
       systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'test');
