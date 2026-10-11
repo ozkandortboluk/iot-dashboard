@@ -361,6 +361,45 @@ export class SystemSecretsService {
   }
 
   /**
+   * Synchronous local-only migration: persist and verify before deleting legacy plaintext.
+   * Does not depend on PostgreSQL availability during startup.
+   */
+  public migrateLegacyDatabasePassword(password: string): void {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    if (!password || isMaskedSecret(password)) {
+      throw new Error('Legacy database password is empty or masked');
+    }
+    const key = 'database.password';
+    const previous = this.inMemorySecrets.get(key);
+    const record: StoredSecretRecord = {
+      key,
+      category: 'database',
+      label: 'PostgreSQL Password',
+      encryptedValue: encryptSecret(password),
+      isSensitive: true,
+      keyId: previous?.keyId ?? 'database_password_v1',
+      version: previous?.version ?? 1,
+      previousVersions: previous?.previousVersions,
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'legacy_migration',
+    };
+    this.inMemorySecrets.set(key, record);
+    try {
+      this.saveToLocalVault();
+      // Verify from the authoritative disk snapshot, not just the in-memory map.
+      const snapshot = JSON.parse(fs.readFileSync(getVaultFilePath(), 'utf8'));
+      const persisted = snapshot?.secrets?.[key]?.encryptedValue;
+      if (!persisted || decryptSecret(persisted) !== password) {
+        throw new Error('Persisted Vault password verification failed');
+      }
+    } catch (err) {
+      if (previous) this.inMemorySecrets.set(key, previous);
+      else this.inMemorySecrets.delete(key);
+      throw err;
+    }
+  }
+
+  /**
    * Internal method: sets an encrypted secret in the vault
    */
   public async setSecret(
