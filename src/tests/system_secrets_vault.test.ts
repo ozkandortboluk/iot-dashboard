@@ -569,6 +569,23 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       }
     });
 
+    it('cleans temporary runtime file after completion fsync failure', () => {
+      const file = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
+      setupService.saveRuntimeSecretConfig({ host: 'localhost', port: 5432, database: 'temp_db', user: 'tester', sslMode: 'disable' });
+      const originalSync = fs.fsyncSync;
+      const spy = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+        if (fs.fstatSync(fd).isFile()) throw new Error('simulated fsync failure');
+        return originalSync(fd);
+      });
+      try {
+        expect(() => setupService.markSetupCompleted()).toThrow();
+        expect(fs.existsSync(file)).toBe(true);
+        expect(fs.readdirSync(process.env.NEXUS_TEST_DATA_DIR!).filter(n => n.startsWith('.db_config.json.tmp.'))).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('keeps the previous runtime config if atomic rename fails', () => {
       const configPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
       const original = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : null;
