@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 16 — 100/100 doğrulandı; 7 yeni WebSocket regresyon testiyle 107 test doğrulama bekliyor**
+> **📍 ŞU ANKİ KONUM: 17 — 107/107, TypeScript ve Compose doğrulandı; gerçek WebSocket ve outbound/SSRF incelemesi açık**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -186,3 +186,5 @@
 > **2026-10-11 toplu test sonucu (`cd36abd`):** Kullanıcının izole `/tmp/nexus-security-test` checkout çıktısında `npm run type-check` başarılı, Vitest 8 dosyada 100/100 başarılı ve `docker compose config -q` başarılı. Beklenen negatif Vault senaryolarının hata logları test başarısızlığı değildir. Gerçek WebSocket handshake/kimlik doğrulama entegrasyon testi, SSRF/outbound envanteri ve canlı Docker ağ doğrulaması hâlâ açık. Üretime dağıtım veya `main` birleştirmesi yapılmadı.
 
 > **16. WebSocket upgrade request-target doğrulaması:** `8d3040b` ile yalnızca origin-form (`/ws`, `/api/ws`) hedefleri ayrıştırılır, absolute/protocol-relative/backslash girdileri reddedilir; `36dae2e` bunu HTTP upgrade handler'ına bağlar. `400e7c9` yedi regresyon testi ekler. **Yeni hedef 107 test** (önceki doğrulanmış 100); TypeScript ve testler henüz yeniden çalıştırılmadı. WebSocket gerçek handshake ve SSRF/outbound incelemesi ayrıca açık; `main` ve canlı sistem değişmedi.
+
+> **2026-10-11 doğrulama (`4181a1a`):** Kullanıcının izole test checkout'unda `npm run type-check` başarılı; Vitest 8 dosyada **107/107** başarılı; `docker compose config -q` başarılı. Vault negatif senaryo logları beklenendir. Gerçek WebSocket bağlantı/kimlik doğrulama entegrasyonu, outbound/SSRF envanteri ve Docker ağ çalışma zamanı testi henüz tamamlanmadı. `main` ve canlı dağıtım değiştirilmedi.
