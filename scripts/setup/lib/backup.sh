@@ -41,33 +41,19 @@ perform_backup() {
   log_success "Yedekleme tamamlandı: $archive"
 }
 
+# Restore is intentionally blocked until a separately tested, explicit recovery
+# workflow can validate the archive, database target and vault-key compatibility.
+# The previous implementation only extracted files and incorrectly claimed success.
 perform_restore() {
-  local ARCHIVE_PATH="$1"
+  local ARCHIVE_PATH="${1:-}"
   if [ -z "$ARCHIVE_PATH" ] || [ ! -f "$ARCHIVE_PATH" ]; then
-    log_fatal "Geri yüklenecek geçerli bir arşiv dosyası belirtilmedi: '$ARCHIVE_PATH'"
+    log_error "Geçerli bir geri yükleme arşivi belirtilmedi."
+    return 1
   fi
-
-  log_step "Yedekten Geri Yükleme (Restore) Başlatılıyor: ${ARCHIVE_PATH}..."
-
-  if [ "$NON_INTERACTIVE" != true ]; then
-    echo -ne "${CLR_RED}DİKKAT: Mevcut secrets ve data dizinlerinin üzerine yazılacak! Devam edilsin mi? [E/h]: ${CLR_RESET}"
-    read -r answer
-    case "$answer" in
-      [eE][vV][eE][tT]|[yY][eE][sS]|[eE]|[yY])
-        ;;
-      *)
-        log_info "İşlem iptal edildi."
-        return 0
-        ;;
-    esac
+  if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
+    log_error "Arşiv okunamıyor veya bozuk."
+    return 1
   fi
-
-  log_info "Arşiv içeriği ayıklanıyor..."
-  tar -xzf "$ARCHIVE_PATH"
-
-  # Restore permissions
-  [ -d "./secrets" ] && chmod 700 ./secrets && chmod 600 ./secrets/* 2>/dev/null || true
-  [ -d "./data" ] && chmod 755 ./data || true
-
-  log_success "Yedek başarıyla geri yüklendi. Servisleri yeniden başlatmak için './install.sh' çalıştırabilirsiniz."
+  log_error "Otomatik geri yükleme güvenlik nedeniyle devre dışı: SQL veritabanı ve uygulama volume verileri henüz doğrulanmış bir kurtarma akışıyla geri yüklenmiyor. Mevcut veriler değiştirilmedi."
+  return 1
 }
