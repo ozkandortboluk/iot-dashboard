@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 06 — 51/51 doğrulandı; sonraki güvenlik paketi hazırlanacak**
+> **📍 ŞU ANKİ KONUM: 07 — Vault migration dosya bütünlüğü düzeltildi; toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -146,3 +146,5 @@
 > Dördüncü paket: `443e72a` kurulumun başarılı tamamlanması ve runtime config içinden legacy plaintext parolanın çıkarılması; `3b26772` kurulum tamamlama commit hatasında disk üzerinde completed=true yazılmaması. Önceki doğrulama 49/49, yeni hedef 51/51. Yeni testler henüz çalıştırılmadı. Canlı kurulum entegrasyonu ayrıca bekliyor.
 
 > VPS izole checkout (`b9e7d08`) doğrulaması: `npm run type-check` başarılı; Vitest 3 dosya, 51/51 başarılı (Vault 33, canonical 10, Master Key 8). Loglardaki hatalar beklenen negatif test senaryolarıdır. Canlı dağıtım ve uçtan uca kurulum entegrasyon testi yapılmadı.
+
+> Beşinci paket: `bc91801` Vault migration sırasında `.db_config.json` scrub işlemi atomik geçici dosya, fsync ve rename ile yapılıyor; `b543507` scrub hatasının sessizce yutulmasını kaldırıp hata yükseltiyor. Son doğrulanan test sayısı 51/51 (`b9e7d08`); yeni değişiklikler için TypeScript ve 51 test yeniden çalıştırılmalı. **Bu kod yolu için doğrudan hata enjeksiyonu testi henüz eklenmedi; ayrıca entegrasyon doğrulaması gerekiyor.** Canlı Docker ve main değişmedi.
