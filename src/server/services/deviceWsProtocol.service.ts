@@ -936,7 +936,11 @@ export class DeviceWsProtocolService {
    */
   private async verifyDeviceAuthorization(ws: AuthenticatedWebSocket, deviceId: string): Promise<Device | null> {
     const cleanId = deviceId.trim();
-    let targetDevice = db.getDeviceById(cleanId) || db.getDeviceByApiKey(cleanId);
+    // Never trust a cached device record as authoritative in production.
+    const production = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
+    if (!ws.isAuth || (!ws.device && !ws.user)) return null;
+    if (production && !db.postgresRepo?.isReady()) return null;
+    let targetDevice = production ? null : (db.getDeviceById(cleanId) || db.getDeviceByApiKey(cleanId));
 
     if (!targetDevice && db.postgresRepo) {
       try {
@@ -969,6 +973,8 @@ export class DeviceWsProtocolService {
       });
       return null;
     }
+
+    if (targetDevice.apiKeyRevoked === true || (targetDevice.apiKeyExpiresAt && (!Number.isFinite(new Date(targetDevice.apiKeyExpiresAt).getTime()) || new Date(targetDevice.apiKeyExpiresAt).getTime() <= Date.now()))) return null;
 
     // If the socket was already authenticated with a specific device, ensure the deviceId matches
     if (ws.device) {

@@ -8,6 +8,9 @@ import { systemSecretsService } from './systemSecrets.service.js';
 import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 
 export function isSshTunnelAllowed(): boolean {
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
+    return false;
+  }
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
     return true;
   }
@@ -252,6 +255,7 @@ class SSHTunnelService {
     host: string,
     port: number = 22
   ): Promise<{ success: boolean; sha256?: string; md5?: string; error?: string }> {
+    if (!isSshTunnelAllowed()) return { success: false, error: 'SSH tüneli bu ortamda devre dışı.' };
     return new Promise((resolve) => {
       const client = new Client();
       let isResolved = false;
@@ -313,6 +317,7 @@ class SSHTunnelService {
   }
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
+    if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
     if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
       const probeRes = await this.probeHostFingerprint(config.sshHost, config.sshPort || 22);
       if (probeRes.success && probeRes.sha256) {
@@ -444,6 +449,7 @@ class SSHTunnelService {
     databaseState?: string;
     hostFingerprint?: string | null;
   }> {
+    if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }

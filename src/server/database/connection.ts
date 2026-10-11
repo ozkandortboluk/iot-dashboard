@@ -53,6 +53,10 @@ function notifyPoolRecycled(newPool: pg.Pool | null): void {
  * - TRUE in Development / AI Studio Preview mode
  */
 export function isSshTunnelAllowed(): boolean {
+  // Production must never initiate outbound SSH tunnels, even if an override is set.
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
+    return false;
+  }
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
     return true;
   }

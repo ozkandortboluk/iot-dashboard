@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import net from 'node:net';
 import { authenticateUser, AuthenticatedRequest } from '../middleware/auth.js';
 import { db } from '../db.js';
 import { broadcast } from '../services/websocket.js';
@@ -10,6 +11,7 @@ export const networkRouter = Router();
 // In-memory store for active scan jobs and field agents (for MVP/architecture)
 const activeScans = new Map<string, NetworkScanJob>();
 const connectedAgents = new Map<string, NetworkAgent>();
+const MAX_PENDING_SCAN_JOBS = 100;
 
 // Role check middleware for network ops
 const requireNetworkAdminOrOperator = (req: Request, res: Response, next: NextFunction) => {
@@ -40,9 +42,13 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   
-  const { subnet, agentId } = req.body;
-  if (!subnet || typeof subnet !== 'string' || !subnet.includes('/')) {
+  const { subnet, agentId } = req.body || {};
+  if (!subnet || typeof subnet !== 'string' || subnet.split('/').length !== 2 || !/^\d{1,2}$/.test(subnet.split('/')[1]) || Number(subnet.split('/')[1]) > 32 || net.isIP(subnet.split('/')[0]) !== 4) {
     return res.status(400).json({ error: 'Geçerli bir subnet belirtilmelidir (Örn: 192.168.1.0/24)' });
+  }
+
+  if (activeScans.size >= MAX_PENDING_SCAN_JOBS) {
+    return res.status(429).json({ error: 'Ağ tarama görev kapasitesi dolu.' });
   }
 
   // Create an async job
@@ -82,6 +88,7 @@ networkRouter.post('/scans', authenticateUser, requireNetworkAdminOrOperator, (r
           job.completedAt = new Date().toISOString();
           // In real app, agent reports discovered devices here
           activeScans.set(jobId, job);
+          setTimeout(() => activeScans.delete(jobId), 5 * 60 * 1000).unref();
         } else {
           job.progress = progress;
           job.updatedAt = new Date().toISOString();
@@ -118,8 +125,8 @@ networkRouter.get('/scans/:id', authenticateUser, requireNetworkAdminOrOperator,
 
 // 4. POST /api/network/ping - Issues a real ICMP ping (delegated to agent)
 networkRouter.post('/ping', authenticateUser, requireNetworkAdminOrOperator, (req, res) => {
-  const { ip, agentId } = req.body;
-  if (!ip || typeof ip !== 'string') {
+  const { ip, agentId } = req.body || {};
+  if (!ip || typeof ip !== 'string' || net.isIP(ip) !== 4) {
     return res.status(400).json({ error: 'Geçerli bir IP adresi belirtilmelidir.' });
   }
 

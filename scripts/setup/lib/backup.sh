@@ -5,81 +5,84 @@
 # ==============================================================================
 
 perform_backup() {
-  log_step "Yedekleme İşlemi (Disaster Recovery Backup) Başlatılıyor..."
-
-  local BACKUP_DIR="./backups"
-  local TIMESTAMP
-  TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-  local BACKUP_ARCHIVE="${BACKUP_DIR}/nexus_backup_${TIMESTAMP}.tar.gz"
-
-  mkdir -p "$BACKUP_DIR"
-
-  # Dump database if container is healthy
-  local DB_DUMP_FILE="${BACKUP_DIR}/db_dump_${TIMESTAMP}.sql"
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "nexus_timescaledb"; then
-    log_info "TimescaleDB veritabanı yedeği alınıyor (pg_dump)..."
-    docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$DB_DUMP_FILE" 2>/dev/null || true
+  log_step "Yedekleme başlatılıyor..."
+  local dir="./backups" stamp archive stage ok=false
+  stamp=$(date +"%Y%m%d_%H%M%S")
+  archive="$dir/nexus_backup_$stamp.tar.gz"
+  mkdir -p "$dir" || return 1
+  stage=$(mktemp -d "$dir/.backup-stage.XXXXXXXX") || return 1
+  chmod 700 "$stage"
+  if ! docker inspect nexus_timescaledb >/dev/null 2>&1 ||
+     ! docker inspect nexus_app >/dev/null 2>&1; then
+    log_error "Veritabanı veya uygulama konteyneri bulunamadı."
+  elif ! docker exec nexus_timescaledb pg_dump -U iot_user -d iot_dashboard > "$stage/db_dump.sql"; then
+    log_error "pg_dump başarısız."
+  elif [ ! -s "$stage/db_dump.sql" ]; then
+    log_error "pg_dump boş dosya oluşturdu."
+  elif ! mkdir -p "$stage/app_data" ||
+       ! docker cp nexus_app:/app/data/. "$stage/app_data/"; then
+    log_error "Uygulama volume verileri kopyalanamadı."
+  else
+    log_warn "Ana şifreleme anahtarı ve PostgreSQL parolası arşive alınmaz; ayrı güvenli yedek gerekir."
+    # Store only the SQL dump and app volume snapshot; never include plaintext host secrets.
+    if (umask 077; tar -C "$stage" -czf "$PWD/${archive#./}.part" db_dump.sql app_data) &&
+       tar -tzf "$archive.part" >/dev/null &&
+       mv "$archive.part" "$archive"; then
+      chmod 600 "$archive"
+      ok=true
+    fi
   fi
-
-  log_info "Şifreli Kasa (Vault), veriler ve veritabanı yedeği arşivleniyor..."
-  log_warn "GÜVENLİK SINIRI: Root şifreleme anahtarı (encryption_key), düz metin parolalar ve .env arşive konulmaz! Orijinal ENCRYPTION_KEY kök anahtarınızı harici güvenli bir kasada ayrı saklayınız."
-  local TARGETS=()
-  [ -d "./data" ] && TARGETS+=("./data")
-  [ -d "./docker/certs" ] && TARGETS+=("./docker/certs")
-  [ -f "$DB_DUMP_FILE" ] && TARGETS+=("$DB_DUMP_FILE")
-
-  if [ ${#TARGETS[@]} -eq 0 ]; then
-    mkdir -p "./data"
-    TARGETS+=("./data")
+  rm -f "$archive.part"
+  rm -rf "$stage"
+  if [ "$ok" != true ]; then
+    log_error "Yedekleme başarısız; eksik arşiv bırakılmadı."
+    return 1
   fi
-
-  # Strictly exclude root master encryption key, plaintext secrets and env files from unencrypted archive
-  tar \
-    --exclude='./secrets/encryption_key' \
-    --exclude='data/.vault_key' \
-    --exclude='./secrets/postgres_password' \
-    --exclude='./secrets/db_password' \
-    --exclude='./secrets/ota_signing_key' \
-    --exclude='./secrets/ota_private_key' \
-    --exclude='./secrets/jwt_secret' \
-    --exclude='./secrets/session_secret' \
-    --exclude='./.env' \
-    --exclude='./.env.*' \
-    -czf "$BACKUP_ARCHIVE" "${TARGETS[@]}" 2>/dev/null
-  rm -f "$DB_DUMP_FILE"
-
-  local SIZE
-  SIZE=$(du -h "$BACKUP_ARCHIVE" | awk '{print $1}')
-  log_success "Yedekleme tamamlandı! Dosya: ${CLR_BOLD}${BACKUP_ARCHIVE}${CLR_RESET} (${SIZE})"
+  log_success "Yedekleme tamamlandı: $archive"
 }
 
+# Restore is intentionally blocked until a separately tested, explicit recovery
+# workflow can validate the archive, database target and vault-key compatibility.
+# The previous implementation only extracted files and incorrectly claimed success.
 perform_restore() {
-  local ARCHIVE_PATH="$1"
+  local ARCHIVE_PATH="${1:-}"
   if [ -z "$ARCHIVE_PATH" ] || [ ! -f "$ARCHIVE_PATH" ]; then
-    log_fatal "Geri yüklenecek geçerli bir arşiv dosyası belirtilmedi: '$ARCHIVE_PATH'"
+    log_error "Geçerli bir geri yükleme arşivi belirtilmedi."
+    return 1
   fi
-
-  log_step "Yedekten Geri Yükleme (Restore) Başlatılıyor: ${ARCHIVE_PATH}..."
-
-  if [ "$NON_INTERACTIVE" != true ]; then
-    echo -ne "${CLR_RED}DİKKAT: Mevcut secrets ve data dizinlerinin üzerine yazılacak! Devam edilsin mi? [E/h]: ${CLR_RESET}"
-    read -r answer
-    case "$answer" in
-      [eE][vV][eE][tT]|[yY][eE][sS]|[eE]|[yY])
-        ;;
-      *)
-        log_info "İşlem iptal edildi."
-        return 0
-        ;;
-    esac
+  if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
+    log_error "Arşiv okunamıyor veya bozuk."
+    return 1
   fi
+  log_error "Otomatik geri yükleme güvenlik nedeniyle devre dışı: SQL veritabanı ve uygulama volume verileri henüz doğrulanmış bir kurtarma akışıyla geri yüklenmiyor. Mevcut veriler değiştirilmedi."
+  return 1
+}
 
-  log_info "Arşiv içeriği ayıklanıyor..."
-  tar -xzf "$ARCHIVE_PATH"
-
-  # Restore permissions
-  [ -d "./secrets" ] && chmod 700 ./secrets && chmod 600 ./secrets/* 2>/dev/null || true
-  [ -d "./data" ] && chmod 755 ./data || true
-
-  log_success "Yedek başarıyla geri yüklendi. Servisleri yeniden başlatmak için './install.sh' çalıştırabilirsiniz."
+# Read-only archive validation. Never extracts into the live installation.
+perform_restore_check() {
+  local archive="${1:-}" listing
+  if [ -z "$archive" ] || [ ! -f "$archive" ]; then
+    log_error "Arşiv bulunamadı."
+    return 1
+  fi
+  if ! tar -tzf "$archive" >/dev/null 2>&1; then
+    log_error "Arşiv bozuk veya okunamıyor."
+    return 1
+  fi
+  listing=$(tar -tzf "$archive") || return 1
+  if ! printf '%s\n' "$listing" | grep -Fxq 'db_dump.sql' ||
+     ! printf '%s\n' "$listing" | grep -Fxq 'app_data/' ; then
+    log_error "SQL dökümü veya uygulama verileri eksik."
+    return 1
+  fi
+  # Reject traversal and absolute paths before inspecting any member.
+  if printf '%s\n' "$listing" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    log_error "Arşivde güvensiz dosya yolu var."
+    return 1
+  fi
+  if ! tar -xOzf "$archive" db_dump.sql | grep -q '[^[:space:]]'; then
+    log_error "SQL dökümü boş veya okunamıyor."
+    return 1
+  fi
+  log_success "Arşiv yapısı doğrulandı (SQL içeriğinin veritabanına yüklenebilirliği henüz test edilmedi)."
 }

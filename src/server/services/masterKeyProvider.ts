@@ -127,18 +127,24 @@ export class MasterKeyProvider {
       }
     } catch {}
 
-    // 3. Persistent local development key (data/.vault_key) - MUST CHECK BEFORE RE-GENERATING!
-    try {
-      if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
+    // 3. Persistent local development key: never silently replace a damaged key.
+    // An existing key may encrypt valuable Vault records, even outside production.
+    if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
+      try {
         const raw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
-        if (raw && raw.length >= 16) {
-          this.cachedKeyBuffer = this.derive32ByteKey(raw);
-          this.cachedSource = 'data_vault_key';
-          this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
-          return this.cachedKeyBuffer;
+        if (raw.length < 16) {
+          throw new Error('Persistent Vault master key is invalid');
         }
+        this.cachedKeyBuffer = this.derive32ByteKey(raw);
+        this.cachedSource = 'data_vault_key';
+        this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+        return this.cachedKeyBuffer;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error : new Error(String(error));
+        this.cachedSource = 'missing';
+        return null; // Fail closed; never rotate a key after read/corruption errors.
       }
-    } catch {}
+    }
 
     // 4. Custom key path if specified
     const customKeyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
@@ -171,17 +177,30 @@ export class MasterKeyProvider {
         fs.mkdirSync(dataDir, { recursive: true });
       }
       const newKeyHex = crypto.randomBytes(32).toString('hex');
-      fs.writeFileSync(LOCAL_VAULT_KEY_PATH, newKeyHex, { encoding: 'utf8', mode: 0o600 });
+      // Exclusive creation prevents two processes from overwriting each other's key.
+      fs.writeFileSync(LOCAL_VAULT_KEY_PATH, newKeyHex, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       this.cachedKeyBuffer = this.derive32ByteKey(newKeyHex);
       this.cachedSource = 'data_vault_key';
       this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
       return this.cachedKeyBuffer;
-    } catch {
-      // Ephemeral in-memory fallback if disk is completely read-only in sandbox
-      const fallbackHex = crypto.randomBytes(32).toString('hex');
-      this.cachedKeyBuffer = this.derive32ByteKey(fallbackHex);
-      this.cachedSource = 'env';
-      return this.cachedKeyBuffer;
+    } catch (error) {
+      // A concurrent process may have won the create race. Use its persisted key,
+      // but never replace it or generate an ephemeral incompatible master key.
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        try {
+          const winner = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
+          if (winner.length < 16) throw new Error('Concurrent master key is invalid');
+          this.cachedKeyBuffer = this.derive32ByteKey(winner);
+          this.cachedSource = 'data_vault_key';
+          this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+          return this.cachedKeyBuffer;
+        } catch (readError) {
+          this.lastError = readError instanceof Error ? readError : new Error(String(readError));
+          return null;
+        }
+      }
+      this.lastError = error instanceof Error ? error : new Error(String(error));
+      return null;
     }
   }
 

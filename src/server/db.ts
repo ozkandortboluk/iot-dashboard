@@ -72,7 +72,7 @@ import { DatabaseState } from '../types.js';
 import { dispatchMessageToChannel, defaultNotificationConfig } from './notificationServices.js';
 import { PostgresRepository, isTestOrEphemeralArtifact, isTestOrEphemeralUser, isRealAdminUser } from './database/postgres.js';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.NEXUS_TEST_DATA_DIR && process.env.NODE_ENV === 'test' ? process.env.NEXUS_TEST_DATA_DIR : path.join(process.cwd(), 'data');
 const DB_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_db.json') : path.join(DATA_DIR, 'db.json');
 const SYSTEM_CONFIG_FILE = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? path.join(DATA_DIR, 'test_system_config.json') : path.join(DATA_DIR, 'system_config.json');
 
@@ -355,8 +355,10 @@ class LocalDatabase {
 
     this.setupFirestoreSync();
     this.startAutoQuotaCheck();
-    this.startQueueWorker();
-    this.startAutoRetentionWorker();
+    if (process.env.NODE_ENV !== 'test') {
+      this.startQueueWorker();
+      this.startAutoRetentionWorker();
+    }
     
     // In production or when PostgreSQL is configured, start in DB_CONNECTING.
     // In development without PostgreSQL configured, default to READY for local WAL / in-memory development.
@@ -389,10 +391,14 @@ class LocalDatabase {
       }
     });
 
-    this.initPromise = this.initPostgresRepository().catch(() => false);
-    this.startPostgresAutoReconnect();
-    this.startAutoBackupWorker();
-    this.autoHealer.startWatchdog(30000);
+    if (process.env.NODE_ENV === 'test') {
+      this.initPromise = Promise.resolve(false);
+    } else {
+      this.initPromise = this.initPostgresRepository().catch(() => false);
+      this.startPostgresAutoReconnect();
+      this.startAutoBackupWorker();
+      this.autoHealer.startWatchdog(30000);
+    }
   }
 
   private initPromise: Promise<boolean> | null = null;
@@ -1677,6 +1683,8 @@ class LocalDatabase {
   }
 
   public saveData(dataToSave: DatabaseSchema, forceWrite = false) {
+    // Isolated Vault tests exercise in-memory state only; never start file writes.
+    if (process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR) return;
     const isProduction = process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true';
     if (isProduction) {
       // Security Invariant: In production, NEVER persist auth/users/devices/credentials to local disk db.json!

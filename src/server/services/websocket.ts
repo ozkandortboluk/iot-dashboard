@@ -9,6 +9,7 @@ import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 import { tenantSecurityService } from './tenantSecurity.service.js';
 import { systemLogger } from './systemLogger.service.js';
 import { isAllowedWsOrigin } from '../utils/corsOrigins.js';
+import { parseWebSocketUpgradeUrl } from '../utils/wsUpgradePath.js';
 export { isAllowedWsOrigin };
 
 export interface AuthenticatedWebSocket extends WebSocket {
@@ -71,7 +72,7 @@ async function resolveUser(token?: string | null): Promise<User | null> {
 
   const clean = token.trim();
   // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
-  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+  if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
     return null;
   }
 
@@ -84,14 +85,14 @@ async function resolveUser(token?: string | null): Promise<User | null> {
 }
 
 // Physical device API key / Token verification helper for WebSocket connections
-async function resolveDevice(token?: string | null): Promise<Device | null> {
+async function resolveDevice(token?: string | null, updateLastUsed = true): Promise<Device | null> {
   if (!token || typeof token !== 'string' || token.trim() === '') {
     return null;
   }
 
   const cleanToken = token.trim();
   // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
-  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+  if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
     return null;
   }
 
@@ -100,7 +101,8 @@ async function resolveDevice(token?: string | null): Promise<Device | null> {
   if (db.postgresRepo?.isReady()) {
     foundDev = await db.postgresRepo.getDeviceByApiKey(cleanToken).catch(() => null);
   }
-  if (!foundDev) {
+  // Production must not accept a stale in-memory device after PostgreSQL rejects its key.
+  if (!foundDev && process.env.NODE_ENV !== 'production' && process.env.VPS_PRODUCTION !== 'true') {
     foundDev = db.getDeviceByApiKey(cleanToken) || null;
   }
   if (!foundDev) return null;
@@ -112,14 +114,16 @@ async function resolveDevice(token?: string | null): Promise<Device | null> {
   }
 
   // 2. API Key Expiry Check
-  if (foundDev.apiKeyExpiresAt && new Date(foundDev.apiKeyExpiresAt).getTime() < Date.now()) {
+  if (foundDev.apiKeyExpiresAt && (!Number.isFinite(new Date(foundDev.apiKeyExpiresAt).getTime()) || new Date(foundDev.apiKeyExpiresAt).getTime() <= Date.now())) {
     console.warn(`[WebSocket Auth] Cihaz API anahtarının süresi dolmuş (Expired): ${foundDev.id} (${foundDev.name})`);
     return null;
   }
 
   // 3. Update Last-Used Timestamp
-  foundDev.apiKeyLastUsedAt = new Date().toISOString();
-  db.updateDevice(foundDev.id, { apiKeyLastUsedAt: foundDev.apiKeyLastUsedAt });
+  if (updateLastUsed) {
+    foundDev.apiKeyLastUsedAt = new Date().toISOString();
+    db.updateDevice(foundDev.id, { apiKeyLastUsedAt: foundDev.apiKeyLastUsedAt });
+  }
 
   return foundDev;
 }
@@ -651,9 +655,9 @@ export function initWebSocketServer(server: http.Server) {
     noServer: true,
     maxPayload: MAX_WS_PAYLOAD,
     handleProtocols: (protocols) => {
+      // Never reflect a credential supplied as a subprotocol into the response headers.
       if (protocols.has('nexus-token')) return 'nexus-token';
-      const first = Array.from(protocols)[0];
-      return first || false;
+      return false;
     },
   });
   wss.on('error', (err: any) => {
@@ -700,10 +704,10 @@ export function initWebSocketServer(server: http.Server) {
         return;
       }
 
-      const urlObj = new URL(request.url || '', `http://${request.headers.host || '127.0.0.1'}`);
-      const pathname = urlObj.pathname;
+      // Parse relative upgrade targets against a fixed base, never an untrusted Host header.
+      const urlObj = parseWebSocketUpgradeUrl(request.url);
 
-      if (pathname === '/ws' || pathname.startsWith('/ws') || pathname === '/api/ws' || pathname.startsWith('/api/ws')) {
+      if (urlObj) {
         let connectionToken: string | null = null;
 
         // 1. Extract Token from Cookie, Authorization header, X-API-KEY, Sec-WebSocket-Protocol, or Query string
@@ -760,7 +764,7 @@ export function initWebSocketServer(server: http.Server) {
 
         // Strict Fail-Closed Check in Production:
         // When in production (or strict maintenance mode), PostgreSQL must be READY before accepting authenticated WebSocket connections.
-        if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+        if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
           console.warn('[WebSocket Security] WebSocket upgrade reddedildi (503 Service Unavailable): PostgreSQL üretim modunda hazır değil.');
           socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\n\r\n');
           socket.destroy();
@@ -774,6 +778,10 @@ export function initWebSocketServer(server: http.Server) {
           ws.sessionToken = connectionToken || undefined;
           wss!.emit('connection', ws, request);
         });
+      } else {
+        // Reject unsupported upgrade paths instead of leaving sockets open.
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+        socket.destroy();
       }
     } catch (err) {
       console.error('[WebSocket] Upgrade error:', err);
@@ -796,6 +804,10 @@ export function initWebSocketServer(server: http.Server) {
       // Periodic security validation of active sessions and accounts
       if (ws.user) {
         // SEC-06: Authoritatively verify session token against database/state
+        if (!ws.sessionToken) {
+          try { ws.close(1008, 'Session credentials missing'); ws.terminate(); } catch {}
+          continue;
+        }
         if (ws.sessionToken) {
           try {
             const verifiedSession = await db.verifySessionAsync(ws.sessionToken);
@@ -815,6 +827,11 @@ export function initWebSocketServer(server: http.Server) {
           const users = await db.getUsersAsync();
           currentUser = users.find((u: any) => u.id === ws.user!.id);
         } catch {
+          // Production must not authorize an account using stale in-memory state.
+          if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+            try { ws.close(1008, 'Account verification failed'); ws.terminate(); } catch {}
+            continue;
+          }
           currentUser = db.getUsers().find((u: any) => u.id === ws.user!.id);
         }
         if (!currentUser || currentUser.status === 'suspended' || currentUser.deletedAt) {
@@ -824,6 +841,25 @@ export function initWebSocketServer(server: http.Server) {
         // Dynamic role synchronization
         if (ws.user.role !== currentUser.role) {
           ws.user = { ...currentUser };
+        }
+      }
+
+      // Device credentials can be revoked after the handshake; revalidate each heartbeat.
+      if (ws.device) {
+        if (!ws.sessionToken) {
+          try { ws.close(1008, 'Device credentials missing'); ws.terminate(); } catch {}
+          continue;
+        }
+        try {
+          const currentDevice = await resolveDevice(ws.sessionToken, false);
+          if (!currentDevice || currentDevice.id !== ws.device.id) {
+            try { ws.close(1008, 'Device credentials revoked or expired'); ws.terminate(); } catch {}
+            continue;
+          }
+          ws.device = currentDevice;
+        } catch {
+          try { ws.close(1008, 'Device verification failed'); ws.terminate(); } catch {}
+          continue;
         }
       }
 
@@ -970,6 +1006,7 @@ export function initWebSocketServer(server: http.Server) {
               ws.isAuth = true;
               ws.device = verifiedDevice;
               ws.user = undefined;
+              ws.sessionToken = token.trim();
               deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
               console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
               safeSend(

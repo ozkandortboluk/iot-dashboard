@@ -80,8 +80,32 @@ export interface DbTestResult {
 }
 
 // Location of persistent server-side runtime secret file (inside data/ which is volume mounted and gitignored)
-const RUNTIME_SECRET_DIR = path.resolve(process.cwd(), 'data');
+const RUNTIME_SECRET_DIR = process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR ? path.resolve(process.env.NEXUS_TEST_DATA_DIR) : path.resolve(process.cwd(), 'data');
 const RUNTIME_SECRET_FILE = path.join(RUNTIME_SECRET_DIR, '.db_config.json');
+
+function writeRuntimeConfigAtomically(payload: unknown): void {
+  fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+  const temporary = path.join(RUNTIME_SECRET_DIR, `.db_config.json.tmp.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    const fd = fs.openSync(temporary, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(payload, null, 2), { encoding: 'utf8' });
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temporary, RUNTIME_SECRET_FILE);
+    // The new inode already has mode 0600; persist the directory entry where supported.
+    try {
+      const dirFd = fs.openSync(RUNTIME_SECRET_DIR, 'r');
+      try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+    } catch {
+      // Some filesystems do not support syncing directories.
+    }
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+}
 const SETUP_TOKEN_FILE = path.join(RUNTIME_SECRET_DIR, '.setup_token');
 
 // Docker secret fallback paths
@@ -117,7 +141,7 @@ export class SetupService {
    * Safely reads Docker secrets, environment variables, or server-side protected runtime secret file
    */
   public loadRuntimeSecretConfig(): DatabaseConfigPayload | null {
-    if ((process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) && !process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.TEST_POSTGRES_URL) {
+    if ((process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST)) && !process.env.NEXUS_TEST_DATA_DIR && !process.env.DATABASE_URL && !process.env.POSTGRES_URL && !process.env.TEST_POSTGRES_URL) {
       return null;
     }
     try {
@@ -137,22 +161,22 @@ export class SetupService {
           if (parsed.password && typeof parsed.password === 'string' && !parsed.password.includes('••••')) {
             pass = parsed.password;
             systemLogger.warn('security', '[Security Migration] .db_config.json içinde eski plaintext şifre tespit edildi. Güvenli Vault kasasına taşınıyor.');
-            systemSecretsService.setSecret('database.password', parsed.password, {
-              category: 'database',
-              label: 'PostgreSQL Password',
-              isSensitive: true,
-              updatedBy: 'legacy_migration',
-            }).catch(() => {});
-
-            // Scrub password from disk immediately
             try {
+              // Only scrub the legacy file after the encrypted password is durably
+              // written and read back from the authoritative local Vault.
+              systemSecretsService.migrateLegacyDatabasePassword(parsed.password);
               const scrubbed = { ...parsed };
               delete scrubbed.password;
               scrubbed.hasPassword = true;
               scrubbed.passwordRef = 'vault:database.password';
               scrubbed.updatedAt = new Date().toISOString();
-              fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
-            } catch {}
+              writeRuntimeConfigAtomically(scrubbed);
+            } catch (migrationError: any) {
+              systemLogger.error('security', 'Legacy PostgreSQL parola taşıma veya dosya temizleme işlemi başarısız oldu; manuel kontrol gerekli.');
+              // Do not silently report a successful migration. The original
+              // plaintext remains when Vault persistence fails.
+              throw migrationError;
+            }
           } else {
             // In normal operation, retrieve password securely from Central Security Vault
             pass = systemSecretsService.getDatabasePassword();
@@ -304,8 +328,8 @@ export class SetupService {
         database: config.database,
         user: config.user,
         // Plaintext password is NEVER written to .db_config.json
-        hasPassword: Boolean(config.password),
-        passwordRef: config.password ? 'vault:database.password' : undefined,
+        hasPassword: Boolean(config.password && !config.password.includes('••••')) || Boolean(systemSecretsService.getDatabasePassword()),
+        passwordRef: (config.password || systemSecretsService.getDatabasePassword()) ? 'vault:database.password' : undefined,
         sslMode: config.sslMode || 'disable',
         rejectUnauthorized: config.rejectUnauthorized ?? (config.sslMode && config.sslMode !== 'disable'),
         isCompleted: Boolean(isCompleted),
@@ -313,38 +337,50 @@ export class SetupService {
         updatedAt: new Date().toISOString(),
       };
 
-      this.runtimeConfig = { ...config };
+      // Do not replace an existing password unless the connection metadata can
+      // also be committed. The old password is restored if config writing fails.
+      const oldPassword = systemSecretsService.getDatabasePassword();
+      const hasNewPassword = Boolean(config.password && !config.password.includes('••••'));
+      if (hasNewPassword) {
+        systemSecretsService.persistDatabasePasswordLocally(config.password!, 'setup_wizard');
+      }
+
+      try {
+        writeRuntimeConfigAtomically(payload);
+      } catch (error) {
+        if (hasNewPassword && oldPassword !== config.password) {
+          try {
+            if (systemSecretsService.getSecret('database.password') && !oldPassword) {
+              systemSecretsService.rollbackNewDatabasePasswordLocally(config.password!);
+            } else if (oldPassword) {
+              systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'setup_rollback');
+            }
+          } catch (rollbackError) {
+            systemLogger.error('security', 'Runtime config failure: Vault password rollback failed');
+            throw new Error('Runtime config failed and Vault password rollback failed', { cause: rollbackError });
+          }
+        }
+        throw error;
+      }
+
+      // A masked UI placeholder is never a usable database credential.
+      const effectivePassword = config.password?.includes('••••')
+        ? systemSecretsService.getDatabasePassword()
+        : (config.password || systemSecretsService.getDatabasePassword());
+      this.runtimeConfig = { ...config, password: effectivePassword };
       this.isCompletedState = payload.isCompleted;
       if (payload.completedAt) this.completedAtDate = payload.completedAt;
 
-      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(payload, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600, // Read/Write only by owner process
-      });
-
-      // Ensure permissions in case umask relaxed it
-      try {
-        fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
-      } catch {}
-
-      // Synchronize password to AES-256-GCM encrypted system secrets vault
-      if (config.password && !config.password.includes('••••')) {
-        systemSecretsService.setSecret('database.password', config.password, {
-          category: 'database',
-          label: 'PostgreSQL Password',
-          isSensitive: true,
-          updatedBy: 'setup_wizard',
-        }).catch(() => {});
-      }
-
+      // Mirror non-password metadata; report failures rather than hiding them.
       systemSecretsService.updateDatabaseSecrets({
         host: config.host,
         port: config.port,
         database: config.database,
         user: config.user,
-        password: config.password,
         sslMode: config.sslMode,
-      }, 'setup_wizard').catch(() => {});
+      }, 'setup_wizard').catch((err: any) => {
+        systemLogger.error('database', 'Vault database metadata synchronization failed');
+      });
 
       // Synchronize databaseSettings into persistent db.json store
       // SEC-07: Passwords must NEVER be stored in plaintext in db.json!
@@ -604,32 +640,31 @@ export class SetupService {
    * Marks installation as permanently completed and persists state to disk
    */
   public markSetupCompleted(): void {
-    this.isCompletedState = true;
-    this.completedAtDate = this.completedAtDate || new Date().toISOString();
-    this.invalidateSetupToken();
+    // Do not report completion in memory until its durable record is committed.
     try {
-      if (!fs.existsSync(RUNTIME_SECRET_DIR)) {
-        fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
+      if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
+        throw new Error('Runtime database configuration is missing');
       }
-      let existingPayload: any = {};
-      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
-        try {
-          existingPayload = JSON.parse(fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8'));
-        } catch {}
+      const existingPayload = JSON.parse(fs.readFileSync(RUNTIME_SECRET_FILE, 'utf8'));
+      if (!existingPayload || typeof existingPayload.host !== 'string' || !existingPayload.host.trim()
+        || typeof existingPayload.database !== 'string' || !existingPayload.database.trim()) {
+        throw new Error('Runtime database configuration is invalid');
       }
+      const completedAt = this.completedAtDate || new Date().toISOString();
       const updated = {
         ...existingPayload,
         isCompleted: true,
-        completedAt: this.completedAtDate,
+        completedAt,
         updatedAt: new Date().toISOString(),
       };
       delete updated.password; // Ensure password is never in .db_config.json
-      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(updated, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
+      writeRuntimeConfigAtomically(updated);
+      this.completedAtDate = completedAt;
+      this.isCompletedState = true;
+      this.invalidateSetupToken();
     } catch (e) {
       console.warn('[SetupService] Could not persist completed flag:', e);
+      throw e;
     }
   }
 

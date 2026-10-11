@@ -53,7 +53,10 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
   });
 
   it('3. OTA private key must be resolved from Central Security Vault as canonical source', async () => {
-    const testOta = '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgTestKeyPlaceholder1234567890abcdef\n-----END PRIVATE KEY-----';
+    // Generate a valid disposable Ed25519 key; never use a production OTA key in tests.
+    const { generateKeyPairSync } = await import('node:crypto');
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const testOta = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
     await systemSecretsService.setSecret('ota.signing_key', testOta, {
       category: 'ota',
       label: 'OTA Signing Key',
@@ -61,7 +64,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     });
 
     const resolved = systemSecretsService.getOtaSigningKey();
-    expect(resolved).toBe(testOta);
+    expect(resolved.trim()).toBe(testOta.trim());
   });
 
   it('4. resolvePostgresConnectionString must inject password from Central Security Vault if missing in connection string', async () => {
@@ -168,6 +171,13 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
       migratedTables: ['users', 'devices'],
     } as any);
 
+    // Keep this lifecycle test focused on canonical Vault credentials and
+    // passwordless runtime config; pool construction belongs to integration tests.
+    const configureSpy = vi.spyOn(setupService, 'configureDatabase').mockImplementation(async (config) => {
+      setupService.saveRuntimeSecretConfig(config, false);
+      return { success: true, message: 'Vault fixture configured' };
+    });
+
     // Call quickInitDocker without passing password argument and without process.env.POSTGRES_PASSWORD
     const result = await setupService.quickInitDocker();
     expect(result.success).toBe(true);
@@ -180,7 +190,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     }));
 
     // Verify .db_config.json on disk contains no plaintext password
-    const runtimeConfigPath = path.resolve(process.cwd(), 'data', '.db_config.json');
+    const runtimeConfigPath = path.join(process.env.NEXUS_TEST_DATA_DIR!, '.db_config.json');
     if (fs.existsSync(runtimeConfigPath)) {
       const savedConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
       expect(savedConfig.password).toBeUndefined();
@@ -189,6 +199,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     }
 
     testConnSpy.mockRestore();
+    configureSpy.mockRestore();
     initDbSpy.mockRestore();
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
@@ -199,6 +210,18 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     process.env.POSTGRES_PASSWORD = 'insecure_env_password_should_be_ignored';
     process.env.DB_PASSWORD = 'insecure_db_password_should_be_ignored';
     process.env.DATABASE_URL = 'postgresql://iot_user:env_url_password@timescaledb:5432/iot_dashboard';
+
+    // Production key resolution must use the Docker secret, not the env fixture.
+    // Supply a disposable mounted-secret fixture without changing fail-closed policy.
+    const actualExists = fs.existsSync.bind(fs);
+    const actualRead = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, 'existsSync').mockImplementation((file: any) =>
+      file === '/run/secrets/encryption_key' ? true : actualExists(file)
+    );
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) =>
+      file === '/run/secrets/encryption_key' ? process.env.ENCRYPTION_KEY! : (actualRead as any)(file, ...args)
+    ) as typeof fs.readFileSync);
+    resetKeyCacheForTesting();
 
     const vaultCanonicalPassword = 'CanonicalVaultPass_StrictProd_9988!';
     const getPassSpy = vi.spyOn(systemSecretsService, 'getDatabasePassword').mockReturnValue(vaultCanonicalPassword);

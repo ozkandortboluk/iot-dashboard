@@ -193,7 +193,7 @@ export interface CustomSecretInput {
   value: string;
 }
 
-const VAULT_DIR = path.resolve(process.cwd(), 'data');
+const VAULT_DIR = process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR ? path.resolve(process.env.NEXUS_TEST_DATA_DIR) : path.resolve(process.cwd(), 'data');
 
 export function getVaultFilePath(): string {
   const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
@@ -238,7 +238,11 @@ export class SystemSecretsService {
         }
       }
     } catch (err: any) {
-      systemLogger.warn('security', `Lokal secret kasası okunamadı: ${err?.message || err}`);
+      systemLogger.error('security', `Lokal secret kasası okunamadı: ${err?.message || err}`);
+      // A damaged or unreadable authoritative Vault must never be treated as
+      // an empty one: a subsequent save would otherwise replace its contents.
+      this.isLoaded = false;
+      throw new Error('Authoritative local Secret Vault could not be loaded', { cause: err });
     }
     this.isLoaded = true;
   }
@@ -312,14 +316,35 @@ export class SystemSecretsService {
       };
 
       const vaultPath = getVaultFilePath();
-      fs.writeFileSync(vaultPath, JSON.stringify(payload, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-
+      // Write a complete snapshot before replacing the authoritative vault.
+      // The temporary file must be on the same filesystem for atomic rename.
+      const tempPath = path.join(
+        VAULT_DIR,
+        `.${path.basename(vaultPath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`,
+      );
+      let fd: number | undefined;
       try {
-        fs.chmodSync(vaultPath, 0o600);
-      } catch {}
+        fd = fs.openSync(tempPath, 'wx', 0o600);
+        fs.writeFileSync(fd, JSON.stringify(payload, null, 2), { encoding: 'utf8' });
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fd = undefined;
+        fs.renameSync(tempPath, vaultPath);
+        // Persist the directory entry where supported.
+        try {
+          const dirFd = fs.openSync(VAULT_DIR, 'r');
+          try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+        } catch {
+          // Directory fsync may not be supported by every filesystem.
+        }
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+        try { fs.unlinkSync(tempPath); } catch (err: any) {
+          if (err?.code !== 'ENOENT') {
+            systemLogger.warn('security', 'Vault geçici dosyası temizlenemedi.');
+          }
+        }
+      }
     } catch (err: any) {
       systemLogger.error('security', `Lokal secret kasası kaydedilemedi: ${err?.message || err}`);
       throw new Error(`Secret kasası dosyaya yazılamadı: ${err?.message || err}`, { cause: err });
@@ -340,6 +365,69 @@ export class SystemSecretsService {
   }
 
   /**
+   * Synchronous local-only migration: persist and verify before deleting legacy plaintext.
+   * Does not depend on PostgreSQL availability during startup.
+   */
+  public persistDatabasePasswordLocally(password: string, updatedBy: string = 'setup_wizard'): void {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    if (!password || isMaskedSecret(password)) {
+      throw new Error('Legacy database password is empty or masked');
+    }
+    const key = 'database.password';
+    const previous = this.inMemorySecrets.get(key);
+    const record: StoredSecretRecord = {
+      key,
+      category: 'database',
+      label: 'PostgreSQL Password',
+      encryptedValue: encryptSecret(password),
+      isSensitive: true,
+      keyId: previous?.keyId ?? 'database_password_v1',
+      version: previous?.version ?? 1,
+      previousVersions: previous?.previousVersions,
+      updatedAt: new Date().toISOString(),
+      updatedBy,
+    };
+    this.inMemorySecrets.set(key, record);
+    try {
+      this.saveToLocalVault();
+      // Verify from the authoritative disk snapshot, not just the in-memory map.
+      const snapshot = JSON.parse(fs.readFileSync(getVaultFilePath(), 'utf8'));
+      const persisted = snapshot?.secrets?.[key]?.encryptedValue;
+      if (!persisted || decryptSecret(persisted) !== password) {
+        throw new Error('Persisted Vault password verification failed');
+      }
+    } catch (err) {
+      if (previous) this.inMemorySecrets.set(key, previous);
+      else this.inMemorySecrets.delete(key);
+      throw err;
+    }
+  }
+
+  /**
+   * Undo a newly created database password after runtime config commit failure.
+   * Only for the no-previous-Vault-password case; never delete an existing credential.
+   */
+  public rollbackNewDatabasePasswordLocally(expectedPassword: string): void {
+    if (!this.isLoaded) this.loadFromLocalVault();
+    const key = 'database.password';
+    const current = this.inMemorySecrets.get(key);
+    if (!current || decryptSecret(current.encryptedValue) !== expectedPassword) {
+      throw new Error('Vault password changed before rollback');
+    }
+    this.inMemorySecrets.delete(key);
+    try {
+      this.saveToLocalVault();
+    } catch (error) {
+      this.inMemorySecrets.set(key, current);
+      throw error;
+    }
+  }
+
+  public migrateLegacyDatabasePassword(password: string): void {
+    this.persistDatabasePasswordLocally(password, 'legacy_migration');
+  }
+
+  /**
    * Internal method: sets an encrypted secret in the vault
    */
   public async setSecret(
@@ -353,6 +441,8 @@ export class SystemSecretsService {
       updatedBy?: string;
       keyId?: string;
       version?: number;
+      /** One-shot maintenance tools may skip the optional PostgreSQL backup. */
+      skipPostgresBackup?: boolean;
     }
   ): Promise<void> {
     if (!this.isLoaded) this.loadFromLocalVault();
@@ -406,7 +496,9 @@ export class SystemSecretsService {
 
     this.inMemorySecrets.set(key, record);
     this.saveToLocalVault();
-    await this.persistToPostgres();
+    if (!meta.skipPostgresBackup) {
+      await this.persistToPostgres();
+    }
   }
 
   /**
@@ -821,9 +913,24 @@ export class SystemSecretsService {
               const scrubbed = { ...raw };
               delete scrubbed.password;
               scrubbed.passwordRef = 'vault:database.password';
-              fs.writeFileSync(dbConfigPath, JSON.stringify(scrubbed, null, 2), { mode: 0o600 });
+              const temporary = dbConfigPath + '.scrub.' + process.pid + '.' + crypto.randomBytes(6).toString('hex');
+              try {
+                const fd = fs.openSync(temporary, 'wx', 0o600);
+                try {
+                  fs.writeFileSync(fd, JSON.stringify(scrubbed, null, 2), 'utf8');
+                  fs.fsyncSync(fd);
+                } finally {
+                  fs.closeSync(fd);
+                }
+                fs.renameSync(temporary, dbConfigPath);
+              } finally {
+                if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+              }
             }
-          } catch {}
+          } catch (err: any) {
+            systemLogger.error('security', '[Migration] Legacy runtime config scrub failed; manual review required: ' + (err?.code || 'write_error'));
+            throw err;
+          }
         }
       }
     }
@@ -1341,24 +1448,45 @@ export class SystemSecretsService {
   // ============================================================================
 
   public async updateDatabaseSecrets(input: DatabaseSecretsUpdateInput, updatedBy?: string): Promise<void> {
-    if (input.host !== undefined) {
-      await this.setSecret('database.host', input.host, { category: 'database', label: 'PostgreSQL Host', isSensitive: false, updatedBy });
-    }
-    if (input.port !== undefined) {
-      await this.setSecret('database.port', String(input.port), { category: 'database', label: 'PostgreSQL Port', isSensitive: false, updatedBy });
-    }
-    if (input.database !== undefined) {
-      await this.setSecret('database.database', input.database, { category: 'database', label: 'PostgreSQL Database', isSensitive: false, updatedBy });
-    }
-    if (input.user !== undefined) {
-      await this.setSecret('database.user', input.user, { category: 'database', label: 'PostgreSQL User', isSensitive: false, updatedBy });
-    }
-    if (input.sslMode !== undefined) {
-      await this.setSecret('database.sslMode', input.sslMode, { category: 'database', label: 'PostgreSQL SSL Mode', isSensitive: false, updatedBy });
-    }
+    if (!this.isLoaded) this.loadFromLocalVault();
+
+    const updates: Array<[string, string, string, boolean]> = [];
+    if (input.host !== undefined) updates.push(['database.host', input.host, 'PostgreSQL Host', false]);
+    if (input.port !== undefined) updates.push(['database.port', String(input.port), 'PostgreSQL Port', false]);
+    if (input.database !== undefined) updates.push(['database.database', input.database, 'PostgreSQL Database', false]);
+    if (input.user !== undefined) updates.push(['database.user', input.user, 'PostgreSQL User', false]);
+    if (input.sslMode !== undefined) updates.push(['database.sslMode', input.sslMode, 'PostgreSQL SSL Mode', false]);
     if (input.password !== undefined && !isMaskedSecret(input.password)) {
-      await this.setSecret('database.password', input.password, { category: 'database', label: 'PostgreSQL Password', isSensitive: true, updatedBy });
+      updates.push(['database.password', input.password, 'PostgreSQL Password', true]);
     }
+    if (updates.length === 0) return;
+
+    const previous = new Map(this.inMemorySecrets);
+    try {
+      for (const [key, value, label, isSensitive] of updates) {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          this.inMemorySecrets.delete(key);
+          continue;
+        }
+        const existing = this.inMemorySecrets.get(key);
+        const version = existing?.version ?? 1;
+        this.inMemorySecrets.set(key, {
+          key, category: 'database', label,
+          encryptedValue: encryptSecret(trimmed), isSensitive,
+          keyId: existing?.keyId ?? `${key.replace(/[^a-zA-Z0-9]/g, '_')}_v${version}`,
+          version, previousVersions: existing?.previousVersions,
+          updatedAt: new Date().toISOString(), updatedBy,
+        });
+      }
+      // One authoritative snapshot: all fields commit together or none do.
+      this.saveToLocalVault();
+    } catch (error) {
+      this.inMemorySecrets = previous;
+      throw error;
+    }
+    // PostgreSQL is only a best-effort secondary mirror.
+    await this.persistToPostgres();
   }
 
   public async updateEmailSecrets(input: EmailSecretsUpdateInput, updatedBy?: string): Promise<void> {

@@ -128,9 +128,9 @@ systemRouter.get('/runtime', (req, res) => {
   const databaseTransport = isTunnelActive ? 'ssh-tunnel' : (isPgReady ? 'postgres-direct' : 'in-memory');
 
   if (config.isVps) {
-    const authHeader = req.headers.authorization;
-    const cookie = (req as any).cookies?.nexus_session_token;
-    if (!authHeader && !cookie) {
+    // An Authorization header or cookie is not proof of authentication.
+    // Keep public VPS diagnostics minimal regardless of caller-supplied headers.
+    {
       return res.json({
         environment: 'vps',
         production: true,

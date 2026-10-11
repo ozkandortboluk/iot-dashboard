@@ -53,8 +53,10 @@ HTTP_ONLY=false
 USE_DOCKER_PROXY=false
 DO_BACKUP=false
 DO_RESTORE=false
+DO_RESTORE_CHECK=false
 DO_UPDATE=false
 DO_STATUS=false
+HOST_SECURITY_CHECK=false
 RESTORE_FILE=""
 SETUP_DOMAIN=""
 SETUP_EMAIL=""
@@ -83,8 +85,10 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --init-only              Yalnızca secrets, .env ve dizinleri hazırlar, Docker konteynerlerini başlatmaz
   --check                  Yalnızca sistem gereksinimlerini ve port çakışmalarını denetler
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
+  --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
   --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
-  --restore <arsiv.tar.gz> Alınan yedekten tüm sistemi geri yükler
+  --restore-check <arsiv.tar.gz> Arşiv yapısını salt-okunur doğrular (geri yüklemez)
+  --restore <arsiv.tar.gz> Güvenlik nedeniyle devre dışı (tam geri yükleme henüz uygulanmadı)
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
   --docker-proxy           Docker Nginx ters proxy servisini başlatır (Varsayılan: kapalı, sistem Nginx kullanılır)
   -h, --help               Bu yardım mesajını gösterir
@@ -128,9 +132,22 @@ while [[ $# -gt 0 ]]; do
       DO_STATUS=true
       shift
       ;;
+    --host-security-check)
+      HOST_SECURITY_CHECK=true
+      shift
+      ;;
     --backup)
       DO_BACKUP=true
       shift
+      ;;
+    --restore-check)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        echo "HATA: --restore-check için arşiv yolu gereklidir." >&2
+        exit 2
+      fi
+      DO_RESTORE_CHECK=true
+      RESTORE_FILE="$2"
+      shift 2
       ;;
     --restore)
       DO_RESTORE=true
@@ -157,6 +174,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [ "$HOST_SECURITY_CHECK" = true ]; then
+  exec bash ./scripts/security/setup-host-security.sh --check
+fi
+
 # Execute Status Check if Requested
 if [ "$DO_STATUS" = true ]; then
   print_banner
@@ -180,6 +201,12 @@ fi
 if [ "$DO_BACKUP" = true ]; then
   print_banner
   perform_backup
+  exit $?
+fi
+
+# Validate archive without changing services or files.
+if [ "$DO_RESTORE_CHECK" = true ]; then
+  perform_restore_check "$RESTORE_FILE"
   exit $?
 fi
 
@@ -229,6 +256,17 @@ if [ "$HTTP_ONLY" = false ]; then
   if ! ensure_ssl_certificates; then
     log_fatal "SSL / TLS sertifikasyonu veya doğrulaması başarısız oldu. Dağıtım durduruldu."
     exit 1
+  fi
+fi
+
+# 6a. Apply hardening to an existing host Nginx site (Docker proxy is separate).
+# Do not install or replace system Nginx or its TLS certificates.
+if [ "$USE_DOCKER_PROXY" = false ] && [ -f /etc/nginx/sites-available/iot-dashboard ]; then
+  log_info "Mevcut sistem Nginx guvenlik kurallari kontrol ediliyor..."
+  if [ "${IS_ROOT:-false}" = true ]; then
+    bash ./scripts/setup/harden-system-nginx.sh
+  else
+    ${SUDO_CMD:-sudo} bash ./scripts/setup/harden-system-nginx.sh
   fi
 fi
 
@@ -314,29 +352,41 @@ if [ "$USE_DOCKER_PROXY" = true ]; then
 elif command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^nexus_proxy$"; then
   SERVICES+=("nexus_proxy")
 fi
-MAX_WAIT_SECONDS=60
-START_TIME=$(date +%s)
+MAX_WAIT_SECONDS=120
+HEALTH_FAILURE=false
 
 for svc in "${SERVICES[@]}"; do
   log_info "Servis bekleniyor: ${CLR_BOLD}${svc}${CLR_RESET}..."
+  START_TIME=$(date +%s)
   while true; do
     CURRENT_TIME=$(date +%s)
     ELAPSED=$((CURRENT_TIME - START_TIME))
 
     if [ "$ELAPSED" -gt "$MAX_WAIT_SECONDS" ]; then
-      log_warn "Servis (${svc}) beklenen sürede healthy durumuna geçmedi. Loglar için: docker logs ${svc}"
+      log_error "Servis (${svc}) zaman asimi. Loglar: docker logs ${svc}"
+      HEALTH_FAILURE=true
       break
     fi
 
-    STATUS=$(docker inspect --format='{{json .State.Health.Status}}' "$svc" 2>/dev/null || echo "\"running\"")
-    if [ "$STATUS" = "\"healthy\"" ] || [ "$STATUS" = "\"running\"" ]; then
+    STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing-healthcheck{{end}}' "$svc" 2>/dev/null) || STATUS="missing-container"
+    if [ "$STATUS" = "healthy" ]; then
       log_success "Servis çalışıyor ve sağlıklı: ${svc}"
       break
     fi
 
+    if [ "$STATUS" = "unhealthy" ] || [ "$STATUS" = "missing-healthcheck" ] || [ "$STATUS" = "missing-container" ]; then
+      log_error "Servis (${svc}) saglik kontrolu basarisiz: ${STATUS}"
+      HEALTH_FAILURE=true
+      break
+    fi
     sleep 2
   done
 done
+
+if [ "$HEALTH_FAILURE" = true ]; then
+  log_fatal "Zorunlu servisler healthy olmadi; kurulum basarisiz."
+  exit 1
+fi
 
 # 10. Plugin Post-Start Hook
 run_setup_hooks "post-start"
