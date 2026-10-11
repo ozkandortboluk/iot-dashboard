@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Master key kalıcılık testleri (37 hedef, doğrulama bekliyor)**
+> **📍 ŞU ANKİ KONUM: 05 — Master key kalıcılığı doğrulandı (37/37); üretim öncesi risk incelemesi**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -46,11 +46,11 @@
 │   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (fa584de)                       ✅
-│   ├── İzole Vault testleri (fa584de: 35/35)              ✅
+│   ├── npm run type-check (99c4359)                       ✅
+│   ├── İzole Vault testleri (99c4359: 37/37)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
-│   ├── Master key kalıcılık kategorisi (2 yeni test)      ⏳
+│   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -111,3 +111,5 @@
 > Son VPS izole checkout doğrulaması: `fa584de` — TypeScript başarılı, 35/35 test geçti. PostgreSQL havuzu, OTA PEM ve ENCRYPTION_KEY eksik test uyarıları artık görünmüyor. Kasıtlı bozuk Vault / disk hatası / plaintext reddi logları beklenen negatif test çıktılarıdır. Bu sonuçlar üretim ortamı doğrulaması değildir.
 
 > `7cf7d0f`: geliştirmede mevcut `.vault_key` bozuk/okunamazsa fail-closed; anahtar sessizce yeniden üretilmez. `4ea69a2`: ayrı `master_key_persistence.test.ts` kategorisi; `3fe1605`: Vitest kapsamına eklendi. 37 test ve type-check doğrulaması bekleniyor. Üretim Docker secret politikası değiştirilmedi.
+
+> `99c4359` izole VPS checkout doğrulaması: TypeScript geçti; 3 test dosyasında toplam 37/37 test geçti (Vault 25, canonical 10, master key 2). Üretim entegrasyon testi değildir. Kalan: kalıcı anahtarın restart ve izin davranışları ile dosya yarışları için ilave risk değerlendirmesi.
