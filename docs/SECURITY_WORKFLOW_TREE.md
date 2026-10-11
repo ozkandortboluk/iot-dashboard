@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 08 — 56/56 doğrulandı; sıradaki paket en az beş yeni test**
+> **📍 ŞU ANKİ KONUM: 09 — 5 yeni geçersiz yapılandırma testi eklendi; 61 test doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -154,3 +154,5 @@
 > Altıncı toplu paket: `f0a2900` metadata korunması; `6a8252f` kurulum fsync hatasında eski config korunması; `0467eeb` fsync hatasında temp dosya temizliği; `ac372fd` null config reddi; `d4aad25` boş veritabanı adının reddi. Son doğrulanan 51/51; yeni hedef 56/56. Yeni testler henüz çalıştırılmadı. Vault migration scrub için doğrudan hata enjeksiyonu testleri ayrıca bekliyor.
 
 > İzole VPS checkout `4ae9493`: `npm run type-check` başarılı; Vitest 3 dosya, 56/56 başarılı (System Secrets 38, Canonical 10, Master Key 8). Beş yeni test doğrulandı. Vault migration scrub hata enjeksiyonu testleri henüz bekliyor. Canlı Docker veya main değiştirilmedi.
+
+> Yedinci paket (`1b1249b`): array, number, boolean, eksik database ve eksik host içeren runtime config girdileri için 5 regresyon testi eklendi. Önceki 56/56 doğrulandı, yeni hedef 61/61. Vault migration scrub hata enjeksiyonu testleri hâlâ yapılacak; bu paket doğrudan o yolu sınamıyor. Canlı ortam ve main değişmedi.
