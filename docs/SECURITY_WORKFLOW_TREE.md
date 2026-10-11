@@ -37,8 +37,8 @@
 │   └── Test izolasyonunu yeniden doğrula                   ✅
 │
 ├── 04. Hata senaryoları ve güvenli dosya işlemleri         🔄 📍
-│   ├── Legacy .db_config.json temizliğini atomik yap       ⚠️
-│   ├── Normal config kaydını atomik yap                    ⚠️
+│   ├── Legacy .db_config.json temizliğini atomik yap       🔄
+│   ├── Normal config kaydını atomik yap                    🔄
 │   ├── Vault yazma hatasında eski parolayı koru            ⏳
 │   ├── Vault bozuk/okunamıyor durumunda fail-closed        ⏳
 │   └── Metadata senkronizasyonu ve kısmi kayıt riski       ⏳
@@ -75,6 +75,7 @@
 | `0df2533` | Vault testinde tanımsız değişkeni düzeltme |
 | `9c81218` | İzole Vault testlerinde PostgreSQL Pool koruması |
 | `c0dc864` | Testte asenkron yerel DB dosyası yazımını devre dışı bırakma |
+| `010244f` | Runtime DB config ve legacy temizliği için atomik değiştirme (test bekliyor) |
 
 ## Güncelleme kuralı
 
