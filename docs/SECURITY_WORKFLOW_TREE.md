@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 13 — 72/72 doğrulandı; HTTP Origin, Nginx throttling ve WebSocket endpoint güvenliği toplu test bekliyor**
+> **📍 ŞU ANKİ KONUM: 14 — 72/72 doğrulandı; HTTP/WS, Nginx ve Docker hardening toplu doğrulama bekliyor**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -164,3 +164,5 @@
 > Toplu HTTP koruma paketi: kullanıcı `98b231b` sürümünde 72/72 testin geçtiğini bildirdi. `fe2674c` HTTP/WS Origin ayrıştırmasını katılaştırdı; `b94580f` 9 senaryo ekledi; `9649003` Nginx API/WS IP bazlı istek ve bağlantı sınırları getirdi; `479b7ec` 4 yeni statik regresyon testi ekledi. Toplam hedef 85 test. Bunlar henüz çalıştırılmadı; `nginx -t` ve gerçek HTTP yük testi ayrıca gerekli. Açık incelemeler: SSRF/dış bağlantılar, WebSocket protokolü ve yetkilendirme, Docker çalışma zamanı/SSH kontrolleri. `main` ve canlı sistem değiştirilmedi.
 
 > WebSocket endpoint paketi: `c57e5d0` ile sunucuda yalnızca `/ws` ve `/api/ws` upgrade yolları kabul ediliyor; `29522f7` Nginx rotasını aynı kural ile eşledi; `cd47c02` 7 regresyon testi ekledi, `2120710` test konfigürasyonuna aldı. Önceki doğrulanmış 72 test üzerine 20 yeni test eklenmiş durumda (hedef 92). Bu paket henüz test edilmedi. SSRF ve Docker/SSH üretim çalışma zamanı incelemeleri açık; gerçek Nginx ve HTTP entegrasyon testleri ayrıca gerekli. Canlı/main değiştirilmedi.
+
+> Docker/Nginx paketi: `9e46f5d` Nginx konfigürasyonuna yanlışlıkla yazılan literal `\\n` karakterlerini gerçek satır sonuna çevirdi ve genel HTTP `location /` sınırlarını ekledi. Bu hata düzeltilmeden `nginx -t` başarısız olabilirdi. `b468dda` app için `no-new-privileges`, `cap_drop: ALL`, PID limiti ve init; proxy için daraltılmış yetkiler ekledi. `d7e0349` sekiz Docker regresyon testi ekledi; `f13286e` test paketine aldı. Son doğrulanan 72 üzerine 28 yeni test, hedef 100. Henüz derleme, Nginx veya Docker Compose çalışma zamanı testi yapılmadı. `nginx -t`, `docker compose config -q`, container başlatma ve ağ kontrolleri üretim öncesi zorunlu. SSRF/dış bağlantı ve SSH konuları hâlâ açık; sağlayıcı abuse nedeni kanıtlanmış değil. `main` ve canlı sunucu değişmedi.
