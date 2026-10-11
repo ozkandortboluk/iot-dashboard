@@ -8,6 +8,9 @@ import { systemSecretsService } from './systemSecrets.service.js';
 import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 
 export function isSshTunnelAllowed(): boolean {
+  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
+    return false;
+  }
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
     return true;
   }
