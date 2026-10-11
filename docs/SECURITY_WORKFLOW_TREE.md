@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — Master key kalıcılığı doğrulandı (37/37); üretim öncesi risk incelemesi**
+> **📍 ŞU ANKİ KONUM: 05 — Master key yeniden başlatma / yarış / izin testleri (40 hedef, bekliyor)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -51,6 +51,7 @@
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Master key kalıcılık kategorisi (2/2 geçti)        ✅
+│   ├── Restart, yarış ve izin testleri (3 yeni test)       ⏳
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
 │   ├── Regresyon / güvenlik incelemesi                     ⏳
 │   └── Kalan riskler ve kanıtlı sonuç raporu               ⏳
@@ -113,3 +114,5 @@
 > `7cf7d0f`: geliştirmede mevcut `.vault_key` bozuk/okunamazsa fail-closed; anahtar sessizce yeniden üretilmez. `4ea69a2`: ayrı `master_key_persistence.test.ts` kategorisi; `3fe1605`: Vitest kapsamına eklendi. 37 test ve type-check doğrulaması bekleniyor. Üretim Docker secret politikası değiştirilmedi.
 
 > `99c4359` izole VPS checkout doğrulaması: TypeScript geçti; 3 test dosyasında toplam 37/37 test geçti (Vault 25, canonical 10, master key 2). Üretim entegrasyon testi değildir. Kalan: kalıcı anahtarın restart ve izin davranışları ile dosya yarışları için ilave risk değerlendirmesi.
+
+> `7e90f86`: geliştirmede kalıcı anahtar oluşturma `wx` ile özel; eşzamanlı EEXIST halinde var olan anahtarı kullanır; yazma hatasında ephemeral anahtar üretmez. `9fd3bb2`: yeniden başlatma, yarış ve izin hatası için 3 Master Key testi. TypeScript ve 40/40 hedefi henüz doğrulanmadı. Üretim Docker secret yolu değişmedi.
