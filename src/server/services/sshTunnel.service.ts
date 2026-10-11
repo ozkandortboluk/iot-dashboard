@@ -316,6 +316,7 @@ class SSHTunnelService {
   }
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
+    if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
     if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
       const probeRes = await this.probeHostFingerprint(config.sshHost, config.sshPort || 22);
       if (probeRes.success && probeRes.sha256) {
