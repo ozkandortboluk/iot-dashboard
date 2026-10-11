@@ -325,12 +325,27 @@ export class SetupService {
         updatedAt: new Date().toISOString(),
       };
 
-      // Persist and verify the password in the authoritative local Vault first.
-      if (config.password && !config.password.includes('••••')) {
-        systemSecretsService.persistDatabasePasswordLocally(config.password, 'setup_wizard');
+      // Do not replace an existing password unless the connection metadata can
+      // also be committed. The old password is restored if config writing fails.
+      const oldPassword = systemSecretsService.getDatabasePassword();
+      const hasNewPassword = Boolean(config.password && !config.password.includes('••••'));
+      if (hasNewPassword) {
+        systemSecretsService.persistDatabasePasswordLocally(config.password!, 'setup_wizard');
       }
 
-      writeRuntimeConfigAtomically(payload);
+      try {
+        writeRuntimeConfigAtomically(payload);
+      } catch (error) {
+        if (hasNewPassword && oldPassword && oldPassword !== config.password) {
+          try {
+            systemSecretsService.persistDatabasePasswordLocally(oldPassword, 'setup_rollback');
+          } catch (rollbackError) {
+            systemLogger.error('security', 'Runtime config failure: Vault password rollback failed');
+            throw new Error('Runtime config failed and Vault password rollback failed', { cause: rollbackError });
+          }
+        }
+        throw error;
+      }
 
       // A masked UI placeholder is never a usable database credential.
       const effectivePassword = config.password?.includes('••••')
