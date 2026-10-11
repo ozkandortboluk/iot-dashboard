@@ -92,7 +92,7 @@ async function resolveDevice(token?: string | null, updateLastUsed = true): Prom
 
   const cleanToken = token.trim();
   // Fail-closed: in production, verify strictly against PostgreSQL authoritative state
-  if (process.env.NODE_ENV === 'production' && !db.postgresRepo?.isReady()) {
+  if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
     return null;
   }
 
@@ -114,7 +114,7 @@ async function resolveDevice(token?: string | null, updateLastUsed = true): Prom
   }
 
   // 2. API Key Expiry Check
-  if (foundDev.apiKeyExpiresAt && new Date(foundDev.apiKeyExpiresAt).getTime() < Date.now()) {
+  if (foundDev.apiKeyExpiresAt && (!Number.isFinite(new Date(foundDev.apiKeyExpiresAt).getTime()) || new Date(foundDev.apiKeyExpiresAt).getTime() <= Date.now())) {
     console.warn(`[WebSocket Auth] Cihaz API anahtarının süresi dolmuş (Expired): ${foundDev.id} (${foundDev.name})`);
     return null;
   }
