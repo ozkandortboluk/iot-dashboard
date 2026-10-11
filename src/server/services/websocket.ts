@@ -9,6 +9,7 @@ import { deviceWsProtocolService } from './deviceWsProtocol.service.js';
 import { tenantSecurityService } from './tenantSecurity.service.js';
 import { systemLogger } from './systemLogger.service.js';
 import { isAllowedWsOrigin } from '../utils/corsOrigins.js';
+import { isWebSocketUpgradePath } from '../utils/wsUpgradePath.js';
 export { isAllowedWsOrigin };
 
 export interface AuthenticatedWebSocket extends WebSocket {
@@ -703,7 +704,7 @@ export function initWebSocketServer(server: http.Server) {
       const urlObj = new URL(request.url || '', `http://${request.headers.host || '127.0.0.1'}`);
       const pathname = urlObj.pathname;
 
-      if (pathname === '/ws' || pathname.startsWith('/ws') || pathname === '/api/ws' || pathname.startsWith('/api/ws')) {
+      if (isWebSocketUpgradePath(pathname)) {
         let connectionToken: string | null = null;
 
         // 1. Extract Token from Cookie, Authorization header, X-API-KEY, Sec-WebSocket-Protocol, or Query string
