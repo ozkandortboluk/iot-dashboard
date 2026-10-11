@@ -1,6 +1,6 @@
 # Güvenlik dalı — iş akış ağacı
 
-> **📍 ŞU ANKİ KONUM: 05 — DB ve master key test izolasyonu (35 test yeniden doğrulanacak)**
+> **📍 ŞU ANKİ KONUM: 05 — İzole testler tamam; üretim öncesi güvenlik incelemesi (35/35 geçti)**
 >
 > Dal: `security/abuse-prevention-audit-20261011`  
 > Kapsam: Bu sohbette yürütülen Vault güvenliği ve doğrulama çalışmaları.  
@@ -46,8 +46,8 @@
 │   └── Config yazma hatasında Vault parola rollback       ✅
 │
 ├── 05. Doğrulama                                           🔄 📍
-│   ├── npm run type-check (9f87ff1)                       ✅
-│   ├── İzole Vault testleri (9f87ff1: 35/35)              ✅
+│   ├── npm run type-check (fa584de)                       ✅
+│   ├── İzole Vault testleri (fa584de: 35/35)              ✅
 │   ├── Üç yeni regresyon testi (34/34 geçti)              ✅
 │   ├── İlk parola rollback testi (35/35 geçti)            ✅
 │   ├── Son yazma kuyruğu düzeltmesini tekrar test et       ✅
@@ -106,3 +106,5 @@
 > `65d8fa5` doğrulaması: TypeScript ve 35/35 test başarılı; OTA ayrıştırma uyarısı giderildi. PostgreSQL havuzu uyarısının kaynağı `quickInitDocker` testinin `configureDatabase` içinde gerçek Pool oluşturmaya çalışmasıdır; izole test bunu engelliyor. Teste özel düzeltme yazma girişimi engellendi, henüz uygulanmadı. ENCRYPTION_KEY eksik uyarıları üretim modu taklit testinde görülüyor; üretim fail-closed politikası korunacak.
 
 > Test düzenlemeleri: `9444adf` üretim-modu fixture'ında Docker master key secret mount'unu taklit eder; `a7dcda3` quickInitDocker testinde gerçek PostgreSQL Pool kurulumunu mock'lar. Üretim koduna dokunulmadı. 35 test yeniden çalıştırılmayı bekliyor.
+
+> Son VPS izole checkout doğrulaması: `fa584de` — TypeScript başarılı, 35/35 test geçti. PostgreSQL havuzu, OTA PEM ve ENCRYPTION_KEY eksik test uyarıları artık görünmüyor. Kasıtlı bozuk Vault / disk hatası / plaintext reddi logları beklenen negatif test çıktılarıdır. Bu sonuçlar üretim ortamı doğrulaması değildir.
