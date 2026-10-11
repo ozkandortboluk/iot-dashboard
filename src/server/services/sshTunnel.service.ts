@@ -255,6 +255,7 @@ class SSHTunnelService {
     host: string,
     port: number = 22
   ): Promise<{ success: boolean; sha256?: string; md5?: string; error?: string }> {
+    if (!isSshTunnelAllowed()) return { success: false, error: 'SSH tüneli bu ortamda devre dışı.' };
     return new Promise((resolve) => {
       const client = new Client();
       let isResolved = false;
