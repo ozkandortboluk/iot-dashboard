@@ -238,7 +238,11 @@ export class SystemSecretsService {
         }
       }
     } catch (err: any) {
-      systemLogger.warn('security', `Lokal secret kasası okunamadı: ${err?.message || err}`);
+      systemLogger.error('security', `Lokal secret kasası okunamadı: ${err?.message || err}`);
+      // A damaged or unreadable authoritative Vault must never be treated as
+      // an empty one: a subsequent save would otherwise replace its contents.
+      this.isLoaded = false;
+      throw new Error('Authoritative local Secret Vault could not be loaded', { cause: err });
     }
     this.isLoaded = true;
   }
