@@ -10,9 +10,12 @@ function getCleanOrigin(urlStr?: string): string | null {
   if (!urlStr || !urlStr.trim()) return null;
   try {
     const parsed = new URL(urlStr.trim());
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    if (parsed.username || parsed.password) return null;
+    if (parsed.pathname !== '/' || parsed.search || parsed.hash) return null;
     return parsed.origin.toLowerCase();
   } catch {
-    return urlStr.trim().toLowerCase().replace(/\/+$/, '');
+    return null;
   }
 }
 
