@@ -87,9 +87,21 @@ function writeRuntimeConfigAtomically(payload: unknown): void {
   fs.mkdirSync(RUNTIME_SECRET_DIR, { recursive: true });
   const temporary = path.join(RUNTIME_SECRET_DIR, `.db_config.json.tmp.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
   try {
-    fs.writeFileSync(temporary, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    const fd = fs.openSync(temporary, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(payload, null, 2), { encoding: 'utf8' });
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(temporary, RUNTIME_SECRET_FILE);
-    fs.chmodSync(RUNTIME_SECRET_FILE, 0o600);
+    // The new inode already has mode 0600; persist the directory entry where supported.
+    try {
+      const dirFd = fs.openSync(RUNTIME_SECRET_DIR, 'r');
+      try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+    } catch {
+      // Some filesystems do not support syncing directories.
+    }
   } finally {
     if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
   }
@@ -648,10 +660,7 @@ export class SetupService {
         updatedAt: new Date().toISOString(),
       };
       delete updated.password; // Ensure password is never in .db_config.json
-      fs.writeFileSync(RUNTIME_SECRET_FILE, JSON.stringify(updated, null, 2), {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
+      writeRuntimeConfigAtomically(updated);
     } catch (e) {
       console.warn('[SetupService] Could not persist completed flag:', e);
     }
