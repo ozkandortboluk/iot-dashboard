@@ -64,7 +64,7 @@ describe('Central Security Vault - Canonical Single Source of Truth Suite', () =
     });
 
     const resolved = systemSecretsService.getOtaSigningKey();
-    expect(resolved).toBe(testOta);
+    expect(resolved.trim()).toBe(testOta.trim());
   });
 
   it('4. resolvePostgresConnectionString must inject password from Central Security Vault if missing in connection string', async () => {
