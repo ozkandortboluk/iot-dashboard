@@ -997,6 +997,7 @@ export function initWebSocketServer(server: http.Server) {
               ws.isAuth = true;
               ws.device = verifiedDevice;
               ws.user = undefined;
+              ws.sessionToken = token.trim();
               deviceWsProtocolService.registerDeviceSocket(verifiedDevice.id, ws);
               console.log(`[WebSocket] Saha Cihazı doğrulandı: ${verifiedDevice.name} (${verifiedDevice.id})`);
               safeSend(
