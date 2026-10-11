@@ -127,18 +127,24 @@ export class MasterKeyProvider {
       }
     } catch {}
 
-    // 3. Persistent local development key (data/.vault_key) - MUST CHECK BEFORE RE-GENERATING!
-    try {
-      if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
+    // 3. Persistent local development key: never silently replace a damaged key.
+    // An existing key may encrypt valuable Vault records, even outside production.
+    if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
+      try {
         const raw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
-        if (raw && raw.length >= 16) {
-          this.cachedKeyBuffer = this.derive32ByteKey(raw);
-          this.cachedSource = 'data_vault_key';
-          this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
-          return this.cachedKeyBuffer;
+        if (raw.length < 16) {
+          throw new Error('Persistent Vault master key is invalid');
         }
+        this.cachedKeyBuffer = this.derive32ByteKey(raw);
+        this.cachedSource = 'data_vault_key';
+        this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+        return this.cachedKeyBuffer;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error : new Error(String(error));
+        this.cachedSource = 'missing';
+        return null; // Fail closed; never rotate a key after read/corruption errors.
       }
-    } catch {}
+    }
 
     // 4. Custom key path if specified
     const customKeyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
