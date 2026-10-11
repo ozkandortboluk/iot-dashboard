@@ -288,15 +288,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       // Run loadRuntimeSecretConfig which triggers legacy migration
       // Enable the file-backed loader only for this explicit migration test.
       // The URL is a non-routable placeholder and no connection is opened.
-      const previousTestUrl = process.env.TEST_POSTGRES_URL;
-      process.env.TEST_POSTGRES_URL = 'postgresql://test@127.0.0.1:1/test';
-      let reloaded;
-      try {
-        reloaded = setupService.loadRuntimeSecretConfig();
-      } finally {
-        if (previousTestUrl === undefined) delete process.env.TEST_POSTGRES_URL;
-        else process.env.TEST_POSTGRES_URL = previousTestUrl;
-      }
+      const reloaded = setupService.loadRuntimeSecretConfig();
       expect(reloaded?.password).toBe(legacyPassword);
 
       // Verify disk file was scrubbed of plaintext password!
