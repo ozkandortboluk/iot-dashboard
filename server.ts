@@ -145,7 +145,7 @@ process.on('unhandledRejection', (reason: any) => {
 const app = express();
 // Configure Trust Proxy: Trust container reverse proxy (1 hop / loopback + private docker subnets)
 const trustProxyConfig = process.env.TRUST_PROXY || 'loopback, 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16';
-const parsedTrustProxy = trustProxyConfig === 'true' ? true : trustProxyConfig === 'false' ? false : (!isNaN(Number(trustProxyConfig)) ? Number(trustProxyConfig) : trustProxyConfig);
+const parsedTrustProxy = trustProxyConfig === 'true' ? (isProductionVpsEnvironment() ? 'loopback, 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16' : true) : trustProxyConfig === 'false' ? false : (!isNaN(Number(trustProxyConfig)) ? Number(trustProxyConfig) : trustProxyConfig);
 app.set('trust proxy', parsedTrustProxy);
 
 // Fast 503 Service Unavailable rejection for new incoming requests when shutting down
