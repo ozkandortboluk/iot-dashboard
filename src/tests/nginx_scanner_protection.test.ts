@@ -25,6 +25,25 @@ describe('Nginx scanner probe protection', () => {
     expect(config).toContain(String.raw`package(?:-lock)?\.json`);
   });
 
+  it('defines a bounded per-IP request rate zone', () => {
+    expect(config).toContain('limit_req_zone $binary_remote_addr zone=nexus_api:10m rate=20r/s;');
+    expect(config).toContain('limit_req_status 429;');
+  });
+
+  it('enforces connection limits for WebSocket clients', () => {
+    expect(config).toContain('limit_conn_zone $binary_remote_addr zone=nexus_conn:10m;');
+    expect(config).toContain('limit_conn nexus_conn 30;');
+  });
+
+  it('enforces request throttling on regular HTTP routes', () => {
+    expect(config).toContain('limit_req zone=nexus_api burst=80 nodelay;');
+    expect(config).toContain('limit_conn nexus_conn 60;');
+  });
+
+  it('enforces WebSocket upgrade throttling', () => {
+    expect(config).toContain('limit_req zone=nexus_api burst=30 nodelay;');
+  });
+
   it('blocks docker compose metadata probes', () => {
     expect(config).toContain(String.raw`docker-compose\.ya?ml`);
     expect(config).toMatch(/location ~\* \^\/\(\?:wp-config/);
