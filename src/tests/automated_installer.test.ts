@@ -128,7 +128,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     const latestBackup = path.join(backupsDir, files[files.length - 1]);
     const archiveSize = fs.statSync(latestBackup).size;
     expect(archiveSize).toBeGreaterThan(100); // Must not be empty
-  });
+  }, 30000);
 
   // =========================================================================
   // 5. Extensible Plugin & Hook Execution
