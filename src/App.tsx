@@ -43,6 +43,7 @@ import {
   RefreshCw,
   Database,
   CheckCircle2,
+  AlertCircle,
   Server,
   Terminal,
 } from 'lucide-react';
@@ -307,16 +308,63 @@ function SystemStateGuard() {
   const [systemMode, setSystemMode] = useState<'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' | 'LOADING'>('LOADING');
   const [isSSHDrawerOpen, setIsSSHDrawerOpen] = useState(false);
   const [sshTunnelAllowed, setSshTunnelAllowed] = useState(false);
+  const [isAiStudioEnv, setIsAiStudioEnv] = useState<boolean | null>(null);
+  const [sshGatePassed, setSshGatePassed] = useState<boolean>(false);
+  const [isCheckingSshGate, setIsCheckingSshGate] = useState<boolean>(true);
+  const [connectionLostNotice, setConnectionLostNotice] = useState<boolean>(false);
 
-  useEffect(() => {
-    let active = true;
-    fetch('/api/runtime', { credentials: 'include' })
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (active) setSshTunnelAllowed(data?.sshTunnelAllowed === true && data?.environment !== 'vps');
-      })
-      .catch(() => { if (active) setSshTunnelAllowed(false); });
-    return () => { active = false; };
+  const verifySshGate = useCallback(async (): Promise<boolean> => {
+    try {
+      let token =
+        sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
+        localStorage.getItem('nexus_ssh_bootstrap_token');
+      if (!token) {
+        try {
+          const bootRes = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
+            method: 'POST',
+            credentials: 'include',
+          });
+          if (bootRes.ok) {
+            const bootData = await bootRes.json();
+            if (bootData.bootstrapToken) {
+              token = bootData.bootstrapToken;
+              sessionStorage.setItem('nexus_ssh_bootstrap_token', token);
+            }
+          }
+        } catch {}
+      }
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['X-SSH-Bootstrap-Token'] = token;
+      }
+      const userToken = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
+      if (userToken) {
+        headers['Authorization'] = `Bearer ${userToken}`;
+      }
+
+      const res = await fetch('/api/system/ssh-tunnel/status', {
+        headers,
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const isSsh = Boolean(data.sshConnected ?? (data.status === 'connected'));
+        const isSel1 = Boolean(data.postgresSelect1Verified ?? false);
+        const isReady = Boolean(data.databaseReady ?? (data.databaseState === 'READY'));
+        const passed = Boolean(data.canProceedToLogin ?? (isSsh && isSel1 && isReady));
+
+        setSshGatePassed(passed);
+        return passed;
+      }
+      setSshGatePassed(false);
+      return false;
+    } catch {
+      setSshGatePassed(false);
+      return false;
+    } finally {
+      setIsCheckingSshGate(false);
+    }
   }, []);
 
   const checkStatus = useCallback(async () => {
@@ -353,8 +401,43 @@ function SystemStateGuard() {
   }, []);
 
   useEffect(() => {
-    checkStatus();
+    let active = true;
+    fetch('/api/runtime', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(async (data) => {
+        if (!active) return;
+        const isVps = data?.environment === 'vps' || data?.isVps === true;
+        const isAiStudio = (data?.isAiStudio === true || data?.environment === 'aistudio') && !isVps;
+        setSshTunnelAllowed(data?.sshTunnelAllowed === true && !isVps);
+        setIsAiStudioEnv(isAiStudio);
 
+        if (!isAiStudio) {
+          // On VPS production or local workstation without SSH requirement, bypass pre-login gate
+          setSshGatePassed(true);
+          setIsCheckingSshGate(false);
+          checkStatus();
+        } else {
+          // In AI Studio development sandbox: evaluate SSH + SELECT 1 + READY gate before login
+          const passed = await verifySshGate();
+          if (passed) {
+            checkStatus();
+          }
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setSshTunnelAllowed(false);
+        setIsAiStudioEnv(false);
+        setSshGatePassed(true);
+        setIsCheckingSshGate(false);
+        checkStatus();
+      });
+    return () => {
+      active = false;
+    };
+  }, [checkStatus, verifySshGate]);
+
+  useEffect(() => {
     // Global maintenance event listener (e.g. dispatched on 503 with explicit maintenance payload)
     const handleGlobalMaintenance = () => {
       setSystemMode('MAINTENANCE');
@@ -370,7 +453,7 @@ function SystemStateGuard() {
       window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
       window.removeEventListener('nexus_open_ssh_drawer', handleOpenSSH);
     };
-  }, [checkStatus, sshTunnelAllowed]);
+  }, [sshTunnelAllowed]);
 
   // Periodic health monitor when system is READY
   useEffect(() => {
@@ -397,15 +480,69 @@ function SystemStateGuard() {
     return () => clearInterval(intervalId);
   }, [systemMode]);
 
+  // Periodic connection monitor when in AI Studio and gate passed (does not destroy user session)
+  useEffect(() => {
+    if (!isAiStudioEnv || !sshGatePassed) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const token =
+          sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
+          localStorage.getItem('nexus_ssh_bootstrap_token');
+        const userToken =
+          sessionStorage.getItem('nexus_session_token') ||
+          localStorage.getItem('nexus_session_token');
+        const headers: Record<string, string> = {};
+        if (token) headers['X-SSH-Bootstrap-Token'] = token;
+        if (userToken) headers['Authorization'] = `Bearer ${userToken}`;
+
+        const res = await fetch('/api/system/ssh-tunnel/status', { headers, credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          const isSsh = Boolean(data.sshConnected ?? (data.status === 'connected'));
+          const isSel1 = Boolean(data.postgresSelect1Verified ?? false);
+          if (!isSsh || !isSel1) {
+            setConnectionLostNotice(true);
+          } else {
+            setConnectionLostNotice(false);
+          }
+        }
+      } catch {
+        // network hiccup does not wipe user session
+      }
+    }, 20000);
+
+    return () => clearInterval(intervalId);
+  }, [isAiStudioEnv, sshGatePassed]);
+
   const renderActiveView = () => {
-    if (systemMode === 'LOADING') {
+    if (isCheckingSshGate || (systemMode === 'LOADING' && isAiStudioEnv === null)) {
       return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
           <div className="flex flex-col items-center gap-3 text-center">
             <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-            <p className="text-xs font-medium text-slate-400">Sistem Durumu Kontrol Ediliyor...</p>
+            <p className="text-xs font-medium text-slate-400">Sistem ve Bağlantı Durumu Kontrol Ediliyor...</p>
           </div>
         </div>
+      );
+    }
+
+    // AI Studio pre-login SSH connection screen:
+    // Displayed before LoginView until SSH + PostgreSQL SELECT 1 + database READY are verified.
+    if (isAiStudioEnv && !sshGatePassed) {
+      return (
+        <SSHTunnelDrawer
+          isOpen={true}
+          isPreLoginScreen={true}
+          onConnectedSuccess={async () => {
+            const passed = await verifySshGate();
+            if (passed) {
+              setSshGatePassed(true);
+              setConnectionLostNotice(false);
+              checkStatus();
+            }
+          }}
+        />
       );
     }
 
@@ -430,25 +567,65 @@ function SystemStateGuard() {
 
   return (
     <>
+      {/* Alert banner if SSH connection is lost during an active session in AI Studio */}
+      {connectionLostNotice && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-rose-600/95 backdrop-blur-md text-white px-4 py-2.5 shadow-2xl flex flex-wrap items-center justify-between gap-3 text-xs font-semibold border-b border-rose-400/30">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 animate-pulse text-rose-200" />
+            <span>
+              PostgreSQL SSH Tünel bağlantısı kesildi. Oturumunuz korundu, veritabanına erişim için tüneli yeniden başlatabilirsiniz.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                const passed = await verifySshGate();
+                if (passed) {
+                  setConnectionLostNotice(false);
+                  checkStatus();
+                }
+              }}
+              className="px-3 py-1 bg-white text-rose-700 hover:bg-slate-100 rounded font-bold transition-colors cursor-pointer"
+            >
+              Yeniden Dene
+            </button>
+            <button
+              onClick={() => setIsSSHDrawerOpen(true)}
+              className="px-3 py-1 bg-rose-800 hover:bg-rose-900 text-white rounded font-medium transition-colors cursor-pointer"
+            >
+              SSH Ayarlarını Aç
+            </button>
+          </div>
+        </div>
+      )}
+
       {renderActiveView()}
 
       {/* Development-only SSH controls; server policy is authoritative. */}
-      {sshTunnelAllowed && <button
-        type="button"
-        onClick={() => setIsSSHDrawerOpen(true)}
-        title="SSH Bağlantı Tüneli (Sol Ekran)"
-        className="fixed bottom-6 left-0 z-40 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-2.5 px-3 rounded-r-xl shadow-xl shadow-cyan-950/50 flex items-center gap-2 transition-transform hover:translate-x-1 group border-y border-r border-cyan-400/30 cursor-pointer"
-      >
-        <Terminal className="w-4 h-4 text-white group-hover:rotate-12 transition-transform shrink-0" />
-        <span className="text-xs font-bold hidden sm:inline pr-1">SSH Tüneli</span>
-      </button>}
+      {sshTunnelAllowed && (
+        <button
+          type="button"
+          onClick={() => setIsSSHDrawerOpen(true)}
+          title="SSH Bağlantı Tüneli (Sol Ekran)"
+          className="fixed bottom-6 left-0 z-40 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-2.5 px-3 rounded-r-xl shadow-xl shadow-cyan-950/50 flex items-center gap-2 transition-transform hover:translate-x-1 group border-y border-r border-cyan-400/30 cursor-pointer"
+        >
+          <Terminal className="w-4 h-4 text-white group-hover:rotate-12 transition-transform shrink-0" />
+          <span className="text-xs font-bold hidden sm:inline pr-1">SSH Tüneli</span>
+        </button>
+      )}
 
       {/* Global Left-Side SSH Tunnel Drawer */}
-      {sshTunnelAllowed && <SSHTunnelDrawer
-        isOpen={isSSHDrawerOpen}
-        onClose={() => setIsSSHDrawerOpen(false)}
-        onConnectedSuccess={checkStatus}
-      />}
+      {sshTunnelAllowed && (
+        <SSHTunnelDrawer
+          isOpen={isSSHDrawerOpen}
+          onClose={() => setIsSSHDrawerOpen(false)}
+          onConnectedSuccess={() => {
+            setConnectionLostNotice(false);
+            verifySshGate();
+            checkStatus();
+          }}
+        />
+      )}
     </>
   );
 }

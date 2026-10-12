@@ -130,18 +130,21 @@ systemRouter.get('/runtime', (req, res) => {
   if (config.isVps) {
     // An Authorization header or cookie is not proof of authentication.
     // Keep public VPS diagnostics minimal regardless of caller-supplied headers.
-    {
-      return res.json({
-        environment: 'vps',
-        production: true,
-      });
-    }
+    return res.json({
+      environment: 'vps',
+      isVps: true,
+      isAiStudio: false,
+      production: true,
+      sshTunnelAllowed: false,
+    });
   }
 
   const cookieMode = config.isVps || config.isAiStudio ? 'same-origin-secure' : 'local-development';
 
   return res.json({
     environment: config.environment,
+    isVps: false,
+    isAiStudio: config.isAiStudio,
     production: config.isProductionRuntime,
     sshTunnelAllowed: isSshTunnelAllowed(),
     cookieMode,

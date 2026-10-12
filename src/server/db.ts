@@ -675,6 +675,34 @@ class LocalDatabase {
     }
   }
 
+  /**
+   * Directly queries PostgreSQL pool with 'SELECT 1;' to verify live database connectivity.
+   */
+  public async verifyPostgresSelect1(): Promise<boolean> {
+    const pool = this.postgresRepo?.getPool() || this.getPgPool();
+    if (!pool) return false;
+    let client: any = null;
+    const onErr = () => {};
+    try {
+      client = await Promise.race([
+        pool.connect(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PostgreSQL SELECT 1 timeout')), 3000)
+        ),
+      ]);
+      if (client) client.on('error', onErr);
+      await client.query('SELECT 1;');
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (client) {
+        try { client.off('error', onErr); } catch {}
+        try { client.release(); } catch {}
+      }
+    }
+  }
+
   public async syncAllToPostgres(): Promise<{ success: boolean; message: string; counts?: Record<string, number> }> {
     const pool = this.getPgPool();
     if (!pool) {

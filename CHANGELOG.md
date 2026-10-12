@@ -4,6 +4,21 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 
 ---
 
+## 🚀 [v1.48.0] - 2026-10-12
+
+### 🔐 AI Studio SSH Tünel & PostgreSQL Ön-Giriş (Pre-Login) Bağlantı Akışı
+- **Giriş Öncesi SSH Bağlantı & Doğrulama Ekranı (`SSHTunnelDrawer.tsx`)**:
+  - Yalnızca AI Studio geliştirme ortamında açılışta `LoginView` öncesinde çalışan tam ekran ve mobil uyumlu SSH bağlantı arayüzü oluşturuldu.
+  - SSH bağlantısı, PostgreSQL `SELECT 1` doğrulaması ve veritabanı `READY` durumu bağımsız olarak kontrol edilir; üçü de doğrulanmadan giriş ekranına geçiş engellenir.
+- **Güvenli Ephemeral Bootstrap Yetkilendirme (`AiStudioBootstrapAuthService`)**:
+  - Mevcut admin/setup token korumaları muhafaza edildi; AI Studio'ya özel, sınırlı yetkili ve güvenli `nxs_aistudio_boot_` token akışı (`POST /api/system/ssh-tunnel/bootstrap-token`) entegre edildi.
+  - VPS üretim ortamında SSH tünel uç noktaları ve bootstrap servisleri kesin olarak `HTTP 403 Forbidden` ile korunur.
+- **Kesintisiz Oturum ve Durum Yönetimi (`SystemStateGuard` in `App.tsx`)**:
+  - SSH veya veritabanı bağlantı kopmalarında kullanıcı oturumu silinmez; belirgin hata ve yeniden deneme araç çubuğu üzerinden oturum korunarak kurtarma imkânı sunulur.
+  - VPS üretim ortamının giriş, kurulum ve bakım akışları eksiksiz korundu.
+
+---
+
 ## 🚀 [v1.47.0] - 2026-10-03
 
 ### 🛡️ Kasa Şifreleme Anahtarı (Vault Encryption Key) Korumalı Granüler Sistem & Veritabanı Sıfırlama (Factory Reset)

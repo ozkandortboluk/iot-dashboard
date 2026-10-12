@@ -7,6 +7,7 @@ import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { db } from '../db.js';
 import { setupService } from '../services/setup.service.js';
+import { aiStudioBootstrapAuthService } from '../services/aiStudioBootstrapAuth.service.js';
 
 export const sshTunnelRouter = Router();
 
@@ -49,6 +50,7 @@ function validateTunnelTarget(
 /**
  * Authorization guard for SSH Tunnel operations (/status, /test, /connect, /disconnect, /probe-fingerprint):
  * - If Setup/Recovery Token is valid: Allow access (for wizard, cloud preview setup, and disaster recovery).
+ * - Or if valid AI Studio Pre-Login Bootstrap Token is supplied (allowed strictly in AI Studio, never on VPS).
  * - Or if user has a valid authenticated Admin session: Allow access.
  * - Otherwise: Reject with 401 Unauthorized. DB outage or setup status does NOT grant anonymous access.
  */
@@ -58,8 +60,19 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
     return next();
   }
 
-  // No anonymous bypass in development, during setup, or when PostgreSQL is unavailable.
-  // A valid setup/recovery token (checked above) or an authenticated admin is mandatory.
+  // 2. AI Studio Pre-Login Bootstrap Token (strictly permitted in AI Studio development sandbox, never on VPS)
+  const bootstrapToken = aiStudioBootstrapAuthService.extractBootstrapToken(req);
+  if (bootstrapToken && aiStudioBootstrapAuthService.validateBootstrapToken(bootstrapToken)) {
+    (req as any).isAiStudioBootstrap = true;
+    (req as any).user = {
+      id: 'aistudio_bootstrap',
+      name: 'AI Studio Developer (Pre-Login)',
+      role: 'admin',
+    };
+    return next();
+  }
+
+  // 3. Fallback: Authenticated Admin Session required
   return authenticateUser(req, res, () => requireAdmin(req, res, next));
 }
 
@@ -78,6 +91,60 @@ function guardSshTunnelPolicy(req: Request, res: Response, next: NextFunction) {
   }
   return next();
 }
+
+/**
+ * POST /api/system/ssh-tunnel/bootstrap-token & GET /api/system/ssh-tunnel/bootstrap-token
+ * Generates an ephemeral, secure bootstrap token for pre-login SSH tunnel setup.
+ * Strictly forbidden in production VPS environment (HTTP 403).
+ */
+const handleBootstrapToken = (req: Request, res: Response) => {
+  if (!aiStudioBootstrapAuthService.isBootstrapAllowed()) {
+    return res.status(403).json({
+      success: false,
+      code: 'SSH_BOOTSTRAP_DISALLOWED',
+      error: 'SSH Bootstrap yetkilendirmesi yalnızca AI Studio geliştirme ortamında kullanılabilir.',
+      message: 'VPS üretim ortamında veya SSH tüneli devre dışıyken bootstrap token alınamaz.',
+    });
+  }
+
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_bootstrap:${clientIp}`, 25);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      success: false,
+      message: 'Çok fazla istek yapıldı. Lütfen biraz bekleyin.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    });
+  }
+
+  const token = aiStudioBootstrapAuthService.createBootstrapToken();
+  if (!token) {
+    return res.status(403).json({
+      success: false,
+      code: 'SSH_BOOTSTRAP_UNAVAILABLE',
+      error: 'Bootstrap token oluşturulamadı.',
+    });
+  }
+
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.cookie('nexus_ssh_bootstrap_token', token, {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: isSecure ? 'none' : 'lax',
+    maxAge: 30 * 60 * 1000,
+    path: '/',
+  });
+
+  return res.json({
+    success: true,
+    bootstrapToken: token,
+    expiresInSeconds: 1800,
+    environment: 'aistudio',
+  });
+};
+
+sshTunnelRouter.post('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
+sshTunnelRouter.get('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
 
 /**
  * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
@@ -113,13 +180,35 @@ sshTunnelRouter.post('/probe-fingerprint', guardSshTunnelPolicy, requireSshTunne
 
 /**
  * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
- * Status endpoint for SSH Tunnel (Protected: setup mode or admin authorization required)
+ * Status endpoint for SSH Tunnel with separate SSH, SELECT 1, and READY verification.
  */
-sshTunnelRouter.get('/status', guardSshTunnelPolicy, requireSshTunnelAuth, (req: Request, res: Response) => {
+sshTunnelRouter.get('/status', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   try {
     const state = sshTunnelService.getState();
-    const isDbConnected = Boolean(db.postgresRepo?.isReady());
+    const isTunnelActive = state.status === 'connected';
+
+    // 1. SSH Bağlantısı durumu
+    const sshConnected = isTunnelActive;
+
+    // 2. PostgreSQL "SELECT 1" doğrulaması
+    let postgresSelect1Verified = false;
+    let select1Error: string | null = null;
+    if (sshConnected) {
+      try {
+        postgresSelect1Verified = await db.verifyPostgresSelect1();
+      } catch (err: any) {
+        select1Error = err?.message || String(err);
+      }
+    }
+
+    // 3. Veritabanı "READY" durumu
     const databaseState = db.getDatabaseState();
+    const databaseReady = databaseState === 'READY';
+
+    // Üç şartın birlikte kontrolü: SSH + PostgreSQL SELECT 1 + READY
+    const canProceedToLogin = sshConnected && postgresSelect1Verified && databaseReady;
+
+    const isDbConnected = Boolean(db.postgresRepo?.isReady());
     const activeEngine = db.getActiveEngine();
     const isSchemaEnsured = Boolean(db.postgresRepo?.getIsSchemaEnsured());
     const isSetupDone = setupService.isSetupCompleted();
@@ -128,9 +217,14 @@ sshTunnelRouter.get('/status', guardSshTunnelPolicy, requireSshTunnelAuth, (req:
     return res.json({
       success: true,
       isTunnelAllowed: isSshTunnelAllowed(),
-      transportConnected: state.status === 'connected',
+      transportConnected: sshConnected,
+      sshConnected,
+      postgresSelect1Verified,
+      select1Error,
+      databaseReady,
+      canProceedToLogin,
       dbAuthenticated: isDbConnected,
-      schemaReady: isDbConnected && isSchemaEnsured && databaseState === 'READY',
+      schemaReady: isDbConnected && isSchemaEnsured && databaseReady,
       setupComplete: isSetupDone,
       migrationSuccessful: migrationSuccess,
       isDbConnected,
@@ -145,6 +239,28 @@ sshTunnelRouter.get('/status', guardSshTunnelPolicy, requireSshTunnelAuth, (req:
       error: 'SSH tünel durumu alınamadı.',
     });
   }
+});
+
+/**
+ * Dedicated 3-point check endpoint for pre-login gate validation.
+ */
+sshTunnelRouter.get('/verify-status', guardSshTunnelPolicy, requireSshTunnelAuth, async (_req: Request, res: Response) => {
+  const state = sshTunnelService.getState();
+  const sshConnected = state.status === 'connected';
+  let postgresSelect1Verified = false;
+  if (sshConnected) {
+    postgresSelect1Verified = await db.verifyPostgresSelect1().catch(() => false);
+  }
+  const databaseState = db.getDatabaseState();
+  const databaseReady = databaseState === 'READY';
+  return res.json({
+    success: true,
+    sshConnected,
+    postgresSelect1Verified,
+    databaseReady,
+    canProceedToLogin: sshConnected && postgresSelect1Verified && databaseReady,
+    databaseState,
+  });
 });
 
 /**
