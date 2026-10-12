@@ -184,6 +184,9 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
 
     if (fs.existsSync(pgPassFile)) fs.unlinkSync(pgPassFile);
     fs.writeFileSync(dbPassFile, legacyPass, { mode: 0o600 });
+    // Legacy password migration is an existing-install upgrade. Preserve its
+    // original Vault key; missing keys must still fail closed in production.
+    fs.writeFileSync(path.join(secretsDir, 'encryption_key'), 'a'.repeat(64), { mode: 0o600 });
 
     const output = execSync(`bash ${installScriptPath} --init-only --quick`, { cwd: rootDir, encoding: 'utf-8' });
     expect(output).toMatch(/Legacy veritabanı bootstrap parolası aktarıldı/i);
