@@ -1,4 +1,106 @@
 #!/usr/bin/env bash
+# Concise read-only audit; --verbose preserves the full SEC-01..SEC-09 checks.
+set -u
+export LC_ALL=C
+if [ "$#" -gt 1 ]; then echo 'Usage: sec-all.sh [--verbose|--self-test]' >&2; exit 2; fi
+if [ "$#" -eq 1 ] && [ "$1" = '--self-test' ]; then
+  # Local smoke tests for summary parser; does not touch Docker or network.
+  sample=$(printf '[PASS] HTTP 404 /xmlrpc.php\n[PASS] HTTP 404 //xmlrpc.php?rsd\n')
+  [ "$(grep -c '^\[PASS\] HTTP 404 ' <<< "$sample")" -eq 2 ] &&
+  ! grep -Eq '^\[(WARN|ALERT)\]' <<< "$sample" &&
+  printf 'PASS: summary parser smoke tests\n'
+  exit $?
+fi
+if [ "$#" -eq 0 ]; then
+  # Keep verbose output in memory only; no log file or secrets written to disk.
+  details=$(bash "$0" --verbose 2>&1)
+  rc=$?
+  pass=0; warn=0; fail=0
+  result() {
+    printf '%-7s %-5s %-27s %s\n' "$1" "$2" "$3" "$4"
+    case "$2" in PASS) pass=$((pass+1));; WARN) warn=$((warn+1));; FAIL) fail=$((fail+1));; esac
+  }
+  section_ok() { grep -Fq "========== $1 " <<< "$details"; }
+  printf 'NexusNode | Security audit (read-only)\n'
+  printf '%-7s %-5s %-27s %s\n' 'SECTION' 'STATE' 'CHECK' 'RESULT'
+  if ! section_ok SEC-01; then
+    result SEC-01 WARN 'Firewall / SSH' 'Audit incomplete'
+  elif ! command -v ufw >/dev/null || ! ufw status 2>/dev/null | grep -q '^Status: active'; then
+    result SEC-01 FAIL 'Firewall / SSH' 'UFW inactive or unavailable'
+  elif ! fail2ban-client status 2>/dev/null | grep -q sshd; then
+    result SEC-01 WARN 'Firewall / SSH' 'SSH jail not confirmed'
+  else
+    result SEC-01 PASS 'Firewall / SSH' 'UFW active; SSH jail detected'
+  fi
+  if ! section_ok SEC-02 || ! iptables -S DOCKER-USER >/dev/null 2>&1; then
+    result SEC-02 WARN 'Firewall / NAT' 'Rules unavailable'
+  else
+    result SEC-02 WARN 'Firewall / NAT' 'Docker rules require manual review'
+  fi
+  if section_ok SEC-03 && docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    result SEC-03 PASS 'Docker engine' 'Running; version collected'
+  else
+    result SEC-03 WARN 'Docker engine' 'Version not confirmed'
+  fi
+  if section_ok SEC-04 && apt-cache policy docker.io 2>/dev/null | grep -q 'Installed:'; then
+    result SEC-04 PASS 'Docker security packages' 'APT metadata available (not CVE scan)'
+  else
+    result SEC-04 WARN 'Docker security packages' 'Package metadata unavailable'
+  fi
+  if section_ok SEC-05 && docker network inspect bridge >/dev/null 2>&1; then
+    result SEC-05 PASS 'Docker network' 'Bridge inspected'
+  else
+    result SEC-05 WARN 'Docker network' 'Bridge not inspected'
+  fi
+  if ! section_ok SEC-06 || [ "$(cat /proc/sys/net/ipv4/conf/all/route_localnet 2>/dev/null)" != 0 ]; then
+    result SEC-06 WARN 'Kernel network settings' 'route_localnet not confirmed safe'
+  else
+    result SEC-06 PASS 'Kernel network settings' 'Global route_localnet=0'
+  fi
+  ports=$(docker compose ps --format '{{.Service}} {{.Ports}}' 2>/dev/null) || ports=''
+  if ! section_ok SEC-07 || [ -z "$ports" ]; then
+    result SEC-07 WARN 'Published ports' 'Bindings not confirmed'
+  elif printf '%s\n' "$ports" | grep -Eq '0[.]0[.]0[.]0:(3000|5432|8080)|\[::\]:(3000|5432|8080)'; then
+    result SEC-07 FAIL 'Published ports' 'Sensitive service exposed on all interfaces'
+  elif printf '%s\n' "$ports" | grep -q '127.0.0.1:3000' &&
+       printf '%s\n' "$ports" | grep -q '127.0.0.1:5432' &&
+       printf '%s\n' "$ports" | grep -q '127.0.0.1:8080'; then
+    result SEC-07 PASS 'Published ports' 'App / DB / Adminer loopback-only'
+  else
+    result SEC-07 WARN 'Published ports' 'Unexpected or missing bindings'
+  fi
+  sec08=$(sed -n '/========== SEC-08 /,/========== SEC-09 /p' <<< "$details")
+  if ! section_ok SEC-08; then
+    result SEC-08 WARN 'SPA security probes' 'Audit incomplete'
+  elif grep -q '^\[ALERT\]' <<< "$sec08"; then
+    result SEC-08 FAIL 'SPA security probes' 'Unexpected response; see --verbose'
+  elif grep -q '^\[WARN\]' <<< "$sec08"; then
+    result SEC-08 WARN 'SPA security probes' 'Some probes unavailable'
+  else
+    n=$(grep -c '^\[PASS\] HTTP 404 ' <<< "$sec08" || true)
+    if [ "$n" -eq 7 ]; then
+      result SEC-08 PASS 'SPA security probes' '7/7 returned HTTP 404'
+    else
+      result SEC-08 WARN 'SPA security probes' "$n/7 confirmed"
+    fi
+  fi
+  updates=$(apt list --upgradable 2>/dev/null | grep -c 'upgradable from:' || true)
+  if ! section_ok SEC-09; then
+    result SEC-09 WARN 'Security updates' 'Audit incomplete'
+  elif [ "$updates" -gt 0 ]; then
+    result SEC-09 WARN 'Security updates' "$updates update(s) in cached APT lists"
+  else
+    result SEC-09 PASS 'Security updates' 'No pending updates in cached lists'
+  fi
+  printf '\nSummary: %d PASS | %d WARN | %d FAIL\n' "$pass" "$warn" "$fail"
+  printf 'Details: sudo bash sec-all.sh --verbose\n'
+  if [ "$rc" -ne 0 ]; then echo 'WARN: detailed audit exited abnormally'; exit 2; fi
+  if [ "$fail" -gt 0 ]; then exit 1; fi
+  if [ "$warn" -gt 0 ]; then exit 2; fi
+  exit 0
+fi
+if [ "$1" != '--verbose' ]; then echo 'Unknown option' >&2; exit 2; fi
+# Original detailed diagnostics below. All checks remain read-only.
 # NexusNode SEC-ALL — read-only diagnostics
 set -u
 export LC_ALL=C
