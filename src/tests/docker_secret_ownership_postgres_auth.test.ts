@@ -38,6 +38,10 @@ const isolatedFileStat = (file: string) => {
   const raw = asRoot(`stat -c '%u %g %a' "${file}"`).trim().split(' ');
   return { uid: Number(raw[0]), gid: Number(raw[1]), mode: parseInt(raw[2], 8) };
 };
+const isolatedRead = (file: string) => {
+  if (!file.startsWith(secretsDir + path.sep)) throw new Error('Outside test sandbox');
+  return asRoot(`cat "${file}"`).trim();
+};
 const resetOwner = () => {
   if (!isolated) return;
   asRoot(`chown -R ${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001} "${rootDir}"`);
@@ -601,8 +605,8 @@ align_secrets_ownership_and_permissions
     asRoot(scriptCmd);
 
     // Verify contents are strictly preserved byte-for-byte
-    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(originalKey);
-    expect(fs.readFileSync(pgPassPath, 'utf8').trim()).toBe(originalPass);
+    expect(isolatedRead(encKeyPath)).toBe(originalKey);
+    expect(isolatedRead(pgPassPath)).toBe(originalPass);
   });
 
   it('15. Proje dışındaki üst dizinler: izinler otomatik DEĞİŞTİRİLMEZ, erişim yoksa açık hata ile güvenli durulur', () => {
@@ -703,6 +707,6 @@ exit $?
     expect(exitCode).toBe(0);
 
     // Verify key is still valid and readable
-    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(testKey);
+    expect(isolatedRead(encKeyPath)).toBe(testKey);
   });
 });
