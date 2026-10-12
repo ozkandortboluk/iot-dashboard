@@ -186,7 +186,7 @@ class SSHTunnelService {
           category: 'custom',
           label: 'SSH Tüneli Özel Anahtarı (Private Key)',
           isSensitive: true,
-        }).catch(() => {});
+        });
       }
 
       // 2. Persist ONLY non-sensitive settings to disk
@@ -211,6 +211,7 @@ class SSHTunnelService {
       fs.chmodSync(CONFIG_FILE, 0o600);
     } catch (err: any) {
       systemLogger.error('database', `SSH yapılandırması kaydedilemedi: ${err?.message}`);
+      throw err;
     }
   }
 
@@ -417,6 +418,8 @@ class SSHTunnelService {
       if (config.authType === 'privateKey') {
         if (!effectivePrivateKey) {
           clearTimeout(timeout);
+          isResolved = true;
+          client.end();
           return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
         }
         sshConnConfig.privateKey = effectivePrivateKey;
@@ -734,6 +737,8 @@ class SSHTunnelService {
         if (!effectivePrivateKey) {
           clearTimeout(connectTimeout);
           this.status = 'error';
+          isResolved = true;
+          this.cleanup();
           return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
         }
         sshConnConfig.privateKey = effectivePrivateKey;
