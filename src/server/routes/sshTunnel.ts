@@ -115,7 +115,7 @@ sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, guardSshTunnelP
  * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
  * Status endpoint for SSH Tunnel (Protected: setup mode or admin authorization required)
  */
-sshTunnelRouter.get('/status', requireSshTunnelAuth, (req: Request, res: Response) => {
+sshTunnelRouter.get('/status', requireSshTunnelAuth, guardSshTunnelPolicy, (req: Request, res: Response) => {
   try {
     const state = sshTunnelService.getState();
     const isDbConnected = Boolean(db.postgresRepo?.isReady());
