@@ -5,23 +5,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
-import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
+import { isDevelopmentSshTunnelAllowed } from '../config/runtimeEnvironment.js';
 
 export function isSshTunnelAllowed(): boolean {
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
-    return false;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
-    return true;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
-    return false;
-  }
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
-    return false;
-  }
-  const env = resolveRuntimeEnvironment();
-  return env !== 'vps';
+  return isDevelopmentSshTunnelAllowed();
 }
 
 export interface SSHTunnelConfig {
