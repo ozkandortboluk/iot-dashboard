@@ -155,8 +155,8 @@ class SSHTunnelService {
           this.activeConfig = {
             ...parsed,
             localPort: Number(parsed.localPort) || DEFAULT_SSH_LOCAL_PORT,
-            password: vaultPassword || parsed.password || undefined,
-            privateKey: vaultPrivateKey || parsed.privateKey || undefined,
+            password: vaultPassword || undefined,
+            privateKey: vaultPrivateKey || undefined,
           };
           this.addLog(`Kaydedilmiş SSH tünel yapılandırması yüklendi: ${parsed.sshUser}@${parsed.sshHost} (Local Port: ${this.activeConfig?.localPort})`);
         }
@@ -166,7 +166,7 @@ class SSHTunnelService {
     }
   }
 
-  public saveConfig(config: SSHTunnelConfig) {
+  public async saveConfig(config: SSHTunnelConfig) {
     try {
       const dataDir = path.dirname(CONFIG_FILE);
       if (!fs.existsSync(dataDir)) {
@@ -175,14 +175,14 @@ class SSHTunnelService {
 
       // 1. Secure sensitive password & privateKey in System Secrets Vault
       if (config.password && !config.password.includes('••••••••')) {
-        systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
+        await systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
           category: 'custom',
           label: 'SSH Tüneli Parolası',
           isSensitive: true,
-        }).catch(() => {});
+        });
       }
       if (config.privateKey && !config.privateKey.includes('••••••••')) {
-        systemSecretsService.setSecret('ssh_tunnel_private_key', config.privateKey, {
+        await systemSecretsService.setSecret('ssh_tunnel_private_key', config.privateKey, {
           category: 'custom',
           label: 'SSH Tüneli Özel Anahtarı (Private Key)',
           isSensitive: true,
@@ -207,7 +207,8 @@ class SSHTunnelService {
         localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
       };
 
-      fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfigForDisk, null, 2), 'utf-8');
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfigForDisk, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.chmodSync(CONFIG_FILE, 0o600);
     } catch (err: any) {
       systemLogger.error('database', `SSH yapılandırması kaydedilemedi: ${err?.message}`);
     }
@@ -319,17 +320,11 @@ class SSHTunnelService {
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
     if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
-    if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
-      const probeRes = await this.probeHostFingerprint(config.sshHost, config.sshPort || 22);
-      if (probeRes.success && probeRes.sha256) {
-        config.expectedHostFingerprint = probeRes.sha256;
-      } else {
-        return {
-          success: false,
-          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
-          hostFingerprint: null,
-        };
-      }
+    if (!config.expectedHostFingerprint?.trim()) {
+      return {
+        success: false,
+        message: 'SSH sunucu SHA256 parmak izini VPS üzerinden doğrulayıp girin. Kimlik doğrulaması başlatılmadı.',
+      };
     }
 
     return new Promise((resolve) => {
@@ -419,7 +414,11 @@ class SSHTunnelService {
         },
       };
 
-      if (config.authType === 'privateKey' && effectivePrivateKey) {
+      if (config.authType === 'privateKey') {
+        if (!effectivePrivateKey) {
+          clearTimeout(timeout);
+          return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
+        }
         sshConnConfig.privateKey = effectivePrivateKey;
       } else {
         sshConnConfig.password = effectivePassword || '';
@@ -499,7 +498,7 @@ class SSHTunnelService {
     }
 
     this.activeConfig = fullConfig;
-    this.saveConfig(fullConfig);
+    await this.saveConfig(fullConfig);
 
     this.addLog(`SSH Tüneli başlatılıyor: ${fullConfig.sshUser}@${fullConfig.sshHost}:${fullConfig.sshPort || 22} -> Local :${fullConfig.localPort}...`);
 
@@ -731,7 +730,12 @@ class SSHTunnelService {
         },
       };
 
-      if (fullConfig.authType === 'privateKey' && effectivePrivateKey) {
+      if (fullConfig.authType === 'privateKey') {
+        if (!effectivePrivateKey) {
+          clearTimeout(connectTimeout);
+          this.status = 'error';
+          return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
+        }
         sshConnConfig.privateKey = effectivePrivateKey;
       } else {
         sshConnConfig.password = effectivePassword || '';
