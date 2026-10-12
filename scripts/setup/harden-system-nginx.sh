@@ -41,7 +41,7 @@ rules = r'''    # NexusNode host Nginx sensitive-path protection
         return 404;
     }
 
-    location ~* ^/(?:wp-config\.php|composer\.(?:json|lock)|package(?:-lock)?\.json|docker-compose\.ya?ml)$ {
+    location ~* ^/(?:wp-config\.php|xmlrpc\.php|wp-includes|wp-admin|wp-content|composer\.(?:json|lock)|package(?:-lock)?\.json|docker-compose\.ya?ml) {
         return 404;
     }
 

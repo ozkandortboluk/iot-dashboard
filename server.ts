@@ -22,6 +22,7 @@ import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from '
 import { isProductionVpsEnvironment } from './src/server/config/runtimeEnvironment.js';
 import { resolveTrustProxy } from './src/server/config/trustProxyPolicy.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
+import { spaRouteGuardMiddleware, createSpaFallbackHandler } from './src/server/utils/spaFallbackGuard.js';
 
 // Bootstrap runtime security secrets early in dev/test only
 ensureRuntimeSecuritySecrets();
@@ -596,6 +597,9 @@ async function setupViteOrStatic() {
     }
   }
 
+  // SEC-SPA: Guard against WordPress probes, scanners, and forbidden extensions before reaching Vite or static handlers
+  app.use(spaRouteGuardMiddleware);
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: {
@@ -608,9 +612,7 @@ async function setupViteOrStatic() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', createSpaFallbackHandler(distPath));
   }
 
   server.on('error', (err: any) => {

@@ -189,7 +189,7 @@ export class MasterKeyProvider {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
         try {
           const winner = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
-          if (winner.length < 16) throw new Error('Concurrent master key is invalid');
+          if (winner.length < 16) throw new Error('Concurrent master key is invalid', { cause: error });
           this.cachedKeyBuffer = this.derive32ByteKey(winner);
           this.cachedSource = 'data_vault_key';
           this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
