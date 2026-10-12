@@ -311,7 +311,7 @@ echo "OFFLINE_CODE=$code"
     expect(stat.mode & 0o077).toBe(0); // Strict 0600 (owner only)
 
     // Execute real read command AS unprivileged user 'node' (UID 1000)
-    const readOutput = execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
+    const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readOutput).toBe(testKey);
   });
 
@@ -338,7 +338,7 @@ echo "OFFLINE_CODE=$code"
     expect(stat.mode & 0o004).toBe(0);     // Others forbidden
 
     // Execute real read command AS unprivileged user 'node' (UID 1000, GID 1000)
-    const readOutput = execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
+    const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readOutput).toBe(testKey);
   });
 
@@ -360,7 +360,7 @@ echo "OFFLINE_CODE=$code"
     // Verify unprivileged 'node' user CANNOT read it before fix (Permission denied)
     let failedAsExpected = false;
     try {
-      execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
+      execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
     } catch (err: any) {
       failedAsExpected = true;
       expect(err.status).not.toBe(0);
@@ -379,7 +379,7 @@ echo "OFFLINE_CODE=$code"
     execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
 
     // Now verify unprivileged 'node' user CAN read it successfully!
-    const recoveredKey = execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
+    const recoveredKey = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(recoveredKey).toBe(testKey);
 
     // Verify it is NOT world readable
@@ -439,7 +439,7 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
     // Verify unprivileged 'node' user (UID 1000) CANNOT read the file initially
     let initialReadFailed = false;
     try {
-      execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
+      execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
     } catch {
       initialReadFailed = true;
     }
@@ -457,7 +457,7 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
     expect(res).toBeDefined();
 
     // Verify unprivileged 'node' user (UID 1000) CAN NOW ACTUALLY READ the key at runtime!
-    const readKey = execSync(`sudo -n -u '#1000' -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
+    const readKey = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readKey).toBe(testKey);
 
     // Verify file is strictly NOT world-readable
