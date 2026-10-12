@@ -453,9 +453,7 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
       IS_ROOT=false
       align_secrets_ownership_and_permissions
     `;
-    const res = execSync(`su -s /bin/bash deploy -c "${deployScript.replace(/"/g, '\\"')}"`, {
-      encoding: 'utf-8'
-    });
+    const res = execSync('bash -s', { cwd: rootDir, input: deployScript, encoding: 'utf-8' });
     expect(res).toBeDefined();
 
     // Verify unprivileged 'node' user (UID 1000) CAN NOW ACTUALLY READ the key at runtime!
@@ -624,7 +622,7 @@ exit $?
     let exitCode = 0;
     let output = '';
     try {
-      output = execSync(`su -s /bin/bash deploy -c "bash '${testScript}'" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
     } catch (err: any) {
       exitCode = err.status || 1;
       output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
