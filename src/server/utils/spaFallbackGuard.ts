@@ -31,8 +31,8 @@ export const SCANNER_PROBE_PATTERNS: RegExp[] = [
   /(?:^|\/)xmlrpc\.php$/i,
   /(?:^|\/)wp-(?:admin|includes|content|login|config|json|cron|trackback|activate|signup|comments)(?:$|\/)/i,
   /\/wlwmanifest\.xml$/i,
-  // Sensitive dotfiles and directories (except .well-known)
-  /(?:^|\/)\.(?!well-known(?:$|\/))/i,
+  // Sensitive dotfiles and directories (except .well-known and .vite)
+  /(?:^|\/)\.(?!(?:well-known|vite)(?:$|\/))/i,
   // Common CMS & Database Admin probes
   /(?:^|\/)(?:phpmyadmin|pma|adminer|webfig|cgi-bin|solr|actuator|telescope)(?:$|\/)/i,
 ];
@@ -123,6 +123,10 @@ export function isCandidateSpaRoute(req: Request): boolean {
  */
 export const spaRouteGuardMiddleware: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
   const pathname = req.path || req.url || '/';
+  // Allow Vite internal dev server requests (/@vite, /@fs, /@id, /.vite/) to pass through untouched
+  if (pathname.startsWith('/@') || pathname.includes('/.vite/')) {
+    return next();
+  }
   if (isScannerOrProbingPath(pathname)) {
     return res.status(404).type('text/plain').send('Not Found');
   }

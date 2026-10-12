@@ -305,6 +305,7 @@ function DashboardContent() {
 }
 
 function SystemStateGuard() {
+  const { user } = useAuth();
   const [systemMode, setSystemMode] = useState<'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' | 'LOADING'>('LOADING');
   const [isSSHDrawerOpen, setIsSSHDrawerOpen] = useState(false);
   const [sshTunnelAllowed, setSshTunnelAllowed] = useState(false);
@@ -312,6 +313,14 @@ function SystemStateGuard() {
   const [sshGatePassed, setSshGatePassed] = useState<boolean>(false);
   const [isCheckingSshGate, setIsCheckingSshGate] = useState<boolean>(true);
   const [connectionLostNotice, setConnectionLostNotice] = useState<boolean>(false);
+
+  const isResetPasswordUrl = Boolean(
+    typeof window !== 'undefined' && (
+      window.location.search.includes('token=') ||
+      window.location.hash.includes('token=') ||
+      window.location.hash.includes('reset-password')
+    )
+  );
 
   const verifySshGate = useCallback(async (): Promise<boolean> => {
     try {
@@ -516,18 +525,7 @@ function SystemStateGuard() {
   }, [isAiStudioEnv, sshGatePassed]);
 
   const renderActiveView = () => {
-    if (isCheckingSshGate || (systemMode === 'LOADING' && isAiStudioEnv === null)) {
-      return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-            <p className="text-xs font-medium text-slate-400">Sistem ve Bağlantı Durumu Kontrol Ediliyor...</p>
-          </div>
-        </div>
-      );
-    }
-
-    // AI Studio pre-login SSH connection screen:
+    // 1. AI Studio pre-login SSH connection screen:
     // Displayed before LoginView until SSH + PostgreSQL SELECT 1 + database READY are verified.
     if (isAiStudioEnv && !sshGatePassed) {
       return (
@@ -546,6 +544,18 @@ function SystemStateGuard() {
       );
     }
 
+    // 2. Loading state: while inspecting SSH tunnel gate or fetching system readiness
+    if (isCheckingSshGate || systemMode === 'LOADING') {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+            <p className="text-xs font-medium text-slate-400">Sistem ve Bağlantı Durumu Kontrol Ediliyor...</p>
+          </div>
+        </div>
+      );
+    }
+
     if (systemMode === 'SETUP') {
       return <DatabaseSetupWizard onComplete={checkStatus} />;
     }
@@ -558,6 +568,13 @@ function SystemStateGuard() {
       return <RecoveryView onRecovered={checkStatus} />;
     }
 
+    // 3. System is READY:
+    // If not authenticated or on password reset link, show LoginView directly
+    if (!user || isResetPasswordUrl) {
+      return <LoginView />;
+    }
+
+    // 4. Authenticated user in READY mode: load RealtimeProvider and Dashboard
     return (
       <RealtimeProvider>
         <DashboardContent />

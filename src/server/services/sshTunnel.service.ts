@@ -608,6 +608,24 @@ class SSHTunnelService {
                     await db.initPostgresRepository();
                     dbState = db.getDatabaseState();
                   }
+
+                  if (isPgConnected) {
+                    try {
+                      const { setupService } = await import('./setup.service.js');
+                      setupService.saveRuntimeSecretConfig({
+                        host: '127.0.0.1',
+                        port: localPort,
+                        database: config.dbName?.trim() || 'iot_dashboard',
+                        user: config.dbUser?.trim() || 'iot_user',
+                        password: currentDbPass || config.dbPassword?.trim() || '',
+                        sslMode: 'disable',
+                        rejectUnauthorized: false,
+                      }, true);
+                      setupService.markSetupCompleted();
+                    } catch (setupSyncErr: any) {
+                      console.warn('[SSHTunnel] Setup service sync notice:', setupSyncErr?.message);
+                    }
+                  }
                 } catch (pgErr: any) {
                   const errMsg = pgErr?.message || String(pgErr);
                   const lowerMsg = errMsg.toLowerCase();

@@ -16,7 +16,9 @@ import { DatabaseState, type AuditLog, type User } from '../../types.js';
 import { systemSecretsService } from './systemSecrets.service.js';
 import { systemKeysService } from './systemKeys.service.js';
 import { isVaultConfigured, getVaultStatus } from '../utils/crypto.js';
-import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
+import { isProductionVpsEnvironment, isDevelopmentSshTunnelAllowed } from '../config/runtimeEnvironment.js';
+import { sshTunnelService } from './sshTunnel.service.js';
+import { isDefaultPassword } from '../utils/startupSecurityPolicy.js';
 
 export interface DatabaseConfigPayload {
   host: string;
@@ -212,7 +214,27 @@ export class SetupService {
         }
       }
 
-      // 2. Check protected system secrets vault (AES-256-GCM encrypted - CANONICAL RUNTIME SOURCE)
+      // 2. Check active development SSH tunnel connection in AI Studio / dev environments
+      if (isDevelopmentSshTunnelAllowed() && sshTunnelService.isConnected()) {
+        const tunnelCfg = sshTunnelService.getConfig();
+        const localPort = sshTunnelService.getLocalPort();
+        const vaultPass = systemSecretsService.getDatabasePassword();
+        const pass = (tunnelCfg?.dbPassword && !isDefaultPassword(tunnelCfg.dbPassword))
+          ? tunnelCfg.dbPassword
+          : (vaultPass && !isDefaultPassword(vaultPass) ? vaultPass : '');
+        this.runtimeConfig = {
+          host: '127.0.0.1',
+          port: localPort || 15432,
+          database: tunnelCfg?.dbName || 'iot_dashboard',
+          user: tunnelCfg?.dbUser || 'iot_user',
+          password: pass,
+          sslMode: 'disable',
+          rejectUnauthorized: false,
+        };
+        return this.runtimeConfig;
+      }
+
+      // 3. Check protected system secrets vault (AES-256-GCM encrypted - CANONICAL RUNTIME SOURCE)
       const vaultDb = systemSecretsService.getDatabaseConfig();
       if (vaultDb.isConfigured && vaultDb.host) {
         const isInternalHost = ['localhost', '127.0.0.1', 'timescaledb', 'nexus_timescaledb', 'postgres', 'db'].includes(vaultDb.host.toLowerCase());
@@ -339,7 +361,7 @@ export class SetupService {
 
       // Do not replace an existing password unless the connection metadata can
       // also be committed. The old password is restored if config writing fails.
-      const oldPassword = systemSecretsService.getDatabasePassword();
+      const oldPassword = systemSecretsService.getSecret('database.password');
       const hasNewPassword = Boolean(config.password && !config.password.includes('••••'));
       if (hasNewPassword) {
         systemSecretsService.persistDatabasePasswordLocally(config.password!, 'setup_wizard');
@@ -630,7 +652,8 @@ export class SetupService {
       return Boolean(this.isCompletedState);
     }
     // If runtime config has no valid host or database, installation is not effectively completed
-    if (!this.runtimeConfig?.host || !this.runtimeConfig?.database) {
+    const cfg = this.getRuntimeConfig();
+    if (!cfg?.host || !cfg?.database) {
       return false;
     }
     return Boolean(this.isCompletedState);
@@ -874,14 +897,40 @@ export class SetupService {
     } else {
       // First-time setup: check if all criteria are newly met
       if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
-        this.markSetupCompleted();
+        if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
+          const cfg = this.getRuntimeConfig();
+          if (cfg && cfg.host && cfg.database) {
+            try {
+              this.saveRuntimeSecretConfig(cfg, true);
+            } catch {}
+          }
+        }
+        try {
+          this.markSetupCompleted();
+        } catch (markErr: any) {
+          systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+          this.isCompletedState = true;
+        }
         systemMode = 'READY';
       } else if (hasAdmin && !isTestEnv) {
         // In production, if PostgreSQL is disconnected, return MAINTENANCE rather than READY
         if (!isDbConnected && (process.env.NODE_ENV === 'production' || isProductionVpsEnvironment())) {
           systemMode = 'MAINTENANCE';
         } else if (isDbConnected) {
-          this.markSetupCompleted();
+          if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
+            const cfg = this.getRuntimeConfig();
+            if (cfg && cfg.host && cfg.database) {
+              try {
+                this.saveRuntimeSecretConfig(cfg, true);
+              } catch {}
+            }
+          }
+          try {
+            this.markSetupCompleted();
+          } catch (markErr: any) {
+            systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+            this.isCompletedState = true;
+          }
           systemMode = 'READY';
         } else {
           systemMode = 'SETUP';
