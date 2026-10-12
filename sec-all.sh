@@ -36,8 +36,35 @@ run docker network ls
 run docker compose ps --format 'table {{.Service}}\t{{.Ports}}'
 section 'SEC-08 Nginx suspicious requests / errors'
 run sudo ls -lh /var/log/nginx/
-# Only paths/status are extracted; avoid collecting full request lines with cookies, tokens, or IPs.
-sudo awk 'BEGIN{IGNORECASE=1} {p=$7; if(p ~ /(wp-login|xmlrpc|wp-admin|\.env|\.git|phpmyadmin|cgi-bin|actuator|vendor)/) {split($4,t,":"); count[p" status=" $9]++}} END{for(k in count) print count[k], k}' /var/log/nginx/access.log 2>/dev/null | sort -nr | head -40 || true
+# Aggregate suspicious request statuses without printing URLs, query strings, IPs or tokens.
+# Include current and previous rotated logs; avoid matching legitimate vendor-*.js assets.
+sudo awk '
+  {
+    p=$7; sub(/\\?.*$/, "", p);
+    if (p ~ /(^|\\/)(wp-login\\.php|xmlrpc\\.php|wp-admin|phpmyadmin|cgi-bin|actuator)(\\/|$)/ ||
+        p ~ /(^|\\/)\\.(env|git)(\\/|\\.|$)/ ||
+        p ~ /(^|\\/)vendor\\/phpunit(\\/|$)/) {
+      count[$9]++
+    }
+  }
+  END {
+    for (status in count) printf "suspicious requests HTTP %s: %d\\n", status, count[status]
+  }
+' /var/log/nginx/access.log /var/log/nginx/access.log.1 2>/dev/null || true
+
+echo 'SEC-08 live SPA probe regression (loopback only; no external requests):'
+if command -v curl >/dev/null 2>&1; then
+  for probe in '/wp-login.php' '/xmlrpc.php' '//xmlrpc.php?rsd' '///wp-login.php' '/cgi-bin/test.cgi' '/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php' '/%78mlrpc.php?rsd'; do
+    code=$(curl --path-as-is --noproxy '*' --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:3000$probe" 2>/dev/null) || code='000'
+    case "$code" in
+      404) printf '[PASS] HTTP %s %s\\n' "$code" "$probe" ;;
+      000) printf '[WARN] App unavailable %s\\n' "$probe" ;;
+      *) printf '[ALERT] Unexpected HTTP %s %s\\n' "$code" "$probe" ;;
+    esac
+  done
+else
+  echo '[WARN] curl unavailable; skipping live probes'
+fi
 # Error log can contain secrets or identifiers: only count severity lines.
 sudo awk '{if ($0 ~ /\[error\]/) e++; if ($0 ~ /\[crit\]/) c++; if ($0 ~ /\[alert\]/) a++} END {printf "nginx errors=%d critical=%d alerts=%d\n",e,c,a}' /var/log/nginx/error.log 2>/dev/null || true
 section 'SEC-09 Security updates / patch posture (cached APT metadata)'
