@@ -453,6 +453,9 @@ class SSHTunnelService {
     hostFingerprint?: string | null;
   }> {
     if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
+    if (!config.expectedHostFingerprint?.trim()) {
+      return { success: false, message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. VPS üzerinden doğruladığınız SHA256 parmak izini girin; bağlantı başlatılmadı.' };
+    }
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }
@@ -477,28 +480,6 @@ class SSHTunnelService {
       privateKey: effectivePrivateKey,
     };
 
-    if (!fullConfig.expectedHostFingerprint || !fullConfig.expectedHostFingerprint.trim()) {
-      this.addLog('SSH Host Key parmak izi belirtilmedi. Güvenli otomatik parmak izi sorgulaması başlatılıyor...');
-      const probeRes = await this.probeHostFingerprint(fullConfig.sshHost, fullConfig.sshPort || 22);
-      if (probeRes.success && probeRes.sha256) {
-        this.status = 'error';
-        this.lastError = 'SSH sunucu parmak izi güvenilir bir kanaldan doğrulanıp onaylanmalıdır.';
-        return {
-          success: false,
-          message: 'SSH sunucu parmak izi otomatik olarak güvenilir kabul edilmedi. VPS üzerinden doğruladığınız SHA256 parmak izini girip tekrar deneyin.',
-          hostFingerprint: probeRes.sha256,
-        };
-      } else {
-        this.status = 'error';
-        this.lastError = `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı.'}`;
-        this.addLog(`GÜVENLİK HATASI: SSH Host Key Parmak İzi sorgulanamadı: ${probeRes.error}`);
-        return {
-          success: false,
-          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
-          hostFingerprint: null,
-        };
-      }
-    }
 
     this.activeConfig = fullConfig;
     await this.saveConfig(fullConfig);
