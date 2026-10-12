@@ -28,6 +28,25 @@ const secretsDir = path.join(rootDir, 'secrets');
 const dataDir = path.join(rootDir, 'data');
 const installScriptPath = path.join(rootDir, 'install.sh');
 const secretsLibPath = path.join(rootDir, 'scripts/setup/lib/secrets.sh');
+const isolated = process.env.NEXUS_ISOLATED_OWNERSHIP_TEST === '1';
+const asRoot = (script: string) => {
+  if (!isolated || !sandboxRoot.startsWith('/tmp/nexus-secret-test-')) throw new Error('Isolated test container required');
+  return execSync('sudo -n bash -s', { cwd: rootDir, input: script, encoding: 'utf8' });
+};
+const isolatedFileStat = (file: string) => {
+  if (!file.startsWith(secretsDir + path.sep)) throw new Error('Outside test sandbox');
+  const raw = asRoot(`stat -c '%u %g %a' "${file}"`).trim().split(' ');
+  return { uid: Number(raw[0]), gid: Number(raw[1]), mode: parseInt(raw[2], 8) };
+};
+const isolatedRead = (file: string) => {
+  if (!file.startsWith(secretsDir + path.sep)) throw new Error('Outside test sandbox');
+  return asRoot(`cat "${file}"`).trim();
+};
+const resetOwner = () => {
+  if (!isolated) return;
+  asRoot(`chown -R ${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001} "${rootDir}"`);
+};
+
 
 describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verification', () => {
   let backupSecrets: Record<string, string> = {};
@@ -68,6 +87,7 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
   });
 
   afterEach(() => {
+    resetOwner();
     if (fs.existsSync(secretsDir)) {
       for (const file of fs.readdirSync(secretsDir)) {
         try {
@@ -202,7 +222,7 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
       align_secrets_ownership_and_permissions
     `;
 
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
 
@@ -303,15 +323,15 @@ echo "OFFLINE_CODE=$code"
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.uid).toBe(1000);
     expect(stat.gid).toBe(1000);
     expect(stat.mode & 0o077).toBe(0); // Strict 0600 (owner only)
 
     // Execute real read command AS unprivileged user 'node' (UID 1000)
-    const readOutput = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
+    const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readOutput).toBe(testKey);
   });
 
@@ -330,7 +350,7 @@ echo "OFFLINE_CODE=$code"
       SUDO_UID=1001
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
     expect(stat.gid).toBe(1000);
@@ -338,7 +358,7 @@ echo "OFFLINE_CODE=$code"
     expect(stat.mode & 0o004).toBe(0);     // Others forbidden
 
     // Execute real read command AS unprivileged user 'node' (UID 1000, GID 1000)
-    const readOutput = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
+    const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readOutput).toBe(testKey);
   });
 
@@ -360,7 +380,7 @@ echo "OFFLINE_CODE=$code"
     // Verify unprivileged 'node' user CANNOT read it before fix (Permission denied)
     let failedAsExpected = false;
     try {
-      execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8', stdio: 'pipe' });
+      execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
     } catch (err: any) {
       failedAsExpected = true;
       expect(err.status).not.toBe(0);
@@ -376,14 +396,14 @@ echo "OFFLINE_CODE=$code"
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     // Now verify unprivileged 'node' user CAN read it successfully!
-    const recoveredKey = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
+    const recoveredKey = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(recoveredKey).toBe(testKey);
 
     // Verify it is NOT world readable
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.mode & 0o004).toBe(0);
   });
 
@@ -439,7 +459,7 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
     // Verify unprivileged 'node' user (UID 1000) CANNOT read the file initially
     let initialReadFailed = false;
     try {
-      execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8', stdio: 'pipe' });
+      execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8', stdio: 'pipe' });
     } catch {
       initialReadFailed = true;
     }
@@ -453,13 +473,11 @@ echo "VERIFIED=$RECOVERY_VERIFIED"
       IS_ROOT=false
       align_secrets_ownership_and_permissions
     `;
-    const res = execSync(`su -s /bin/bash deploy -c "${deployScript.replace(/"/g, '\\"')}"`, {
-      encoding: 'utf-8'
-    });
+    const res = execSync('bash -s', { cwd: rootDir, input: deployScript, encoding: 'utf-8' });
     expect(res).toBeDefined();
 
     // Verify unprivileged 'node' user (UID 1000) CAN NOW ACTUALLY READ the key at runtime!
-    const readKey = execSync(`su -s /bin/sh node -c "cat '${encKeyPath}'"`, { encoding: 'utf-8' }).trim();
+    const readKey = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
     expect(readKey).toBe(testKey);
 
     // Verify file is strictly NOT world-readable
@@ -544,7 +562,7 @@ exit $exit_code
     fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
     fs.writeFileSync(pgPassPath, 'NodeUserPass2026!@#', { mode: 0o600 });
     try {
-      execSync(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
+      asRoot(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
     } catch {}
 
     const testScript = path.join(rootDir, 'data', 'temp_uid1000_test.sh');
@@ -558,12 +576,12 @@ align_secrets_ownership_and_permissions
 `;
     fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
     try {
-      execSync(`bash "${testScript}"`, { cwd: rootDir, encoding: 'utf-8' });
+      execSync(`sudo -n -- runuser -u node -- bash "${testScript}"`, { cwd: rootDir, encoding: 'utf-8' });
     } finally {
       try { fs.unlinkSync(testScript); } catch {}
     }
 
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.uid).toBe(1000);
     expect(stat.mode & 0o077).toBe(0); // 0600 strict
   });
@@ -584,11 +602,11 @@ align_secrets_ownership_and_permissions
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     // Verify contents are strictly preserved byte-for-byte
-    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(originalKey);
-    expect(fs.readFileSync(pgPassPath, 'utf8').trim()).toBe(originalPass);
+    expect(isolatedRead(encKeyPath)).toBe(originalKey);
+    expect(isolatedRead(pgPassPath)).toBe(originalPass);
   });
 
   it('15. Proje dışındaki üst dizinler: izinler otomatik DEĞİŞTİRİLMEZ, erişim yoksa açık hata ile güvenli durulur', () => {
@@ -624,7 +642,7 @@ exit $?
     let exitCode = 0;
     let output = '';
     try {
-      output = execSync(`su -s /bin/bash deploy -c "bash '${testScript}'" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
     } catch (err: any) {
       exitCode = err.status || 1;
       output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
@@ -663,7 +681,7 @@ SUDO_USER=""
 # Mock 'id node' and 'getent passwd node' to fail, simulating VPS where user is named 'ubuntu' or 'debian'
 getent() {
   if [ "$1" = "passwd" ] && [ "$2" = "node" ]; then return 1; fi
-  builtin getent "$@"
+  command getent "$@"
 }
 id() {
   if [ "$1" = "node" ]; then return 1; fi
@@ -678,7 +696,7 @@ exit $?
     let exitCode = 0;
     let output = '';
     try {
-      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+      output = asRoot(`bash "${testScript}" 2>&1`);
     } catch (err: any) {
       exitCode = err.status || 1;
       output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
@@ -689,6 +707,6 @@ exit $?
     expect(exitCode).toBe(0);
 
     // Verify key is still valid and readable
-    expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(testKey);
+    expect(isolatedRead(encKeyPath)).toBe(testKey);
   });
 });
