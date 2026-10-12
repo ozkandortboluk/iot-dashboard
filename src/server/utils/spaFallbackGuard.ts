@@ -41,18 +41,25 @@ export const SCANNER_PROBE_PATTERNS: RegExp[] = [
  * Safely decodes and normalizes a URL pathname for routing inspection.
  */
 export function normalizePathname(urlPath: string): string {
+  // Treat input as a request-target PATH, never as a URL. In particular,
+  // new URL('//xmlrpc.php', base) treats xmlrpc.php as a hostname.
+  let pathname = urlPath.split(/[?#]/, 1)[0];
   try {
-    const urlObj = new URL(urlPath, 'http://localhost');
-    const pathname = decodeURIComponent(urlObj.pathname);
-    return pathname.replace(/\/+/g, '/');
+    // Decode nested percent encoding used by scanners (%252e -> %2e -> .).
+    // A fixed bound avoids unbounded work on hostile input.
+    for (let i = 0; i < 3; i++) {
+      const decoded = decodeURIComponent(pathname);
+      if (decoded === pathname) break;
+      pathname = decoded;
+    }
   } catch {
-    const qIdx = urlPath.indexOf('?');
-    const hIdx = urlPath.indexOf('#');
-    let clean = urlPath;
-    if (qIdx !== -1) clean = clean.substring(0, qIdx);
-    if (hIdx !== -1) clean = clean.substring(0, hIdx);
-    return clean.replace(/\/+/g, '/');
+    // Fail closed for malformed percent escapes.
+    return '/.invalid-encoded-path';
   }
+  pathname = pathname.replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (!pathname.startsWith('/')) pathname = '/' + pathname;
+  // Collapse dot segments so encoded traversal cannot hide probe paths.
+  return path.posix.normalize(pathname);
 }
 
 /**
