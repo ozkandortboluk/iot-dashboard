@@ -73,18 +73,21 @@ detect_existing_installation() {
     return 0
   fi
 
-  # 3. Check Docker volumes and containers specific to NexusNode
+  # 3. Docker resources must belong to this compose project. A separate test
+  # checkout must never inherit installation state from unrelated live containers.
   if command -v docker >/dev/null 2>&1; then
-    if resolve_app_data_volume >/dev/null 2>&1; then
-      return 0
-    fi
     local project_name="${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)" | tr -cd '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')}"
-    if docker volume inspect "${project_name}_timescaledb_data" >/dev/null 2>&1 || docker volume inspect "timescaledb_data" >/dev/null 2>&1; then
+    if docker volume inspect "${project_name}_app_data" >/dev/null 2>&1 ||
+       docker volume inspect "${project_name}_timescaledb_data" >/dev/null 2>&1; then
       return 0
     fi
-    if docker inspect nexus_timescaledb >/dev/null 2>&1 || docker inspect nexus_app >/dev/null 2>&1; then
-      return 0
-    fi
+    local container label
+    for container in nexus_app nexus_timescaledb; do
+      label=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+      if [ "$label" = "$project_name" ]; then
+        return 0
+      fi
+    done
   fi
 
   return 1
