@@ -28,6 +28,16 @@ const secretsDir = path.join(rootDir, 'secrets');
 const dataDir = path.join(rootDir, 'data');
 const installScriptPath = path.join(rootDir, 'install.sh');
 const secretsLibPath = path.join(rootDir, 'scripts/setup/lib/secrets.sh');
+const isolated = process.env.NEXUS_ISOLATED_OWNERSHIP_TEST === '1';
+const asRoot = (script: string) => {
+  if (!isolated || !sandboxRoot.startsWith('/tmp/nexus-secret-test-')) throw new Error('Isolated test container required');
+  return execSync('sudo -n bash -s', { cwd: rootDir, input: script, encoding: 'utf8' });
+};
+const resetOwner = () => {
+  if (!isolated) return;
+  asRoot(`chown -R ${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001} "${rootDir}"`);
+};
+
 
 describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verification', () => {
   let backupSecrets: Record<string, string> = {};
@@ -68,6 +78,7 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
   });
 
   afterEach(() => {
+    resetOwner();
     if (fs.existsSync(secretsDir)) {
       for (const file of fs.readdirSync(secretsDir)) {
         try {
@@ -202,7 +213,7 @@ describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verific
       align_secrets_ownership_and_permissions
     `;
 
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
 
@@ -303,7 +314,7 @@ echo "OFFLINE_CODE=$code"
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
     expect(stat.uid).toBe(1000);
@@ -330,7 +341,7 @@ echo "OFFLINE_CODE=$code"
       SUDO_UID=1001
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
     expect(stat.gid).toBe(1000);
@@ -376,7 +387,7 @@ echo "OFFLINE_CODE=$code"
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     // Now verify unprivileged 'node' user CAN read it successfully!
     const recoveredKey = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
@@ -542,7 +553,7 @@ exit $exit_code
     fs.writeFileSync(encKeyPath, testKey, { mode: 0o600 });
     fs.writeFileSync(pgPassPath, 'NodeUserPass2026!@#', { mode: 0o600 });
     try {
-      execSync(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
+      asRoot(`chown -R 1000:1000 '${secretsDir}' && chmod 700 '${secretsDir}' && chmod 600 '${encKeyPath}' '${pgPassPath}'`);
     } catch {}
 
     const testScript = path.join(rootDir, 'data', 'temp_uid1000_test.sh');
@@ -556,7 +567,7 @@ align_secrets_ownership_and_permissions
 `;
     fs.writeFileSync(testScript, bashScript, { mode: 0o755 });
     try {
-      execSync(`bash "${testScript}"`, { cwd: rootDir, encoding: 'utf-8' });
+      execSync(`sudo -n -- runuser -u node -- bash "${testScript}"`, { cwd: rootDir, encoding: 'utf-8' });
     } finally {
       try { fs.unlinkSync(testScript); } catch {}
     }
@@ -582,7 +593,7 @@ align_secrets_ownership_and_permissions
       SUDO_USER=""
       align_secrets_ownership_and_permissions
     `;
-    execSync(`bash -c "${scriptCmd.replace(/"/g, '\\"')}"`, { cwd: rootDir });
+    asRoot(scriptCmd);
 
     // Verify contents are strictly preserved byte-for-byte
     expect(fs.readFileSync(encKeyPath, 'utf8').trim()).toBe(originalKey);
@@ -676,7 +687,7 @@ exit $?
     let exitCode = 0;
     let output = '';
     try {
-      output = execSync(`bash "${testScript}" 2>&1`, { cwd: rootDir, encoding: 'utf-8' });
+      output = asRoot(`bash "${testScript}" 2>&1`);
     } catch (err: any) {
       exitCode = err.status || 1;
       output = `${err.message || ''} ${err.stdout || ''} ${err.stderr || ''}`;
