@@ -116,7 +116,24 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   // 4. Automated Backup & Disaster Recovery Engine
   // =========================================================================
   it('5. ./install.sh --backup creates a timestamped archive bundle of secrets and configuration', () => {
-    const backupOutput = execSync(`bash ${installScriptPath} --backup`, { cwd: rootDir, encoding: 'utf-8' });
+    // A backup integration test must never inspect or copy live Docker resources.
+    // Provide a minimal fake Docker CLI in the disposable installer sandbox.
+    const mockBin = path.join(rootDir, 'data', 'mock-bin');
+    fs.mkdirSync(mockBin, { recursive: true });
+    const mockDocker = path.join(mockBin, 'docker');
+    fs.writeFileSync(mockDocker, `#!/bin/sh
+case "$1" in
+  inspect) case "$2" in nexus_timescaledb|nexus_app) exit 0;; esac ;;
+  exec) if [ "$2" = nexus_timescaledb ] && [ "$3" = pg_dump ]; then printf '%s\\n' '-- isolated test SQL dump'; exit 0; fi ;;
+  cp) if [ "$2" = nexus_app:/app/data/. ]; then mkdir -p "$3"; printf 'test-data\\n' > "$3/test-marker"; exit 0; fi ;;
+esac
+exit 1
+`, { mode: 0o755 });
+    const backupOutput = execSync(`bash ${installScriptPath} --backup`, {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${mockBin}:${process.env.PATH ?? ''}` }
+    });
     expect(backupOutput).toMatch(/Yedekleme tamamlandı/i);
 
     const backupsDir = path.join(rootDir, 'backups');
