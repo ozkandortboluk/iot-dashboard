@@ -33,6 +33,11 @@ const asRoot = (script: string) => {
   if (!isolated || !sandboxRoot.startsWith('/tmp/nexus-secret-test-')) throw new Error('Isolated test container required');
   return execSync('sudo -n bash -s', { cwd: rootDir, input: script, encoding: 'utf8' });
 };
+const isolatedFileStat = (file: string) => {
+  if (!file.startsWith(secretsDir + path.sep)) throw new Error('Outside test sandbox');
+  const raw = asRoot(`stat -c '%u %g %a' "${file}"`).trim().split(' ');
+  return { uid: Number(raw[0]), gid: Number(raw[1]), mode: parseInt(raw[2], 8) };
+};
 const resetOwner = () => {
   if (!isolated) return;
   asRoot(`chown -R ${process.getuid?.() ?? 1001}:${process.getgid?.() ?? 1001} "${rootDir}"`);
@@ -316,7 +321,7 @@ echo "OFFLINE_CODE=$code"
     `;
     asRoot(scriptCmd);
 
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.uid).toBe(1000);
     expect(stat.gid).toBe(1000);
     expect(stat.mode & 0o077).toBe(0); // Strict 0600 (owner only)
@@ -394,7 +399,7 @@ echo "OFFLINE_CODE=$code"
     expect(recoveredKey).toBe(testKey);
 
     // Verify it is NOT world readable
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.mode & 0o004).toBe(0);
   });
 
@@ -572,7 +577,7 @@ align_secrets_ownership_and_permissions
       try { fs.unlinkSync(testScript); } catch {}
     }
 
-    const stat = fs.statSync(encKeyPath);
+    const stat = isolatedFileStat(encKeyPath);
     expect(stat.uid).toBe(1000);
     expect(stat.mode & 0o077).toBe(0); // 0600 strict
   });
