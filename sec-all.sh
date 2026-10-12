@@ -64,9 +64,9 @@ if command -v curl >/dev/null 2>&1; then
   for probe in '/wp-login.php' '/xmlrpc.php' '//xmlrpc.php?rsd' '///wp-login.php' '/cgi-bin/test.cgi' '/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php' '/%78mlrpc.php?rsd'; do
     code=$(curl --path-as-is --noproxy '*' --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:3000$probe" 2>/dev/null) || code='000'
     case "$code" in
-      404) printf '[PASS] HTTP %s %s\\n' "$code" "$probe" ;;
-      000) printf '[WARN] App unavailable %s\\n' "$probe" ;;
-      *) printf '[ALERT] Unexpected HTTP %s %s\\n' "$code" "$probe" ;;
+      404) printf '[PASS] HTTP %s %s\n' "$code" "$probe" ;;
+      000) printf '[WARN] App unavailable %s\n' "$probe" ;;
+      *) printf '[ALERT] Unexpected HTTP %s %s\n' "$code" "$probe" ;;
     esac
   done
 else
