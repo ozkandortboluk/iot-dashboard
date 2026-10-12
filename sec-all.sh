@@ -36,19 +36,26 @@ run docker network ls
 run docker compose ps --format 'table {{.Service}}\t{{.Ports}}'
 section 'SEC-08 Nginx suspicious requests / errors'
 run sudo ls -lh /var/log/nginx/
-# Aggregate suspicious request statuses without printing URLs, query strings, IPs or tokens.
-# Include current and previous rotated logs; avoid matching legitimate vendor-*.js assets.
+# Aggregate status codes only: never print client IPs, raw URLs, queries or tokens.
+# Match common scanner targets, not ordinary vendor-*.js assets.
+# Nginx standard combined log format: $7=request-target, $9=HTTP status.
+echo 'SEC-08 suspicious request counts (current and previous access logs):'
 sudo awk '
   {
-    p=$7; sub(/\\?.*$/, "", p);
-    if (p ~ /(^|\\/)(wp-login\\.php|xmlrpc\\.php|wp-admin|phpmyadmin|cgi-bin|actuator)(\\/|$)/ ||
-        p ~ /(^|\\/)\\.(env|git)(\\/|\\.|$)/ ||
-        p ~ /(^|\\/)vendor\\/phpunit(\\/|$)/) {
+    p=$7
+    sub(/[?].*$/, "", p)
+    gsub(/%2[fF]/, "/", p)
+    gsub(/[/]+/, "/", p)
+    if (p ~ /(^|[/])(wp-login[.]php|xmlrpc[.]php|wp-admin|phpmyadmin|cgi-bin|actuator)([/]|$)/ ||
+        p ~ /(^|[/])[.](env|git)([/]|[.]|$)/ ||
+        p ~ /(^|[/])vendor[/]phpunit([/]|$)/) {
       count[$9]++
+      total++
     }
   }
   END {
-    for (status in count) printf "suspicious requests HTTP %s: %d\\n", status, count[status]
+    if (!total) print "No matching suspicious requests in scanned logs"
+    else for (status in count) printf "suspicious requests HTTP %s: %d\n", status, count[status]
   }
 ' /var/log/nginx/access.log /var/log/nginx/access.log.1 2>/dev/null || true
 
