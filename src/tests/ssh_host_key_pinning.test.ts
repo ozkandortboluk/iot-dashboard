@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   verifyHostFingerprint,
   computeHostFingerprints,
@@ -76,10 +76,11 @@ describe('SEC-02: Strict SSH Host Key Pinning & Verification (Fail-Closed)', () 
     });
 
     expect(testResult.success).toBe(false);
-    expect(testResult.message).toMatch(/(Zorunlu SSH Host Key Parmak İzi|SSH kimlik doğrulama başarısız)/);
+    expect(testResult.message).toContain('SHA256 parmak izini VPS üzerinden doğrulayıp girin');
   });
 
   it('6. connectTunnel fail-closed: refuses to establish tunnel when expectedHostFingerprint is omitted', async () => {
+    const probeSpy = vi.spyOn(sshTunnelService as any, 'probeHostFingerprint');
     const connectResult = await sshTunnelService.connectTunnel({
       sshHost: '127.0.0.1',
       sshPort: 22,
@@ -92,6 +93,8 @@ describe('SEC-02: Strict SSH Host Key Pinning & Verification (Fail-Closed)', () 
     });
 
     expect(connectResult.success).toBe(false);
-    expect(connectResult.message).toMatch(/(Zorunlu SSH Host Key Parmak İzi|SSH Tüneli kurulamadı)/);
+    expect(connectResult.message).toContain('Zorunlu SSH Host Key Parmak İzi');
+    expect(probeSpy).not.toHaveBeenCalled();
+    probeSpy.mockRestore();
   }, 15000);
 });
