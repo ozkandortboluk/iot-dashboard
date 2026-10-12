@@ -64,11 +64,6 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
   const bootstrapToken = aiStudioBootstrapAuthService.extractBootstrapToken(req);
   if (bootstrapToken && aiStudioBootstrapAuthService.validateBootstrapToken(bootstrapToken)) {
     (req as any).isAiStudioBootstrap = true;
-    (req as any).user = {
-      id: 'aistudio_bootstrap',
-      name: 'AI Studio Developer (Pre-Login)',
-      role: 'admin',
-    };
     return next();
   }
 
@@ -107,6 +102,12 @@ const handleBootstrapToken = (req: Request, res: Response) => {
     });
   }
 
+  // Bootstrap issuance requires the existing server-validated setup/recovery authorization.
+  // Environment detection alone is never sufficient to grant SSH management access.
+  if (!isRequestSetupAuthenticated(req)) {
+    return res.status(401).json({ success: false, code: 'SSH_BOOTSTRAP_AUTH_REQUIRED', error: 'Geçerli kurulum/kurtarma yetkisi gereklidir.' });
+  }
+
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_bootstrap:${clientIp}`, 25);
   if (!rateLimit.allowed) {
@@ -130,21 +131,20 @@ const handleBootstrapToken = (req: Request, res: Response) => {
   res.cookie('nexus_ssh_bootstrap_token', token, {
     httpOnly: true,
     secure: isSecure,
-    sameSite: isSecure ? 'none' : 'lax',
+    sameSite: 'strict',
     maxAge: 30 * 60 * 1000,
     path: '/',
   });
 
   return res.json({
     success: true,
-    bootstrapToken: token,
     expiresInSeconds: 1800,
     environment: 'aistudio',
   });
 };
 
 sshTunnelRouter.post('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
-sshTunnelRouter.get('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
+sshTunnelRouter.get('/bootstrap-token', guardSshTunnelPolicy, (_req, res) => res.status(405).json({ success: false, error: 'Method Not Allowed' }));
 
 /**
  * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
