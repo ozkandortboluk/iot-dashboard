@@ -53,7 +53,8 @@ export interface SSHTunnelState {
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
-export const DEFAULT_SSH_LOCAL_PORT = 5432;
+// Use a dedicated local forwarding port to avoid collision with local PostgreSQL.
+export const DEFAULT_SSH_LOCAL_PORT = 15432;
 
 /**
  * Calculates SHA-256 and MD5 fingerprints of SSH Host Public Key
@@ -478,8 +479,13 @@ class SSHTunnelService {
       this.addLog('SSH Host Key parmak izi belirtilmedi. Güvenli otomatik parmak izi sorgulaması başlatılıyor...');
       const probeRes = await this.probeHostFingerprint(fullConfig.sshHost, fullConfig.sshPort || 22);
       if (probeRes.success && probeRes.sha256) {
-        fullConfig.expectedHostFingerprint = probeRes.sha256;
-        this.addLog(`Sunucu Host Key parmak izi otomatik alındı: ${probeRes.sha256}`);
+        this.status = 'error';
+        this.lastError = 'SSH sunucu parmak izi güvenilir bir kanaldan doğrulanıp onaylanmalıdır.';
+        return {
+          success: false,
+          message: 'SSH sunucu parmak izi otomatik olarak güvenilir kabul edilmedi. VPS üzerinden doğruladığınız SHA256 parmak izini girip tekrar deneyin.',
+          hostFingerprint: probeRes.sha256,
+        };
       } else {
         this.status = 'error';
         this.lastError = `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı.'}`;
