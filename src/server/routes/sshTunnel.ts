@@ -83,7 +83,7 @@ function guardSshTunnelPolicy(req: Request, res: Response, next: NextFunction) {
  * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
  * Safely inspects the remote SSH server's public key fingerprint WITHOUT sending any user credentials.
  */
-sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/probe-fingerprint', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_probe:${clientIp}`, 15);
   if (!rateLimit.allowed) {
@@ -115,7 +115,7 @@ sshTunnelRouter.post('/probe-fingerprint', requireSshTunnelAuth, guardSshTunnelP
  * GET /api/system/ssh-tunnel/status & GET /api/setup/ssh-tunnel/status
  * Status endpoint for SSH Tunnel (Protected: setup mode or admin authorization required)
  */
-sshTunnelRouter.get('/status', requireSshTunnelAuth, guardSshTunnelPolicy, (req: Request, res: Response) => {
+sshTunnelRouter.get('/status', guardSshTunnelPolicy, requireSshTunnelAuth, (req: Request, res: Response) => {
   try {
     const state = sshTunnelService.getState();
     const isDbConnected = Boolean(db.postgresRepo?.isReady());
@@ -151,7 +151,7 @@ sshTunnelRouter.get('/status', requireSshTunnelAuth, guardSshTunnelPolicy, (req:
  * POST /api/system/ssh-tunnel/test & POST /api/setup/ssh-tunnel/test
  * Test SSH Credentials & verify host fingerprint (Protected)
  */
-sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/test', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_test:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -216,7 +216,7 @@ sshTunnelRouter.post('/test', requireSshTunnelAuth, guardSshTunnelPolicy, async 
  * POST /api/system/ssh-tunnel/connect & POST /api/setup/ssh-tunnel/connect
  * Connect and establish SSH Tunnel with host key pinning & verification (Protected)
  */
-sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/connect', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`ssh_connect:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -303,7 +303,7 @@ sshTunnelRouter.post('/connect', requireSshTunnelAuth, guardSshTunnelPolicy, asy
  * POST /api/system/ssh-tunnel/disconnect & POST /api/setup/ssh-tunnel/disconnect
  * Disconnect active SSH Tunnel (Protected)
  */
-sshTunnelRouter.post('/disconnect', requireSshTunnelAuth, guardSshTunnelPolicy, async (req: Request, res: Response) => {
+sshTunnelRouter.post('/disconnect', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   try {
     const result = await sshTunnelService.disconnectTunnel();
     const actorId = (req as any).user?.id || 'setup_recovery';
