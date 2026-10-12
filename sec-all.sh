@@ -92,6 +92,18 @@ if [ "$#" -eq 0 ]; then
   else
     result SEC-09 PASS 'Security updates' 'No pending updates in cached lists'
   fi
+  for id in SEC-10 SEC-11 SEC-12; do
+    line=$(grep -E "^\\[(PASS|WARN|FAIL)\\] $id " <<< "$details" | tail -1)
+    if [ -z "$line" ]; then result "$id" WARN 'Additional security check' 'Result unavailable'; continue; fi
+    state=$(printf '%s\n' "$line" | cut -d']' -f1 | tr -d '[')
+    note=$(printf '%s\n' "$line" | cut -d' ' -f3-)
+    case "$id" in
+      SEC-10) label='Nginx / TLS certificate';;
+      SEC-11) label='Secret file permissions';;
+      SEC-12) label='App / DB readiness';;
+    esac
+    result "$id" "$state" "$label" "$note"
+  done
   printf '\nSummary: %d PASS | %d WARN | %d FAIL\n' "$pass" "$warn" "$fail"
   printf 'Details: sudo bash sec-all.sh --verbose\n'
   if [ "$rc" -ne 0 ]; then echo 'WARN: detailed audit exited abnormally'; exit 2; fi
@@ -193,4 +205,49 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl is-active apt-daily-upgrade.timer 2>/dev/null || true
 fi
 echo 'NOTE: APT upgrade simulation is not a vulnerability scan; review Debian security advisories separately.'
+section 'SEC-10 Nginx configuration and TLS certificate'
+if ! nginx -t >/dev/null 2>&1; then
+  echo '[WARN] SEC-10 Nginx configuration check unavailable or failed'
+else
+  cert=''
+  for candidate in /etc/letsencrypt/live/nexusnodeiot.com.tr/fullchain.pem /etc/letsencrypt/live/www.nexusnodeiot.com.tr/fullchain.pem docker/certs/server.crt; do
+    if [ -r "$candidate" ]; then cert="$candidate"; break; fi
+  done
+  if [ -z "$cert" ]; then
+    echo '[WARN] SEC-10 Certificate path not found'
+  elif ! openssl x509 -in "$cert" -noout -checkend 0 >/dev/null 2>&1; then
+    echo '[FAIL] SEC-10 Certificate expired or unreadable'
+  elif ! openssl x509 -in "$cert" -noout -checkend 2592000 >/dev/null 2>&1; then
+    echo '[WARN] SEC-10 Certificate expires within 30 days'
+  else
+    echo '[PASS] SEC-10 Nginx valid; certificate valid for 30+ days'
+  fi
+fi
+section 'SEC-11 Secret permissions (no secret contents read)'
+checked=0; insecure=0
+for f in secrets/encryption_key secrets/postgres_password; do
+  if [ -f "$f" ]; then
+    checked=$((checked+1))
+    mode=$(stat -c '%a' "$f" 2>/dev/null) || mode=''
+    if [ -z "$mode" ]; then insecure=2; break; fi
+    if [ $((8#$mode & 077)) -ne 0 ]; then insecure=1; fi
+  fi
+done
+if [ "$insecure" -eq 1 ]; then
+  echo '[FAIL] SEC-11 Secret files readable by group or others'
+elif [ "$insecure" -eq 2 ] || [ "$checked" -ne 2 ]; then
+  echo '[WARN] SEC-11 Secret file or permission unavailable'
+else
+  echo '[PASS] SEC-11 Both secret files have owner-only permissions'
+fi
+section 'SEC-12 Application / database readiness'
+ready=$(curl --noproxy '*' --silent --max-time 5 http://127.0.0.1:3000/api/health/ready 2>/dev/null) || ready=''
+if [ -z "$ready" ]; then
+  echo '[FAIL] SEC-12 Readiness endpoint unreachable'
+elif printf '%s' "$ready" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' &&
+     printf '%s' "$ready" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"connected"'; then
+  echo '[PASS] SEC-12 Application ready; database connected'
+else
+  echo '[WARN] SEC-12 Readiness not confirmed'
+fi
 section 'DONE — READ ONLY'
