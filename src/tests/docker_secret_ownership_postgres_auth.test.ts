@@ -661,7 +661,7 @@ SUDO_USER=""
 # Mock 'id node' and 'getent passwd node' to fail, simulating VPS where user is named 'ubuntu' or 'debian'
 getent() {
   if [ "$1" = "passwd" ] && [ "$2" = "node" ]; then return 1; fi
-  builtin getent "$@"
+  command getent "$@"
 }
 id() {
   if [ "$1" = "node" ]; then return 1; fi
