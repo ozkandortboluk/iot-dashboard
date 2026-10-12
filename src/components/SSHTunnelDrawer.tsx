@@ -41,7 +41,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const [remoteDbHost, setRemoteDbHost] = useState('127.0.0.1');
   const [remoteDbPort, setRemoteDbPort] = useState('5432');
-  const [localPort, setLocalPort] = useState('5432');
+  const [localPort, setLocalPort] = useState('15432');
   const [expectedHostFingerprint, setExpectedHostFingerprint] = useState('');
   const [discoveredFingerprint, setDiscoveredFingerprint] = useState<string | null>(null);
 
@@ -208,7 +208,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           privateKey: authType === 'privateKey' ? privateKey : undefined,
           remoteDbHost,
           remoteDbPort: Number(remoteDbPort) || 5432,
-          localPort: Number(localPort) || 5432,
+          localPort: Number(localPort) || 15432,
           expectedHostFingerprint: expectedHostFingerprint.trim() || undefined,
         }),
       });
@@ -253,7 +253,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           privateKey: authType === 'privateKey' ? privateKey : undefined,
           remoteDbHost,
           remoteDbPort: Number(remoteDbPort) || 5432,
-          localPort: Number(localPort) || 5432,
+          localPort: Number(localPort) || 15432,
           expectedHostFingerprint: expectedHostFingerprint.trim() || undefined,
           dbUser: dbUser.trim() || undefined,
           dbPassword: dbPassword ? dbPassword : undefined,
@@ -430,10 +430,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                   onClick={() => {
                     setSshHost('db.nexusnodeiot.com.tr');
                     setSshPort('22');
-                    setSshUser('root');
+                    setSshUser('deploy');
                     setRemoteDbHost('127.0.0.1');
                     setRemoteDbPort('5432');
-                    setLocalPort('5432');
+                    setLocalPort('15432');
                   }}
                   className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 hover:underline cursor-pointer"
                 >
@@ -583,11 +583,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     type="number"
                     value={localPort}
                     onChange={(e) => setLocalPort(e.target.value)}
-                    placeholder="5432"
+                    placeholder="15432"
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                   />
                   <p className="text-[10px] text-slate-500">
-                    Uygulama tünel üzerinden 127.0.0.1:{localPort || '5432'} adresi ile PostgreSQL veritabanına bağlanır (Standart: 5432).
+                    Uygulama tünel üzerinden 127.0.0.1:{localPort || '15432'} adresi ile PostgreSQL veritabanına bağlanır (Standart: 15432).
                   </p>
                 </div>
               </div>
@@ -693,7 +693,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                     type="text"
                     value={expectedHostFingerprint}
                     onChange={(e) => setExpectedHostFingerprint(e.target.value)}
-                    placeholder="SHA256:abc123xyz... (İsteğe bağlı)"
+                    placeholder="SHA256:... (Zorunlu — bağımsız kaynaktan doğrulayın)"
                     className="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                   />
                 </div>

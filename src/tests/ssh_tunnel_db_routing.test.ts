@@ -40,6 +40,36 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
     expect(resolved).not.toContain('127.0.0.1');
   });
 
+  it('VPS production cannot enable SSH tunnel using environment overrides', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.VPS_PRODUCTION = 'true';
+    process.env.APP_ENV = 'aistudio';
+    process.env.ENABLE_SSH_TUNNEL = 'true';
+    process.env.DB_SSH_TUNNEL_ENABLED = 'true';
+
+    expect(isSshTunnelAllowed()).toBe(false);
+    expect(isSshTunnelRequired('postgresql://iot_user:pass@remote.example:5432/db')).toBe(false);
+  });
+
+  it('AI Studio runtime permits SSH tunnel even with NODE_ENV=production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.APP_ENV = 'aistudio';
+    delete process.env.VPS_PRODUCTION;
+    delete process.env.DB_SSH_TUNNEL_ENABLED;
+    delete process.env.ENABLE_SSH_TUNNEL;
+
+    expect(isSshTunnelAllowed()).toBe(true);
+  });
+
+  it('explicit VPS environment blocks SSH tunnel without NODE_ENV=production', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.APP_ENV = 'vps';
+    process.env.ENABLE_SSH_TUNNEL = 'true';
+    delete process.env.VPS_PRODUCTION;
+
+    expect(isSshTunnelAllowed()).toBe(false);
+  });
+
   it('2. Local Postgres without SSH tunnel config: isSshTunnelRequired returns false', () => {
     process.env.NODE_ENV = 'development';
     delete process.env.VPS_PRODUCTION;

@@ -325,6 +325,7 @@ app.use('/api', (req, res, next) => {
     req.path.startsWith('/auth/verify-setup-token') ||
     req.path.startsWith('/system/ssh-tunnel') ||
     req.path.startsWith('/ssh-tunnel') ||
+    req.path === '/runtime' ||
     req.path === '/system/status' ||
     req.path.startsWith('/server') ||
     req.path.startsWith('/health') ||

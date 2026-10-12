@@ -306,6 +306,18 @@ function DashboardContent() {
 function SystemStateGuard() {
   const [systemMode, setSystemMode] = useState<'READY' | 'MAINTENANCE' | 'RECOVERY' | 'SETUP' | 'LOADING'>('LOADING');
   const [isSSHDrawerOpen, setIsSSHDrawerOpen] = useState(false);
+  const [sshTunnelAllowed, setSshTunnelAllowed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/runtime', { credentials: 'include' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (active) setSshTunnelAllowed(data?.sshTunnelAllowed === true && data?.environment !== 'vps');
+      })
+      .catch(() => { if (active) setSshTunnelAllowed(false); });
+    return () => { active = false; };
+  }, []);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -348,7 +360,7 @@ function SystemStateGuard() {
       setSystemMode('MAINTENANCE');
     };
     const handleOpenSSH = () => {
-      setIsSSHDrawerOpen(true);
+      if (sshTunnelAllowed) setIsSSHDrawerOpen(true);
     };
 
     window.addEventListener('nexus_system_maintenance', handleGlobalMaintenance);
@@ -358,7 +370,7 @@ function SystemStateGuard() {
       window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
       window.removeEventListener('nexus_open_ssh_drawer', handleOpenSSH);
     };
-  }, [checkStatus]);
+  }, [checkStatus, sshTunnelAllowed]);
 
   // Periodic health monitor when system is READY
   useEffect(() => {
@@ -420,8 +432,8 @@ function SystemStateGuard() {
     <>
       {renderActiveView()}
 
-      {/* Persistent Left Edge Floating Handle for SSH Tunnel */}
-      <button
+      {/* Development-only SSH controls; server policy is authoritative. */}
+      {sshTunnelAllowed && <button
         type="button"
         onClick={() => setIsSSHDrawerOpen(true)}
         title="SSH Bağlantı Tüneli (Sol Ekran)"
@@ -429,14 +441,14 @@ function SystemStateGuard() {
       >
         <Terminal className="w-4 h-4 text-white group-hover:rotate-12 transition-transform shrink-0" />
         <span className="text-xs font-bold hidden sm:inline pr-1">SSH Tüneli</span>
-      </button>
+      </button>}
 
       {/* Global Left-Side SSH Tunnel Drawer */}
-      <SSHTunnelDrawer
+      {sshTunnelAllowed && <SSHTunnelDrawer
         isOpen={isSSHDrawerOpen}
         onClose={() => setIsSSHDrawerOpen(false)}
         onConnectedSuccess={checkStatus}
-      />
+      />}
     </>
   );
 }

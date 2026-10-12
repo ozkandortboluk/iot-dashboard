@@ -5,23 +5,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
-import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
+import { isDevelopmentSshTunnelAllowed } from '../config/runtimeEnvironment.js';
 
 export function isSshTunnelAllowed(): boolean {
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
-    return false;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
-    return true;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
-    return false;
-  }
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
-    return false;
-  }
-  const env = resolveRuntimeEnvironment();
-  return env !== 'vps';
+  return isDevelopmentSshTunnelAllowed();
 }
 
 export interface SSHTunnelConfig {
@@ -53,7 +40,8 @@ export interface SSHTunnelState {
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
-export const DEFAULT_SSH_LOCAL_PORT = 5432;
+// Use a dedicated local forwarding port to avoid collision with local PostgreSQL.
+export const DEFAULT_SSH_LOCAL_PORT = 15432;
 
 /**
  * Calculates SHA-256 and MD5 fingerprints of SSH Host Public Key
@@ -154,8 +142,8 @@ class SSHTunnelService {
           this.activeConfig = {
             ...parsed,
             localPort: Number(parsed.localPort) || DEFAULT_SSH_LOCAL_PORT,
-            password: vaultPassword || parsed.password || undefined,
-            privateKey: vaultPrivateKey || parsed.privateKey || undefined,
+            password: vaultPassword || undefined,
+            privateKey: vaultPrivateKey || undefined,
           };
           this.addLog(`Kaydedilmiş SSH tünel yapılandırması yüklendi: ${parsed.sshUser}@${parsed.sshHost} (Local Port: ${this.activeConfig?.localPort})`);
         }
@@ -165,7 +153,7 @@ class SSHTunnelService {
     }
   }
 
-  public saveConfig(config: SSHTunnelConfig) {
+  public async saveConfig(config: SSHTunnelConfig) {
     try {
       const dataDir = path.dirname(CONFIG_FILE);
       if (!fs.existsSync(dataDir)) {
@@ -174,18 +162,18 @@ class SSHTunnelService {
 
       // 1. Secure sensitive password & privateKey in System Secrets Vault
       if (config.password && !config.password.includes('••••••••')) {
-        systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
+        await systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
           category: 'custom',
           label: 'SSH Tüneli Parolası',
           isSensitive: true,
-        }).catch(() => {});
+        });
       }
       if (config.privateKey && !config.privateKey.includes('••••••••')) {
-        systemSecretsService.setSecret('ssh_tunnel_private_key', config.privateKey, {
+        await systemSecretsService.setSecret('ssh_tunnel_private_key', config.privateKey, {
           category: 'custom',
           label: 'SSH Tüneli Özel Anahtarı (Private Key)',
           isSensitive: true,
-        }).catch(() => {});
+        });
       }
 
       // 2. Persist ONLY non-sensitive settings to disk
@@ -206,9 +194,11 @@ class SSHTunnelService {
         localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
       };
 
-      fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfigForDisk, null, 2), 'utf-8');
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(sanitizedConfigForDisk, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.chmodSync(CONFIG_FILE, 0o600);
     } catch (err: any) {
       systemLogger.error('database', `SSH yapılandırması kaydedilemedi: ${err?.message}`);
+      throw err;
     }
   }
 
@@ -318,17 +308,11 @@ class SSHTunnelService {
 
   public async testConnection(config: SSHTunnelConfig): Promise<{ success: boolean; message: string; hostFingerprint?: string | null }> {
     if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
-    if (!config.expectedHostFingerprint || !config.expectedHostFingerprint.trim()) {
-      const probeRes = await this.probeHostFingerprint(config.sshHost, config.sshPort || 22);
-      if (probeRes.success && probeRes.sha256) {
-        config.expectedHostFingerprint = probeRes.sha256;
-      } else {
-        return {
-          success: false,
-          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
-          hostFingerprint: null,
-        };
-      }
+    if (!config.expectedHostFingerprint?.trim()) {
+      return {
+        success: false,
+        message: 'SSH sunucu SHA256 parmak izini VPS üzerinden doğrulayıp girin. Kimlik doğrulaması başlatılmadı.',
+      };
     }
 
     return new Promise((resolve) => {
@@ -418,7 +402,13 @@ class SSHTunnelService {
         },
       };
 
-      if (config.authType === 'privateKey' && effectivePrivateKey) {
+      if (config.authType === 'privateKey') {
+        if (!effectivePrivateKey) {
+          clearTimeout(timeout);
+          isResolved = true;
+          client.end();
+          return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
+        }
         sshConnConfig.privateKey = effectivePrivateKey;
       } else {
         sshConnConfig.password = effectivePassword || '';
@@ -450,6 +440,9 @@ class SSHTunnelService {
     hostFingerprint?: string | null;
   }> {
     if (!isSshTunnelAllowed()) return { success: false, message: 'SSH tüneli bu ortamda devre dışı.' };
+    if (!config.expectedHostFingerprint?.trim()) {
+      return { success: false, message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. VPS üzerinden doğruladığınız SHA256 parmak izini girin; bağlantı başlatılmadı.' };
+    }
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }
@@ -474,26 +467,9 @@ class SSHTunnelService {
       privateKey: effectivePrivateKey,
     };
 
-    if (!fullConfig.expectedHostFingerprint || !fullConfig.expectedHostFingerprint.trim()) {
-      this.addLog('SSH Host Key parmak izi belirtilmedi. Güvenli otomatik parmak izi sorgulaması başlatılıyor...');
-      const probeRes = await this.probeHostFingerprint(fullConfig.sshHost, fullConfig.sshPort || 22);
-      if (probeRes.success && probeRes.sha256) {
-        fullConfig.expectedHostFingerprint = probeRes.sha256;
-        this.addLog(`Sunucu Host Key parmak izi otomatik alındı: ${probeRes.sha256}`);
-      } else {
-        this.status = 'error';
-        this.lastError = `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı.'}`;
-        this.addLog(`GÜVENLİK HATASI: SSH Host Key Parmak İzi sorgulanamadı: ${probeRes.error}`);
-        return {
-          success: false,
-          message: `Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. Otomatik sorgulama hatası: ${probeRes.error || 'Sunucuya ulaşılamadı. IP ve port bilgilerini kontrol edin.'}`,
-          hostFingerprint: null,
-        };
-      }
-    }
 
     this.activeConfig = fullConfig;
-    this.saveConfig(fullConfig);
+    await this.saveConfig(fullConfig);
 
     this.addLog(`SSH Tüneli başlatılıyor: ${fullConfig.sshUser}@${fullConfig.sshHost}:${fullConfig.sshPort || 22} -> Local :${fullConfig.localPort}...`);
 
@@ -725,7 +701,14 @@ class SSHTunnelService {
         },
       };
 
-      if (fullConfig.authType === 'privateKey' && effectivePrivateKey) {
+      if (fullConfig.authType === 'privateKey') {
+        if (!effectivePrivateKey) {
+          clearTimeout(connectTimeout);
+          this.status = 'error';
+          isResolved = true;
+          this.cleanup();
+          return resolve({ success: false, message: 'SSH özel anahtarı bulunamadı.' });
+        }
         sshConnConfig.privateKey = effectivePrivateKey;
       } else {
         sshConnConfig.password = effectivePassword || '';

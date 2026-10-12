@@ -6,7 +6,7 @@ import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { isDefaultPassword } from '../utils/startupSecurityPolicy.js';
-import { resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
+import { resolveRuntimeEnvironment, isDevelopmentSshTunnelAllowed } from '../config/runtimeEnvironment.js';
 
 import { DatabaseState } from '../../types.js';
 export { DatabaseState, isDefaultPassword };
@@ -53,22 +53,7 @@ function notifyPoolRecycled(newPool: pg.Pool | null): void {
  * - TRUE in Development / AI Studio Preview mode
  */
 export function isSshTunnelAllowed(): boolean {
-  // Production must never initiate outbound SSH tunnels, even if an override is set.
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true' || resolveRuntimeEnvironment() === 'vps') {
-    return false;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'true' || process.env.ENABLE_SSH_TUNNEL === 'true') {
-    return true;
-  }
-  if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') {
-    return false;
-  }
-  if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
-    return false;
-  }
-  const env = resolveRuntimeEnvironment();
-  // By default, SSH tunnel is disallowed on VPS production, and allowed in AI Studio, local development, and test.
-  return env !== 'vps';
+  return isDevelopmentSshTunnelAllowed();
 }
 
 /**
