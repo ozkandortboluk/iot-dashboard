@@ -1,0 +1,36 @@
+name: SSH Tunnel Validation
+
+on:
+  push:
+    branches:
+      - fix/ai-studio-ssh-tunnel-security
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-tunnel:
+    name: TypeScript, SSH pinning and DB routing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: 'true'
+      NODE_ENV: test
+      DB_SSH_TUNNEL_ENABLED: 'true'
+    steps:
+      - name: Checkout development branch
+        uses: actions/checkout@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: TypeScript validation
+        run: npm run type-check
+      - name: SSH fingerprint and database routing unit tests
+        run: npx vitest run src/tests/ssh_host_key_pinning.test.ts src/tests/ssh_tunnel_db_routing.test.ts
+      - name: Build server bundle
+        run: npm run build:server
