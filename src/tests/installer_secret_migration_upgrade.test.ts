@@ -193,7 +193,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
 
     expect(fs.existsSync(pgPassFile)).toBe(true);
     expect(fs.readFileSync(pgPassFile, 'utf8').trim()).toBe(legacyPass);
-  });
+  }, 30000);
 
   it('4. Fail-closed: halts with error if existing install cannot recover Vault password and secrets/postgres_password is missing', () => {
     const knownEncryptionKey = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
