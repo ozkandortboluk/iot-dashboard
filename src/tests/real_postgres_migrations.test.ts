@@ -1,52 +1,84 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import pg from 'pg';
+import { randomBytes } from 'node:crypto';
 import { runAllMigrations, ALL_MIGRATIONS, CANONICAL_MIGRATION_MANIFEST } from '../server/database/migrations/migrationRunner.js';
 
 describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
   let pool: pg.Pool | null = null;
+  let adminPool: pg.Pool | null = null;
   let isDbReachable = false;
-  const dbUrl = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:5432/postgres';
+  let temporaryDatabase = '';
+  const dbUrl = process.env.TEST_DATABASE_URL || '';
+
+  // No implicit fallback to the production PostgreSQL port.
+  const parsed = dbUrl ? new URL(dbUrl) : null;
+  if (parsed && (
+    !['postgres:', 'postgresql:'].includes(parsed.protocol) ||
+    parsed.hostname !== '127.0.0.1' ||
+    parsed.port !== '55432' ||
+    parsed.pathname !== '/nexus_test_db' ||
+    decodeURIComponent(parsed.username) !== 'nexus_test'
+  )) {
+    throw new Error('Migration tests require nexus_test@127.0.0.1:55432/nexus_test_db');
+  }
 
   beforeAll(async () => {
-    try {
-      pool = new pg.Pool({
-        connectionString: dbUrl,
-        connectionTimeoutMillis: 2000,
-      });
-      const client = await pool.connect();
-      client.release();
-      isDbReachable = true;
-    } catch (err) {
-      isDbReachable = false;
+    if (!parsed) return;
+    adminPool = new pg.Pool({ connectionString: dbUrl, max: 1, connectionTimeoutMillis: 3000 });
+    const identity = await adminPool.query(
+      'SELECT current_database() AS db, current_user AS username, inet_server_addr()::text AS address, inet_server_port() AS port'
+    );
+    const row = identity.rows[0];
+    if (row.db !== 'nexus_test_db' || row.username !== 'nexus_test' || row.port !== 5432 ||
+        row.address !== '127.0.0.1') {
+      throw new Error('Unexpected PostgreSQL server identity; refusing migration tests');
+    }
+    isDbReachable = true;
+  });
+
+  beforeEach(async () => {
+    if (!isDbReachable || !adminPool || !parsed) return;
+    temporaryDatabase = 'nexus_migration_' + randomBytes(8).toString('hex');
+    await adminPool.query('CREATE DATABASE "' + temporaryDatabase + '"');
+    const target = new URL(dbUrl);
+    target.pathname = '/' + temporaryDatabase;
+    pool = new pg.Pool({ connectionString: target.toString(), max: 2, connectionTimeoutMillis: 3000 });
+  });
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.end();
       pool = null;
+    }
+    if (temporaryDatabase && adminPool) {
+      const name = temporaryDatabase;
+      temporaryDatabase = '';
+      await adminPool.query('DROP DATABASE IF EXISTS "' + name + '" WITH (FORCE)');
     }
   });
 
   afterAll(async () => {
-    if (pool) {
-      await pool.end().catch(() => {});
-    }
+    if (adminPool) await adminPool.end();
   });
 
   it('should run clean install (001 -> latest) on completely empty DB and verify READY status', async () => {
     if (!isDbReachable || !pool) {
       if (process.env.TEST_DATABASE_URL) {
-        expect.fail(`❌ [DB-01 FATAL] TEST_DATABASE_URL/PostgreSQL is configured but unreachable at: ${dbUrl}. Real PostgreSQL tests are MANDATORY for DB-01 validation.`);
+        expect.fail('TEST_DATABASE_URL configured but isolated PostgreSQL unavailable');
       } else {
         console.log('⚠️ Skipping real PostgreSQL clean install test (TEST_DATABASE_URL is not configured and no local postgres found).');
         return;
       }
     }
 
-    const schemaName = 'test_clean_migration_install';
+    const schemaName = 'public';
     const client = await pool.connect();
     try {
       // 1. Setup isolated clean schema sandbox
-      await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`);
-      await client.query(`CREATE SCHEMA ${schemaName};`);
+      // The temporary database is empty; use its default public schema.
 
-      // Set user search path to direct all pool client checkouts to our clean schema
-      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
+      // Migration runner uses the isolated database's default schema
+
       client.release();
 
       // 2. Perform fresh clean install via migrationRunner
@@ -75,15 +107,13 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         const countRes = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
         expect(Number(countRes.rows[0].count)).toBe(22);
       } finally {
-        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
-        await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+
         client2.release();
       }
     } catch (err: any) {
       // Cleanup user search_path on failure
       const cleanupClient = await pool.connect();
-      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
-      await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+
       cleanupClient.release();
       throw err;
     }
@@ -99,12 +129,11 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       }
     }
 
-    const schemaName = 'test_historical_upgrade';
+    const schemaName = 'public';
     const client = await pool.connect();
     try {
       // 1. Setup isolated schema sandbox
-      await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`);
-      await client.query(`CREATE SCHEMA ${schemaName};`);
+      // The temporary database is empty; use its default public schema.
       await client.query(`SET search_path TO ${schemaName};`);
 
       // 2. Install migrations up to 021 first
@@ -151,8 +180,8 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         VALUES ('dev_test_historical', 'Historical Device', 'meter', 'some_key', 'offline');
       `);
 
-      // Set default search path of user to this historical sandbox schema
-      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
+      // Migration runner uses the isolated database's default schema
+
       client.release();
 
       // 3. Perform live upgrade to 022 using the official runAllMigrations
@@ -179,15 +208,13 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         const totalCount = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
         expect(Number(totalCount.rows[0].count)).toBe(22);
       } finally {
-        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
-        await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+
         client2.release();
       }
     } catch (err: any) {
       // Cleanup user search_path on failure
       const cleanupClient = await pool.connect();
-      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
-      await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
+
       cleanupClient.release();
       throw err;
     }
