@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { masterKeyProvider } from '../server/services/masterKeyProvider.js';
@@ -6,6 +6,14 @@ import { masterKeyProvider } from '../server/services/masterKeyProvider.js';
 describe('Master key / persistent key protection', () => {
   const keyPath = path.resolve(process.cwd(), 'data', '.vault_key');
   const originalEnv = { ...process.env };
+
+  // CI exports ENCRYPTION_KEY for unrelated suites. These tests isolate
+  // local key-file creation, read-failure and exclusive-create behavior.
+  beforeEach(() => {
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.ENCRYPTION_KEY_PATH;
+    delete process.env.ENCRYPTION_KEY_FILE;
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();
