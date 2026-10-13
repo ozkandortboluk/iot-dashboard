@@ -329,6 +329,24 @@ export class SetupService {
   }
 
   public getRuntimeConfig(): DatabaseConfigPayload | null {
+    // Active development SSH transport takes precedence over saved direct DB
+    // configuration, but is never written to the permanent setup record.
+    if (isDevelopmentSshTunnelAllowed() && sshTunnelService.isConnected()) {
+      const tunnelCfg = sshTunnelService.getConfig();
+      const vaultPass = systemSecretsService.getDatabasePassword();
+      const password = (tunnelCfg?.dbPassword && !isDefaultPassword(tunnelCfg.dbPassword))
+        ? tunnelCfg.dbPassword
+        : (vaultPass && !isDefaultPassword(vaultPass) ? vaultPass : '');
+      return {
+        host: '127.0.0.1',
+        port: sshTunnelService.getLocalPort() || 15432,
+        database: tunnelCfg?.dbName || 'iot_dashboard',
+        user: tunnelCfg?.dbUser || 'iot_user',
+        password,
+        sslMode: 'disable',
+        rejectUnauthorized: false,
+      };
+    }
     if (!this.runtimeConfig) {
       this.loadRuntimeSecretConfig();
     }
