@@ -97,8 +97,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       headers['x-auth-token'] = userToken;
     }
     const bootstrapToken =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token');
+      sessionStorage.getItem('nexus_ssh_bootstrap_token');
     if (bootstrapToken) {
       headers['X-SSH-Bootstrap-Token'] = bootstrapToken;
     }
@@ -107,8 +106,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   const ensureBootstrapToken = useCallback(async (): Promise<string | null> => {
     const token =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token');
+      sessionStorage.getItem('nexus_ssh_bootstrap_token');
     if (token) return token;
     try {
       const res = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
@@ -119,7 +117,6 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         const data = await res.json();
         if (data.bootstrapToken) {
           sessionStorage.setItem('nexus_ssh_bootstrap_token', data.bootstrapToken);
-          localStorage.setItem('nexus_ssh_bootstrap_token', data.bootstrapToken);
           return data.bootstrapToken;
         }
       }
@@ -171,7 +168,6 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       });
       if (res.status === 401) {
         sessionStorage.removeItem('nexus_ssh_bootstrap_token');
-        localStorage.removeItem('nexus_ssh_bootstrap_token');
         const newToken = await ensureBootstrapToken();
         if (newToken) {
           const retryRes = await fetch('/api/system/ssh-tunnel/status', {
