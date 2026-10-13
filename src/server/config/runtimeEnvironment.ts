@@ -76,6 +76,11 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
 /** SSH tunnels are a development-only capability, never enabled on VPS. */
 export function isDevelopmentSshTunnelAllowed(): boolean {
   if (process.env.VPS_PRODUCTION === 'true' || process.env.APP_ENV?.trim().toLowerCase() === 'vps') return false;
+  // Never expose SSH tunnel management on a generic production server.
+  // AI Studio preview is the only production-mode exception.
+  if (process.env.NODE_ENV === 'production' &&
+      !process.env.K_SERVICE && !process.env.K_REVISION &&
+      process.env.AIS_PREVIEW !== 'true') return false;
   const env = resolveRuntimeEnvironment();
   if (env !== 'aistudio' && env !== 'local' && env !== 'test') return false;
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') return false;
