@@ -199,48 +199,10 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         else throw new Error(`Fixture missing required device column: ${column.column_name} (${kind})`);
       }
       const columns = Object.keys(device);
+      const placeholders = columns.map((_, i) => '$' + (i + 1)).join(', ');
+      const quotedColumns = columns.map(c => '"' + c + '"').join(', ');
       await client.query(
-        `INSERT INTO devices (${columns.map(c => '"' + c + '"').join(', ')}) VALUES (${columns.map((_, i) => '
-
-      // Migration runner uses the isolated database's default schema
-
-      client.release();
-      clientReleased = true;
-
-      // 3. Perform live upgrade to 022 using the official runAllMigrations
-      // Only the pending 022 should be detected and applied!
-      const res = await runAllMigrations(pool);
-      expect(res.success).toBe(true);
-      expect(res.appliedCount).toBe(1); // Exactly 1 migration (022) applied!
-
-      // Connect to verify state after upgrade
-      const client2 = await pool.connect();
-      try {
-        await client2.query(`SET search_path TO ${schemaName};`);
-
-        // 4. Verify entity preservation (data/schema is preserved!)
-        const userRes = await client2.query(`SELECT id, email, name FROM users WHERE id = 'usr_test_historical';`);
-        expect(userRes.rows).toHaveLength(1);
-        expect(userRes.rows[0].email).toBe('test@historical.com');
-
-        const devRes = await client2.query(`SELECT id, name FROM devices WHERE id = 'dev_test_historical';`);
-        expect(devRes.rows).toHaveLength(1);
-        expect(devRes.rows[0].name).toBe('Historical Device');
-
-        // 5. Verify the drift / schema structure check
-        const totalCount = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
-        expect(Number(totalCount.rows[0].count)).toBe(22);
-      } finally {
-
-        client2.release();
-      }
-    } catch (err: any) {
-      if (!clientReleased) client.release();
-      throw err;
-    }
-  });
-});
- + (i + 1)).join(', ')})`,
+        'INSERT INTO devices (' + quotedColumns + ') VALUES (' + placeholders + ')',
         Object.values(device)
       );
 
