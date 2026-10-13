@@ -27,6 +27,10 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
   const isTestRunner = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
   const explicitEnv = (process.env.APP_ENV || '').toLowerCase().trim();
 
+  // An explicit production VPS flag must override even test-runner and
+  // AI Studio environment hints. No SSH controls may be enabled in this case.
+  if (process.env.VPS_PRODUCTION === 'true') return 'vps';
+
   // 1. In automated tests (Vitest / NODE_ENV=test), honor explicit APP_ENV overrides strictly
   if (isTestRunner) {
     if (explicitEnv === 'vps' || explicitEnv === 'aistudio' || explicitEnv === 'local' || explicitEnv === 'test') {
