@@ -73,6 +73,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
     const schemaName = 'public';
     const client = await pool.connect();
+    let clientReleased = false;
     try {
       // 1. Setup isolated clean schema sandbox
       // The temporary database is empty; use its default public schema.
@@ -80,11 +81,12 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       // Migration runner uses the isolated database's default schema
 
       client.release();
+      clientReleased = true;
 
       // 2. Perform fresh clean install via migrationRunner
       const res = await runAllMigrations(pool);
       expect(res.success).toBe(true);
-      expect(res.appliedCount).toBe(22);
+      expect(res.appliedCount).toBe(23);
 
       // Re-connect to verify
       const client2 = await pool.connect();
@@ -103,15 +105,23 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         expect(tableNames.has('telemetry_readings')).toBe(true);
         expect(tableNames.has('schema_migrations')).toBe(true);
 
+        const hypertables = await client2.query(`
+          SELECT hypertable_name FROM timescaledb_information.hypertables
+          WHERE hypertable_schema = 'public'
+        `);
+        expect(new Set(hypertables.rows.map((r: any) => r.hypertable_name))).toEqual(
+          new Set(['telemetry_readings', 'simulation_telemetry_readings'])
+        );
+
         // 4. Verify migration count in schema_migrations
         const countRes = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
-        expect(Number(countRes.rows[0].count)).toBe(22);
+        expect(Number(countRes.rows[0].count)).toBe(23);
       } finally {
 
         client2.release();
       }
     } catch (err: any) {
-      client.release();
+      if (!clientReleased) client.release();
       throw err;
     }
   });
@@ -215,7 +225,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       // Only the pending 022 should be detected and applied!
       const res = await runAllMigrations(pool);
       expect(res.success).toBe(true);
-      expect(res.appliedCount).toBe(1); // Exactly 1 migration (022) applied!
+      expect(res.appliedCount).toBe(2); // Migrations 022 and 023 applied.
 
       // Connect to verify state after upgrade
       const client2 = await pool.connect();
@@ -231,9 +241,17 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         expect(devRes.rows).toHaveLength(1);
         expect(devRes.rows[0].name).toBe('Historical Device');
 
+        const hypertables = await client2.query(`
+          SELECT hypertable_name FROM timescaledb_information.hypertables
+          WHERE hypertable_schema = 'public'
+        `);
+        expect(new Set(hypertables.rows.map((r: any) => r.hypertable_name))).toEqual(
+          new Set(['telemetry_readings', 'simulation_telemetry_readings'])
+        );
+
         // 5. Verify the drift / schema structure check
         const totalCount = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
-        expect(Number(totalCount.rows[0].count)).toBe(22);
+        expect(Number(totalCount.rows[0].count)).toBe(23);
       } finally {
 
         client2.release();
