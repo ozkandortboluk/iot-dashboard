@@ -923,10 +923,14 @@ export class SetupService {
             } catch {}
           }
         }
-        try {
-          this.markSetupCompleted();
-        } catch (markErr: any) {
-          systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+        if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+          try {
+            this.markSetupCompleted();
+          } catch (markErr: any) {
+            systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+            this.isCompletedState = true;
+          }
+        } else {
           this.isCompletedState = true;
         }
         systemMode = 'READY';
