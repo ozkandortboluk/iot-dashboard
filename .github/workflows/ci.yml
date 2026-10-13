@@ -66,7 +66,7 @@ jobs:
         run: npm run lint
 
       - name: Run Automated Test Suite (Vitest)
-        run: npm test -- --exclude src/tests/docker_secret_ownership_postgres_auth.test.ts
+        run: npm test -- --exclude src/tests/docker_secret_ownership_postgres_auth.test.ts --reporter=verbose
 
       - name: Build Production Bundle
         run: npm run build
@@ -120,11 +120,14 @@ jobs:
             node:22-bookworm-slim \
             bash -ec '
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends acl openssl ca-certificates >/dev/null
+              apt-get install -y -qq --no-install-recommends acl sudo passwd openssl ca-certificates >/dev/null
               cp -a /source/. /tmp/project/
               cd /tmp/project
               test -f package-lock.json || { echo "Missing package-lock.json in integration workspace"; exit 1; }
               useradd -u 1001 -m deploy
               npm ci --ignore-scripts
-              npx vitest run src/tests/docker_secret_ownership_postgres_auth.test.ts
+              # These tests perform privileged ownership changes only inside
+              # disposable /tmp sandboxes, never on the mounted source tree.
+              export NEXUS_ISOLATED_OWNERSHIP_TEST=1
+              npx vitest run src/tests/docker_secret_ownership_postgres_auth.test.ts --reporter=verbose
             '
