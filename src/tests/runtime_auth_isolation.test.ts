@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -69,6 +69,13 @@ describe('Centralized Runtime Environment & Cookie Auth Isolation Suite', () => 
         resolve();
       });
     });
+  });
+
+  // Reset VPS flags between tests to prevent cross-test CORS and WS failures.
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.VPS_PRODUCTION;
+    delete process.env.APP_ENV;
   });
 
   afterAll(async () => {
