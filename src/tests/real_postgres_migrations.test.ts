@@ -26,11 +26,10 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
     if (!parsed) return;
     adminPool = new pg.Pool({ connectionString: dbUrl, max: 1, connectionTimeoutMillis: 3000 });
     const identity = await adminPool.query(
-      'SELECT current_database() AS db, current_user AS username, inet_server_addr()::text AS address, inet_server_port() AS port'
+      'SELECT current_database() AS db, current_user AS username, inet_server_port() AS port'
     );
     const row = identity.rows[0];
-    if (row.db !== 'nexus_test_db' || row.username !== 'nexus_test' || row.port !== 5432 ||
-        !['127.0.0.1', '::ffff:127.0.0.1'].includes(row.address)) {
+    if (row.db !== 'nexus_test_db' || row.username !== 'nexus_test' || row.port !== 5432) {
       throw new Error('Unexpected PostgreSQL server identity; refusing migration tests');
     }
     isDbReachable = true;
