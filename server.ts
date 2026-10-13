@@ -117,6 +117,29 @@ function gracefulCrashExit(errType: string, err: any) {
   performGracefulShutdown(`CRITICAL PROCESS CRASH (${errType})`, 1);
 }
 
+function isTransientNetworkOrDbError(err: any): boolean {
+  const errMsg = (err?.message || String(err || '')).toLowerCase();
+  const code = (err?.code || '').toUpperCase();
+  return (
+    errMsg.includes('connection terminated') ||
+    errMsg.includes('econnreset') ||
+    errMsg.includes('epipe') ||
+    errMsg.includes('econnrefused') ||
+    errMsg.includes('etimedout') ||
+    errMsg.includes('connection closed') ||
+    errMsg.includes('client has already been released') ||
+    errMsg.includes('calling end on the pool') ||
+    errMsg.includes('cannot use a pool after calling end') ||
+    errMsg.includes('socket hang up') ||
+    errMsg.includes('57p01') ||
+    errMsg.includes('08006') ||
+    code === 'ECONNRESET' ||
+    code === 'EPIPE' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ETIMEDOUT'
+  );
+}
+
 process.on('uncaughtException', (err: any) => {
   const errMsg = err?.message || String(err);
   console.error('[CRITICAL][uncaughtException]:', errMsg, err?.stack || '');
@@ -127,6 +150,11 @@ process.on('uncaughtException', (err: any) => {
       code: err?.code,
     });
   } catch {}
+
+  if (isTransientNetworkOrDbError(err)) {
+    console.warn('[Server Resilience] Geçici veritabanı veya ağ bağlantı kesintisi yakalandı, sunucu çökmesi engellendi:', errMsg);
+    return;
+  }
 
   gracefulCrashExit('uncaughtException', err);
 });
@@ -140,6 +168,11 @@ process.on('unhandledRejection', (reason: any) => {
       name: reason?.name,
     });
   } catch {}
+
+  if (isTransientNetworkOrDbError(reason)) {
+    console.warn('[Server Resilience] Geçici veritabanı veya ağ promise reddi yakalandı, sunucu çökmesi engellendi:', reasonMsg);
+    return;
+  }
 
   gracefulCrashExit('unhandledRejection', reason);
 });
