@@ -30,6 +30,7 @@ import { SSHTunnelDrawer } from './components/SSHTunnelDrawer';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { apiFetch as fetch } from './lib/apiFetch';
+import { canShowSshControls, isConfirmedAiStudioRuntime } from './lib/sshRuntimePolicy';
 import {
   LayoutDashboard,
   Cpu,
@@ -325,8 +326,7 @@ function SystemStateGuard() {
   const verifySshGate = useCallback(async (): Promise<boolean> => {
     try {
       let token =
-        sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-        localStorage.getItem('nexus_ssh_bootstrap_token');
+        sessionStorage.getItem('nexus_ssh_bootstrap_token');
       if (!token) {
         try {
           const setupToken =
@@ -423,9 +423,8 @@ function SystemStateGuard() {
       .then((res) => (res.ok ? res.json() : null))
       .then(async (data) => {
         if (!active) return;
-        const isVps = data?.environment === 'vps' || data?.isVps === true;
-        const isAiStudio = (data?.isAiStudio === true || data?.environment === 'aistudio') && !isVps;
-        setSshTunnelAllowed(data?.sshTunnelAllowed === true && !isVps);
+        const isAiStudio = isConfirmedAiStudioRuntime(data);
+        setSshTunnelAllowed(canShowSshControls(data));
         setIsAiStudioEnv(isAiStudio);
 
         if (!isAiStudio) {
@@ -444,7 +443,9 @@ function SystemStateGuard() {
       .catch(() => {
         if (!active) return;
         setSshTunnelAllowed(false);
-        setIsAiStudioEnv(false);
+        // Unknown runtime: do not expose SSH controls.
+        setIsAiStudioEnv(null);
+        setIsSSHDrawerOpen(false);
         setSshGatePassed(true);
         setIsCheckingSshGate(false);
         checkStatus();
@@ -460,7 +461,7 @@ function SystemStateGuard() {
       setSystemMode('MAINTENANCE');
     };
     const handleOpenSSH = () => {
-      if (sshTunnelAllowed) setIsSSHDrawerOpen(true);
+      if (isAiStudioEnv === true && sshTunnelAllowed) setIsSSHDrawerOpen(true);
     };
 
     window.addEventListener('nexus_system_maintenance', handleGlobalMaintenance);
@@ -470,7 +471,7 @@ function SystemStateGuard() {
       window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
       window.removeEventListener('nexus_open_ssh_drawer', handleOpenSSH);
     };
-  }, [sshTunnelAllowed]);
+  }, [isAiStudioEnv, sshTunnelAllowed]);
 
   // Periodic health monitor when system is READY
   useEffect(() => {
@@ -504,8 +505,7 @@ function SystemStateGuard() {
     const intervalId = setInterval(async () => {
       try {
         const token =
-          sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-          localStorage.getItem('nexus_ssh_bootstrap_token');
+          sessionStorage.getItem('nexus_ssh_bootstrap_token');
         const userToken =
           sessionStorage.getItem('nexus_session_token') ||
           localStorage.getItem('nexus_session_token');
@@ -627,7 +627,7 @@ function SystemStateGuard() {
       {renderActiveView()}
 
       {/* Development-only SSH controls; server policy is authoritative. */}
-      {sshTunnelAllowed && (
+      {isAiStudioEnv === true && sshTunnelAllowed && (
         <button
           type="button"
           onClick={() => setIsSSHDrawerOpen(true)}
@@ -640,7 +640,7 @@ function SystemStateGuard() {
       )}
 
       {/* Global Left-Side SSH Tunnel Drawer */}
-      {sshTunnelAllowed && (
+      {isAiStudioEnv === true && sshTunnelAllowed && (
         <SSHTunnelDrawer
           isOpen={isSSHDrawerOpen}
           onClose={() => setIsSSHDrawerOpen(false)}
