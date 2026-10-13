@@ -436,7 +436,9 @@ function SystemStateGuard() {
       .catch(() => {
         if (!active) return;
         setSshTunnelAllowed(false);
-        setIsAiStudioEnv(false);
+        // Runtime identity is unknown: fail closed for SSH controls.
+        setIsAiStudioEnv(null);
+        setIsSSHDrawerOpen(false);
         setSshGatePassed(true);
         setIsCheckingSshGate(false);
         checkStatus();
@@ -452,7 +454,7 @@ function SystemStateGuard() {
       setSystemMode('MAINTENANCE');
     };
     const handleOpenSSH = () => {
-      if (sshTunnelAllowed) setIsSSHDrawerOpen(true);
+      if (isAiStudioEnv === true && sshTunnelAllowed) setIsSSHDrawerOpen(true);
     };
 
     window.addEventListener('nexus_system_maintenance', handleGlobalMaintenance);
@@ -462,7 +464,7 @@ function SystemStateGuard() {
       window.removeEventListener('nexus_system_maintenance', handleGlobalMaintenance);
       window.removeEventListener('nexus_open_ssh_drawer', handleOpenSSH);
     };
-  }, [sshTunnelAllowed]);
+  }, [isAiStudioEnv, sshTunnelAllowed]);
 
   // Periodic health monitor when system is READY
   useEffect(() => {
@@ -619,7 +621,7 @@ function SystemStateGuard() {
       {renderActiveView()}
 
       {/* Development-only SSH controls; server policy is authoritative. */}
-      {sshTunnelAllowed && (
+      {isAiStudioEnv === true && sshTunnelAllowed && (
         <button
           type="button"
           onClick={() => setIsSSHDrawerOpen(true)}
@@ -632,7 +634,7 @@ function SystemStateGuard() {
       )}
 
       {/* Global Left-Side SSH Tunnel Drawer */}
-      {sshTunnelAllowed && (
+      {isAiStudioEnv === true && sshTunnelAllowed && (
         <SSHTunnelDrawer
           isOpen={isSSHDrawerOpen}
           onClose={() => setIsSSHDrawerOpen(false)}
