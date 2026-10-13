@@ -609,25 +609,10 @@ class SSHTunnelService {
                     dbState = db.getDatabaseState();
                   }
 
-                  if (isPgConnected) {
-                    try {
-                      const { setupService } = await import('./setup.service.js');
-                      setupService.saveRuntimeSecretConfig({
-                        host: '127.0.0.1',
-                        port: localPort,
-                        database: config.dbName?.trim() || 'iot_dashboard',
-                        user: config.dbUser?.trim() || 'iot_user',
-                        password: currentDbPass || config.dbPassword?.trim() || '',
-                        sslMode: 'disable',
-                        rejectUnauthorized: false,
-                      }, true);
-                      try {
-                        setupService.markSetupCompleted();
-                      } catch {}
-                    } catch (setupSyncErr: any) {
-                      console.warn('[SSHTunnel] Setup service sync notice:', setupSyncErr?.message);
-                    }
-                  }
+                  // A successful SELECT 1 confirms connectivity only. It must not
+                  // permanently complete installation or persist the ephemeral
+                  // 127.0.0.1 tunnel endpoint as the canonical database config.
+                  // Setup completion remains owned by the setup/admin flow.
                 } catch (pgErr: any) {
                   const errMsg = pgErr?.message || String(pgErr);
                   const lowerMsg = errMsg.toLowerCase();
