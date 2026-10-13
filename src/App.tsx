@@ -325,8 +325,7 @@ function SystemStateGuard() {
   const verifySshGate = useCallback(async (): Promise<boolean> => {
     try {
       let token =
-        sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-        localStorage.getItem('nexus_ssh_bootstrap_token');
+        sessionStorage.getItem('nexus_ssh_bootstrap_token');
       if (!token) {
         try {
           const bootRes = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
@@ -499,8 +498,7 @@ function SystemStateGuard() {
     const intervalId = setInterval(async () => {
       try {
         const token =
-          sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-          localStorage.getItem('nexus_ssh_bootstrap_token');
+          sessionStorage.getItem('nexus_ssh_bootstrap_token');
         const userToken =
           sessionStorage.getItem('nexus_session_token') ||
           localStorage.getItem('nexus_session_token');
