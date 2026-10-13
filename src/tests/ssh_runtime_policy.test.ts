@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isDevelopmentSshTunnelAllowed, resolveRuntimeEnvironment } from '../server/config/runtimeEnvironment.js';
+import { aiStudioBootstrapAuthService } from '../server/services/aiStudioBootstrapAuth.service.js';
 
 const originalEnv = { ...process.env };
 
@@ -46,5 +47,28 @@ describe('SSH tunnel runtime isolation', () => {
     process.env.NODE_ENV = 'production';
     process.env.ENABLE_SSH_TUNNEL = 'true';
     expect(isDevelopmentSshTunnelAllowed()).toBe(false);
+  });
+});
+
+
+describe('SSH bootstrap runtime boundaries', () => {
+  it('does not mint bootstrap tokens on VPS', () => {
+    process.env.VPS_PRODUCTION = 'true';
+    process.env.APP_ENV = 'aistudio';
+    process.env.ENABLE_SSH_TUNNEL = 'true';
+    expect(aiStudioBootstrapAuthService.createBootstrapToken()).toBeNull();
+  });
+
+  it('rejects a token once the runtime becomes VPS', () => {
+    delete process.env.VPS_PRODUCTION;
+    process.env.APP_ENV = 'aistudio';
+    process.env.ENABLE_SSH_TUNNEL = 'true';
+    delete process.env.DB_SSH_TUNNEL_ENABLED;
+    const token = aiStudioBootstrapAuthService.createBootstrapToken();
+    expect(token).toBeTruthy();
+    expect(aiStudioBootstrapAuthService.validateBootstrapToken(token)).toBe(true);
+    process.env.VPS_PRODUCTION = 'true';
+    expect(aiStudioBootstrapAuthService.validateBootstrapToken(token)).toBe(false);
+    aiStudioBootstrapAuthService.clearAllTokens();
   });
 });
