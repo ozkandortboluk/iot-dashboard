@@ -18,6 +18,7 @@ describe('SSH controls must be limited to confirmed AI Studio runtime', () => {
     expect(canShowSshControls(null)).toBe(false);
     expect(canShowSshControls(undefined)).toBe(false);
     expect(canShowSshControls({ environment: 'aistudio', sshTunnelAllowed: true })).toBe(false);
+    expect(canShowSshControls({ environment: 'aistudio', isAiStudio: true, sshTunnelAllowed: true })).toBe(false);
   });
 
   it('respects explicit server SSH policy even in AI Studio', () => {
