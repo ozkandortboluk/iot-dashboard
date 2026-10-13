@@ -48,7 +48,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
     if (pool) {
       const ending = pool;
       pool = null;
-      await Promise.race([ending.end(), new Promise<void>(resolve => setTimeout(resolve, 1500))]);
+      await ending.end();
     }
     if (temporaryDatabase && adminPool) {
       const name = temporaryDatabase;
@@ -111,8 +111,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         client2.release();
       }
     } catch (err: any) {
-      // Cleanup user search_path on failure
-      // afterEach drops the isolated database even if migration setup fails.
+      client.release();
       throw err;
     }
   });
@@ -174,8 +173,8 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       `);
 
       await client.query(`
-        INSERT INTO devices (id, name, api_key, status)
-        VALUES ('dev_test_historical', 'Historical Device', 'some_key', 'offline');
+        INSERT INTO devices (id, name, api_key, status, auto_detected_interval_seconds)
+        VALUES ('dev_test_historical', 'Historical Device', 'some_key', 'offline', 60);
       `);
 
       // Migration runner uses the isolated database's default schema
