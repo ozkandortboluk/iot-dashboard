@@ -139,7 +139,7 @@ const handleBootstrapToken = (req: Request, res: Response) => {
 };
 
 sshTunnelRouter.post('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
-sshTunnelRouter.get('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
+// Bootstrap tokens are created only by POST; GET must never mint credentials.
 
 /**
  * POST /api/system/ssh-tunnel/probe-fingerprint & POST /api/setup/ssh-tunnel/probe-fingerprint
