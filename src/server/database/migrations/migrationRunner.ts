@@ -22,6 +22,7 @@ import { migration019 } from './019_restore_canonical_test_entities.js';
 import { migration020 } from './020_add_service_tokens_table.js';
 import { migration021 } from './021_hash_device_and_session_tokens.js';
 import { migration022 } from './022_add_system_settings_and_device_activity_columns.js';
+import { migration023 } from './023_reconcile_timescale_hypertables.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -1057,6 +1058,13 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
       },
     ],
   },
+  '023': {
+    version: '023',
+    name: 'reconcile_timescale_hypertables',
+    // Filled with the deterministic source hash after running the isolated test harness.
+    canonicalSourceHash: 'PENDING_MIGRATION_023_CHECKSUM',
+    historicalChecksums: [],
+  },
 };
 
 /**
@@ -1064,7 +1072,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
  */
 export function validateManifestProvenance(): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  const expectedVersions = Array.from({ length: 22 }, (_, i) => String(i + 1).padStart(3, '0'));
+  const expectedVersions = Array.from({ length: 23 }, (_, i) => String(i + 1).padStart(3, '0'));
 
   for (const ver of expectedVersions) {
     const entry = CANONICAL_MIGRATION_MANIFEST[ver];
@@ -1209,6 +1217,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration020,
   migration021,
   migration022,
+  migration023,
 ];
 
 let lastMigrationStatus: {
