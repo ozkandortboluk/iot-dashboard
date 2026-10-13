@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import { APP_VERSION } from '../config/version';
+import { APP_VERSION, APP_RELEASE_TAG } from '../config/version';
 
 // Run installer integration checks outside the protected GitHub runner checkout.
 const sourceRoot = path.resolve(__dirname, '../..');
@@ -201,12 +201,13 @@ exit 1
   // =========================================================================
   // 7. Version Synchronization (Rule 1 & Rule 2)
   // =========================================================================
-  it('8. package.json, version.ts, and CHANGELOG.md are strictly synchronized to v1.47.0', () => {
+  it('8. package.json, version.ts, and CHANGELOG.md share the active version', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'));
     const changelog = fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf-8');
 
-    expect(pkg.version).toBe('1.47.0');
-    expect(APP_VERSION).toBe('1.47.0');
-    expect(changelog).toContain('## 🚀 [v1.47.0]');
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(APP_VERSION).toBe(pkg.version);
+    expect(APP_RELEASE_TAG).toBe(`v${pkg.version}`);
+    expect(changelog).toContain(`## 🚀 [v${pkg.version}]`);
   });
 });
