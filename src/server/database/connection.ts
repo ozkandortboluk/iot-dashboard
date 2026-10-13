@@ -708,6 +708,11 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
         console.warn('[Unified PostgreSQL Pool Error]:', err?.message);
         systemLogger.warn('database', 'Birleşik PostgreSQL havuz hatası tespit edildi', err?.message);
       });
+      newPool.on('connect', (client: any) => {
+        client.on('error', (err: any) => {
+          console.warn('[Unified PostgreSQL Client Error]:', err?.message);
+        });
+      });
       console.log(`[Unified PostgreSQL Pool] Bağlantı havuzu başlatıldı (Max: ${limits.max}, ConnTimeout: ${limits.connectionTimeoutMillis}ms).`);
       global._unifiedPostgresPool = newPool;
       notifyPoolRecycled(newPool);
