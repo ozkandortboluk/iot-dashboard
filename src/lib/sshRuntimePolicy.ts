@@ -14,7 +14,7 @@ export function isConfirmedAiStudioRuntime(value: unknown): boolean {
   const data = value as RuntimeInfo;
   return data.environment === 'aistudio' &&
     data.isAiStudio === true &&
-    data.isVps !== true;
+    data.isVps === false;
 }
 
 export function canShowSshControls(value: unknown): boolean {
