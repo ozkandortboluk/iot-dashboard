@@ -898,17 +898,24 @@ export class SetupService {
       // First-time setup: check if all criteria are newly met
       if (hasAdmin && isDbConnected && migrationsComplete && schemaVerified) {
         if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
-          const cfg = this.getRuntimeConfig();
+          let cfg = this.getRuntimeConfig();
+          if (!cfg || !cfg.host || !cfg.database) {
+            cfg = this.loadRuntimeSecretConfig();
+          }
           if (cfg && cfg.host && cfg.database) {
             try {
               this.saveRuntimeSecretConfig(cfg, true);
             } catch {}
           }
         }
-        try {
-          this.markSetupCompleted();
-        } catch (markErr: any) {
-          systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+        if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+          try {
+            this.markSetupCompleted();
+          } catch (markErr: any) {
+            systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+            this.isCompletedState = true;
+          }
+        } else {
           this.isCompletedState = true;
         }
         systemMode = 'READY';
@@ -918,17 +925,24 @@ export class SetupService {
           systemMode = 'MAINTENANCE';
         } else if (isDbConnected) {
           if (!fs.existsSync(RUNTIME_SECRET_FILE)) {
-            const cfg = this.getRuntimeConfig();
+            let cfg = this.getRuntimeConfig();
+            if (!cfg || !cfg.host || !cfg.database) {
+              cfg = this.loadRuntimeSecretConfig();
+            }
             if (cfg && cfg.host && cfg.database) {
               try {
                 this.saveRuntimeSecretConfig(cfg, true);
               } catch {}
             }
           }
-          try {
-            this.markSetupCompleted();
-          } catch (markErr: any) {
-            systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+          if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+            try {
+              this.markSetupCompleted();
+            } catch (markErr: any) {
+              systemLogger.warn('database', `Could not persist completed flag: ${markErr?.message || markErr}`);
+              this.isCompletedState = true;
+            }
+          } else {
             this.isCompletedState = true;
           }
           systemMode = 'READY';
@@ -1454,7 +1468,11 @@ export class SetupService {
     }
 
     if (hasAdmin) {
-      this.markSetupCompleted();
+      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+        try {
+          this.markSetupCompleted();
+        } catch {}
+      }
       throw new Error('Sistemde zaten bir yönetici hesabı mevcut. Yeni yönetici oluşturulamaz.');
     }
 
@@ -1791,10 +1809,18 @@ export class SetupService {
         }
       } catch {}
 
-      this.markSetupCompleted();
+      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+        try {
+          this.markSetupCompleted();
+        } catch {}
+      }
       return res;
     } catch (err: any) {
-      this.markSetupCompleted();
+      if (fs.existsSync(RUNTIME_SECRET_FILE)) {
+        try {
+          this.markSetupCompleted();
+        } catch {}
+      }
       throw err;
     }
   }

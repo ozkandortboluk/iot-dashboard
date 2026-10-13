@@ -621,7 +621,9 @@ class SSHTunnelService {
                         sslMode: 'disable',
                         rejectUnauthorized: false,
                       }, true);
-                      setupService.markSetupCompleted();
+                      try {
+                        setupService.markSetupCompleted();
+                      } catch {}
                     } catch (setupSyncErr: any) {
                       console.warn('[SSHTunnel] Setup service sync notice:', setupSyncErr?.message);
                     }
