@@ -329,9 +329,17 @@ function SystemStateGuard() {
         localStorage.getItem('nexus_ssh_bootstrap_token');
       if (!token) {
         try {
+          const setupToken =
+            sessionStorage.getItem('nexus_setup_token') ||
+            localStorage.getItem('nexus_setup_token') ||
+            sessionStorage.getItem('setup_token') ||
+            localStorage.getItem('setup_token') ||
+            sessionStorage.getItem('x-setup-token') ||
+            localStorage.getItem('x-setup-token');
           const bootRes = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
             method: 'POST',
             credentials: 'include',
+            headers: setupToken ? { 'X-Setup-Token': setupToken } : {},
           });
           if (bootRes.ok) {
             const bootData = await bootRes.json();
