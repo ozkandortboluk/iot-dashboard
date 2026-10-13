@@ -3,7 +3,7 @@ import { sshTunnelService, type SSHTunnelConfig, DEFAULT_SSH_LOCAL_PORT } from '
 import { systemLogger } from '../services/systemLogger.service.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { authenticateUser, requireAdmin } from '../middleware/auth.js';
-import { isRequestSetupAuthenticated } from '../middleware/setupAuth.js';
+import { isRequestSetupAuthenticated, extractSetupToken } from '../middleware/setupAuth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { db } from '../db.js';
 import { setupService } from '../services/setup.service.js';
@@ -99,6 +99,23 @@ const handleBootstrapToken = (req: Request, res: Response) => {
       code: 'SSH_BOOTSTRAP_DISALLOWED',
       error: 'SSH Bootstrap yetkilendirmesi yalnızca AI Studio geliştirme ortamında kullanılabilir.',
       message: 'VPS üretim ortamında veya SSH tüneli devre dışıyken bootstrap token alınamaz.',
+    });
+  }
+
+  // Bootstrap issuance is privileged even before database login. A valid local
+  // setup token (initial installation) or recovery token (completed setup) is
+  // required; an environment label or a rate limit is never authentication.
+  const credential = extractSetupToken(req);
+  const authorized = credential && (
+    setupService.isSetupCompleted()
+      ? setupService.validateRecoveryToken(credential)
+      : setupService.validateSetupToken(credential)
+  );
+  if (!authorized) {
+    return res.status(401).json({
+      success: false,
+      code: 'SSH_BOOTSTRAP_AUTH_REQUIRED',
+      message: 'SSH ön bağlantısı için geçerli kurulum veya kurtarma anahtarı gereklidir.',
     });
   }
 
