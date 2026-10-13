@@ -38,17 +38,14 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
     return 'test';
   }
 
-  // 2. Explicit APP_ENV override in real runtime
-  if (explicitEnv === 'vps') {
+  // VPS production always wins over a mistaken APP_ENV=aistudio setting.
+  if (process.env.VPS_PRODUCTION === 'true' || explicitEnv === 'vps') {
     return 'vps';
-  }
-  if (explicitEnv === 'aistudio') {
-    return 'aistudio';
   }
 
-  // 3. VPS Production detection (VPS_PRODUCTION=true)
-  if (process.env.VPS_PRODUCTION === 'true') {
-    return 'vps';
+  // Only explicit development configuration may select AI Studio here.
+  if (explicitEnv === 'aistudio') {
+    return 'aistudio';
   }
 
   // 4. Google AI Studio / Cloud Run detection (always aistudio in Cloud Run unless VPS explicitly configured)
