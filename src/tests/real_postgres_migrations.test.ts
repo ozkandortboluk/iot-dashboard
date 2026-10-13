@@ -30,7 +30,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
     );
     const row = identity.rows[0];
     if (row.db !== 'nexus_test_db' || row.username !== 'nexus_test' || row.port !== 5432 ||
-        row.address !== '127.0.0.1') {
+        !['127.0.0.1', '::ffff:127.0.0.1'].includes(row.address)) {
       throw new Error('Unexpected PostgreSQL server identity; refusing migration tests');
     }
     isDbReachable = true;
