@@ -128,6 +128,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
     const schemaName = 'public';
     const client = await pool.connect();
+    let clientReleased = false;
     try {
       // 1. Setup isolated schema sandbox
       // The temporary database is empty; use its default public schema.
@@ -180,6 +181,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       // Migration runner uses the isolated database's default schema
 
       client.release();
+      clientReleased = true;
 
       // 3. Perform live upgrade to 022 using the official runAllMigrations
       // Only the pending 022 should be detected and applied!
@@ -209,8 +211,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         client2.release();
       }
     } catch (err: any) {
-      // Cleanup user search_path on failure
-      // afterEach drops the isolated database even if migration setup fails.
+      if (!clientReleased) client.release();
       throw err;
     }
   });
