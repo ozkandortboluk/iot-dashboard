@@ -22,6 +22,7 @@ import { migration019 } from './019_restore_canonical_test_entities.js';
 import { migration020 } from './020_add_service_tokens_table.js';
 import { migration021 } from './021_hash_device_and_session_tokens.js';
 import { migration022 } from './022_add_system_settings_and_device_activity_columns.js';
+import { migration023 } from './023_reconcile_timescale_hypertables.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -1209,6 +1210,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration020,
   migration021,
   migration022,
+  migration023,
 ];
 
 let lastMigrationStatus: {
