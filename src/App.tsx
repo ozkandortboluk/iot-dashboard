@@ -416,8 +416,9 @@ function SystemStateGuard() {
       .then(async (data) => {
         if (!active) return;
         const isVps = data?.environment === 'vps' || data?.isVps === true;
-        const isAiStudio = (data?.isAiStudio === true || data?.environment === 'aistudio') && !isVps;
-        setSshTunnelAllowed(data?.sshTunnelAllowed === true && !isVps);
+        // Require consistent server environment flags before exposing SSH UI.
+        const isAiStudio = data?.environment === 'aistudio' && data?.isAiStudio === true && !isVps;
+        setSshTunnelAllowed(isAiStudio && data?.sshTunnelAllowed === true);
         setIsAiStudioEnv(isAiStudio);
 
         if (!isAiStudio) {
