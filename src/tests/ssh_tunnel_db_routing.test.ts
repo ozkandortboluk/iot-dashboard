@@ -51,9 +51,10 @@ describe('SSH Tunnel & PostgreSQL Connection Routing Test Suite', () => {
     expect(isSshTunnelRequired('postgresql://iot_user:pass@remote.example:5432/db')).toBe(false);
   });
 
-  it('AI Studio runtime permits SSH tunnel even with NODE_ENV=production', () => {
+  it('verified AI Studio preview permits SSH tunnel even with NODE_ENV=production', () => {
     process.env.NODE_ENV = 'production';
     process.env.APP_ENV = 'aistudio';
+    process.env.AIS_PREVIEW = 'true';
     delete process.env.VPS_PRODUCTION;
     delete process.env.DB_SSH_TUNNEL_ENABLED;
     delete process.env.ENABLE_SSH_TUNNEL;
