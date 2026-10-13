@@ -173,10 +173,76 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         VALUES ('usr_test_historical', 'Test User', 'test@historical.com', 'dummy_hash', 'customer');
       `);
 
-      await client.query(`
-        INSERT INTO devices (id, name, api_key, status, auto_detected_interval_seconds)
-        VALUES ('dev_test_historical', 'Historical Device', 'some_key', 'offline', 60);
+      // Populate all mandatory device columns according to the actual 021 schema.
+      // This avoids fixture drift when migrations add new NOT NULL columns.
+      const requiredColumns = await client.query(`
+        SELECT column_name, data_type, udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'devices'
+          AND is_nullable = 'NO' AND column_default IS NULL
       `);
+      const device: Record<string, unknown> = {
+        id: 'dev_test_historical',
+        name: 'Historical Device',
+        api_key: 'some_key',
+        status: 'offline',
+        auto_detected_interval_seconds: 60,
+        simulated_metrics: '[]',
+      };
+      for (const column of requiredColumns.rows) {
+        if (device[column.column_name] !== undefined) continue;
+        const kind = String(column.udt_name);
+        if (['bool'].includes(kind)) device[column.column_name] = false;
+        else if (['int2', 'int4', 'int8', 'float4', 'float8', 'numeric'].includes(kind)) device[column.column_name] = 0;
+        else if (['json', 'jsonb'].includes(kind)) device[column.column_name] = '{}';
+        else if (kind.startsWith('timestamp') || kind === 'timestamptz' || kind === 'date') device[column.column_name] = new Date();
+        else throw new Error(`Fixture missing required device column: ${column.column_name} (${kind})`);
+      }
+      const columns = Object.keys(device);
+      await client.query(
+        `INSERT INTO devices (${columns.map(c => '"' + c + '"').join(', ')}) VALUES (${columns.map((_, i) => '
+
+      // Migration runner uses the isolated database's default schema
+
+      client.release();
+      clientReleased = true;
+
+      // 3. Perform live upgrade to 022 using the official runAllMigrations
+      // Only the pending 022 should be detected and applied!
+      const res = await runAllMigrations(pool);
+      expect(res.success).toBe(true);
+      expect(res.appliedCount).toBe(1); // Exactly 1 migration (022) applied!
+
+      // Connect to verify state after upgrade
+      const client2 = await pool.connect();
+      try {
+        await client2.query(`SET search_path TO ${schemaName};`);
+
+        // 4. Verify entity preservation (data/schema is preserved!)
+        const userRes = await client2.query(`SELECT id, email, name FROM users WHERE id = 'usr_test_historical';`);
+        expect(userRes.rows).toHaveLength(1);
+        expect(userRes.rows[0].email).toBe('test@historical.com');
+
+        const devRes = await client2.query(`SELECT id, name FROM devices WHERE id = 'dev_test_historical';`);
+        expect(devRes.rows).toHaveLength(1);
+        expect(devRes.rows[0].name).toBe('Historical Device');
+
+        // 5. Verify the drift / schema structure check
+        const totalCount = await client2.query(`SELECT COUNT(*) as count FROM schema_migrations;`);
+        expect(Number(totalCount.rows[0].count)).toBe(22);
+      } finally {
+
+        client2.release();
+      }
+    } catch (err: any) {
+      if (!clientReleased) client.release();
+      throw err;
+    }
+  });
+});
+ + (i + 1)).join(', ')})`,
+        Object.values(device)
+      );
 
       // Migration runner uses the isolated database's default schema
 
