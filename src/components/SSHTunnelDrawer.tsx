@@ -114,6 +114,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       const res = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
         method: 'POST',
         credentials: 'include',
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -127,7 +128,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       // Ignore network errors in preview
     }
     return null;
-  }, []);
+  }, [getAuthHeaders]);
 
   const handleStatusData = useCallback((data: any) => {
     if (!data) return;
