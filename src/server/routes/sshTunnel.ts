@@ -64,11 +64,6 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
   const bootstrapToken = aiStudioBootstrapAuthService.extractBootstrapToken(req);
   if (bootstrapToken && aiStudioBootstrapAuthService.validateBootstrapToken(bootstrapToken)) {
     (req as any).isAiStudioBootstrap = true;
-    (req as any).user = {
-      id: 'aistudio_bootstrap',
-      name: 'AI Studio Developer (Pre-Login)',
-      role: 'admin',
-    };
     return next();
   }
 
