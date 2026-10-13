@@ -1062,7 +1062,7 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
     version: '023',
     name: 'reconcile_timescale_hypertables',
     // Filled with the deterministic source hash after running the isolated test harness.
-    canonicalSourceHash: 'PENDING_MIGRATION_023_CHECKSUM',
+    canonicalSourceHash: 'a5998882515b6b3aa33a20637daaf41f',
     historicalChecksums: [],
   },
 };
