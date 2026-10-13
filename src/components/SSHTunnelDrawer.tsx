@@ -339,7 +339,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
         await fetchStatus();
-        if (onConnectedSuccess && data.canProceedToLogin) {
+        // The connect response confirms transport setup but does not supply
+        // canProceedToLogin. Ask the parent to re-check SSH + SELECT 1 + READY.
+        // The parent alone decides whether login may proceed.
+        if (onConnectedSuccess) {
           onConnectedSuccess();
         }
       } else {
