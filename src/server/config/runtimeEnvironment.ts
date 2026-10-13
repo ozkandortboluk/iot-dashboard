@@ -27,6 +27,10 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
   const isTestRunner = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
   const explicitEnv = (process.env.APP_ENV || '').toLowerCase().trim();
 
+  // An explicit production VPS flag must override even test-runner and
+  // AI Studio environment hints. No SSH controls may be enabled in this case.
+  if (process.env.VPS_PRODUCTION === 'true') return 'vps';
+
   // 1. In automated tests (Vitest / NODE_ENV=test), honor explicit APP_ENV overrides strictly
   if (isTestRunner) {
     if (explicitEnv === 'vps' || explicitEnv === 'aistudio' || explicitEnv === 'local' || explicitEnv === 'test') {
@@ -38,17 +42,14 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
     return 'test';
   }
 
-  // 2. Explicit APP_ENV override in real runtime
-  if (explicitEnv === 'vps') {
+  // VPS production always wins over a mistaken APP_ENV=aistudio setting.
+  if (process.env.VPS_PRODUCTION === 'true' || explicitEnv === 'vps') {
     return 'vps';
-  }
-  if (explicitEnv === 'aistudio') {
-    return 'aistudio';
   }
 
-  // 3. VPS Production detection (VPS_PRODUCTION=true)
-  if (process.env.VPS_PRODUCTION === 'true') {
-    return 'vps';
+  // Only explicit development configuration may select AI Studio here.
+  if (explicitEnv === 'aistudio') {
+    return 'aistudio';
   }
 
   // 4. Google AI Studio / Cloud Run detection (always aistudio in Cloud Run unless VPS explicitly configured)
@@ -79,6 +80,11 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
 /** SSH tunnels are a development-only capability, never enabled on VPS. */
 export function isDevelopmentSshTunnelAllowed(): boolean {
   if (process.env.VPS_PRODUCTION === 'true' || process.env.APP_ENV?.trim().toLowerCase() === 'vps') return false;
+  // Never expose SSH tunnel management on a generic production server.
+  // AI Studio preview is the only production-mode exception.
+  if (process.env.NODE_ENV === 'production' &&
+      !process.env.K_SERVICE && !process.env.K_REVISION &&
+      process.env.AIS_PREVIEW !== 'true') return false;
   const env = resolveRuntimeEnvironment();
   if (env !== 'aistudio' && env !== 'local' && env !== 'test') return false;
   if (process.env.DB_SSH_TUNNEL_ENABLED === 'false' || process.env.ENABLE_SSH_TUNNEL === 'false') return false;
