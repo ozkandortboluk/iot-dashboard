@@ -15,43 +15,30 @@ export const migration002: Migration = {
       // ignore
     }
 
-    // 1. Check if TimescaleDB extension is available and functional
+    // 1. Detect TimescaleDB using its catalog and supported hypertable API.
+    // timescaledb_version() is not provided by TimescaleDB 2.30.1.
     let hasTimescale = false;
     let timescaleVersion = '';
 
     try {
-      const extCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
+      let extCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
+      if (extCheck.rows.length === 0) {
+        await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
+        extCheck = await client.query("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';");
+      }
       if (extCheck.rows.length > 0) {
-        try {
-          const vRes = await client.query('SELECT timescaledb_version();');
-          hasTimescale = true;
-          timescaleVersion = vRes.rows[0]?.timescaledb_version || extCheck.rows[0]?.extversion;
-          console.log(`[Migration 002] TimescaleDB extension v${timescaleVersion} is functional.`);
-        } catch (libErr: any) {
-          console.warn('[Migration 002] TimescaleDB extension in catalog but library call failed:', libErr?.message || libErr);
-          try {
-            await client.query('ALTER EXTENSION timescaledb UPDATE;');
-            const vRes = await client.query('SELECT timescaledb_version();');
-            hasTimescale = true;
-            timescaleVersion = vRes.rows[0]?.timescaledb_version || '';
-            console.log(`[Migration 002] Successfully updated TimescaleDB extension to v${timescaleVersion}.`);
-          } catch (updErr: any) {
-            console.warn('[Migration 002] ALTER EXTENSION timescaledb UPDATE failed:', updErr?.message || updErr);
-            hasTimescale = false;
-          }
-        }
-      } else {
-        // Extension not in catalog, attempt installation
-        try {
-          await client.query('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;');
-          const vRes = await client.query('SELECT timescaledb_version();');
-          hasTimescale = true;
-          timescaleVersion = vRes.rows[0]?.timescaledb_version || '';
-          console.log(`[Migration 002] Successfully installed TimescaleDB extension v${timescaleVersion}.`);
-        } catch (createErr: any) {
-          console.warn('[Migration 002] CREATE EXTENSION timescaledb failed:', createErr?.message || createErr);
-          hasTimescale = false;
-        }
+        timescaleVersion = extCheck.rows[0].extversion;
+        const apiCheck = await client.query(
+          "SELECT to_regprocedure('create_hypertable(regclass,name,boolean,boolean)') IS NOT NULL AS available"
+        );
+        // Function signatures differ between TimescaleDB releases; use pg_proc
+        // to verify API presence without invoking a mutating function.
+        const procCheck = await client.query(
+          "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'create_hypertable' AND pg_function_is_visible(oid)) AS available"
+        );
+        hasTimescale = Boolean(apiCheck.rows[0]?.available || procCheck.rows[0]?.available);
+        if (hasTimescale) console.log(`[Migration 002] TimescaleDB extension v${timescaleVersion} is available.`);
+        else console.warn('[Migration 002] TimescaleDB extension exists but create_hypertable API is unavailable.');
       }
     } catch (err: any) {
       console.warn('[Migration 002] TimescaleDB detection error:', err?.message || err);
