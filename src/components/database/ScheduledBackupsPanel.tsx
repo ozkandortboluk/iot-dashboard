@@ -178,7 +178,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
               Zamanlanmış Snapshot Yedeği & Afet Kurtarma Hazırlığı
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-              <ShieldCheck className="w-3 h-3" /> %100 Afet Hazırlığı
+              <ShieldCheck className="w-3 h-3" /> Yerel Yedekleme
             </span>
           </div>
           <p className="text-xs text-slate-300 max-w-3xl">
@@ -228,7 +228,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
             {config.lastBackupAt ? new Date(config.lastBackupAt).toLocaleString() : 'Henüz Alınmadı'}
           </p>
           <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-            <Check className="w-3 h-3" /> Durum: Güncel & Doğrulandı
+            <Check className="w-3 h-3" /> {config.lastBackupAt ? 'Yedek üretildi; geri yükleme test edilmedi' : 'Henüz doğrulanmış yedek yok'}
           </span>
         </div>
 
