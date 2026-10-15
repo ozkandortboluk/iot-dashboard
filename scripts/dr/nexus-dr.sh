@@ -121,16 +121,8 @@ backup(){
     actual=$(rclone cat "$remote" | sha256sum | awk '{print $1}') || die 'remote read-back failed'
     [ "$expected" = "$actual" ] || die 'remote ciphertext hash mismatch'
     rclone copyto "$hash" "$remote.sha256" || die 'offsite checksum copy failed'
-    [[ "$DR_LOCAL_KEEP" =~ ^[0-9]+$ ]] && [ "$DR_LOCAL_KEEP" -ge 3 ] || die 'invalid retention count'
-    DR_BACKUP_DIR="$DR_BACKUP_DIR" DR_LOCAL_KEEP="$DR_LOCAL_KEEP" python3 - <<'PY'
-import os
-from pathlib import Path
-p=Path(os.environ['DR_BACKUP_DIR'])
-items=sorted(p.glob('nexus-dr-*.tar.gz.age'), key=lambda x:x.stat().st_mtime, reverse=True)
-for old in items[int(os.environ['DR_LOCAL_KEEP']):]:
-    old.unlink()
-    old.with_name(old.name+'.sha256').unlink(missing_ok=True)
-PY
+    # No automatic deletion: retention is managed only after independent
+    # restore and offsite durability verification. Protected archives stay put.
     echo 'Encrypted offsite copy verified by remote SHA-256 read-back.'
   else
     echo 'WARNING: emergency local-only archive is not an offsite backup.'
