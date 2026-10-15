@@ -86,7 +86,7 @@ backup(){
   rm "$WORK_DIR/app-data.tar"
   # Capture old ephemeral paths BEFORE the old container is recreated.
   local pair src dst
-  for pair in 'backups:app_backups' 'uploads/firmware:firmware'; do
+  for pair in 'backups:app_backups' 'uploads/firmware:firmware' 'uploads/keys:ota_keys'; do
     src="${pair%%:*}"; dst="${pair#*:}"
     if docker exec "$DR_APP_CONTAINER" sh -c "test -d '/app/$src'" >/dev/null 2>&1; then
       mkdir -p -m 700 "$stage/legacy/$dst"
