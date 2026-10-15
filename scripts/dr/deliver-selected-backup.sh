@@ -62,22 +62,26 @@ report(){
   printf '{"destination":"%s","timestamp":"%s","result":"%s"}\n' "$DEST" "$(date -u +%FT%TZ)" "$outcome" > "$tmp"
   chmod 644 "$tmp"; mv -f "$tmp" "$STATUS_FILE"
 }
-# Fail closed for a selected destination that lost provisioning.
-if ! python3 - "$DEST" "$READY" <<'PY'
-import json,sys
-sys.exit(0 if sys.argv[1] in json.loads(sys.argv[2]) else 1)
-PY
-then report failed; die 'selected destination not configured; no fallback without admin approval'; fi
-
-# Create a new, confirmed local backup in all cases.
+# Create a new, confirmed local backup before any remote-destination failure.
+BEFORE=$(find "$DAILY" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
 if ! /usr/local/sbin/nexusnode-local-backup; then
   report failed; die 'local backup failed'
 fi
 if [[ "$DEST" = local ]]; then report success; exit 0; fi
+
+# Do not silently fall back to local when an explicitly selected remote fails.
+# The verified local copy already exists and is preserved.
+if ! python3 - "$DEST" "$READY" <<'PY'
+import json,sys
+sys.exit(0 if sys.argv[1] in json.loads(sys.argv[2]) else 1)
+PY
+then report failed; die 'selected destination not configured; verified local backup preserved'; fi
 [[ -s "$RECIPIENTS" && ! -L "$RECIPIENTS" ]] || { report failed; die 'offline age public recipient missing'; }
 command -v age >/dev/null || { report failed; die 'age missing'; }
 LATEST=$(find "$DAILY" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%T@ %p\n' | sort -rn | head -n1 | cut -d' ' -f2-)
 [[ -n "$LATEST" && -s "$LATEST/manifest.sha256" && ! -L "$LATEST" ]] || { report failed; die 'backup missing'; }
+AFTER=$(find "$DAILY" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+[[ "$AFTER" != "$BEFORE" ]] || { report failed; die 'new backup was not created'; }
 (cd "$LATEST" && sha256sum -c manifest.sha256 >/dev/null) || { report failed; die 'local backup corrupt'; }
 TMP=$(mktemp -d "$BASE/.delivery-XXXXXXXX")
 cleanup(){ [[ "$TMP" = "$BASE/.delivery-"* ]] && rm -rf -- "$TMP"; }
