@@ -397,10 +397,32 @@ if [ "$HEALTH_FAILURE" = true ]; then
   exit 1
 fi
 
-# 10. Plugin Post-Start Hook
+# 10. Mandatory local recovery scheduling (normal first install / quick install).
+# Never run during --check, --init-only, --status or manual backup-only modes.
+# Fail the installer rather than claiming success without a scheduled backup.
+log_step "Yerel kurtarma yedegi ve gunluk zamanlayici hazirlaniyor..."
+if ! command -v systemctl >/dev/null 2>&1; then
+  log_fatal "systemd yok; gunluk yedekleme kurulamadi."
+  exit 1
+fi
+if [ "${IS_ROOT:-false}" = true ]; then
+  bash ./scripts/dr/install-local-backup.sh || {
+    log_fatal "Yerel yedekleme kurulumu basarisiz; genel kurulum basarili sayilamaz."
+    exit 1
+  }
+else
+  [ -n "${SUDO_CMD:-}" ] || { log_fatal "Yedek servisleri icin sudo gerekli."; exit 1; }
+  ${SUDO_CMD} bash ./scripts/dr/install-local-backup.sh || {
+    log_fatal "Yerel yedekleme kurulumu basarisiz; genel kurulum basarili sayilamaz."
+    exit 1
+  }
+fi
+log_success "Yerel yedekleme servisi ve gunluk zamanlayici etkin."
+
+# 11. Plugin Post-Start Hook
 run_setup_hooks "post-start"
 
-# 11. Final Success Summary
+# 12. Final Success Summary
 HOST_IP=$(curl -s https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 ACCESS_URL="http://${HOST_IP}"
 if [ -n "$SETUP_DOMAIN" ]; then
@@ -424,7 +446,7 @@ ${CLR_BOLD}🔐 Güvenlik Mimarisi & Kasa Durumu:${CLR_RESET}
 ${CLR_BOLD}⚡ Faydalı Yönetim Komutları:${CLR_RESET}
    - Canlı Logları İzleme:  ${CLR_YELLOW}docker compose logs -f${CLR_RESET}
    - Servis Durumunu Görme: ${CLR_YELLOW}./install.sh --status${CLR_RESET}
-   - Tam Yedek Alma:        ${CLR_YELLOW}./install.sh --backup${CLR_RESET}
+   - Sifreli Harici Yedek:   ${CLR_YELLOW}./install.sh --backup (harici depo yapilandirilmali)${CLR_RESET}\n   - Gunluk Yerel Yedek:    ${CLR_GREEN}systemctl status nexusnode-local-backup.timer${CLR_RESET}
    - Yeniden Başlatma:      ${CLR_YELLOW}docker compose restart${CLR_RESET}
 
 ${CLR_BOLD}👤 İlk Kullanıcı Kaydı (Onboarding):${CLR_RESET}
