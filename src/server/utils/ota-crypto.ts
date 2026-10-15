@@ -4,8 +4,11 @@ import crypto from 'node:crypto';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
-const KEYS_DIR = path.join(process.cwd(), 'uploads', 'keys');
-const FIRMWARE_STORAGE_DIR = path.join(process.cwd(), 'uploads', 'firmware');
+// Production assets must live under /app/data (the persistent app_data volume).
+// Existing assets in /app/uploads must be migrated BEFORE the first deployment.
+const UPLOADS_DIR = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/uploads' : 'uploads');
+const KEYS_DIR = path.join(UPLOADS_DIR, 'keys');
+const FIRMWARE_STORAGE_DIR = path.join(UPLOADS_DIR, 'firmware');
 const SECRETS_DIR = path.join(process.cwd(), 'secrets');
 
 // Ensure storage directories exist
