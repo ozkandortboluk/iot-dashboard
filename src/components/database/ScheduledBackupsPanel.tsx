@@ -182,7 +182,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-300 max-w-3xl">
-            TimescaleDB telemetri hypertables verileriniz ve sistem konfigürasyonunuz için periyodik otomatik snapshot yedeklemelerini yapılandırın, saklama limitlerini ayarlayın ve anlık kurtarma doğrulaması yapın.
+            PostgreSQL SQL yedeklerini burada oluşturabilir ve indirebilirsiniz. Bu işlem uygulama dosyalarını, Vault anahtarını ve firmware ikili dosyalarını kapsamaz; başarılı felaket kurtarma testi yerine geçmez.
           </p>
         </div>
 
