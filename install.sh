@@ -15,13 +15,21 @@ cd "$(dirname "$0")" || exit 1
 # ------------------------------------------------------------------------------
 if [[ " $* " =~ [[:space:]]--update[[:space:]] ]] && [ "${_NEXUS_UPDATE_RELOADED:-0}" != "1" ]; then
   if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-    echo "[NexusNode Update] Git deposundan güncellemeler kontrol ediliyor (git pull)..."
+    echo "[NexusNode Update] Önce şifreli ve uzak depoda doğrulanmış DR yedeği alınıyor..."
+    if [ ! -f ./scripts/dr/nexus-dr.sh ]; then
+      echo "HATA: Güvenli DR betiği yok, güncelleme reddedildi." >&2
+      exit 1
+    fi
+    bash ./scripts/dr/nexus-dr.sh backup || { echo "HATA: Offsite DR yedeği başarısız. Güncelleme yapılmadı." >&2; exit 1; }
+    bash ./scripts/dr/prepare-persistence.sh || { echo "HATA: Eski dosya taşınması doğrulanamadı. Güncelleme yapılmadı." >&2; exit 1; }
+    echo "[NexusNode Update] Güvenli yedek tamamlandı. Git güncellemesi kontrol ediliyor..."
     if git pull --ff-only 2>/dev/null; then
       echo "[NexusNode Update] Kod tabanı başarıyla güncellendi. Yeni kodlarla yükleyici yeniden başlatılıyor..."
       export _NEXUS_UPDATE_RELOADED=1
       exec "$0" "$@"
     else
-      echo "[NexusNode Update] Git pull tamamlanamadı veya yerel değişiklikler mevcut; mevcut kod tabanıyla devam ediliyor."
+      echo "[NexusNode Update] Git pull başarısız; güvenli güncelleme iptal edildi." >&2
+      exit 1
     fi
   fi
 fi
