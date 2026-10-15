@@ -15,12 +15,20 @@ cd "$(dirname "$0")" || exit 1
 # ------------------------------------------------------------------------------
 if [[ " $* " =~ [[:space:]]--update[[:space:]] ]] && [ "${_NEXUS_UPDATE_RELOADED:-0}" != "1" ]; then
   if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-    echo "[NexusNode Update] Önce şifreli ve uzak depoda doğrulanmış DR yedeği alınıyor..."
-    if [ ! -f ./scripts/dr/nexus-dr.sh ]; then
-      echo "HATA: Güvenli DR betiği yok, güncelleme reddedildi." >&2
+    echo "[NexusNode Update] Önce geri yüklenebilir yerel kurtarma yedeği doğrulanıyor..."
+    # Offsite provisioning is not yet mandatory for hosts intentionally using
+    # the admin-selected local destination. Never silently create/rotate keys.
+    # The existing root-only snapshot tool is required to succeed before pull.
+    if [ ! -x /usr/local/sbin/nexusnode-local-backup ]; then
+      echo "HATA: Root-only yerel DR yedekleyici kurulu değil. Güncelleme reddedildi." >&2
       exit 1
     fi
-    bash ./scripts/dr/nexus-dr.sh backup || { echo "HATA: Offsite DR yedeği başarısız. Güncelleme yapılmadı." >&2; exit 1; }
+    if [ "$(id -u)" -eq 0 ]; then
+      /usr/local/sbin/nexusnode-local-backup || { echo "HATA: Yerel DR yedeği başarısız." >&2; exit 1; }
+    else
+      sudo /usr/local/sbin/nexusnode-local-backup || { echo "HATA: Yerel DR yedeği başarısız." >&2; exit 1; }
+    fi
+    echo "UYARI: Yerel yedek farklı VPS/disk kaybından korumaz; harici hedef ayrıca yapılandırılmalıdır."
     bash ./scripts/dr/prepare-persistence.sh || { echo "HATA: Eski dosya taşınması doğrulanamadı. Güncelleme yapılmadı." >&2; exit 1; }
     echo "[NexusNode Update] Güvenli yedek tamamlandı. Git güncellemesi kontrol ediliyor..."
     if git pull --ff-only 2>/dev/null; then
