@@ -972,7 +972,9 @@ class LocalDatabase {
   private writeQueue: DatabaseSchema[] = [];
   private lastBackupTime = 0;
 
-  private BACKUP_DIR = path.join(process.cwd(), 'backups');
+  // Production backups must survive container recreation: /app/data is a persistent Compose volume.
+  // Keep local development/test backups under ./backups for isolation.
+  private BACKUP_DIR = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/backups' : 'backups');
 
   private ensureBackupDir() {
     if (!fs.existsSync(this.BACKUP_DIR)) {
