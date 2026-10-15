@@ -1,0 +1,20 @@
+[Unit]
+Description=NexusNode non-destructive local PostgreSQL and Vault backup
+Documentation=https://github.com/ozkandortboluk/iot-dashboard/blob/fix/dr-backup-durability-20261015/docs/DR_OPERATIONS.md
+Wants=docker.service
+After=docker.service
+RequiresMountsFor=/var/backups/nexusnode
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStartPre=/usr/bin/test -x /usr/local/sbin/nexusnode-local-backup
+ExecStart=/usr/local/sbin/nexusnode-local-backup
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+StandardOutput=journal
+StandardError=journal
