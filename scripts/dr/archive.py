@@ -81,8 +81,11 @@ def verify_archive(archive, output=None, max_bytes=MAX_BYTES):
         members = {}
         total = 0
         for member in tar:
-            safe_path(member.name)
-            if member.name in members:
+            # GNU tar and Python tarfile may encode safe directory entries as
+            # 'app_data/' rather than 'app_data'. Normalize only real directories.
+            name = member.name[:-1] if member.isdir() and member.name.endswith('/') else member.name
+            safe_path(name)
+            if name in members:
                 raise ValueError('duplicate archive member')
             if not (member.isfile() or member.isdir()):
                 raise ValueError('archive links/devices are prohibited')
@@ -90,7 +93,7 @@ def verify_archive(archive, output=None, max_bytes=MAX_BYTES):
                 total += member.size
                 if total > max_bytes:
                     raise ValueError('archive exceeds uncompressed size limit')
-            members[member.name] = member
+            members[name] = member
             if len(members) > MAX_FILES:
                 raise ValueError('archive contains too many files')
         if 'manifest.json' not in members or not members['manifest.json'].isfile():
