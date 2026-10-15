@@ -10,7 +10,7 @@ for tool in systemctl systemd-analyze install stat docker; do
 done
 [[ -d /run/systemd/system ]] || die 'systemd is not running'
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-[[ -f "$ROOT/docker-compose.yml" && -f "$ROOT/scripts/dr/local-backup.sh" ]] || die 'project backup sources missing'
+[[ -f "$ROOT/docker-compose.yml" && -f "$ROOT/scripts/dr/local-backup.sh" && -f "$ROOT/scripts/dr/deliver-selected-backup.sh" ]] || die 'project backup sources missing'
 [[ ! -L "$ROOT/scripts/dr/local-backup.sh" ]] || die 'backup source is a symlink'
 [[ ! -L "$ROOT/scripts/dr/systemd/nexusnode-local-backup.service" && ! -L "$ROOT/scripts/dr/systemd/nexusnode-local-backup.timer" ]] || die 'systemd source is a symlink'
 
