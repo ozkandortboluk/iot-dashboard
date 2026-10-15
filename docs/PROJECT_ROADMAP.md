@@ -148,12 +148,14 @@
 - ☐ ☐ ☐ **DR-01 | P1 | Production yedek ve restore gerçek PostgreSQL üzerinde çalışmalı** — Doğrulanmış kod bulgusu.
   - **Yapılacak:** Ortak connection resolver ve uygun pg_dump/restore araçlarını kullan; metadata/export ile tam yedeği ayır. Restore bakım/transaction/uyumluluk kontrolleriyle gerçek DB’ye uygulanmalı; dosya yolu backup dizinine sınırlanmalı.
   - **Kabul:** Vault-only config ile üretim benzeri DB dump → boş DB restore → kayıt/tenant/telemetry/komut sayıları ve uygulama açılışı doğrulanmalı; JSON fallback tam yedek başarısı vermemeli.
+  - **2026-10-15 dal kanıtı (henüz onay değil):** PR #18 (taslak) uygulama SQL yedeklerini kalıcı app_data volume'üne taşır ve canlı production web restore'unu kapatır; mevcut tam restore yine uygulanmamış. Eksikler: off-VPS şifreli kopya, DB+Vault anahtarlarıyla tam kurtarma, izolasyonlu Timescale restore kanıtı. Ayrıntı: `docs/DR_BACKUP_RECOVERY_AUDIT.md`. Madde açık.
 
 - ☐ ☐ ☐ **DR-02 | P1 | Firmware, yedek ve imzalama anahtarı kalıcılığını tamamla** — Doğrulanmış kod bulgusu.
   - **Yeni saha kanıtı:** 2026-09-30 `/api/compiler/build` isteği production ortamında kalıcı Ed25519 private key bulunamadığı için 500 dönüyor. `ota-crypto.ts` güvenli biçimde production'da yeni key üretmiyor; mevcut Compose ise OTA signing secret'ını açık bir Docker secret olarak tanımlamıyor. Bu davranış güvenlik açısından doğru fail-closed, deployment/bootstrap ise eksik.
   - **Nokta atışı düzeltme:** Mevcut sahada kullanılan/pinlenmiş OTA root key varsa onu kurtarıp kalıcı secret kaynağına bağla; yoksa ilk güvenli provisioning sürecini açıkça tanımla ve cihaz public-key pinning süreciyle birlikte tek seferlik anahtar üret. Container recreate/redeploy sonrası aynı private key okunmalı; secret repo/log/ENV çıktısına sızmamalı.
   - **Yapılacak:** Firmware ve backup için kalıcı volume/harici hedef tanımla; anahtarı ayrı güvenli secret olarak yönet. Anahtar kurtarma ve firmware metadata/dosya tutarlılığı prosedürü ekle.
   - **Kabul:** Recreate sonrası eski firmware indirilebilir ve doğrulanabilir; yedek geri yüklenebilir; sabit public key kullanan cihaz OTA doğrulamasını sürdürebilir.
+  - **2026-10-15 dal kanıtı (henüz onay değil):** PR #18 (taslak) firmware binary'lerini kalıcı app_data volume'üne yönlendirir, eski metadata yolunu okumayı destekler. Dağıtım öncesi eski container'dan `/app/uploads/firmware` ve `/app/backups` kopyası + SHA-256 doğrulaması zorunludur. OTA imza zinciri, key kurtarma ve gerçek yeniden kurulum testleri eksik; madde açık.
 
 ## 6. Cihaz, WebSocket, komut ve otomasyon
 
