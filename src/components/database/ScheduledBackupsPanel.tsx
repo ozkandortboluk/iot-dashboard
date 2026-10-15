@@ -89,7 +89,7 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
                 <span className="space-y-1">
                   <span className="block text-sm font-semibold text-slate-900 dark:text-white">{item.label}</span>
                   <span className="block text-xs text-slate-500 dark:text-slate-400">{item.description}</span>
-                  <span className="block text-xs">{item.configured ? 'Hazır' : 'VPS bağlantısı kurulmadı'}</span>
+                  <span className="block text-xs">{item.configured ? (item.id === 'local' ? 'Hazır' : 'VPS hedefi tanımlı — aktarım testi gerekir') : 'VPS bağlantısı kurulmadı'}</span>
                 </span>
               </label>
             ))}
