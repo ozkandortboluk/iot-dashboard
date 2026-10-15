@@ -972,7 +972,9 @@ class LocalDatabase {
   private writeQueue: DatabaseSchema[] = [];
   private lastBackupTime = 0;
 
-  private BACKUP_DIR = path.join(process.cwd(), 'backups');
+  // Production backups must survive container recreation: /app/data is a persistent Compose volume.
+  // Keep local development/test backups under ./backups for isolation.
+  private BACKUP_DIR = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/backups' : 'backups');
 
   private ensureBackupDir() {
     if (!fs.existsSync(this.BACKUP_DIR)) {
@@ -1012,11 +1014,7 @@ class LocalDatabase {
   } {
     this.ensureBackupDir();
     const cleanFilename = path.basename(filename);
-    const backupPath = path.isAbsolute(filename)
-      ? filename
-      : fs.existsSync(filename)
-      ? filename
-      : path.join(this.BACKUP_DIR, cleanFilename);
+    const backupPath = path.join(this.BACKUP_DIR, cleanFilename);
 
     if (!fs.existsSync(backupPath)) {
       return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: 'Dosya bulunamadı' };
@@ -1028,45 +1026,51 @@ class LocalDatabase {
         return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: 'Dosya boş' };
       }
 
-      const fileBuffer = fs.readFileSync(backupPath);
-      const checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-
+      // SQL dumps may be many gigabytes. Stream the checksum and validate the
+      // dump footer without loading the whole backup into Node's heap.
       if (cleanFilename.endsWith('.sql')) {
-        const sqlContent = fileBuffer.toString('utf-8');
-        const hasHeader =
-          sqlContent.includes('PostgreSQL database dump') ||
-          sqlContent.includes('CREATE TABLE') ||
-          sqlContent.includes('INSERT INTO') ||
-          sqlContent.includes('SET statement_timeout') ||
-          sqlContent.includes('SET lock_timeout');
-
+        const fd = fs.openSync(backupPath, 'r');
+        const hash = crypto.createHash('sha256');
+        const chunk = Buffer.allocUnsafe(1024 * 1024);
+        let bytes = 0;
+        let head = '';
+        let tail = '';
+        let countCreate = 0;
+        let countInsert = 0;
+        let carry = '';
+        try {
+          while (true) {
+            const n = fs.readSync(fd, chunk, 0, chunk.length, bytes);
+            if (n === 0) break;
+            hash.update(chunk.subarray(0, n));
+            const part = chunk.toString('utf8', 0, n);
+            if (bytes === 0) head = part.slice(0, 4096);
+            tail = (tail + part).slice(-4096);
+            const textPart = carry + part;
+            const safe = textPart.slice(0, Math.max(0, textPart.length - 32));
+            countCreate += (safe.match(/CREATE TABLE/gi) || []).length;
+            countInsert += (safe.match(/INSERT INTO/gi) || []).length;
+            carry = textPart.slice(-32);
+            bytes += n;
+          }
+          countCreate += (carry.match(/CREATE TABLE/gi) || []).length;
+          countInsert += (carry.match(/INSERT INTO/gi) || []).length;
+        } finally { fs.closeSync(fd); }
+        const checksum = hash.digest('hex');
+        const hasHeader = head.includes('PostgreSQL database dump') ||
+          head.includes('SET statement_timeout') || head.includes('CREATE TABLE');
         if (!hasHeader) {
           return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'Geçersiz SQL başlığı veya yapısı' };
         }
-
-        // Structural Completion Check:
-        // Complete pg_dump files conclude with "-- PostgreSQL database dump complete".
-        // Truncated/interrupted dumps lack this marker.
-        const hasDumpCompleteMarker = sqlContent.includes('PostgreSQL database dump complete');
-        const isMockOrCompleteSql = hasDumpCompleteMarker || sqlContent.includes('CREATE TABLE');
-
-        if (!isMockOrCompleteSql) {
+        if (!tail.includes('PostgreSQL database dump complete')) {
           return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'SQL yedeği yarım kalmış veya tamamlanmamış' };
         }
+        return { isHealthy: true, sizeBytes: stats.size, checksum, tablesVerified: countCreate, recordsCount: countInsert };
+      }
+      const fileBuffer = fs.readFileSync(backupPath);
+      const checksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
-        const createTableMatches = sqlContent.match(/CREATE TABLE/gi) || [];
-        const insertMatches = sqlContent.match(/INSERT INTO/gi) || [];
-        const tablesVerified = createTableMatches.length;
-        const recordsCount = insertMatches.length;
-
-        return {
-          isHealthy: true,
-          sizeBytes: stats.size,
-          checksum,
-          tablesVerified,
-          recordsCount,
-        };
-      } else if (cleanFilename.endsWith('.json')) {
+      if (cleanFilename.endsWith('.json')) {
         const jsonContent = fileBuffer.toString('utf-8');
         const parsed = JSON.parse(jsonContent);
 
@@ -1136,6 +1140,8 @@ class LocalDatabase {
           throw new Error('pg_dump produced an empty file');
         }
 
+        // Retention is only applied after structural verification of the new backup.
+        if (!this.verifyBackupFile(filename).isHealthy) throw new Error('SQL backup structural verification failed');
         this.pruneBackups();
         return { success: true, filename, size: stats.size };
       } catch (err: any) {
@@ -1154,6 +1160,7 @@ class LocalDatabase {
       const serialized = JSON.stringify(this.data, null, 2);
       await fs.promises.writeFile(backupPath, serialized, 'utf-8');
 
+      if (!this.verifyBackupFile(filename).isHealthy) throw new Error('JSON backup verification failed');
       this.pruneBackups();
 
       return {
@@ -1351,13 +1358,17 @@ class LocalDatabase {
   public async restoreBackup(filename: string): Promise<boolean> {
     this.ensureBackupDir();
     const cleanFilename = path.basename(filename);
-    const backupPath = path.isAbsolute(filename)
-      ? filename
-      : fs.existsSync(filename)
-      ? filename
-      : path.join(this.BACKUP_DIR, cleanFilename);
+    const backupPath = path.join(this.BACKUP_DIR, cleanFilename);
 
-    if (!fs.existsSync(backupPath)) return false;
+    if (filename !== cleanFilename || !/^(pg_backup_[\w-]+\.sql|db_backup_[\w-]+\.json)$/.test(cleanFilename)) return false;
+    if (!fs.existsSync(backupPath) || !fs.statSync(backupPath).isFile()) return false;
+
+    // A live PostgreSQL restore must be performed offline after an isolated restore test.
+    // The legacy HTTP restore path cannot safely coordinate active writers or schema changes.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[RESTORE] Live production restore is disabled; use the documented isolated disaster-recovery procedure.');
+      return false;
+    }
 
     const isSql = cleanFilename.endsWith('.sql');
 

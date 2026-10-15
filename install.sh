@@ -15,13 +15,29 @@ cd "$(dirname "$0")" || exit 1
 # ------------------------------------------------------------------------------
 if [[ " $* " =~ [[:space:]]--update[[:space:]] ]] && [ "${_NEXUS_UPDATE_RELOADED:-0}" != "1" ]; then
   if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-    echo "[NexusNode Update] Git deposundan güncellemeler kontrol ediliyor (git pull)..."
+    echo "[NexusNode Update] Önce geri yüklenebilir yerel kurtarma yedeği doğrulanıyor..."
+    # Offsite provisioning is not yet mandatory for hosts intentionally using
+    # the admin-selected local destination. Never silently create/rotate keys.
+    # The existing root-only snapshot tool is required to succeed before pull.
+    if [ ! -x /usr/local/sbin/nexusnode-local-backup ]; then
+      echo "HATA: Root-only yerel DR yedekleyici kurulu değil. Güncelleme reddedildi." >&2
+      exit 1
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+      /usr/local/sbin/nexusnode-local-backup || { echo "HATA: Yerel DR yedeği başarısız." >&2; exit 1; }
+    else
+      sudo /usr/local/sbin/nexusnode-local-backup || { echo "HATA: Yerel DR yedeği başarısız." >&2; exit 1; }
+    fi
+    echo "UYARI: Yerel yedek farklı VPS/disk kaybından korumaz; harici hedef ayrıca yapılandırılmalıdır."
+    bash ./scripts/dr/prepare-persistence.sh || { echo "HATA: Eski dosya taşınması doğrulanamadı. Güncelleme yapılmadı." >&2; exit 1; }
+    echo "[NexusNode Update] Güvenli yedek tamamlandı. Git güncellemesi kontrol ediliyor..."
     if git pull --ff-only 2>/dev/null; then
       echo "[NexusNode Update] Kod tabanı başarıyla güncellendi. Yeni kodlarla yükleyici yeniden başlatılıyor..."
       export _NEXUS_UPDATE_RELOADED=1
       exec "$0" "$@"
     else
-      echo "[NexusNode Update] Git pull tamamlanamadı veya yerel değişiklikler mevcut; mevcut kod tabanıyla devam ediliyor."
+      echo "[NexusNode Update] Git pull başarısız; güvenli güncelleme iptal edildi." >&2
+      exit 1
     fi
   fi
 fi
@@ -86,7 +102,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --check                  Yalnızca sistem gereksinimlerini ve port çakışmalarını denetler
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
   --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
-  --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
+  --backup                 Şifreli tam DR yedeğini doğrulanmış bağımsız harici depoya gönderir; önceden yapılandırma gerektirir
   --restore-check <arsiv.tar.gz> Arşiv yapısını salt-okunur doğrular (geri yüklemez)
   --restore <arsiv.tar.gz> Güvenlik nedeniyle devre dışı (tam geri yükleme henüz uygulanmadı)
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
@@ -200,8 +216,9 @@ fi
 # Execute Backup if Requested
 if [ "$DO_BACKUP" = true ]; then
   print_banner
-  perform_backup
-  exit $?
+  # Full recovery always requires encrypted offsite copy and the existing Vault root key.
+  # Do not silently fall back to a legacy unencrypted SQL+app-only archive.
+  exec bash ./scripts/dr/nexus-dr.sh backup
 fi
 
 # Validate archive without changing services or files.
@@ -388,10 +405,32 @@ if [ "$HEALTH_FAILURE" = true ]; then
   exit 1
 fi
 
-# 10. Plugin Post-Start Hook
+# 10. Mandatory local recovery scheduling (normal first install / quick install).
+# Never run during --check, --init-only, --status or manual backup-only modes.
+# Fail the installer rather than claiming success without a scheduled backup.
+log_step "Yerel kurtarma yedegi ve gunluk zamanlayici hazirlaniyor..."
+if ! command -v systemctl >/dev/null 2>&1; then
+  log_fatal "systemd yok; gunluk yedekleme kurulamadi."
+  exit 1
+fi
+if [ "${IS_ROOT:-false}" = true ]; then
+  bash ./scripts/dr/install-local-backup.sh || {
+    log_fatal "Yerel yedekleme kurulumu basarisiz; genel kurulum basarili sayilamaz."
+    exit 1
+  }
+else
+  [ -n "${SUDO_CMD:-}" ] || { log_fatal "Yedek servisleri icin sudo gerekli."; exit 1; }
+  ${SUDO_CMD} bash ./scripts/dr/install-local-backup.sh || {
+    log_fatal "Yerel yedekleme kurulumu basarisiz; genel kurulum basarili sayilamaz."
+    exit 1
+  }
+fi
+log_success "Yerel yedekleme servisi ve gunluk zamanlayici etkin."
+
+# 11. Plugin Post-Start Hook
 run_setup_hooks "post-start"
 
-# 11. Final Success Summary
+# 12. Final Success Summary
 HOST_IP=$(curl -s https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 ACCESS_URL="http://${HOST_IP}"
 if [ -n "$SETUP_DOMAIN" ]; then
@@ -415,7 +454,7 @@ ${CLR_BOLD}🔐 Güvenlik Mimarisi & Kasa Durumu:${CLR_RESET}
 ${CLR_BOLD}⚡ Faydalı Yönetim Komutları:${CLR_RESET}
    - Canlı Logları İzleme:  ${CLR_YELLOW}docker compose logs -f${CLR_RESET}
    - Servis Durumunu Görme: ${CLR_YELLOW}./install.sh --status${CLR_RESET}
-   - Tam Yedek Alma:        ${CLR_YELLOW}./install.sh --backup${CLR_RESET}
+   - Sifreli Harici Yedek:   ${CLR_YELLOW}./install.sh --backup (harici depo yapilandirilmali)${CLR_RESET}\n   - Gunluk Yerel Yedek:    ${CLR_GREEN}systemctl status nexusnode-local-backup.timer${CLR_RESET}
    - Yeniden Başlatma:      ${CLR_YELLOW}docker compose restart${CLR_RESET}
 
 ${CLR_BOLD}👤 İlk Kullanıcı Kaydı (Onboarding):${CLR_RESET}

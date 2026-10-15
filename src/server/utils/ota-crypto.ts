@@ -4,8 +4,11 @@ import crypto from 'node:crypto';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
 
-const KEYS_DIR = path.join(process.cwd(), 'uploads', 'keys');
-const FIRMWARE_STORAGE_DIR = path.join(process.cwd(), 'uploads', 'firmware');
+// Production assets must live under /app/data (the persistent app_data volume).
+// Existing assets in /app/uploads must be migrated BEFORE the first deployment.
+const UPLOADS_DIR = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/uploads' : 'uploads');
+const KEYS_DIR = path.join(UPLOADS_DIR, 'keys');
+const FIRMWARE_STORAGE_DIR = path.join(UPLOADS_DIR, 'firmware');
 const SECRETS_DIR = path.join(process.cwd(), 'secrets');
 
 // Ensure storage directories exist
@@ -194,8 +197,14 @@ export function getTrustedPublicKeys(): TrustedPublicKeyInfo[] {
             if (item.keyId && !result.some((r) => r.keyId === item.keyId)) {
               let publicKeyPem = item.publicKeyPem;
               let publicKeyHex = item.publicKeyHex || '';
-              if (!publicKeyPem && item.publicKeyPath && fs.existsSync(item.publicKeyPath)) {
-                publicKeyPem = fs.readFileSync(item.publicKeyPath, 'utf8');
+              if (!publicKeyPem && item.publicKeyPath) {
+                // Historical keyring JSON can persist old absolute /app/uploads/keys paths.
+                const legacyRoot = path.join(process.cwd(), 'uploads', 'keys') + path.sep;
+                const fallback = process.env.NODE_ENV === 'production' &&
+                  item.publicKeyPath.startsWith(legacyRoot)
+                  ? path.join(KEYS_DIR, path.basename(item.publicKeyPath))
+                  : item.publicKeyPath;
+                if (fs.existsSync(fallback)) publicKeyPem = fs.readFileSync(fallback, 'utf8');
               }
               if (publicKeyPem) {
                 try {
@@ -374,6 +383,13 @@ export function readFirmwareFileFromDisk(filePath: string): Buffer | null {
   try {
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath);
+    }
+    // Legacy DB metadata stores absolute paths under /app/uploads/firmware.
+    // Following the operator's one-time copy into the persistent volume, resolve these paths.
+    const legacyPrefix = path.join(process.cwd(), 'uploads', 'firmware') + path.sep;
+    if (process.env.NODE_ENV === 'production' && filePath.startsWith(legacyPrefix)) {
+      const migratedPath = path.join(FIRMWARE_STORAGE_DIR, path.basename(filePath));
+      if (fs.existsSync(migratedPath)) return fs.readFileSync(migratedPath);
     }
   } catch {
     // Ignore

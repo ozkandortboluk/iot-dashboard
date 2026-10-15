@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NexusNode offsite disaster recovery backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=nexus-dr.service
+
+[Install]
+WantedBy=timers.target

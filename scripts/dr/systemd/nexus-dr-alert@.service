@@ -1,0 +1,8 @@
+[Unit]
+Description=NexusNode DR failure notification for %i
+
+[Service]
+Type=oneshot
+User=root
+Environment=DR_CONFIG_FILE=/etc/nexusnode/dr.conf
+ExecStart=/opt/iot-dashboard/iot-dashboard/scripts/dr/nexus-dr.sh alert

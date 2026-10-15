@@ -23,6 +23,99 @@ import {
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import type { ScheduledBackupConfig, BackupSnapshotItem } from '../../types';
 
+type DestinationId = 'local' | 'disk' | 'gdrive' | 'dropbox' | 'sftp';
+type DestinationStatus = {
+  requestedDestination: DestinationId;
+  destinations: Array<{ id: DestinationId; label: string; description: string; configured: boolean; requiresHostSetup: boolean }>;
+  lastDelivery: null | { destination: DestinationId; timestamp: string; result: 'success' | 'failed' };
+  note: string;
+};
+
+const DisasterRecoveryDestinationPanel: React.FC = () => {
+  const [status, setStatus] = useState<DestinationStatus | null>(null);
+  const [choice, setChoice] = useState<DestinationId>('local');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/database/dr/destination')
+      .then(async r => {
+        if (!r.ok) throw new Error('Hedef bilgileri alınamadı');
+        return r.json();
+      })
+      .then((data: DestinationStatus) => {
+        if (!cancelled) { setStatus(data); setChoice(data.requestedDestination); }
+      })
+      .catch(() => { if (!cancelled) setError('Tam kurtarma hedefleri okunamadı.'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await fetch('/api/database/dr/destination', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: choice }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Hedef seçimi kaydedilemedi');
+      setStatus(data);
+      setNotice('Tercih kaydedildi. Yeni seçim sonraki tam yedeklemede kullanılacak.');
+    } catch (e: any) {
+      setError(e.message || 'Hedef seçimi kaydedilemedi.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white">Tam Kurtarma Yedeği — Saklama Hedefi</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          PostgreSQL, uygulama dosyaları, Vault ve kurtarma anahtarlarının yedekleme hedefi.
+          Aşağıdaki SQL snapshot ayarlarından bağımsızdır. Yerel korumalı kopya her zaman saklanır.
+        </p>
+      </div>
+      {status ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {status.destinations.map(item => (
+              <label key={item.id} className={`rounded-lg border p-3 flex items-start gap-3 ${choice === item.id ? 'border-indigo-500' : 'border-slate-200 dark:border-slate-700'} ${!item.configured ? 'opacity-60' : ''}`}>
+                <input type="radio" name="dr-destination" value={item.id} checked={choice === item.id}
+                  disabled={!item.configured} onChange={() => setChoice(item.id)} />
+                <span className="space-y-1">
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-white">{item.label}</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">{item.description}</span>
+                  <span className="block text-xs">{item.configured ? (item.id === 'local' ? 'Hazır' : 'VPS hedefi tanımlı — aktarım testi gerekir') : 'VPS bağlantısı kurulmadı'}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Etkin tercih: {status.destinations.find(x => x.id === status.requestedDestination)?.label || 'Yerel disk'}
+            {status.lastDelivery && <span className="block mt-1">
+              Son aktarım: {status.lastDelivery.result === 'success' ? 'Başarılı' : 'Başarısız'} — {new Date(status.lastDelivery.timestamp).toLocaleString()}
+            </span>}
+          </div>
+          <button type="button" onClick={save} disabled={busy || choice === status.requestedDestination}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold disabled:opacity-50">
+            {busy ? 'Kaydediliyor...' : 'Hedefi Kaydet'}
+          </button>
+        </>
+      ) : <p className="text-xs text-slate-500">Hedef durumu yükleniyor...</p>}
+      {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
+      {notice && <p role="status" className="text-xs text-emerald-600">{notice}</p>}
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        Harici hedeflerde şifreleme ve bağlantı bilgileri yalnızca VPS yöneticisi tarafından yapılandırılır.
+        Hazır olmayan hedefler seçilemez. Bu ekran yedek oluşturmaz veya canlı veritabanını geri yüklemez.
+      </p>
+    </section>
+  );
+};
+
 export const ScheduledBackupsPanel: React.FC = () => {
   const [config, setConfig] = useState<ScheduledBackupConfig>({
     enabled: true,
@@ -169,6 +262,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <DisasterRecoveryDestinationPanel />
       {/* Top Banner & Readiness Score Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-xl p-5 border border-slate-800 shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -178,11 +272,11 @@ export const ScheduledBackupsPanel: React.FC = () => {
               Zamanlanmış Snapshot Yedeği & Afet Kurtarma Hazırlığı
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-              <ShieldCheck className="w-3 h-3" /> %100 Afet Hazırlığı
+              <ShieldCheck className="w-3 h-3" /> Yerel Yedekleme
             </span>
           </div>
           <p className="text-xs text-slate-300 max-w-3xl">
-            TimescaleDB telemetri hypertables verileriniz ve sistem konfigürasyonunuz için periyodik otomatik snapshot yedeklemelerini yapılandırın, saklama limitlerini ayarlayın ve anlık kurtarma doğrulaması yapın.
+            PostgreSQL SQL yedeklerini burada oluşturabilir ve indirebilirsiniz. Bu işlem uygulama dosyalarını, Vault anahtarını ve firmware ikili dosyalarını kapsamaz; başarılı felaket kurtarma testi yerine geçmez.
           </p>
         </div>
 
@@ -228,7 +322,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
             {config.lastBackupAt ? new Date(config.lastBackupAt).toLocaleString() : 'Henüz Alınmadı'}
           </p>
           <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-            <Check className="w-3 h-3" /> Durum: Güncel & Doğrulandı
+            <Check className="w-3 h-3" /> {config.lastBackupAt ? 'Yedek üretildi; geri yükleme test edilmedi' : 'Henüz doğrulanmış yedek yok'}
           </span>
         </div>
 
@@ -395,7 +489,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
               Yedek Snapshot Geçmişi & Afet Kurtarma Listesi
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Sistemde saklanan en güncel snapshot dosyaları. İhtiyaç anında doğrudan bilgisayarınıza indirebilir veya tek tıkla geri yükleyebilirsiniz.
+              Sistemde saklanan SQL yedekleri. İndirme mümkündür; canlı üretimde geri yükleme kapalıdır ve güvenli izole kurtarma prosedürü gerekir.
             </p>
           </div>
 
@@ -450,7 +544,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1 w-fit">
-                          <CheckCircle2 className="w-3 h-3" /> ✓ Doğrulandı (SHA-256)
+                          <CheckCircle2 className="w-3 h-3" /> Yapısal SQL kontrolü (restore testi değil)
                         </span>
                       </td>
                       <td className="p-3 text-right">
@@ -465,9 +559,9 @@ export const ScheduledBackupsPanel: React.FC = () => {
 
                           <button
                             onClick={() => handleRestore(snap.filename)}
-                            disabled={restoringFilename === snap.filename}
+                            disabled={import.meta.env.PROD || restoringFilename === snap.filename}
                             className="p-1.5 text-slate-600 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer disabled:opacity-50"
-                            title="Geri Yükle"
+                            title="Canlı sistemde geri yükleme kapalıdır; izole DR kurtarma prosedürünü kullanın"
                           >
                             <RotateCcw className={`w-4 h-4 ${restoringFilename === snap.filename ? 'animate-spin' : ''}`} />
                           </button>
