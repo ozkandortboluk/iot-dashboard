@@ -1014,11 +1014,7 @@ class LocalDatabase {
   } {
     this.ensureBackupDir();
     const cleanFilename = path.basename(filename);
-    const backupPath = path.isAbsolute(filename)
-      ? filename
-      : fs.existsSync(filename)
-      ? filename
-      : path.join(this.BACKUP_DIR, cleanFilename);
+    const backupPath = path.join(this.BACKUP_DIR, cleanFilename);
 
     if (!fs.existsSync(backupPath)) {
       return { isHealthy: false, sizeBytes: 0, checksum: '', tablesVerified: 0, recordsCount: 0, error: 'Dosya bulunamadı' };
@@ -1050,7 +1046,7 @@ class LocalDatabase {
         // Complete pg_dump files conclude with "-- PostgreSQL database dump complete".
         // Truncated/interrupted dumps lack this marker.
         const hasDumpCompleteMarker = sqlContent.includes('PostgreSQL database dump complete');
-        const isMockOrCompleteSql = hasDumpCompleteMarker || sqlContent.includes('CREATE TABLE');
+        const isMockOrCompleteSql = hasDumpCompleteMarker;
 
         if (!isMockOrCompleteSql) {
           return { isHealthy: false, sizeBytes: stats.size, checksum, tablesVerified: 0, recordsCount: 0, error: 'SQL yedeği yarım kalmış veya tamamlanmamış' };
@@ -1353,13 +1349,17 @@ class LocalDatabase {
   public async restoreBackup(filename: string): Promise<boolean> {
     this.ensureBackupDir();
     const cleanFilename = path.basename(filename);
-    const backupPath = path.isAbsolute(filename)
-      ? filename
-      : fs.existsSync(filename)
-      ? filename
-      : path.join(this.BACKUP_DIR, cleanFilename);
+    const backupPath = path.join(this.BACKUP_DIR, cleanFilename);
 
-    if (!fs.existsSync(backupPath)) return false;
+    if (filename !== cleanFilename || !/^(pg_backup_[\w-]+\.sql|db_backup_[\w-]+\.json)$/.test(cleanFilename)) return false;
+    if (!fs.existsSync(backupPath) || !fs.statSync(backupPath).isFile()) return false;
+
+    // A live PostgreSQL restore must be performed offline after an isolated restore test.
+    // The legacy HTTP restore path cannot safely coordinate active writers or schema changes.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[RESTORE] Live production restore is disabled; use the documented isolated disaster-recovery procedure.');
+      return false;
+    }
 
     const isSql = cleanFilename.endsWith('.sql');
 
