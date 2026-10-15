@@ -10,7 +10,8 @@ for cmd in docker flock sha256sum find sort xargs mktemp df stat install du sed;
   command -v "$cmd" >/dev/null || fail "eksik arac: $cmd"
 done
 
-ROOT=/opt/iot-dashboard/iot-dashboard
+ROOT=${NEXUS_DR_PROJECT_ROOT:-/opt/iot-dashboard/iot-dashboard}
+[[ -d "$ROOT" && ! -L "$ROOT" ]] || fail 'proje klasoru mevcut degil veya sembolik bag'
 BASE=/var/backups/nexusnode
 DAILY="$BASE/gunluk"
 DB=nexus_timescaledb
