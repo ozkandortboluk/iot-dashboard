@@ -55,6 +55,14 @@ printf '{"ready":%s}\n' "$READY" > "$CAP_TMP"
 chmod 644 "$CAP_TMP"
 mv -f "$CAP_TMP" "$CAPS_FILE"
 
+# Provisioning changes can be reflected in the dashboard without producing
+# any backup or touching old archives.
+if [[ "${1:-}" = '--refresh' && "$#" -eq 1 ]]; then
+  echo 'DR capabilities refreshed (no backup created).'
+  exit 0
+fi
+[[ "$#" -eq 0 ]] || die 'usage: deliver-selected-backup.sh [--refresh]'
+
 report(){
   local outcome="$1"
   local tmp
