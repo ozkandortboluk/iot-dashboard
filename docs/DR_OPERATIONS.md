@@ -33,3 +33,8 @@ The DB dump is transactionally consistent, but hot app-volume file copies are no
 An app UI SQL backup is not a full disaster-recovery bundle. The installer full restore remains intentionally disabled; never auto-restore production. No encrypted backup can be recovered without the correct offline private identity and the captured original Vault key. An independent host image/infra inventory is also needed for host TLS/DNS/firewall/SSH credentials and other resources outside app_data.
 
 DR-01 and DR-02 remain OPEN until isolated CI, live-server-safe test and complete machine-loss recovery drill pass.
+## Offline recovery staging
+
+On an isolated recovery computer, after moving the encrypted archive and accessing the offline age identity, create a dedicated *empty* directory outside the live application tree. Run: bash scripts/dr/stage-recovery.sh /secure/archive.age /secure/offline-identity /var/tmp/nexus-dr-clean-room . The staging command validates the manifest and Vault decryption before writing recovery-data, refuses known production paths, and does not touch the running VPS. Keep the staged root key, PostgreSQL bootstrap credential and configuration private (mode 0600).
+
+Only then perform an isolated database restoration and compare recovered user, tenant, device, telemetry/hypertable data, firmware hashes and OTA signatures. A production recovery remains a manual incident-response change with an explicit maintenance window and rollback plan.
