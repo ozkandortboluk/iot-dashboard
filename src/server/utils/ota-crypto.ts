@@ -197,8 +197,14 @@ export function getTrustedPublicKeys(): TrustedPublicKeyInfo[] {
             if (item.keyId && !result.some((r) => r.keyId === item.keyId)) {
               let publicKeyPem = item.publicKeyPem;
               let publicKeyHex = item.publicKeyHex || '';
-              if (!publicKeyPem && item.publicKeyPath && fs.existsSync(item.publicKeyPath)) {
-                publicKeyPem = fs.readFileSync(item.publicKeyPath, 'utf8');
+              if (!publicKeyPem && item.publicKeyPath) {
+                // Historical keyring JSON can persist old absolute /app/uploads/keys paths.
+                const legacyRoot = path.join(process.cwd(), 'uploads', 'keys') + path.sep;
+                const fallback = process.env.NODE_ENV === 'production' &&
+                  item.publicKeyPath.startsWith(legacyRoot)
+                  ? path.join(KEYS_DIR, path.basename(item.publicKeyPath))
+                  : item.publicKeyPath;
+                if (fs.existsSync(fallback)) publicKeyPem = fs.readFileSync(fallback, 'utf8');
               }
               if (publicKeyPem) {
                 try {
