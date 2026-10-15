@@ -23,6 +23,99 @@ import {
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import type { ScheduledBackupConfig, BackupSnapshotItem } from '../../types';
 
+type DestinationId = 'local' | 'disk' | 'gdrive' | 'dropbox' | 'sftp';
+type DestinationStatus = {
+  requestedDestination: DestinationId;
+  destinations: Array<{ id: DestinationId; label: string; description: string; configured: boolean; requiresHostSetup: boolean }>;
+  lastDelivery: null | { destination: DestinationId; timestamp: string; result: 'success' | 'failed' };
+  note: string;
+};
+
+const DisasterRecoveryDestinationPanel: React.FC = () => {
+  const [status, setStatus] = useState<DestinationStatus | null>(null);
+  const [choice, setChoice] = useState<DestinationId>('local');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/database/dr/destination')
+      .then(async r => {
+        if (!r.ok) throw new Error('Hedef bilgileri alınamadı');
+        return r.json();
+      })
+      .then((data: DestinationStatus) => {
+        if (!cancelled) { setStatus(data); setChoice(data.requestedDestination); }
+      })
+      .catch(() => { if (!cancelled) setError('Tam kurtarma hedefleri okunamadı.'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await fetch('/api/database/dr/destination', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: choice }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Hedef seçimi kaydedilemedi');
+      setStatus(data);
+      setNotice('Tercih kaydedildi. Yeni seçim sonraki tam yedeklemede kullanılacak.');
+    } catch (e: any) {
+      setError(e.message || 'Hedef seçimi kaydedilemedi.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white">Tam Kurtarma Yedeği — Saklama Hedefi</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          PostgreSQL, uygulama dosyaları, Vault ve kurtarma anahtarlarının yedekleme hedefi.
+          Aşağıdaki SQL snapshot ayarlarından bağımsızdır. Yerel korumalı kopya her zaman saklanır.
+        </p>
+      </div>
+      {status ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {status.destinations.map(item => (
+              <label key={item.id} className={`rounded-lg border p-3 flex items-start gap-3 ${choice === item.id ? 'border-indigo-500' : 'border-slate-200 dark:border-slate-700'} ${!item.configured ? 'opacity-60' : ''}`}>
+                <input type="radio" name="dr-destination" value={item.id} checked={choice === item.id}
+                  disabled={!item.configured} onChange={() => setChoice(item.id)} />
+                <span className="space-y-1">
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-white">{item.label}</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">{item.description}</span>
+                  <span className="block text-xs">{item.configured ? 'Hazır' : 'VPS bağlantısı kurulmadı'}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Etkin tercih: {status.destinations.find(x => x.id === status.requestedDestination)?.label || 'Yerel disk'}
+            {status.lastDelivery && <span className="block mt-1">
+              Son aktarım: {status.lastDelivery.result === 'success' ? 'Başarılı' : 'Başarısız'} — {new Date(status.lastDelivery.timestamp).toLocaleString()}
+            </span>}
+          </div>
+          <button type="button" onClick={save} disabled={busy || choice === status.requestedDestination}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold disabled:opacity-50">
+            {busy ? 'Kaydediliyor...' : 'Hedefi Kaydet'}
+          </button>
+        </>
+      ) : <p className="text-xs text-slate-500">Hedef durumu yükleniyor...</p>}
+      {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
+      {notice && <p role="status" className="text-xs text-emerald-600">{notice}</p>}
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        Harici hedeflerde şifreleme ve bağlantı bilgileri yalnızca VPS yöneticisi tarafından yapılandırılır.
+        Hazır olmayan hedefler seçilemez. Bu ekran yedek oluşturmaz veya canlı veritabanını geri yüklemez.
+      </p>
+    </section>
+  );
+};
+
 export const ScheduledBackupsPanel: React.FC = () => {
   const [config, setConfig] = useState<ScheduledBackupConfig>({
     enabled: true,
@@ -169,6 +262,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <DisasterRecoveryDestinationPanel />
       {/* Top Banner & Readiness Score Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-xl p-5 border border-slate-800 shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div className="space-y-1">
