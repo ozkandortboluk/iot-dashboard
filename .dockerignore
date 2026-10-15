@@ -38,3 +38,13 @@ docs/
 !metadata.json
 !README.md
 
+# Never send local database exports and editor scratch files to Docker build context
+*.sql
+*.sql.*
+*.dump
+*.backup
+*.swp
+*.swo
+*~
+*.before-*
+full_backup*
