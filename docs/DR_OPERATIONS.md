@@ -18,6 +18,16 @@ The entire bundle, including secrets, is encrypted using age recipients. Retain 
 6. After proven recovery, use sudo bash scripts/dr/safe-update.sh instead of an unguarded git pull + docker compose up --build.
 
 
+## Automatic local backup on first install (no offsite connection required)
+
+On a **normal** `./install.sh` or `./install.sh --quick` deployment, only AFTER app and database health checks pass, the installer invokes `scripts/dr/install-local-backup.sh`. This root-only, idempotent setup installs `/usr/local/sbin/nexusnode-local-backup`, the daily systemd service/timer, and a root-only `/etc/nexusnode/local-backup.env` with the canonical project directory. Before enabling a previously inactive timer, it creates and verifies an initial local backup. The installer fails visibly if any stage fails; `--init-only`, `--check`, `--status` and backup-only commands do not schedule anything. An already active timer is preserved without redundant first-backup writes.
+
+The timer runs daily at 03:15 Europe/Istanbul with up to five minutes randomized delay and `Persistent=true` so systemd can attempt missed runs on reboot. It **does not automatically delete or rotate** any old backup; this intentionally favors safety but requires disk capacity monitoring. The executable checks at least 2 GB disk availability and makes a new root-only local backup under `/var/backups/nexusnode/gunluk` with manifest SHA-256. Existing snapshots under `/var/backups/nexusnode/arsiv` and `pretest-*` are never altered. Run `systemctl list-timers --all nexusnode-local-backup.timer` and `journalctl -u nexusnode-local-backup.service -n 50 --no-pager` to check operation.
+
+**Existing installations:** First deploy the new installer code *only after a verified independent backup and careful preservation of legacy `/app/backups`, `/app/uploads/firmware` and `/app/uploads/keys` paths*. Do not run `./install.sh --update` with an unconfigured offsite destination: it correctly requires encrypted offsite backup and exits safely. For existing VPS systems where Google Drive is deferred, separately inspect and run `sudo bash scripts/dr/install-local-backup.sh` from a reviewed checkout, or provision the service/timer files manually without changing app containers. Never weaken the encrypted offsite update gate silently.
+
+**Limitations:** Local snapshots are not encrypted at rest and include root secrets; the whole VPS/disk can be lost. A root compromise can delete them. A successful dump and checksum are not a complete restore drill. Keep DR-01/DR-02 open until independent recovery and remaining integration tests succeed.
+
 ## Google Drive encrypted offsite setup (pending acceptance)
 
 Google Drive is a storage destination for **age-encrypted** recovery archives, not a store for private age identities. The private age identity must be created and kept **outside** the VPS and outside the same Drive account (two independent protected copies). Copy only the age public recipient to the VPS. Never commit the private identity, Vault encryption key, rclone config file, Google client secret, or Google OAuth token.
