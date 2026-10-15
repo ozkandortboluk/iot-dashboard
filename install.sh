@@ -86,7 +86,7 @@ ${CLR_BOLD}SEÇENEKLER:${CLR_RESET}
   --check                  Yalnızca sistem gereksinimlerini ve port çakışmalarını denetler
   --status                 Çalışan servislerin durumunu ve sağlık raporunu gösterir
   --host-security-check    SSH, UFW ve Fail2ban için salt-okunur ön kontrol (kurulum başlatmaz)
-  --backup                 Tüm veritabanı, vault kasası ve ayarları zaman damgalı arşiv olarak yedekler
+  --backup                 Şifreli tam DR yedeğini doğrulanmış bağımsız harici depoya gönderir; önceden yapılandırma gerektirir
   --restore-check <arsiv.tar.gz> Arşiv yapısını salt-okunur doğrular (geri yüklemez)
   --restore <arsiv.tar.gz> Güvenlik nedeniyle devre dışı (tam geri yükleme henüz uygulanmadı)
   --update                 Git güncellemelerini çeker (mevcutsa), secret migration ve docker compose doğrulamasını tamamlayıp konteynerleri günceller
@@ -200,8 +200,9 @@ fi
 # Execute Backup if Requested
 if [ "$DO_BACKUP" = true ]; then
   print_banner
-  perform_backup
-  exit $?
+  # Full recovery always requires encrypted offsite copy and the existing Vault root key.
+  # Do not silently fall back to a legacy unencrypted SQL+app-only archive.
+  exec bash ./scripts/dr/nexus-dr.sh backup
 fi
 
 # Validate archive without changing services or files.
