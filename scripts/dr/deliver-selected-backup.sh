@@ -70,6 +70,18 @@ report(){
   printf '{"destination":"%s","timestamp":"%s","result":"%s"}\n' "$DEST" "$(date -u +%FT%TZ)" "$outcome" > "$tmp"
   chmod 644 "$tmp"; mv -f "$tmp" "$STATUS_FILE"
 }
+# First-install safety: a fresh VPS may not have any backup directory yet.
+# Do not descend through a symlink or accept a non-root-owned existing base.
+if [[ -e "$BASE" || -L "$BASE" ]]; then
+  [[ -d "$BASE" && ! -L "$BASE" && "$(stat -c %u "$BASE")" = 0 ]] ||
+    die 'invalid or unsafe backup root directory'
+else
+  install -d -o root -g root -m 700 "$BASE" || die 'backup root cannot be created'
+fi
+install -d -o root -g root -m 700 "$DAILY" || die 'daily folder cannot be created'
+[[ -d "$DAILY" && ! -L "$DAILY" && "$(stat -c %u "$DAILY")" = 0 ]] ||
+  die 'invalid or unsafe daily backup directory'
+
 # Create a new, confirmed local backup before any remote-destination failure.
 BEFORE=$(find "$DAILY" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
 if ! /usr/local/sbin/nexusnode-local-backup; then
