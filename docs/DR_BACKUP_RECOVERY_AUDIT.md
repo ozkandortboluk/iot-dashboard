@@ -1,6 +1,6 @@
 # DR-01 / DR-02 — Production backup and recovery acceptance
 
-Status: **PARTIAL IMPLEMENTATION — DO NOT DEPLOY THIS BRANCH WITHOUT THE PRE-DEPLOY COPY.** No production restore has been executed or verified. Keep the PR in draft.
+Status: **BACKUP/RECOVERY CODE PREPARED — RUNTIME ACCEPTANCE PENDING. DO NOT DEPLOY BEFORE THE PRE-DEPLOY COPY AND TESTS.** No production restore has been executed or verified. Keep the PR in draft.
 
 ## Verified from repository and the operator's VPS mounts (2026-10-15)
 
@@ -20,6 +20,17 @@ Status: **PARTIAL IMPLEMENTATION — DO NOT DEPLOY THIS BRANCH WITHOUT THE PRE-D
 - Prevents legacy web restore from modifying a *live production DB* until maintenance-window recovery, complete backup validation, and isolated restore testing are implemented.
 - No longer labels a structural SQL check as 100% disaster recovery readiness.
 - Does not rotate any existing keys, reset DB, create volumes, or run a restore.
+
+## Follow-up implementation (2026-10-15)
+
+- Full encrypted offsite DR pipeline: scripts/dr/nexus-dr.sh. Creates a custom-format consistent pg_dump, captures persistent /app/data and old ephemeral files, includes original root key and host config inside the age-encrypted archive; manifest hashes are verified and remote ciphertext is read back via rclone.
+- Vault AES-256-GCM decryptability is actually checked without emitting secret values: scripts/dr/verify-vault.cjs.
+- scripts/dr/prepare-persistence.sh migrates old ephemeral backup and firmware data without overwrites and performs byte-for-byte comparisons before any container recreation.
+- scripts/dr/safe-update.sh and install.sh --update fail closed when offsite backup or migration fails. install.sh --backup now uses encrypted offsite backup, not unencrypted legacy fallback.
+- scripts/dr/stage-recovery.sh decrypts/validates into a fresh isolated staging path; restore-test operates on a specially labelled disposable TimescaleDB container only, never the live DB.
+- Daily systemd backup, journal-based failure record and optional email hook, plus dedicated GitHub Actions tests and recovery runbook docs/DR_OPERATIONS.md.
+- Seven local Python archive/Vault tests ran successfully in the assistant's isolated workspace; the GitHub Actions runs currently report failure with no assigned runner and no step logs, therefore not accepted as integration evidence.
+- No real production backup, offsite provider, offline age identity, host failover test or disaster recovery restore has been configured or executed. These require the VPS phase and should not be falsely claimed complete.
 
 ## Mandatory **before first deployment** of this branch
 
