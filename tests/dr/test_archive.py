@@ -60,6 +60,20 @@ class DRArchiveTests(unittest.TestCase):
         (self.stage/'host_secrets/encryption_key').write_bytes(b'0'*64)
         (self.stage/'app_data/.system_secrets.json').unlink()
         with self.assertRaisesRegex(ValueError,'mandatory'):dr.manifest(self.stage,{})
+    def test_gnu_tar_directory_entries(self):
+        # Docker/GNU tar emits './' and './nested/' directory headers.
+        # These legitimate headers must not break full DR backups.
+        raw = self.root/'docker-app.tar'
+        folder = self.root/'raw-app';(folder/'nested').mkdir(parents=True)
+        (folder/'nested'/'file.txt').write_text('kept')
+        with tarfile.open(raw,'w') as tar:
+            for item in (folder,folder/'nested',folder/'nested'/'file.txt'):
+                n = '.' if item==folder else './'+item.relative_to(folder).as_posix()
+                if item.is_dir() and n!='.': n += '/'
+                tar.add(item,arcname=n,recursive=False)
+        out=self.root/'app-out';out.mkdir()
+        dr.extract_raw_app_tar(raw,out)
+        self.assertEqual((out/'nested/file.txt').read_text(),'kept')
     def test_raw_app_tar_escape_refused(self):
         tarpath=self.root/'data.tar'
         with tarfile.open(tarpath,'w') as f:
