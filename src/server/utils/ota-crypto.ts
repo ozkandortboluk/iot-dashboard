@@ -378,6 +378,13 @@ export function readFirmwareFileFromDisk(filePath: string): Buffer | null {
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath);
     }
+    // Legacy DB metadata stores absolute paths under /app/uploads/firmware.
+    // Following the operator's one-time copy into the persistent volume, resolve these paths.
+    const legacyPrefix = path.join(process.cwd(), 'uploads', 'firmware') + path.sep;
+    if (process.env.NODE_ENV === 'production' && filePath.startsWith(legacyPrefix)) {
+      const migratedPath = path.join(FIRMWARE_STORAGE_DIR, path.basename(filePath));
+      if (fs.existsSync(migratedPath)) return fs.readFileSync(migratedPath);
+    }
   } catch {
     // Ignore
   }
