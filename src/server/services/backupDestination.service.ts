@@ -85,8 +85,13 @@ export function selectBackupDestination(destination: unknown): ReturnType<typeof
   fs.mkdirSync(dir, { recursive: true });
   // Atomic rename, no arbitrary paths, commands, credentials, or provider URLs.
   const file = selectionPath();
-  if (fs.existsSync(file) && (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink())) {
-    throw new Error('Hedef ayar dosyası güvenli değil.');
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error('Hedef ayar dosyası güvenli değil.');
+    }
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
   }
   const tmp = path.join(dir, '.dr_destination-' + process.pid + '-' +
     Math.random().toString(16).slice(2) + '.tmp');
