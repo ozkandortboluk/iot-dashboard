@@ -46,7 +46,7 @@ systemctl daemon-reload
 # unnecessary archive during routine installer reruns.
 if ! systemctl is-active --quiet nexusnode-local-backup.timer; then
   echo '[NexusNode DR] İlk kurtarma yedeği oluşturuluyor...'
-  /usr/local/sbin/nexusnode-local-backup || die 'initial local backup failed; timer not enabled'
+  /usr/local/sbin/nexusnode-dr-deliver || die 'initial backup and selected delivery failed; timer not enabled'
 fi
 systemctl enable --now nexusnode-local-backup.timer || die 'timer enable failed'
 systemctl is-enabled --quiet nexusnode-local-backup.timer || die 'timer not enabled'
