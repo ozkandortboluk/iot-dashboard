@@ -157,10 +157,23 @@ restore_test(){
   mkdir -m 700 "$WORK_DIR/recovered"
   python3 "$SCRIPTS/archive.py" verify "$WORK_DIR/bundle.tar.gz" --extract "$WORK_DIR/recovered"
   vault "$WORK_DIR/recovered"
-  if docker exec "$target" psql -U postgres -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='$name'" | grep -qx 1; then
+  [ "$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$target")" = none ] || die 'restore test container must have no network'
+  # An isolated label alone is insufficient: refuse any container that mounts
+  # an unlabeled or host-backed PostgreSQL data directory.
+  local test_volume
+  test_volume=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}{{end}}' "$target")
+  [ -n "$test_volume" ] || die 'restore target must use a named test volume'
+  [ "$(docker volume inspect -f '{{index .Labels "com.nexusnode.dr.isolated"}}' "$test_volume")" = true ] || die 'restore target volume is not isolated'
+  if docker exec "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='$name'" | grep -qx 1; then
     die 'restore test database exists; supply a new disposable container'
   fi
-  docker exec "$target" psql -v ON_ERROR_STOP=1 -U postgres -d postgres -c "CREATE DATABASE $name" >/dev/null
+  # Cluster-global roles are not contained in a regular pg_dump. Timescale
+  # background-job metadata refers to the original application role.
+  # This NOLOGIN placeholder exists only in the disposable test cluster.
+  if ! docker exec "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -Atqc "SELECT 1 FROM pg_roles WHERE rolname='iot_user'" | grep -qx 1; then
+    docker exec "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -c 'CREATE ROLE iot_user NOLOGIN' >/dev/null
+  fi
+  docker exec "$target" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -c "CREATE DATABASE $name" >/dev/null
   docker exec "$target" psql -v ON_ERROR_STOP=1 -U postgres -d "$name" -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' >/dev/null
   docker exec "$target" psql -v ON_ERROR_STOP=1 -U postgres -d "$name" -c 'SELECT timescaledb_pre_restore()' >/dev/null
   if ! docker exec -i "$target" pg_restore --verbose --exit-on-error --no-owner --no-acl -U postgres -d "$name" \
