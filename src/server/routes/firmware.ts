@@ -378,7 +378,7 @@ firmwareRouter.post('/upload', authenticateUser, requireAdmin, (req: Request, re
 
   const fields: Record<string, string> = {};
   const tempId = `temp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-  const tempPath = path.join(process.cwd(), 'uploads', 'firmware', `${tempId}.tmp`);
+  const tempPath = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/uploads/firmware' : 'uploads/firmware', `${tempId}.tmp`);
 
   let fileWriteError: string | null = null;
   let fileUploaded = false;
@@ -469,7 +469,7 @@ firmwareRouter.post('/upload', authenticateUser, requireAdmin, (req: Request, re
 
     const { sha256, signatureHex, keyId } = signBinaryBuffer(binaryBuffer);
     const id = `fw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-    const permPath = path.join(process.cwd(), 'uploads', 'firmware', `${id}.bin`);
+    const permPath = path.join(process.cwd(), process.env.NODE_ENV === 'production' ? 'data/uploads/firmware' : 'uploads/firmware', `${id}.bin`);
 
     try {
       fs.renameSync(tempPath, permPath);
