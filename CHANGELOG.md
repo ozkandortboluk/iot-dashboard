@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.48.1] - 2026-10-14
+### 🔐 SSH Bootstrap Token & Pre-Login Authorization Hardening
+- **Geliştirme Ortamı Kurulum/Kurtarma Anahtarı Girişi**: SSH ön bağlantı ekranına () ve doğrulama akışına bootstrap/setup anahtarı alanı eklendi.
+- **Güvenli Hata Yönetimi & Otomatik Jeton Yenileme**: Yetkilendirme başarısız olduğunda bağlantı isteklerinin engellenmesi ve sunucunun gerçek hata mesajının gösterilmesi sağlandı; süresi dolan jetonlar kontrollü olarak temizlenip yenileniyor.
+- **Test ve CI Uyumluluğu**:  ve  testleri güncellenerek tutarlı bootstrap yetkilendirme doğrulaması sağlandı.
+
+---
+
 
 ## 🚀 [v1.48.0] - 2026-10-12
 

@@ -8,6 +8,14 @@ import { sshTunnelService } from '../server/services/sshTunnel.service.js';
 import { db } from '../server/db.js';
 import { DatabaseState } from '../types.js';
 
+vi.mock('../server/services/setup.service.js', () => ({
+  setupService: {
+    isSetupCompleted: vi.fn(() => false),
+    validateSetupToken: vi.fn((token: string) => token === 'valid-setup'),
+    validateRecoveryToken: vi.fn((token: string) => token === 'valid-recovery'),
+  },
+}));
+
 describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
   const originalEnv = { ...process.env };
   let app: express.Express;
@@ -38,16 +46,15 @@ describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
     });
 
     it('denies bootstrap token creation on VPS host with HTTP 403', async () => {
-      const res = await request(app).post('/api/system/ssh-tunnel/bootstrap-token');
+      const res = await request(app).post('/api/system/ssh-tunnel/bootstrap-token').set('X-Setup-Token', 'valid-setup');
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
       expect(res.body.code).toMatch(/SSH_TUNNEL_DISALLOWED|SSH_BOOTSTRAP_DISALLOWED/);
     });
 
-    it('denies GET /bootstrap-token on VPS with HTTP 403', async () => {
+    it('denies GET /bootstrap-token with HTTP 404', async () => {
       const res = await request(app).get('/api/system/ssh-tunnel/bootstrap-token');
-      expect(res.status).toBe(403);
-      expect(res.body.success).toBe(false);
+      expect(res.status).toBe(404);
     });
 
     it('denies GET /status on VPS host with HTTP 403', async () => {
@@ -131,8 +138,10 @@ describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
       delete process.env.VPS_PRODUCTION;
     });
 
-    it('successfully issues bootstrap token in AI Studio environment', async () => {
-      const res = await request(app).post('/api/system/ssh-tunnel/bootstrap-token');
+    it('successfully issues bootstrap token in AI Studio environment with valid setup token', async () => {
+      const res = await request(app)
+        .post('/api/system/ssh-tunnel/bootstrap-token')
+        .set('X-Setup-Token', 'valid-setup');
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.bootstrapToken).toMatch(/^nxs_aistudio_boot_[a-f0-9]{64}$/);
@@ -141,7 +150,9 @@ describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
     });
 
     it('grants access to SSH /status using valid X-SSH-Bootstrap-Token header', async () => {
-      const bootRes = await request(app).post('/api/system/ssh-tunnel/bootstrap-token');
+      const bootRes = await request(app)
+        .post('/api/system/ssh-tunnel/bootstrap-token')
+        .set('X-Setup-Token', 'valid-setup');
       const token = bootRes.body.bootstrapToken;
 
       const res = await request(app)
@@ -157,7 +168,9 @@ describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
     });
 
     it('grants access using cookie authentication', async () => {
-      const bootRes = await request(app).post('/api/system/ssh-tunnel/bootstrap-token');
+      const bootRes = await request(app)
+        .post('/api/system/ssh-tunnel/bootstrap-token')
+        .set('X-Setup-Token', 'valid-setup');
       const cookieHeader = bootRes.headers['set-cookie'];
 
       const res = await request(app)
@@ -177,7 +190,9 @@ describe('AI Studio Pre-Login SSH Connection Flow & Gate Verification', () => {
       process.env.APP_ENV = 'aistudio';
       delete process.env.VPS_PRODUCTION;
 
-      const bootRes = await request(app).post('/api/system/ssh-tunnel/bootstrap-token');
+      const bootRes = await request(app)
+        .post('/api/system/ssh-tunnel/bootstrap-token')
+        .set('X-Setup-Token', 'valid-setup');
       bootstrapToken = bootRes.body.bootstrapToken;
     });
 

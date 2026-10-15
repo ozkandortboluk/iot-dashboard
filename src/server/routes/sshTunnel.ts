@@ -1,3 +1,4 @@
+import { isVps } from '../config/runtimeEnvironment.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { sshTunnelService, type SSHTunnelConfig, DEFAULT_SSH_LOCAL_PORT } from '../services/sshTunnel.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';

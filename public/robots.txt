@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /setup
+Disallow: /recovery
+Disallow: /maintenance
+
+Sitemap: https://nexusnodeiot.com.tr/sitemap.xml

@@ -275,5 +275,50 @@ describe('SPA Fallback & Scanner Probe Guard Test Suite', () => {
       expect(isWebSocketUpgradePath('/xmlrpc.php')).toBe(false);
       expect(isWebSocketUpgradePath('/wp-includes/wlwmanifest.xml')).toBe(false);
     });
+
+    it('blocks system file probes and diagnostic scanner paths with HTTP 404', async () => {
+      const probePaths = [
+        '/Dockerfile',
+        '/proc/self/environ',
+        '/etc/passwd',
+        '/etc/environment',
+        '/phpinfo',
+        '/_profiler/phpinfo',
+        '/server-status',
+        '/server-info',
+        '/kubeconfig',
+        '/yonetim/giris',
+        '/mudur/login',
+        '/administrator/login',
+        '/credentials',
+      ];
+      for (const p of probePaths) {
+        const res = await request(testApp).get(p);
+        expect(res.status).toBe(404);
+        expect(res.text).not.toContain('<div id="root">');
+      }
+    });
+
+    it('blocks directory traversal attacks in query strings or paths with HTTP 404', async () => {
+      const attackUrls = [
+        '/userfiles/x?path=../../../../etc/passwd',
+        '/xstoremgwt/cheetahImages?imageId=..\..\win.ini',
+        '/api/test?query=groovy:println("cat /etc/passwd")',
+      ];
+      for (const u of attackUrls) {
+        const res = await request(testApp).get(u);
+        expect(res.status).toBe(404);
+        expect(res.text).not.toContain('<div id="root">');
+      }
+    });
+
+    it('recognizes legitimate crawler and brand assets as non-scanner routes', () => {
+      expect(isScannerOrProbingPath('/robots.txt')).toBe(false);
+      expect(isScannerOrProbingPath('/sitemap.xml')).toBe(false);
+      expect(isScannerOrProbingPath('/favicon.ico')).toBe(false);
+      expect(isScannerOrProbingPath('/favicon.svg')).toBe(false);
+      expect(isScannerOrProbingPath('/site.webmanifest')).toBe(false);
+      expect(isScannerOrProbingPath('/logos/logo-mark-transparent.png')).toBe(false);
+    });
   });
 });

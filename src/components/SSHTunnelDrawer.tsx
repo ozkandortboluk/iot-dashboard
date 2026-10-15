@@ -73,6 +73,14 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [probingFingerprint, setProbingFingerprint] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
+  const [setupTokenInput, setSetupTokenInput] = useState(() => {
+    return (
+      sessionStorage.getItem('nexus_setup_token') ||
+      localStorage.getItem('nexus_setup_token') ||
+      ''
+    );
+  });
+
   const [isConfigLoaded, setIsConfigLoaded] = useState(false);
 
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +88,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const getAuthHeaders = useCallback((): Record<string, string> => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const setupToken =
+      setupTokenInput.trim() ||
       sessionStorage.getItem('nexus_setup_token') ||
       localStorage.getItem('nexus_setup_token') ||
       sessionStorage.getItem('setup_token') ||
@@ -102,17 +111,32 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       headers['X-SSH-Bootstrap-Token'] = bootstrapToken;
     }
     return headers;
-  }, []);
+  }, [setupTokenInput]);
 
   const ensureBootstrapToken = useCallback(async (): Promise<string | null> => {
-    const token =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token');
+    const token = sessionStorage.getItem('nexus_ssh_bootstrap_token');
     if (token) return token;
+
+    const setupToken =
+      setupTokenInput.trim() ||
+      sessionStorage.getItem('nexus_setup_token') ||
+      localStorage.getItem('nexus_setup_token') ||
+      sessionStorage.getItem('setup_token') ||
+      localStorage.getItem('setup_token') ||
+      sessionStorage.getItem('x-setup-token') ||
+      localStorage.getItem('x-setup-token');
+
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (setupToken) {
+        headers['X-Setup-Token'] = setupToken;
+      }
       const res = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
         method: 'POST',
         credentials: 'include',
-        headers: getAuthHeaders(),
+        headers,
       });
       if (res.ok) {
         const data = await res.json();
@@ -120,12 +144,31 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           sessionStorage.setItem('nexus_ssh_bootstrap_token', data.bootstrapToken);
           return data.bootstrapToken;
         }
+      } else {
+        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
       }
     } catch {
-      // Ignore network errors in preview
+      // Best effort background bootstrap
     }
     return null;
-  }, [getAuthHeaders]);
+  }, [setupTokenInput]);
+
+  const handleVerifySetupToken = async () => {
+    if (!setupTokenInput.trim()) {
+      setActionMessage({ type: 'error', text: 'Lütfen geliştirme ortamı kurulum/kurtarma anahtarını giriniz.' });
+      return;
+    }
+    sessionStorage.setItem('nexus_setup_token', setupTokenInput.trim());
+    sessionStorage.removeItem('nexus_ssh_bootstrap_token');
+    setActionMessage({ type: 'info', text: 'Kurulum anahtarı doğrulanıyor ve SSH bootstrap jetonu alınıyor...' });
+    const token = await ensureBootstrapToken();
+    if (token) {
+      setActionMessage({ type: 'success', text: 'Kurulum anahtarı doğrulandı ve ön bağlantı yetkilendirmesi sağlandı!' });
+      fetchStatus();
+    } else {
+      setActionMessage({ type: 'error', text: lastError || 'Geçersiz kurulum/kurtarma anahtarı veya yetkilendirme reddedildi.' });
+    }
+  };
 
   const handleStatusData = useCallback((data: any) => {
     if (!data) return;
@@ -209,15 +252,44 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     }
   }, [logs.length]);
 
+  const renderSetupTokenSection = () => (
+    <div className="space-y-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+      <div className="flex items-center justify-between">
+        <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+          <KeyRound className="w-3.5 h-3.5 text-slate-400" /> Kurulum / Kurtarma Anahtarı <span className="text-[10px] text-slate-500 font-normal">(Opsiyonel)</span>
+        </h4>
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed">
+        SSH bağlantısı doğrudan sunucu kimlik bilgileriyle çalışır. Kurulum anahtarı zorunlu değildir.
+      </p>
+      <div className="flex gap-2 pt-1">
+        <input
+          type="password"
+          value={setupTokenInput}
+          onChange={(e) => setSetupTokenInput(e.target.value)}
+          placeholder="İsteğe bağlı kurulum veya kurtarma anahtarı..."
+          className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+        />
+        <button
+          type="button"
+          onClick={handleVerifySetupToken}
+          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0 border border-slate-700"
+        >
+          Kaydet
+        </button>
+      </div>
+    </div>
+  );
+
   const handleProbeFingerprint = async () => {
     if (!sshHost) {
       setActionMessage({ type: 'error', text: 'Lütfen SSH Sunucu Adresi (Host) giriniz.' });
       return;
     }
+    await ensureBootstrapToken().catch(() => null);
     setProbingFingerprint(true);
     setActionMessage({ type: 'info', text: 'Sunucu Host Key parmak izi sorgulanıyor (Kimlik bilgisi gönderilmeden)...' });
     try {
-      await ensureBootstrapToken();
       const res = await fetch('/api/system/ssh-tunnel/probe-fingerprint', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -260,11 +332,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       return;
     }
 
+    await ensureBootstrapToken().catch(() => null);
+
     setTesting(true);
     setActionMessage({ type: 'info', text: 'SSH Bağlantısı test ediliyor...' });
 
     try {
-      await ensureBootstrapToken();
       const res = await fetch('/api/system/ssh-tunnel/test', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -306,11 +379,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       return;
     }
 
+    await ensureBootstrapToken().catch(() => null);
+
     setConnecting(true);
     setActionMessage({ type: 'info', text: 'SSH Tüneli başlatılıyor ve PostgreSQL doğrulanıyor...' });
 
     try {
-      await ensureBootstrapToken();
       const res = await fetch('/api/system/ssh-tunnel/connect', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -339,9 +413,6 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
         await fetchStatus();
-        // The connect response confirms transport setup but does not supply
-        // canProceedToLogin. Ask the parent to re-check SSH + SELECT 1 + READY.
-        // The parent alone decides whether login may proceed.
         if (onConnectedSuccess) {
           onConnectedSuccess();
         }
@@ -357,11 +428,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   };
 
   const handleDisconnect = async () => {
+    await ensureBootstrapToken().catch(() => null);
+
     setDisconnecting(true);
     setActionMessage({ type: 'info', text: 'SSH Tüneli kapatılıyor...' });
 
     try {
-      await ensureBootstrapToken();
       const res = await fetch('/api/system/ssh-tunnel/disconnect', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -947,6 +1019,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left Column: SSH Server & Auth */}
             <div className="space-y-4">
+              {renderSetupTokenSection()}
               {renderSshConfig()}
               {renderSshAuth()}
               {renderFingerprintSection()}
@@ -1103,6 +1176,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
                 </button>
               </div>
 
+              {renderSetupTokenSection()}
               {renderSshConfig()}
               {renderSshAuth()}
               {renderPortForwarding()}
