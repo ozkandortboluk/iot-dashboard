@@ -13,9 +13,10 @@ const DESTINATIONS: Array<{ id: BackupDestination; label: string; description: s
 ];
 
 function stateDir(): string {
-  return process.env.NODE_ENV === 'production'
-    ? path.join(process.cwd(), 'data')
-    : path.join(process.cwd(), 'data');
+  if (process.env.NODE_ENV === 'test' && process.env.NEXUS_TEST_DATA_DIR) {
+    return path.resolve(process.env.NEXUS_TEST_DATA_DIR);
+  }
+  return path.join(process.cwd(), 'data');
 }
 const selectionPath = () => path.join(stateDir(), '.dr_destination.json');
 const statusPath = () => path.join(stateDir(), '.dr_delivery_status.json');
