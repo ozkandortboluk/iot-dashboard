@@ -1,0 +1,111 @@
+name: DR Backup and Isolated Timescale Restore
+on:
+  push:
+    paths: ['scripts/dr/**', 'tests/dr/**', '.github/workflows/dr-recovery.yml']
+  pull_request:
+    paths: ['scripts/dr/**', 'tests/dr/**', '.github/workflows/dr-recovery.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dr-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age rclone >/dev/null
+          docker pull timescale/timescaledb:2.30.1-pg16
+          docker pull alpine:3.20
+      - name: Syntax and unit tests
+        run: |
+          bash -n scripts/dr/nexus-dr.sh scripts/dr/safe-update.sh scripts/dr/prepare-persistence.sh
+          python3 -m unittest discover -s tests/dr -v
+      - name: Disposable source database and historic firmware
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/nexus-dr"
+          mkdir -p "$W/app" "$W/old/firmware" "$W/old-backups" "$W/remote"
+          printf '\351\000\001' > "$W/old/firmware/legacy.bin"
+          echo 'legacy backup fixture' > "$W/old-backups/legacy.txt"
+          docker run -d --name nexus_timescaledb --network none \
+            -e POSTGRES_USER=iot_user -e POSTGRES_DB=iot_dashboard \
+            -e POSTGRES_PASSWORD=fixture-password \
+            timescale/timescaledb:2.30.1-pg16
+          docker run -d --name nexus_app --network none \
+            -v "$W/app:/app/data" -v "$W/old:/app/uploads" \
+            -v "$W/old-backups:/app/backups" alpine:3.20 sleep 3600
+          for i in $(seq 1 45); do
+            if docker exec nexus_timescaledb pg_isready -U iot_user -d iot_dashboard; then break; fi
+            sleep 2
+          done
+          docker exec -i nexus_timescaledb psql -v ON_ERROR_STOP=1 -U iot_user -d iot_dashboard <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS timescaledb;
+          CREATE TABLE users (id text PRIMARY KEY, email text);
+          CREATE TABLE devices (id text PRIMARY KEY, name text);
+          CREATE TABLE telemetry_readings (time timestamptz NOT NULL, device_id text, value double precision);
+          SELECT create_hypertable('telemetry_readings','time');
+          INSERT INTO users VALUES ('u1','user@example.invalid');
+          INSERT INTO devices VALUES ('d1','device');
+          INSERT INTO telemetry_readings VALUES (now(),'d1',1.5);
+          SQL
+      - name: Encrypted full backup and offsite readback
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/nexus-dr"
+          export DR_CONFIG_FILE="$W/nonexistent.conf"
+          export DR_BACKUP_DIR="$W/backups"
+          export DR_RECIPIENTS_FILE="$W/recipient.txt"
+          export DR_OFFSITE_REMOTE="drtest:$W/remote"
+          export DR_MIN_FREE_MB=100
+          age-keygen -o "$W/offline-key"
+          age-keygen -y "$W/offline-key" > "$DR_RECIPIENTS_FILE"
+          mkdir -p "$HOME/.config/rclone" secrets
+          printf '[drtest]\ntype = local\n' > "$HOME/.config/rclone/rclone.conf"
+          openssl rand -hex 32 > secrets/encryption_key
+          printf 'fixture-password\n' > secrets/postgres_password
+          printf 'POSTGRES_DB=iot_dashboard\n' > .env
+          chmod 600 secrets/encryption_key secrets/postgres_password .env
+          DR_TEST_APP="$W/app" node <<'JS'
+          const fs=require('fs'),c=require('crypto');
+          const k=Buffer.from(fs.readFileSync('secrets/encryption_key','utf8').trim(),'hex');
+          const iv=c.randomBytes(12),cipher=c.createCipheriv('aes-256-gcm',k,iv);
+          const bytes=Buffer.concat([cipher.update('fixture-db-key'),cipher.final()]);
+          const enc='enc:v1:'+iv.toString('hex')+':'+cipher.getAuthTag().toString('hex')+':'+bytes.toString('hex');
+          fs.writeFileSync(process.env.DR_TEST_APP+'/.system_secrets.json',JSON.stringify({secrets:{'database.password':{encryptedValue:enc}}}));
+          JS
+          if DR_OFFSITE_REMOTE='' bash scripts/dr/nexus-dr.sh backup; then
+            echo 'Offsite requirement was unexpectedly bypassed'; exit 1
+          fi
+          bash scripts/dr/nexus-dr.sh backup
+          archive=$(find "$DR_BACKUP_DIR" -maxdepth 1 -name '*.tar.gz.age' -print -quit)
+          test -n "$archive"
+          test -s "$W/remote/$(basename "$archive")"
+          bash scripts/dr/nexus-dr.sh verify "$archive" "$W/offline-key"
+          bash scripts/dr/prepare-persistence.sh
+          docker exec nexus_app cmp /app/uploads/firmware/legacy.bin /app/data/uploads/firmware/legacy.bin
+          docker exec nexus_app cmp /app/backups/legacy.txt /app/data/backups/legacy.txt
+          printf '%s' "$archive" > "$W/archive-path"
+      - name: Disposable PostgreSQL 16 / TimescaleDB restore
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/nexus-dr"
+          export DR_CONFIG_FILE="$W/nonexistent.conf"
+          docker run -d --name nexus_dr_test_pg16 --network none \
+            --label com.nexusnode.dr.isolated=true \
+            -e POSTGRES_PASSWORD=test-only \
+            timescale/timescaledb:2.30.1-pg16
+          for i in $(seq 1 45); do
+            if docker exec nexus_dr_test_pg16 pg_isready -U postgres -d postgres; then break; fi
+            sleep 2
+          done
+          archive=$(cat "$W/archive-path")
+          bash scripts/dr/nexus-dr.sh restore-test "$archive" "$W/offline-key" nexus_dr_test_pg16
+          test "$(docker exec nexus_dr_test_pg16 psql -U postgres -d nexus_dr_restore_test -Atqc 'select count(*) from telemetry_readings')" = 1
+          test "$(docker exec nexus_dr_test_pg16 psql -U postgres -d nexus_dr_restore_test -Atqc 'select count(*) from devices')" = 1
+          age-keygen -o "$W/wrong-key"
+          if bash scripts/dr/nexus-dr.sh verify "$archive" "$W/wrong-key"; then
+            echo 'Wrong offline decryption key was accepted'; exit 1
+          fi
