@@ -4,7 +4,7 @@ set -Eeuo pipefail
 APP="${DR_APP_CONTAINER:-nexus_app}"
 [ "$(docker inspect -f '{{.State.Running}}' "$APP")" = true ] || { echo 'Old container must still run' >&2; exit 1; }
 docker exec "$APP" sh -eu -c '
-for pair in "backups backups" "uploads/firmware uploads/firmware"; do
+for pair in "backups backups" "uploads/firmware uploads/firmware" "uploads/keys uploads/keys"; do
   set -- $pair
   src="/app/$1"; dst="/app/data/$2"
   [ -d "$src" ] || continue
