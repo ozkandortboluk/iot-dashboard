@@ -147,6 +147,10 @@ def extract_raw_app_tar(archive, output):
                 name = name[2:]
             if not name or name == '.':
                 continue
+            # GNU tar writes directory entries as './folder/'. The trailing
+            # slash is tar syntax, not an empty path component or traversal.
+            if member.isdir() and name.endswith('/'):
+                name = name[:-1]
             safe_path('app_data/' + name)
             if name in seen:
                 raise ValueError('duplicate app-data member')
