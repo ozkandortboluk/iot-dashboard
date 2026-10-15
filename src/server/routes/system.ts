@@ -27,6 +27,7 @@ import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
+import { readBackupDestinationStatus, selectBackupDestination } from '../services/backupDestination.service.js';
 
 const startTime = Date.now();
 
@@ -663,6 +664,27 @@ databaseRouter.get('/growth-analytics', authenticateUser, requireAdmin, async (r
     res.json(analytics);
   } catch (err: any) {
     res.status(500).json({ error: 'Büyüme analitiği alınamadı: ' + (err?.message || err) });
+  }
+});
+
+// Administrator-only full disaster-recovery target selector. No secrets and no host command execution.
+databaseRouter.get('/dr/destination', authenticateUser, requireAdmin, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(readBackupDestinationStatus());
+});
+databaseRouter.put('/dr/destination', authenticateUser, requireAdmin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    if (Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, 'destination')) {
+      return res.status(400).json({ error: 'Yalnızca hedef seçimi kabul edilir.' });
+    }
+    return res.json(selectBackupDestination(body.destination));
+  } catch (e: any) {
+    if (typeof e?.message === 'string' && (e.message.startsWith('Geçersiz') || e.message.startsWith('Bu hedef'))) {
+      return res.status(400).json({ error: e.message });
+    }
+    return res.status(503).json({ error: 'Hedef seçimi saklanamadı; mevcut seçim değişmedi.' });
   }
 });
 
