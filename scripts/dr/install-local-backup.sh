@@ -34,6 +34,7 @@ printf 'NEXUS_DR_PROJECT_ROOT=%s\n' "$ROOT" > /etc/nexusnode/local-backup.env
 chmod 600 /etc/nexusnode/local-backup.env
 
 install -o root -g root -m 700 "$ROOT/scripts/dr/local-backup.sh" /usr/local/sbin/nexusnode-local-backup
+install -o root -g root -m 700 "$ROOT/scripts/dr/deliver-selected-backup.sh" /usr/local/sbin/nexusnode-dr-deliver
 install -o root -g root -m 644 "$ROOT/scripts/dr/systemd/nexusnode-local-backup.service" /etc/systemd/system/nexusnode-local-backup.service
 install -o root -g root -m 644 "$ROOT/scripts/dr/systemd/nexusnode-local-backup.timer" /etc/systemd/system/nexusnode-local-backup.timer
 
