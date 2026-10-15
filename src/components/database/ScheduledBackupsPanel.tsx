@@ -395,7 +395,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
               Yedek Snapshot Geçmişi & Afet Kurtarma Listesi
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Sistemde saklanan en güncel snapshot dosyaları. İhtiyaç anında doğrudan bilgisayarınıza indirebilir veya tek tıkla geri yükleyebilirsiniz.
+              Sistemde saklanan SQL yedekleri. İndirme mümkündür; canlı üretimde geri yükleme kapalıdır ve güvenli izole kurtarma prosedürü gerekir.
             </p>
           </div>
 
@@ -450,7 +450,7 @@ export const ScheduledBackupsPanel: React.FC = () => {
                       </td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1 w-fit">
-                          <CheckCircle2 className="w-3 h-3" /> ✓ Doğrulandı (SHA-256)
+                          <CheckCircle2 className="w-3 h-3" /> Yapısal SQL kontrolü (restore testi değil)
                         </span>
                       </td>
                       <td className="p-3 text-right">
@@ -465,9 +465,9 @@ export const ScheduledBackupsPanel: React.FC = () => {
 
                           <button
                             onClick={() => handleRestore(snap.filename)}
-                            disabled={restoringFilename === snap.filename}
+                            disabled={import.meta.env.PROD || restoringFilename === snap.filename}
                             className="p-1.5 text-slate-600 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer disabled:opacity-50"
-                            title="Geri Yükle"
+                            title="Canlı sistemde geri yükleme kapalıdır; izole DR kurtarma prosedürünü kullanın"
                           >
                             <RotateCcw className={`w-4 h-4 ${restoringFilename === snap.filename ? 'animate-spin' : ''}`} />
                           </button>
