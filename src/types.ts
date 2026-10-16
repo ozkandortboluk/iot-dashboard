@@ -1009,6 +1009,17 @@ export interface SystemEvent {
   deviceId?: string;
 }
 
+export interface LogIncludedFields {
+  stack: boolean;         // Hata Çağrı Yığıtı (Error Stack Trace)
+  ip: boolean;            // İstemci/Cihaz IP Adresi
+  user: boolean;          // Kullanıcı ID & E-posta
+  http: boolean;          // HTTP Yolu, Metodu ve Durum Kodu
+  device: boolean;        // Cihaz & Donanım Kimliği
+  details: boolean;       // Ham Detaylar & JSON Yükü
+  source: boolean;        // Sistem Kaynağı / Alt Modül
+  traceId: boolean;       // İzleme Kimliği (Trace ID)
+}
+
 export interface SystemLoggerConfig {
   enabled: boolean;
   minLevel: SystemEventLevel;
@@ -1019,6 +1030,8 @@ export interface SystemLoggerConfig {
   filePath: string;
   deduplication?: boolean;
   deduplicateWindowMs?: number;
+  includedFields: LogIncludedFields;
+  autoSanitizeSecrets: boolean;
   counts: {
     critical: number;
     error: number;

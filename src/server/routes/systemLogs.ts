@@ -56,7 +56,7 @@ systemLogsRouter.get('/settings', authenticateUser, requireAdmin, (req, res) => 
  * Toggle logging on/off and update retention / minimum level settings.
  */
 systemLogsRouter.post('/settings', authenticateUser, requireAdmin, (req, res) => {
-  const { enabled, minLevel, logToFile, maxInMemory, deduplication, deduplicateWindowMs } = req.body || {};
+  const { enabled, minLevel, logToFile, maxInMemory, deduplication, deduplicateWindowMs, includedFields, autoSanitizeSecrets } = req.body || {};
 
   const updatedConfig = systemLogger.updateConfig({
     enabled: typeof enabled === 'boolean' ? enabled : undefined,
@@ -65,6 +65,8 @@ systemLogsRouter.post('/settings', authenticateUser, requireAdmin, (req, res) =>
     maxInMemory: typeof maxInMemory === 'number' ? maxInMemory : undefined,
     deduplication: typeof deduplication === 'boolean' ? deduplication : undefined,
     deduplicateWindowMs: typeof deduplicateWindowMs === 'number' ? deduplicateWindowMs : undefined,
+    includedFields: typeof includedFields === 'object' ? includedFields : undefined,
+    autoSanitizeSecrets: typeof autoSanitizeSecrets === 'boolean' ? autoSanitizeSecrets : undefined,
   });
 
   res.json({

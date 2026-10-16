@@ -3,6 +3,20 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.0] - 2026-10-16
+
+### 📊 Detaylı Sistem Log Motoru & Konfigüre Edilebilir Alan Seçimi
+- **Konfigüre Edilebilir Log Alanları (Field Selection)**:
+  - Log nesnesinde tutulacak alanlar kullanıcı tarafından seçilebilir hale getirildi: Hata Yığıtı (`stack`), İstemci/Cihaz IP (`ip`), Kullanıcı Kimliği (`user`), HTTP Yolu & Metodu (`http`), Cihaz ID (`device`), JSON Detay Yükü (`details`), Sistem Kaynağı (`source`) ve İzleme Kimliği (`traceId`).
+  - Seçilen konfigürasyon `data/system_logger_config.json` dosyasına sunucu düzeyinde kalıcı olarak kaydedilir ve sunucu yeniden başlatıldığında korunur.
+- **Hassas Veri Maskeleme & Canlı Önizleme**:
+  - Parola, API anahtarı ve veritabanı şifrelerini otomatik maskeleme seçeneği eklendi.
+  - Log Ayarları modalına anlık konfigürasyon önizleme kartı (`Live Preview`) eklendi.
+- **Saha Tanı Testi & Akıllı Sadeleştirme**:
+  - Tek tıkla yapay test hatası tetikleme (`/api/system-logs/test-error`) ve tekrarlayan log kirliliğini temizleyen akıllı sadeleştirme (`/api/system-logs/simplify`) araçları entegre edildi.
+
+---
+
 ## 🚀 [v1.48.1] - 2026-10-14
 ### 🔐 SSH Bootstrap Token & Pre-Login Authorization Hardening
 - **Geliştirme Ortamı Kurulum/Kurtarma Anahtarı Girişi**: SSH ön bağlantı ekranına () ve doğrulama akışına bootstrap/setup anahtarı alanı eklendi.

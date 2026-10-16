@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { SystemEvent, SystemEventLevel, SystemEventCategory, SystemLoggerConfig } from '../../types.js';
+import type { SystemEvent, SystemEventLevel, SystemEventCategory, SystemLoggerConfig, LogIncludedFields } from '../../types.js';
 import { sanitizeLogString } from '../utils/crypto.js';
 
 const LEVEL_WEIGHTS: Record<SystemEventLevel, number> = {
@@ -28,6 +28,17 @@ class SystemLoggerService {
   private maxFileSizeBytes: number = 20 * 1024 * 1024; // 20 MB
   private deduplication: boolean = true;
   private deduplicateWindowMs: number = 60000;
+  private includedFields: LogIncludedFields = {
+    stack: true,
+    ip: true,
+    user: true,
+    http: true,
+    device: true,
+    details: true,
+    source: true,
+    traceId: true,
+  };
+  private autoSanitizeSecrets: boolean = true;
   private recentMessageSignatures: Map<string, { lastLoggedAt: number; count: number }> = new Map();
 
   constructor() {
@@ -74,6 +85,15 @@ class SystemLoggerService {
         if (typeof parsed.deduplicateWindowMs === 'number' && parsed.deduplicateWindowMs >= 1000) {
           this.deduplicateWindowMs = parsed.deduplicateWindowMs;
         }
+        if (parsed.includedFields && typeof parsed.includedFields === 'object') {
+          this.includedFields = {
+            ...this.includedFields,
+            ...parsed.includedFields,
+          };
+        }
+        if (typeof parsed.autoSanitizeSecrets === 'boolean') {
+          this.autoSanitizeSecrets = parsed.autoSanitizeSecrets;
+        }
       }
     } catch (err) {
       console.warn('[SystemLogger] Konfigürasyon okunamadı, varsayılanlar aktif:', err);
@@ -89,6 +109,8 @@ class SystemLoggerService {
         maxInMemory: this.maxInMemoryEvents,
         deduplication: this.deduplication,
         deduplicateWindowMs: this.deduplicateWindowMs,
+        includedFields: this.includedFields,
+        autoSanitizeSecrets: this.autoSanitizeSecrets,
         updatedAt: new Date().toISOString(),
       };
       fs.writeFileSync(this.configFilePath, JSON.stringify(payload, null, 2), 'utf-8');
@@ -150,6 +172,8 @@ class SystemLoggerService {
     maxInMemory?: number;
     deduplication?: boolean;
     deduplicateWindowMs?: number;
+    includedFields?: Partial<LogIncludedFields>;
+    autoSanitizeSecrets?: boolean;
   }): SystemLoggerConfig {
     if (typeof partial.enabled === 'boolean') {
       this.enabled = partial.enabled;
@@ -171,6 +195,15 @@ class SystemLoggerService {
       if (this.inMemoryEvents.length > this.maxInMemoryEvents) {
         this.inMemoryEvents = this.inMemoryEvents.slice(0, this.maxInMemoryEvents);
       }
+    }
+    if (partial.includedFields && typeof partial.includedFields === 'object') {
+      this.includedFields = {
+        ...this.includedFields,
+        ...partial.includedFields,
+      };
+    }
+    if (typeof partial.autoSanitizeSecrets === 'boolean') {
+      this.autoSanitizeSecrets = partial.autoSanitizeSecrets;
     }
     this.saveConfiguration();
     return this.getConfig();
@@ -196,6 +229,8 @@ class SystemLoggerService {
       filePath: this.logFilePath,
       deduplication: this.deduplication,
       deduplicateWindowMs: this.deduplicateWindowMs,
+      includedFields: { ...this.includedFields },
+      autoSanitizeSecrets: this.autoSanitizeSecrets,
       counts,
     };
   }
@@ -318,10 +353,17 @@ class SystemLoggerService {
       }
     }
 
-    const cleanMessage = sanitizeLogString(message);
-    const cleanDetails = detailsString ? sanitizeLogString(detailsString) : undefined;
-    const cleanStack = stack ? sanitizeLogString(stack) : undefined;
-    const cleanPath = pathStr ? sanitizeLogString(pathStr) : undefined;
+    let cleanMessage = message;
+    let cleanDetails = detailsString;
+    let cleanStack = stack;
+    let cleanPath = pathStr;
+
+    if (this.autoSanitizeSecrets) {
+      cleanMessage = sanitizeLogString(message);
+      cleanDetails = detailsString ? sanitizeLogString(detailsString) : undefined;
+      cleanStack = stack ? sanitizeLogString(stack) : undefined;
+      cleanPath = pathStr ? sanitizeLogString(pathStr) : undefined;
+    }
 
     // Intelligent Deduplication / Rate-Limiting:
     // Suppress consecutive or rapid identical messages within deduplicateWindowMs (default 60s)

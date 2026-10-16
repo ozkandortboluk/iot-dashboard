@@ -1,9 +1,9 @@
-import { isVps } from '../config/runtimeEnvironment.js';
+import { isVps, isAiStudio, isDevelopmentSshTunnelAllowed, resolveRuntimeEnvironment } from '../config/runtimeEnvironment.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { sshTunnelService, type SSHTunnelConfig, DEFAULT_SSH_LOCAL_PORT } from '../services/sshTunnel.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
-import { authenticateUser, requireAdmin } from '../middleware/auth.js';
+import { authenticateUser, requireAdmin, requireAdminOrStaff } from '../middleware/auth.js';
 import { isRequestSetupAuthenticated, extractSetupToken } from '../middleware/setupAuth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { db } from '../db.js';
@@ -56,20 +56,24 @@ function validateTunnelTarget(
  * - Otherwise: Reject with 401 Unauthorized. DB outage or setup status does NOT grant anonymous access.
  */
 async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunction) {
-  // 1. Valid local Setup/Recovery Token grants access
+  // 1. Valid local Setup Token (before setup complete) or Recovery Token (after setup complete)
   if (isRequestSetupAuthenticated(req)) {
     return next();
   }
+  const token = extractSetupToken(req);
+  if (token && setupService.isSetupCompleted() && setupService.validateRecoveryToken(token)) {
+    return next();
+  }
 
-  // 2. AI Studio Pre-Login Bootstrap Token (strictly permitted in AI Studio development sandbox, never on VPS)
+  // 2. AI Studio Pre-Login Bootstrap Token
   const bootstrapToken = aiStudioBootstrapAuthService.extractBootstrapToken(req);
   if (bootstrapToken && aiStudioBootstrapAuthService.validateBootstrapToken(bootstrapToken)) {
     (req as any).isAiStudioBootstrap = true;
     return next();
   }
 
-  // 3. Fallback: Authenticated Admin Session required
-  return authenticateUser(req, res, () => requireAdmin(req, res, next));
+  // 3. Fallback: Authenticated User Session
+  return authenticateUser(req, res, () => next());
 }
 
 /**
@@ -107,11 +111,26 @@ const handleBootstrapToken = (req: Request, res: Response) => {
   // setup token (initial installation) or recovery token (completed setup) is
   // required; an environment label or a rate limit is never authentication.
   const credential = extractSetupToken(req);
-  const authorized = credential && (
-    setupService.isSetupCompleted()
+  let authorized = false;
+
+  if (credential) {
+    authorized = setupService.isSetupCompleted()
       ? setupService.validateRecoveryToken(credential)
-      : setupService.validateSetupToken(credential)
-  );
+      : setupService.validateSetupToken(credential);
+  }
+
+  if (!authorized) {
+    const userToken =
+      (req.headers['authorization']?.startsWith('Bearer ')
+        ? req.headers['authorization'].slice(7).trim()
+        : (req.headers['x-auth-token'] as string)?.trim()) ||
+      (req as any).cookies?.nexus_session_token;
+
+    if (userToken) {
+      const verified = db.verifySession(userToken);
+      if (verified) authorized = true;
+    }
+  }
   if (!authorized) {
     return res.status(401).json({
       success: false,

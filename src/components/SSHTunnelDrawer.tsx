@@ -126,12 +126,20 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       sessionStorage.getItem('x-setup-token') ||
       localStorage.getItem('x-setup-token');
 
+    const userToken =
+      sessionStorage.getItem('nexus_session_token') ||
+      localStorage.getItem('nexus_session_token');
+
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
       if (setupToken) {
         headers['X-Setup-Token'] = setupToken;
+      }
+      if (userToken) {
+        headers['Authorization'] = 'Bearer ' + userToken;
+        headers['X-Auth-Token'] = userToken;
       }
       const res = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
         method: 'POST',
@@ -146,6 +154,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         }
       } else {
         sessionStorage.removeItem('nexus_ssh_bootstrap_token');
+        const errData = await res.json().catch(() => null);
+        if (errData?.message) {
+          setLastError(errData.message);
+        }
       }
     } catch {
       // Best effort background bootstrap
@@ -252,34 +264,60 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     }
   }, [logs.length]);
 
-  const renderSetupTokenSection = () => (
-    <div className="space-y-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
-      <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-          <KeyRound className="w-3.5 h-3.5 text-slate-400" /> Kurulum / Kurtarma Anahtarı <span className="text-[10px] text-slate-500 font-normal">(Opsiyonel)</span>
-        </h4>
+  const renderSetupTokenSection = () => {
+    const isUserAuth = Boolean(
+      sessionStorage.getItem('nexus_session_token') ||
+      localStorage.getItem('nexus_session_token')
+    );
+    const hasActiveBootstrap = Boolean(
+      sessionStorage.getItem('nexus_ssh_bootstrap_token')
+    );
+
+    return (
+      <div className="space-y-2 bg-slate-950/50 p-3 rounded-xl border border-slate-800 shadow-sm">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h4 className="text-xs font-semibold text-slate-200 flex items-center gap-2">
+            <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Kurulum & Kurtarma Güvenlik Anahtarı</span>
+          </h4>
+          {isUserAuth ? (
+            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              ● Yönetici Oturumu Aktif
+            </span>
+          ) : hasActiveBootstrap ? (
+            <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
+              ● Ön Yetki Doğrulandı
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+              ● Ön Bağlantı İçin Gerekli
+            </span>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          {isUserAuth
+            ? 'Yönetici oturumunuz aktif olduğu için SSH tüneli doğrudan yetkilendirilmiştir.'
+            : 'Giriş yapılmadan veya veritabanı kurulmadan önce SSH tünelini yönetmek için sunucu kurulum/kurtarma anahtarı (data/.setup_token dosyasında yer alır) gereklidir.'}
+        </p>
+        <div className="flex gap-2 pt-1">
+          <input
+            type="password"
+            value={setupTokenInput}
+            onChange={(e) => setSetupTokenInput(e.target.value)}
+            placeholder="data/.setup_token veya konsoldaki 64 haneli güvenlik anahtarı..."
+            className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+          />
+          <button
+            type="button"
+            onClick={handleVerifySetupToken}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0 border border-indigo-500/30"
+          >
+            Doğrula & Kaydet
+          </button>
+        </div>
       </div>
-      <p className="text-[11px] text-slate-400 leading-relaxed">
-        SSH bağlantısı doğrudan sunucu kimlik bilgileriyle çalışır. Kurulum anahtarı zorunlu değildir.
-      </p>
-      <div className="flex gap-2 pt-1">
-        <input
-          type="password"
-          value={setupTokenInput}
-          onChange={(e) => setSetupTokenInput(e.target.value)}
-          placeholder="İsteğe bağlı kurulum veya kurtarma anahtarı..."
-          className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
-        />
-        <button
-          type="button"
-          onClick={handleVerifySetupToken}
-          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition-colors cursor-pointer shrink-0 border border-slate-700"
-        >
-          Kaydet
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const handleProbeFingerprint = async () => {
     if (!sshHost) {
@@ -300,9 +338,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         }),
       });
       if (res.status === 401) {
+        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
         setActionMessage({
           type: 'error',
-          text: 'Yetkisiz Erişim (401): SSH Tüneli sorgulaması için yetkilendirme gereklidir.',
+          text: 'Yetkilendirme Hatası (401): Parmak izi sorgulaması için sunucu kurulum anahtarı (data/.setup_token) gereklidir. Lütfen yukarıdaki alana girip Doğrula & Kaydet butonuna tıklayınız.',
         });
         return;
       }
@@ -356,6 +395,14 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         }),
       });
 
+      if (res.status === 401) {
+        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
+        setActionMessage({
+          type: 'error',
+          text: 'Yetkilendirme Hatası (401): SSH testi için sunucu kurulum/kurtarma anahtarı (data/.setup_token) gereklidir. Lütfen yukarıdaki alana girip Doğrula & Kaydet butonuna basınız.',
+        });
+        return;
+      }
       const data = await res.json();
       if (data.hostFingerprint) {
         setDiscoveredFingerprint(data.hostFingerprint);
@@ -406,6 +453,14 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         }),
       });
 
+      if (res.status === 401) {
+        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
+        setActionMessage({
+          type: 'error',
+          text: 'Yetkilendirme Hatası (401): SSH tünelini başlatmak için sunucu kurulum/kurtarma anahtarı (data/.setup_token) gereklidir. Lütfen yukarıdaki alana girip Doğrula & Kaydet butonuna basınız.',
+        });
+        return;
+      }
       const data = await res.json();
       if (data.hostFingerprint) {
         setDiscoveredFingerprint(data.hostFingerprint);
