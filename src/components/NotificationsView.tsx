@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import {
   Bell,
@@ -43,14 +44,10 @@ export const NotificationsView: React.FC = () => {
   const { user } = useAuth();
   const { devices, customersList, isConnected, subscribeWsEvent, selectedCustomerForAdmin, notifications } = useRealtime();
 
-  // Active Navigation Tab with Persistence
-  const [activeTab, setActiveTab] = useState<
+  // Active Navigation Tab with Database & User Persistence
+  const [activeTab, setActiveTab] = useUserPreference<
     'notifications' | 'alarms' | 'rules' | 'queue' | 'history' | 'channels' | 'preferences'
-  >(() => (localStorage.getItem('notifications_active_tab') as any) || 'notifications');
-
-  useEffect(() => {
-    localStorage.setItem('notifications_active_tab', activeTab);
-  }, [activeTab]);
+  >('notifications_active_tab', 'notifications');
 
   // Listen for direct navigation events from Header bell dropdown
   useEffect(() => {

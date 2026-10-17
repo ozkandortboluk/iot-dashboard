@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Device, TelemetryReading, Site, Zone, DeviceGroup, DeviceHealthSummary, DeviceReplacementRecord } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import { generateMaskedKey, getStatusColor, formatDateTime, getStatusLabel, formatRelativeTime, isInternalOrControlMetric, getMetricUnit } from '../lib/utils';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import { DeviceHealthBadge } from './devices/DeviceHealthBadge';
@@ -74,15 +75,11 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   } = useRealtime();
   const { user } = useAuth();
 
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
-    () => localStorage.getItem('devices_selected_id') || null
-  );
+  const [selectedDeviceId, setSelectedDeviceId] = useUserPreference<string | null>('devices_selected_id', null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // View Mode (Karo / Liste) with Persistence
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>(
-    () => (localStorage.getItem('devices_view_mode') as 'list' | 'grid') || 'list'
-  );
+  // View Mode (Karo / Liste) with Database & User Persistence
+  const [viewMode, setViewMode] = useUserPreference<'list' | 'grid'>('devices_view_mode', 'list');
 
   // Bulk Selection State
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
@@ -90,59 +87,20 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' | 'loading' | 'pending' } | null>(null);
 
-  // Hierarchy Data & Filter State with Persistence
+  // Hierarchy Data & Filter State with Database & User Persistence
   const [sites, setSites] = useState<Site[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [healthSummaries, setHealthSummaries] = useState<DeviceHealthSummary[]>([]);
   const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
 
-  const [selectedSiteId, setSelectedSiteId] = useState<string>('all');
-  const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
-  const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [selectedSiteId, setSelectedSiteId] = useUserPreference<string>('devices_filter_site', 'all');
+  const [selectedZoneId, setSelectedZoneId] = useUserPreference<string>('devices_filter_zone', 'all');
+  const [selectedGroupId, setSelectedGroupId] = useUserPreference<string>('devices_filter_group', 'all');
+  const [selectedTag, setSelectedTag] = useUserPreference<string>('devices_filter_tag', 'all');
 
-  useEffect(() => {
-    if (selectedDeviceId) {
-      localStorage.setItem('devices_selected_id', selectedDeviceId);
-    } else {
-      localStorage.removeItem('devices_selected_id');
-    }
-  }, [selectedDeviceId]);
-
-  useEffect(() => {
-    localStorage.setItem('devices_view_mode', viewMode);
-  }, [viewMode]);
-
-  useEffect(() => {
-    localStorage.setItem('devices_filter_site', selectedSiteId);
-  }, [selectedSiteId]);
-
-  useEffect(() => {
-    localStorage.setItem('devices_filter_zone', selectedZoneId);
-  }, [selectedZoneId]);
-
-  useEffect(() => {
-    localStorage.setItem('devices_filter_group', selectedGroupId);
-  }, [selectedGroupId]);
-
-  useEffect(() => {
-    localStorage.setItem('devices_filter_tag', selectedTag);
-  }, [selectedTag]);
-
-  // Custom User Device Ordering (Persistent)
-  const [customDeviceOrder, setCustomDeviceOrder] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('devices_custom_order');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem('devices_custom_order', JSON.stringify(customDeviceOrder));
-  }, [customDeviceOrder]);
+  // Custom User Device Ordering (Persistent in DB)
+  const [customDeviceOrder, setCustomDeviceOrder] = useUserPreference<string[]>('devices_custom_order', []);
 
   // Clean up any deleted devices from customDeviceOrder
   useEffect(() => {

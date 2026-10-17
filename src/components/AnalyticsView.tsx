@@ -3,6 +3,7 @@ import type { Device, TimeBucketDataPoint } from '../types';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import {
   exportToCSV,
   exportToJSON,
@@ -67,17 +68,11 @@ export const AnalyticsView: React.FC = () => {
   // Active View Tab
   const [activeTab, setActiveTab] = useState<'trend' | 'comparison' | 'statistics' | 'table' | 'export_hub'>('trend');
 
-  // Filters
-  const [selectedDevice, setSelectedDevice] = useState<string>(
-    () => localStorage.getItem('nexus_analytics_device') || 'all'
-  );
-  const [selectedMetric, setSelectedMetric] = useState<string>(
-    () => localStorage.getItem('nexus_analytics_metric') || 'temperature'
-  );
+  // Filters with Database & User Persistence
+  const [selectedDevice, setSelectedDevice] = useUserPreference<string>('nexus_analytics_device', 'all');
+  const [selectedMetric, setSelectedMetric] = useUserPreference<string>('nexus_analytics_metric', 'temperature');
   const [secondaryMetric, setSecondaryMetric] = useState<string>('humidity');
-  const [timeRange, setTimeRange] = useState<string>(
-    () => localStorage.getItem('nexus_analytics_timerange') || '24h'
-  );
+  const [timeRange, setTimeRange] = useUserPreference<string>('nexus_analytics_timerange', '24h');
 
   // Custom Date Range
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
@@ -112,18 +107,6 @@ export const AnalyticsView: React.FC = () => {
   const [exportLimit, setExportLimit] = useState(5000);
   const [isExporting, setIsExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_analytics_device', selectedDevice);
-  }, [selectedDevice]);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_analytics_metric', selectedMetric);
-  }, [selectedMetric]);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_analytics_timerange', timeRange);
-  }, [timeRange]);
 
   // Dynamic active metrics from online and simulated devices
   const activeMetrics = useMemo(() => {

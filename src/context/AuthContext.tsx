@@ -9,6 +9,7 @@ interface AuthContextType {
   setup: (name: string, email: string, pass: string, companyName: string, seedDemoData: boolean) => Promise<void>;
   checkSetupStatus: () => Promise<boolean>;
   updateUser: (updatedUser: User) => void;
+  updatePreferences: (newPrefs: Partial<NonNullable<User['preferences']>>) => Promise<void>;
   refreshUser: () => Promise<User | null>;
   logout: () => void;
   isLoading: boolean;
@@ -235,6 +236,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
+  const updatePreferences = async (newPrefs: Partial<NonNullable<User['preferences']>>) => {
+    if (!user) return;
+    const mergedPreferences = {
+      ...(user.preferences || {}),
+      ...newPrefs,
+    };
+    const updatedUser: User = {
+      ...user,
+      preferences: mergedPreferences,
+    };
+    // Optimistic local state update
+    setUser(updatedUser);
+    try {
+      localStorage.setItem('dashboard_user', JSON.stringify(updatedUser));
+    } catch {}
+
+    try {
+      const res = await apiFetch('/api/profile/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPrefs),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.user) {
+          setUser(data.user);
+          try {
+            localStorage.setItem('dashboard_user', JSON.stringify(data.user));
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.warn('[AuthContext] Preferences persist deferred:', err);
+    }
+  };
+
   const logout = async () => {
     try {
       await apiFetch('/api/auth/logout', {
@@ -302,6 +339,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setup,
         checkSetupStatus,
         updateUser,
+        updatePreferences,
         refreshUser,
         logout,
         isLoading,

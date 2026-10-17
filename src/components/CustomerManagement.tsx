@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import type { User } from '../types';
 import { CustomerDetailsModal } from './CustomerDetailsModal';
 import { CustomerAvatar } from './CustomerAvatar';
@@ -34,23 +35,14 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   } = useRealtime();
   const { user } = useAuth();
 
-  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('nexus_customers_search') || '');
-  const [roleFilter, setRoleFilter] = useState<string>(() => localStorage.getItem('nexus_customers_role') || 'all');
-  const [statusFilter, setStatusFilter] = useState<string>(() => localStorage.getItem('nexus_customers_status') || 'all');
-  const [deviceFilter, setDeviceFilter] = useState<string>(() => localStorage.getItem('nexus_customers_device') || 'all');
-  const [alarmFilter, setAlarmFilter] = useState<string>(() => localStorage.getItem('nexus_customers_alarm') || 'all');
-  const [sortBy, setSortBy] = useState<string>(() => localStorage.getItem('nexus_customers_sort') || 'newest');
+  const [searchTerm, setSearchTerm] = useUserPreference<string>('nexus_customers_search', '');
+  const [roleFilter, setRoleFilter] = useUserPreference<string>('nexus_customers_role', 'all');
+  const [statusFilter, setStatusFilter] = useUserPreference<string>('nexus_customers_status', 'all');
+  const [deviceFilter, setDeviceFilter] = useUserPreference<string>('nexus_customers_device', 'all');
+  const [alarmFilter, setAlarmFilter] = useUserPreference<string>('nexus_customers_alarm', 'all');
+  const [sortBy, setSortBy] = useUserPreference<string>('nexus_customers_sort', 'newest');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_customers_search', searchTerm);
-    localStorage.setItem('nexus_customers_role', roleFilter);
-    localStorage.setItem('nexus_customers_status', statusFilter);
-    localStorage.setItem('nexus_customers_device', deviceFilter);
-    localStorage.setItem('nexus_customers_alarm', alarmFilter);
-    localStorage.setItem('nexus_customers_sort', sortBy);
-  }, [searchTerm, roleFilter, statusFilter, deviceFilter, alarmFilter, sortBy]);
 
   // Close filter dropdown on click outside
   useEffect(() => {

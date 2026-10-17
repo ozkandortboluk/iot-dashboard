@@ -344,6 +344,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
         { name: 'role', type: 'VARCHAR(32)', nullable: false, defaultValue: "'operator'" },
         { name: 'company_name', type: 'VARCHAR(128)', nullable: true },
         { name: 'notification_preferences', type: 'JSONB', nullable: false, defaultValue: '\'{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}\'::jsonb' },
+        { name: 'preferences', type: 'JSONB', nullable: false, defaultValue: '\'{}\'::jsonb' },
         { name: 'status', type: 'VARCHAR(32)', nullable: false, defaultValue: "'active'" },
         { name: 'deleted_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: true },
         { name: 'created_at', type: 'TIMESTAMP WITH TIME ZONE', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
@@ -1340,6 +1341,7 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(32) NOT NULL DEFAULT 'operator',
     company_name VARCHAR(128),
     notification_preferences JSONB NOT NULL DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
+    preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
     status VARCHAR(32) NOT NULL DEFAULT 'active',
     deleted_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1356,6 +1358,7 @@ ALTER TABLE users ADD CONSTRAINT chk_users_status CHECK (status IN ('active', 's
 -- Align legacy installations with the canonical contract without silently rewriting data.
 ALTER TABLE users ALTER COLUMN role SET NOT NULL;
 ALTER TABLE users ALTER COLUMN notification_preferences SET NOT NULL;
+ALTER TABLE users ALTER COLUMN preferences SET NOT NULL;
 ALTER TABLE users ALTER COLUMN status SET NOT NULL;
 ALTER TABLE users ALTER COLUMN created_at SET NOT NULL;
 ALTER TABLE users ALTER COLUMN updated_at SET NOT NULL;

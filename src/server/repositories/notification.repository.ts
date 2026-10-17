@@ -112,6 +112,24 @@ export class NotificationRepository {
     const effectiveUserId = (!userId || userId === 'all') ? 'usr_admin' : userId;
     if (!this.db.data.dashboards) this.db.data.dashboards = [];
 
+    // 0. Check PostgreSQL first if ready
+    if (this.db.postgresRepo?.isReady()) {
+      try {
+        const pgDash = await this.db.postgresRepo.getDashboard(effectiveUserId);
+        if (pgDash && Array.isArray(pgDash.widgets) && pgDash.widgets.length > 0) {
+          const cachedIdx = this.db.data.dashboards.findIndex((d: any) => d.id === pgDash.id || d.tenantId === effectiveUserId);
+          if (cachedIdx >= 0) {
+            this.db.data.dashboards[cachedIdx] = pgDash;
+          } else {
+            this.db.data.dashboards.push(pgDash);
+          }
+          return pgDash;
+        }
+      } catch (err: any) {
+        console.warn('[getDashboard PG check error]:', err?.message);
+      }
+    }
+
     // 1. First priority: Exact ID match (dash_usr_admin or dash_<userId>)
     const targetDashId = `dash_${effectiveUserId}`;
     let userDash = this.db.data.dashboards.find((d: any) => d.id === targetDashId);

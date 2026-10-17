@@ -63,8 +63,8 @@ export function isOriginAllowed(originOrReferer?: string | null): boolean {
     return true;
   }
 
-  // 2. Local development & test: Allow localhost & loopback variants
-  if (env === 'local' || env === 'test') {
+  // 2. Local development, preview & test: Allow localhost & loopback variants in all non-VPS environments
+  if (env !== 'vps') {
     if (LOCAL_LOOPBACK_REGEX.test(clean) || LOCAL_DEV_ORIGINS.has(clean)) {
       return true;
     }

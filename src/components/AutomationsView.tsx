@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useUserPreference } from '../hooks/useUserPreference';
 import {
   Plus,
   Trash2,
@@ -57,24 +58,13 @@ export const AutomationsView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' | 'loading' | 'pending' } | null>(null);
 
-  // Search and Filter state
-  const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('nexus_automations_search') || '');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(
-    () => (localStorage.getItem('nexus_automations_status') as 'all' | 'active' | 'inactive') || 'all'
+  // Search and Filter state with Database & User Persistence
+  const [searchQuery, setSearchQuery] = useUserPreference<string>('nexus_automations_search', '');
+  const [statusFilter, setStatusFilter] = useUserPreference<'all' | 'active' | 'inactive'>(
+    'nexus_automations_status',
+    'all'
   );
-  const [deviceFilter, setDeviceFilter] = useState<string>(() => localStorage.getItem('nexus_automations_device') || 'all');
-
-  useEffect(() => {
-    localStorage.setItem('nexus_automations_search', searchQuery);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_automations_status', statusFilter);
-  }, [statusFilter]);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_automations_device', deviceFilter);
-  }, [deviceFilter]);
+  const [deviceFilter, setDeviceFilter] = useUserPreference<string>('nexus_automations_device', 'all');
 
   // Trigger testing state
   const [testingId, setTestingId] = useState<string | null>(null);

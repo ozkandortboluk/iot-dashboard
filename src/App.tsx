@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
+import { useUserPreference } from './hooks/useUserPreference';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { WidgetGrid } from './components/WidgetGrid';
@@ -30,7 +31,7 @@ import { SSHTunnelDrawer } from './components/SSHTunnelDrawer';
 import { NexusNodeLogo } from './components/NexusNodeLogo';
 import { canAccessTab, getRoleBadgeInfo } from './lib/permissions';
 import { apiFetch as fetch } from './lib/apiFetch';
-import { canShowSshControls, isConfirmedAiStudioRuntime } from './lib/sshRuntimePolicy';
+import { canShowSshControls, isConfirmedAiStudioRuntime, isConfirmedDevelopmentRuntime } from './lib/sshRuntimePolicy';
 import {
   LayoutDashboard,
   Cpu,
@@ -46,32 +47,20 @@ import {
   CheckCircle2,
   AlertCircle,
   Server,
-  Terminal,
 } from 'lucide-react';
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
-  const [editMode, setEditMode] = useState<boolean>(
-    () => localStorage.getItem('nexus_edit_mode') === 'true'
-  );
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState<string>(() => user?.preferences?.defaultTab || 'dashboard');
+  const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
+  const [editMode, setEditMode] = useUserPreference<boolean>('editMode', false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
-  // Site her açıldığında ve kullanıcı giriş yaptığında/değiştiğinde doğrudan Canlı İzleme Dashboard ekranı açılır
+  // Site her açıldığında ve kullanıcı giriş yaptığında/değiştiğinde kullanıcının tercih ettiği veya varsayılan dashboard sekmesi açılır
   useEffect(() => {
-    setActiveTab('dashboard');
-    try {
-      localStorage.removeItem('nexus_active_tab');
-    } catch {
-      // ignore
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    localStorage.setItem('nexus_edit_mode', String(editMode));
-  }, [editMode]);
+    setActiveTab(user?.preferences?.defaultTab || 'dashboard');
+  }, [user?.id, user?.preferences?.defaultTab]);
 
   // If the URL contains a password reset token/link, force showing the reset screen even if a session is open
   const isResetPasswordUrl = Boolean(
@@ -423,17 +412,18 @@ function SystemStateGuard() {
       .then((res) => (res.ok ? res.json() : null))
       .then(async (data) => {
         if (!active) return;
-        const isAiStudio = isConfirmedAiStudioRuntime(data);
-        setSshTunnelAllowed(canShowSshControls(data));
+        const canSsh = canShowSshControls(data);
+        const isAiStudio = isConfirmedAiStudioRuntime(data) || canSsh;
+        setSshTunnelAllowed(canSsh);
         setIsAiStudioEnv(isAiStudio);
 
-        if (!isAiStudio) {
-          // On VPS production or local workstation without SSH requirement, bypass pre-login gate
+        if (!canSsh) {
+          // On VPS production without SSH requirement, bypass pre-login gate
           setSshGatePassed(true);
           setIsCheckingSshGate(false);
           checkStatus();
         } else {
-          // In AI Studio development sandbox: evaluate SSH + SELECT 1 + READY gate before login
+          // In development environments (AI Studio sandbox, local workstation, preview): evaluate SSH + SELECT 1 + READY gate before login
           const passed = await verifySshGate();
           if (passed) {
             checkStatus();
@@ -626,18 +616,6 @@ function SystemStateGuard() {
 
       {renderActiveView()}
 
-      {/* Development-only SSH controls; server policy is authoritative. */}
-      {isAiStudioEnv === true && sshTunnelAllowed && (
-        <button
-          type="button"
-          onClick={() => setIsSSHDrawerOpen(true)}
-          title="SSH Bağlantı Tüneli (Sol Ekran)"
-          className="fixed bottom-6 left-0 z-40 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white py-2.5 px-3 rounded-r-xl shadow-xl shadow-cyan-950/50 flex items-center gap-2 transition-transform hover:translate-x-1 group border-y border-r border-cyan-400/30 cursor-pointer"
-        >
-          <Terminal className="w-4 h-4 text-white group-hover:rotate-12 transition-transform shrink-0" />
-          <span className="text-xs font-bold hidden sm:inline pr-1">SSH Tüneli</span>
-        </button>
-      )}
 
       {/* Global Left-Side SSH Tunnel Drawer */}
       {isAiStudioEnv === true && sshTunnelAllowed && (
@@ -657,10 +635,10 @@ function SystemStateGuard() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <ThemeProvider>
         <SystemStateGuard />
-      </AuthProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }

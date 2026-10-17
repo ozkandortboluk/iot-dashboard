@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { ArchivedDevice } from '../../types';
+import { useUserPreference } from '../../hooks/useUserPreference';
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import { ArchivedDeviceDetailModal } from './ArchivedDeviceDetailModal';
 import { BulkDeleteModal } from '../common/BulkDeleteModal';
@@ -31,11 +32,7 @@ export const ArchivedDevicesTab: React.FC<ArchivedDevicesTabProps> = ({ onDevice
   const [archivedList, setArchivedList] = useState<ArchivedDevice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('archived_devices_view_mode') as 'grid' | 'list') || 'grid');
-
-  useEffect(() => {
-    localStorage.setItem('archived_devices_view_mode', viewMode);
-  }, [viewMode]);
+  const [viewMode, setViewMode] = useUserPreference<'grid' | 'list'>('archived_devices_view_mode', 'grid');
   const [selectedDeviceForDetail, setSelectedDeviceForDetail] = useState<ArchivedDevice | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [isBulkRestoring, setIsBulkRestoring] = useState(false);

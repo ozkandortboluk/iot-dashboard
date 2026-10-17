@@ -495,6 +495,32 @@ profileRouter.put('/', authenticateUser, async (req, res) => {
   }
 });
 
+profileRouter.put('/preferences', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  try {
+    const preferences = req.body;
+    const updatedUser = await db.updateUserProfile(currentUser.id, { preferences });
+    res.json({
+      success: true,
+      preferences: updatedUser.preferences,
+      user: updatedUser,
+      message: 'Kullanıcı tercihleri güncellendi.',
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Tercihler güncellenemedi.' });
+  }
+});
+
+profileRouter.get('/preferences', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const user = (await db.getUsersAsync()).find((u: any) => u.id === currentUser.id) || currentUser;
+  res.json({
+    preferences: user.preferences || {},
+  });
+});
+
 profileRouter.post('/change-password', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;

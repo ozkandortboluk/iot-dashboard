@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(32) DEFAULT 'operator',
     company_name VARCHAR(128),
     notification_preferences JSONB DEFAULT '{"app":true,"email":true,"whatsapp":true,"telegram":true,"sms":true,"webhook":true}'::jsonb,
+    preferences JSONB DEFAULT '{}'::jsonb,
     status VARCHAR(32) DEFAULT 'active',
     deleted_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

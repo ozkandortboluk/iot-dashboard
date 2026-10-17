@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRealtime } from '../context/RealtimeContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import {
   Cpu,
   Activity,
@@ -34,13 +35,9 @@ import { ToastNotification } from './common/ToastNotification';
 export const DeviceHealthView: React.FC = () => {
   const { devices, refreshDevices } = useRealtime();
 
-  // Search & View Mode State with persistence
-  const [searchTerm, setSearchTerm] = useState<string>(
-    () => localStorage.getItem('device_health_search') || ''
-  );
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(
-    () => (localStorage.getItem('device_health_view_mode') as 'grid' | 'list') || 'grid'
-  );
+  // Search & View Mode State with Database & User Persistence
+  const [searchTerm, setSearchTerm] = useUserPreference<string>('device_health_search', '');
+  const [viewMode, setViewMode] = useUserPreference<'grid' | 'list'>('device_health_view_mode', 'grid');
 
   // Modal & Action State
   const [selectedDetailDevice, setSelectedDetailDevice] = useState<Device | null>(null);
@@ -54,13 +51,7 @@ export const DeviceHealthView: React.FC = () => {
     type: 'success' | 'error' | 'info' | 'warning' | 'loading' | 'pending';
   } | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem('device_health_search', searchTerm);
-  }, [searchTerm]);
 
-  useEffect(() => {
-    localStorage.setItem('device_health_view_mode', viewMode);
-  }, [viewMode]);
 
   // Sync selected detail device with realtime devices list updates
   useEffect(() => {

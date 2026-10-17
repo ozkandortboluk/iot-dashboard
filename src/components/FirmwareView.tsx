@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../lib/apiFetch';
+import { useUserPreference } from '../hooks/useUserPreference';
 import {
   Cpu,
   DownloadCloud,
@@ -76,24 +77,10 @@ export const FirmwareView: React.FC<FirmwareViewProps> = ({
   // Copy SHA State
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
 
-  // View Mode & Filter State for Firmware Library
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
-    try {
-      return (localStorage.getItem('firmware_view_mode') as 'grid' | 'list') || 'grid';
-    } catch {
-      return 'grid';
-    }
-  });
+  // View Mode & Filter State for Firmware Library (Database & User Persisted)
+  const [viewMode, setViewMode] = useUserPreference<'grid' | 'list'>('firmware_view_mode', 'grid');
   const [librarySearch, setLibrarySearch] = useState<string>('');
   const [libraryFilter, setLibraryFilter] = useState<'all' | 'active' | 'inactive'>('all');
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('firmware_view_mode', viewMode);
-    } catch (e) {
-      console.warn('localStorage error for firmware_view_mode:', e);
-    }
-  }, [viewMode]);
 
   // Status Filter State for Jobs Tab
   const [jobStatusFilter, setJobStatusFilter] = useState<string>('all');

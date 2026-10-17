@@ -7,6 +7,7 @@ import type {
   LogIncludedFields,
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { useUserPreference } from '../../hooks/useUserPreference';
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import { formatDateTime, formatRelativeTime } from '../../lib/utils';
 import { SystemLogDetailModal } from './SystemLogDetailModal';
@@ -60,31 +61,22 @@ export const SystemLogsView: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError?: boolean } | null>(null);
 
-  // Filters with persistence
-  const [searchQuery, setSearchQuery] = useState<string>(() => localStorage.getItem('system_logs_search') || '');
-  const [selectedLevel, setSelectedLevel] = useState<string>(() => localStorage.getItem('system_logs_level') || 'all');
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => localStorage.getItem('system_logs_category') || 'all');
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(() => {
-    const saved = localStorage.getItem('system_logs_refresh');
-    return saved ? parseInt(saved, 10) : 5000;
-  });
+  // Filters with Database & User Persistence
+  const [searchQuery, setSearchQuery] = useUserPreference<string>('system_logs_search', '');
+  const [selectedLevel, setSelectedLevel] = useUserPreference<string>('system_logs_level', 'all');
+  const [selectedCategory, setSelectedCategory] = useUserPreference<string>('system_logs_category', 'all');
+  const [autoRefreshInterval, setAutoRefreshInterval] = useUserPreference<number>('system_logs_refresh', 5000);
 
-  // Visible Metadata Columns Toggle (Client-side display preferences)
-  const [visibleMeta, setVisibleMeta] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem('system_logs_visible_meta');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return {
-      source: true,
-      http: true,
-      ip: true,
-      device: true,
-      user: true,
-      traceId: true,
-      stack: true,
-      details: true,
-    };
+  // Visible Metadata Columns Toggle with Database & User Persistence
+  const [visibleMeta, setVisibleMeta] = useUserPreference<Record<string, boolean>>('system_logs_visible_meta', {
+    source: true,
+    http: true,
+    ip: true,
+    device: true,
+    user: true,
+    traceId: true,
+    stack: true,
+    details: true,
   });
   const [isMetaDropdownOpen, setIsMetaDropdownOpen] = useState<boolean>(false);
   const metaDropdownRef = useRef<HTMLDivElement>(null);
@@ -102,26 +94,7 @@ export const SystemLogsView: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 50;
 
-  // Persist filters
-  useEffect(() => {
-    localStorage.setItem('system_logs_search', searchQuery);
-  }, [searchQuery]);
 
-  useEffect(() => {
-    localStorage.setItem('system_logs_level', selectedLevel);
-  }, [selectedLevel]);
-
-  useEffect(() => {
-    localStorage.setItem('system_logs_category', selectedCategory);
-  }, [selectedCategory]);
-
-  useEffect(() => {
-    localStorage.setItem('system_logs_refresh', String(autoRefreshInterval));
-  }, [autoRefreshInterval]);
-
-  useEffect(() => {
-    localStorage.setItem('system_logs_visible_meta', JSON.stringify(visibleMeta));
-  }, [visibleMeta]);
 
   // Close meta dropdown on outside click
   useEffect(() => {

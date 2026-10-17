@@ -84,6 +84,31 @@ export interface DeviceHealthSummary {
   maintenanceMode?: boolean;
 }
 
+export interface UserPreferences {
+  theme?: 'light' | 'dark' | 'system';
+  editMode?: boolean;
+  refreshIntervalSec?: number;
+  defaultTab?: string;
+  soundAlerts?: boolean;
+  audioVolume?: number;
+  language?: 'tr' | 'en';
+  timeFormat?: '24h' | '12h';
+  alertThresholdLevels?: {
+    critical?: boolean;
+    warning?: boolean;
+    deviceOffline?: boolean;
+    otaEvents?: boolean;
+    systemUpdates?: boolean;
+  };
+  quietHours?: {
+    enabled?: boolean;
+    start?: string;
+    end?: string;
+  };
+  screenSettings?: Record<string, any>;
+  [key: string]: any;
+}
+
 export interface User {
   id: string;
   tenantId?: string;
@@ -102,27 +127,7 @@ export interface User {
   title?: string;
   department?: string;
   timezone?: string;
-  preferences?: {
-    theme?: 'light' | 'dark' | 'system';
-    refreshIntervalSec?: number;
-    defaultTab?: string;
-    soundAlerts?: boolean;
-    audioVolume?: number;
-    language?: 'tr' | 'en';
-    timeFormat?: '24h' | '12h';
-    alertThresholdLevels?: {
-      critical?: boolean;
-      warning?: boolean;
-      deviceOffline?: boolean;
-      otaEvents?: boolean;
-      systemUpdates?: boolean;
-    };
-    quietHours?: {
-      enabled?: boolean;
-      start?: string;
-      end?: string;
-    };
-  };
+  preferences?: UserPreferences;
   notificationPreferences?: {
     app?: boolean;
     email?: boolean;

@@ -644,6 +644,19 @@ export class PostgresRepository {
           }
         }
 
+        // Ensure users.preferences column and dashboard_layouts table are always present
+        await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'::jsonb;`).catch(() => {});
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS dashboard_layouts (
+            id VARCHAR(64) PRIMARY KEY,
+            user_id VARCHAR(64),
+            title VARCHAR(128) NOT NULL,
+            widgets_json JSONB NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_dashboard_layouts_user ON dashboard_layouts(user_id);
+        `).catch(() => {});
+
         // 2. Check existing user count in isolated test environments
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
@@ -775,6 +788,13 @@ export class PostgresRepository {
       notifPrefs = r.notification_preferences;
     }
 
+    let userPrefs = {};
+    if (typeof r.preferences === 'string') {
+      try { userPrefs = JSON.parse(r.preferences); } catch {}
+    } else if (r.preferences && typeof r.preferences === 'object') {
+      userPrefs = r.preferences;
+    }
+
     return {
       id: r.id,
       name: r.name,
@@ -786,6 +806,7 @@ export class PostgresRepository {
       role: r.role || 'customer',
       companyName: r.company_name || undefined,
       notificationPreferences: notifPrefs,
+      preferences: userPrefs,
       status: r.status || 'active',
       deletedAt: r.deleted_at ? new Date(r.deleted_at).toISOString() : undefined,
       created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
@@ -888,8 +909,8 @@ export class PostgresRepository {
       INSERT INTO users (
         id, name, email, phone, notification_email, whatsapp_number, 
         telegram_chat_id, password_hash, role, company_name, 
-        notification_preferences, status, deleted_at, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        notification_preferences, preferences, status, deleted_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         email = EXCLUDED.email,
@@ -901,6 +922,7 @@ export class PostgresRepository {
         role = EXCLUDED.role,
         company_name = EXCLUDED.company_name,
         notification_preferences = EXCLUDED.notification_preferences,
+        preferences = EXCLUDED.preferences,
         status = EXCLUDED.status,
         deleted_at = EXCLUDED.deleted_at,
         updated_at = CURRENT_TIMESTAMP;
@@ -917,6 +939,7 @@ export class PostgresRepository {
       user.role || 'customer',
       user.companyName || null,
       JSON.stringify(user.notificationPreferences || {}),
+      JSON.stringify(user.preferences || {}),
       user.status || 'active',
       user.deletedAt || null,
       user.created_at || new Date().toISOString(),
@@ -2449,6 +2472,32 @@ export class PostgresRepository {
     ]);
   }
 
+  public async getDashboard(userId: string): Promise<DashboardLayout | null> {
+    if (!this.pool || !this.isConnected) return null;
+    const effectiveId = (!userId || userId === 'all') ? 'usr_admin' : userId;
+    const targetDashId = `dash_${effectiveId}`;
+    try {
+      const res = await this.query(
+        `SELECT * FROM dashboard_layouts WHERE id = $1 OR user_id = $2 LIMIT 1;`,
+        [targetDashId, effectiveId]
+      );
+      if (res?.rows && res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          tenantId: r.user_id || effectiveId,
+          title: r.title || (r.id === 'dash_usr_admin' ? 'Merkez Yönetim Ana Dashboard' : 'Kullanıcı Dashboard'),
+          widgets: typeof r.widgets_json === 'string' ? JSON.parse(r.widgets_json) : (r.widgets_json || []),
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+        };
+      }
+      return null;
+    } catch (e: any) {
+      console.warn('[PG Error getDashboard]', e?.message);
+      return null;
+    }
+  }
+
   // ==========================================
   // AUDIT LOGS
   // ==========================================
@@ -3366,6 +3415,9 @@ export class PostgresRepository {
             notificationPreferences: typeof r.notification_preferences === 'string' 
               ? JSON.parse(r.notification_preferences) 
               : r.notification_preferences || undefined,
+            preferences: typeof r.preferences === 'string'
+              ? JSON.parse(r.preferences)
+              : r.preferences || undefined,
             status: r.status || 'active',
             deletedAt: r.deleted_at ? new Date(r.deleted_at).toISOString() : undefined,
             created_at: new Date(r.created_at).toISOString(),

@@ -24,4 +24,14 @@ describe('SSH controls must be limited to confirmed AI Studio runtime', () => {
   it('respects explicit server SSH policy even in AI Studio', () => {
     expect(canShowSshControls({ ...preview, sshTunnelAllowed: false })).toBe(false);
   });
+
+  it('allows SSH controls for local development copies outside VPS', () => {
+    const local = { environment: 'local', isLocal: true, isVps: false, sshTunnelAllowed: true };
+    expect(canShowSshControls(local)).toBe(true);
+  });
+
+  it('rejects VPS even for local copies if marked as VPS', () => {
+    const vpsLocal = { environment: 'local', isLocal: true, isVps: true, sshTunnelAllowed: true };
+    expect(canShowSshControls(vpsLocal)).toBe(false);
+  });
 });

@@ -15,19 +15,18 @@ export function getFrontendRuntimeEnvironment(): FrontendRuntimeEnvironment {
 
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    if (host.includes('.run.app')) {
-      return 'aistudio';
-    }
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return 'local';
-    }
     if (host.includes('nexusnodeiot.com.tr')) {
       return 'vps';
     }
+    if (host.includes('.run.app')) {
+      return 'aistudio';
+    }
+    // Any copy running outside production VPS is treated as development/aistudio preview
+    return 'aistudio';
   }
 
-  return 'local';
+  return 'aistudio';
 }
 
-export const isAiStudioClient = typeof window !== 'undefined' && window.location.hostname.includes('.run.app');
+export const isAiStudioClient = typeof window !== 'undefined' && !window.location.hostname.includes('nexusnodeiot.com.tr');
 export const isLocalClient = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');

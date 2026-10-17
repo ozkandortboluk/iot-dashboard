@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useUserPreference } from '../../hooks/useUserPreference';
 import {
   Sliders,
   Plus,
@@ -56,22 +57,10 @@ export const AlarmRuleList: React.FC<AlarmRuleListProps> = ({
 }) => {
   const effectiveBulkDelete = onBulkDelete || onBulkDeleteRules;
 
-  // Filters with persistence
-  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('rules_filter_search') || '');
-  const [selectedDeviceFilter, setSelectedDeviceFilter] = useState(() => localStorage.getItem('rules_filter_device') || 'all');
-  const [selectedSeverityFilter, setSelectedSeverityFilter] = useState(() => localStorage.getItem('rules_filter_severity') || 'all');
-
-  useEffect(() => {
-    localStorage.setItem('rules_filter_search', searchTerm);
-  }, [searchTerm]);
-
-  useEffect(() => {
-    localStorage.setItem('rules_filter_device', selectedDeviceFilter);
-  }, [selectedDeviceFilter]);
-
-  useEffect(() => {
-    localStorage.setItem('rules_filter_severity', selectedSeverityFilter);
-  }, [selectedSeverityFilter]);
+  // Filters with Database & User Persistence
+  const [searchTerm, setSearchTerm] = useUserPreference<string>('rules_filter_search', '');
+  const [selectedDeviceFilter, setSelectedDeviceFilter] = useUserPreference<string>('rules_filter_device', 'all');
+  const [selectedSeverityFilter, setSelectedSeverityFilter] = useUserPreference<string>('rules_filter_severity', 'all');
 
   // Bulk Selection States
   const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(new Set());

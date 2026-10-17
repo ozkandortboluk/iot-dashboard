@@ -73,8 +73,13 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
     return 'vps';
   }
 
-  // 6. Default to local workstation development
-  return 'local';
+  // 6. Explicit local development override
+  if (explicitEnv === 'local') {
+    return 'local';
+  }
+
+  // 7. Non-VPS development copies: default to aistudio development environment
+  return 'aistudio';
 }
 
 /** SSH tunnels are a development-only capability, never enabled on VPS. */
@@ -83,6 +88,7 @@ export function isDevelopmentSshTunnelAllowed(): boolean {
   // Never expose SSH tunnel management on a generic production server.
   // AI Studio preview is the only production-mode exception.
   if (process.env.NODE_ENV === 'production' &&
+      process.env.APP_ENV?.trim().toLowerCase() !== 'aistudio' &&
       !process.env.K_SERVICE && !process.env.K_REVISION &&
       process.env.AIS_PREVIEW !== 'true') return false;
   const env = resolveRuntimeEnvironment();

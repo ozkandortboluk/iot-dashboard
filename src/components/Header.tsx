@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout, updatePreferences } = useAuth();
   const {
     isConnected,
     connectionStatus,
@@ -392,7 +392,15 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="px-4 pt-3 border-t border-slate-200 dark:border-slate-800 text-center">
                   <button
                     onClick={() => {
-                      localStorage.setItem('notifications_active_tab', 'notifications');
+                      if (updatePreferences) {
+                        updatePreferences({
+                          screenSettings: {
+                            ...(user?.preferences?.screenSettings || {}),
+                            notifications_active_tab: 'notifications',
+                          },
+                        });
+                      }
+                      localStorage.setItem(`pref_${user?.id || 'anon'}_notifications_active_tab`, 'notifications');
                       window.dispatchEvent(new CustomEvent('notifications_tab_change', { detail: 'notifications' }));
                       setActiveTab('notifications');
                       setShowNotifications(false);

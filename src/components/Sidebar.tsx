@@ -465,20 +465,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer / Version & GitHub Release Notes */}
       <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#0b1120] shrink-0">
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new CustomEvent('nexus_open_ssh_drawer'))}
-          className="w-full mb-2.5 p-2.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/60 dark:bg-cyan-950/60 dark:hover:bg-cyan-900 border border-cyan-700/40 text-cyan-700 dark:text-cyan-300 transition-all flex items-center justify-between group shadow-xs cursor-pointer"
-        >
-          <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-cyan-600 dark:text-cyan-400 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold">SSH Bağlantı Tüneli</span>
-          </div>
-          <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
-            SOL PANEL
-          </span>
-        </button>
-
         <a
           href="https://github.com/ozkan-1403/iot-telemetry-platform/releases"
           target="_blank"

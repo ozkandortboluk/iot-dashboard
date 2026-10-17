@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useUserPreference } from '../../hooks/useUserPreference';
 import {
   CheckCircle2,
   XCircle,
@@ -40,23 +41,11 @@ export const DeliveryHistory: React.FC<DeliveryHistoryProps> = ({
 }) => {
   const effectiveBulkDelete = onBulkDelete || onBulkDeleteLogs;
 
-  // Filters with persistence
-  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('delivery_filter_search') || '');
-  const [channelFilter, setChannelFilter] = useState(() => localStorage.getItem('delivery_filter_channel') || 'all');
-  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('delivery_filter_status') || 'all');
+  // Filters with Database & User Persistence
+  const [searchTerm, setSearchTerm] = useUserPreference<string>('delivery_filter_search', '');
+  const [channelFilter, setChannelFilter] = useUserPreference<string>('delivery_filter_channel', 'all');
+  const [statusFilter, setStatusFilter] = useUserPreference<string>('delivery_filter_status', 'all');
   const [selectedLogForDetails, setSelectedLogForDetails] = useState<DispatchLogItem | null>(null);
-
-  useEffect(() => {
-    localStorage.setItem('delivery_filter_search', searchTerm);
-  }, [searchTerm]);
-
-  useEffect(() => {
-    localStorage.setItem('delivery_filter_channel', channelFilter);
-  }, [channelFilter]);
-
-  useEffect(() => {
-    localStorage.setItem('delivery_filter_status', statusFilter);
-  }, [statusFilter]);
 
   // Bulk Selection States
   const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());

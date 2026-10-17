@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRealtime } from '../context/RealtimeContext';
 import { useAuth } from '../context/AuthContext';
+import { useUserPreference } from '../hooks/useUserPreference';
 import { apiFetch as fetch, safeJson } from '../lib/apiFetch';
 import {
   Radio,
@@ -44,39 +45,21 @@ export const NetworkDiscoveryView: React.FC<{
   const { devices, refreshDevices, customersList } = useRealtime();
   const { user } = useAuth();
 
-  // Navigation / Tabs with Persistence
-  const [activeTab, setActiveTab] = useState<'discovered' | 'scan' | 'audit' | 'archived'>(
-    () => (localStorage.getItem('discovery_active_tab') as 'discovered' | 'scan' | 'audit' | 'archived') || 'discovered'
+  // Navigation / Tabs with Database & User Persistence
+  const [activeTab, setActiveTab] = useUserPreference<'discovered' | 'scan' | 'audit' | 'archived'>(
+    'discovery_active_tab',
+    'discovered'
   );
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(
-    () => (localStorage.getItem('discovery_view_mode') as 'grid' | 'list') || 'grid'
-  );
-
-  useEffect(() => {
-    localStorage.setItem('discovery_active_tab', activeTab);
-  }, [activeTab]);
-
-  useEffect(() => {
-    localStorage.setItem('discovery_view_mode', viewMode);
-  }, [viewMode]);
+  const [viewMode, setViewMode] = useUserPreference<'grid' | 'list'>('discovery_view_mode', 'grid');
 
   // Discovery State
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredNetworkDevice[]>([]);
   const [isLoadingDiscovered, setIsLoadingDiscovered] = useState(false);
-  const [searchQuery, setSearchQuery] = useState(
-    () => localStorage.getItem('discovery_search_query') || ''
+  const [searchQuery, setSearchQuery] = useUserPreference<string>('discovery_search_query', '');
+  const [lifecycleFilter, setLifecycleFilter] = useUserPreference<'all' | 'discovered' | 'pending' | 'assigned' | 'active'>(
+    'discovery_lifecycle_filter',
+    'all'
   );
-  const [lifecycleFilter, setLifecycleFilter] = useState<'all' | 'discovered' | 'pending' | 'assigned' | 'active'>(
-    () => (localStorage.getItem('discovery_lifecycle_filter') as any) || 'all'
-  );
-
-  useEffect(() => {
-    localStorage.setItem('discovery_search_query', searchQuery);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    localStorage.setItem('discovery_lifecycle_filter', lifecycleFilter);
-  }, [lifecycleFilter]);
 
   // Subnet Scanning State
   const [subnetInput, setSubnetInput] = useState('192.168.1.0/24');
