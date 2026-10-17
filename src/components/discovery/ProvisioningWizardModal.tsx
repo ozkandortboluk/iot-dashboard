@@ -55,6 +55,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
   groups,
   allUsers = [],
 }) => {
+  if (!isOpen) return null;
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [method, setMethod] = useState<PairingMethod>('pairing_code');
 
@@ -119,7 +120,6 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
   const availableZones = zones.filter((z) => (!selectedTenantId || z.tenantId === selectedTenantId) && (!selectedSiteId || z.siteId === selectedSiteId));
   const availableGroups = groups.filter((g) => (!selectedTenantId || g.tenantId === selectedTenantId) && (!selectedZoneId || g.zoneId === selectedZoneId));
 
-  if (!isOpen) return null;
 
   // STEP 1 -> STEP 2 (Collision Check)
   const handleProceedToStep2 = async () => {

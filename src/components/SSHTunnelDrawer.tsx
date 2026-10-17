@@ -223,20 +223,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         credentials: 'include',
       });
       if (res.status === 401) {
-        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
-        const newToken = await ensureBootstrapToken();
-        if (newToken) {
-          const retryRes = await fetch('/api/system/ssh-tunnel/status', {
-            headers: getAuthHeaders(),
-            credentials: 'include',
-          });
-          if (retryRes.ok) {
-            const retryData = await retryRes.json();
-            handleStatusData(retryData);
-            return;
-          }
-        }
-        setLastError('SSH Tüneli yönetimi için yetkilendirme doğrulanıyor. Lütfen tüneli başlatın.');
+        // Suppress 401 logging / noisy error updates when unauthenticated before setup token is entered
         return;
       }
       if (res.ok) {
@@ -468,6 +455,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
         await fetchStatus();
+        setCanProceed(true);
         if (onConnectedSuccess) {
           onConnectedSuccess();
         }
