@@ -106,6 +106,8 @@ export interface UserPreferences {
     end?: string;
   };
   screenSettings?: Record<string, any>;
+  buttonStates?: Record<string, any>;
+  updatedAt?: string;
   [key: string]: any;
 }
 

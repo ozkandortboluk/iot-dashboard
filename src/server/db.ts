@@ -115,6 +115,7 @@ interface DatabaseSchema {
     isPostgresConnected?: boolean;
     postgresVersion?: string;
   };
+  systemSettings?: Record<string, any>;
 }
 
 import {
@@ -307,6 +308,66 @@ class LocalDatabase {
     };
   }
 
+  private broadcastHook: ((event: string, payload: any) => void) | null = null;
+  public setBroadcastHook(hook: (event: string, payload: any) => void) {
+    this.broadcastHook = hook;
+  }
+  public broadcast(event: string, payload: any) {
+    if (this.broadcastHook) {
+      try {
+        this.broadcastHook(event, payload);
+      } catch (err) {
+        console.warn('[LocalDatabase] broadcast hook error:', err);
+      }
+    }
+  }
+
+  public getSystemSetting<T>(key: string, defaultValue?: T): T | null {
+    if (!this.data.systemSettings) {
+      this.data.systemSettings = {};
+    }
+    const val = this.data.systemSettings[key];
+    if (val !== undefined && val !== null) {
+      return val as T;
+    }
+    return defaultValue !== undefined ? defaultValue : null;
+  }
+
+  public getAllSystemSettings(): Record<string, any> {
+    return this.data.systemSettings || {};
+  }
+
+  public async saveSystemSetting(key: string, value: any, updatedAt?: string): Promise<boolean> {
+    if (!this.data.systemSettings) {
+      this.data.systemSettings = {};
+    }
+    const effectiveTime = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
+
+    // Check LWW conflict against in-memory value if it has timestamp
+    const existing = this.data.systemSettings[key];
+    if (existing && typeof existing === 'object' && existing.updatedAt && updatedAt) {
+      if (new Date(updatedAt).getTime() < new Date(existing.updatedAt).getTime()) {
+        return false;
+      }
+    }
+
+    this.data.systemSettings[key] = value;
+    this.saveData(this.data);
+
+    if (this.postgresRepo?.isReady() && typeof this.postgresRepo.saveSystemSetting === 'function') {
+      await this.postgresRepo.saveSystemSetting(key, value, effectiveTime);
+    }
+
+    // Broadcast system setting update in real-time to all connected sessions
+    this.broadcast('system:settings:updated', {
+      key,
+      value,
+      updatedAt: effectiveTime,
+    });
+
+    return true;
+  }
+
   public setDatabaseState(newState: DatabaseState): void {
     const isPgConfigured = !!this.getPostgresUrl().trim();
     if (newState === DatabaseState.READY && (isPgConfigured || process.env.NODE_ENV === 'production')) {
@@ -495,7 +556,7 @@ class LocalDatabase {
     this.pgPool = pool;
     this.pgPoolUrl = url;
 
-    if (pool && this.postgresRepo.getPool() !== pool) {
+    if (pool && typeof this.postgresRepo?.getPool === 'function' && this.postgresRepo.getPool() !== pool) {
       this.postgresRepo.setPool(pool);
     }
 
@@ -554,7 +615,7 @@ class LocalDatabase {
       }
 
       const wasAlreadyReady = this.dbState === DatabaseState.READY;
-      if (this.postgresRepo.getPool() !== pool) {
+      if (typeof this.postgresRepo?.getPool === 'function' && this.postgresRepo.getPool() !== pool) {
         this.postgresRepo.setPool(pool);
       }
       // Only transition to DB_CONNECTING during initial bootstrap or if not already marked unavailable.
@@ -626,12 +687,19 @@ class LocalDatabase {
         this.data.sessions = hydrated.sessions || []; // Overwrite snapshot instead of merging/checking length
         this.data.firmwares = hydrated.firmwares || []; // Overwrite unconditionally
         this.data.otaJobs = hydrated.otaJobs || []; // Overwrite unconditionally
+        this.data.systemSettings = hydrated.systemSettings || {};
+
+        if (hydrated.systemSettings?.simulator_config) {
+          import('./services/simulator.js').then((sim) => {
+            sim.setSimulatorConfig(hydrated.systemSettings!.simulator_config);
+          }).catch(() => {});
+        }
 
         if (hydrated.serviceConfig) {
           this.data.serviceConfig = hydrated.serviceConfig;
           this.saveLocalSystemConfig(hydrated.serviceConfig);
           console.log('[PostgreSQL] E-Posta ve Resend sunucu ayarları veritabanından yüklendi.');
-        } else if (this.data.serviceConfig) {
+        } else if (this.data.serviceConfig && typeof this.postgresRepo?.saveSystemSetting === 'function') {
           await this.postgresRepo.saveSystemSetting('service_config', this.data.serviceConfig);
         }
 
@@ -861,6 +929,7 @@ class LocalDatabase {
       deviceGroups: [],
       replacementHistory: [],
       subscriptions: [],
+      systemSettings: {},
     };
 
     const localSysConfig = this.loadLocalSystemConfig();
@@ -896,6 +965,7 @@ class LocalDatabase {
         if (!parsed.deviceGroups) parsed.deviceGroups = [];
         if (!parsed.replacementHistory) parsed.replacementHistory = [];
         if (!parsed.subscriptions) parsed.subscriptions = [];
+        if (!parsed.systemSettings) parsed.systemSettings = {};
         if (!parsed.retentionPolicies) {
           parsed.retentionPolicies = {
             enabled: true,
@@ -2941,10 +3011,24 @@ class LocalDatabase {
     if (data.department !== undefined) user.department = data.department;
     if (data.timezone !== undefined) user.timezone = data.timezone;
     if (data.preferences) {
-      user.preferences = {
-        ...user.preferences,
-        ...data.preferences,
-      };
+      const incomingPrefs = data.preferences;
+      const existingPrefs = user.preferences || {};
+      const incomingTime = incomingPrefs.updatedAt ? new Date(incomingPrefs.updatedAt).getTime() : Date.now();
+      const existingTime = existingPrefs.updatedAt ? new Date(existingPrefs.updatedAt).getTime() : 0;
+
+      if (incomingTime >= existingTime) {
+        user.preferences = {
+          ...existingPrefs,
+          ...incomingPrefs,
+          updatedAt: new Date(incomingTime).toISOString(),
+        };
+      } else {
+        // Stale write from older session: preserve newer existing fields while applying missing ones
+        user.preferences = {
+          ...incomingPrefs,
+          ...existingPrefs,
+        };
+      }
     }
     if (data.notificationPreferences) {
       user.notificationPreferences = {
@@ -2957,8 +3041,19 @@ class LocalDatabase {
 
     this.saveData(this.data);
 
-    // Sync to PostgreSQL Repository
-    await this.postgresRepo.saveUser(user);
+    // Sync to PostgreSQL Repository if ready
+    if (this.postgresRepo?.isReady()) {
+      await this.postgresRepo.saveUser(user);
+    }
+
+    // Broadcast updated preferences to other connected sessions for real-time synchronization
+    if (data.preferences) {
+      this.broadcast('user:preferences:updated', {
+        userId: user.id,
+        preferences: user.preferences,
+        updatedAt: user.preferences?.updatedAt || user.updatedAt,
+      });
+    }
 
     this.safeFirestoreWrite(
       () => updateDoc(doc(firestore, 'users', user.id), cleanFirestoreData(user)),

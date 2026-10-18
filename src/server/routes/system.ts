@@ -1235,6 +1235,60 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
   }
 });
 
+/**
+ * Generic System Settings API
+ * GET /api/system/settings - Retrieve all persistent system settings (Admin only)
+ * GET /api/system/settings/:key - Retrieve single system setting
+ * POST /api/system/settings/:key - Set system setting with Last-Write-Wins (LWW) resolution
+ */
+systemRouter.get('/settings', authenticateUser, requireAdmin, (req, res) => {
+  const settings = db.getAllSystemSettings();
+  res.json({
+    success: true,
+    settings,
+  });
+});
+
+systemRouter.get('/settings/:key', authenticateUser, (req, res) => {
+  const { key } = req.params;
+  const value = db.getSystemSetting(key);
+  if (value === null || value === undefined) {
+    return res.status(404).json({ error: `Ayar '${key}' bulunamadı.` });
+  }
+  res.json({
+    success: true,
+    key,
+    value,
+  });
+});
+
+systemRouter.post('/settings/:key', authenticateUser, requireAdmin, async (req, res) => {
+  const { key } = req.params;
+  const { value, updatedAt } = req.body;
+  if (value === undefined) {
+    return res.status(400).json({ error: 'value parametresi zorunludur.' });
+  }
+
+  const effectiveTime = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
+  const saved = await db.saveSystemSetting(key, value, effectiveTime);
+
+  if (!saved) {
+    return res.status(409).json({
+      success: false,
+      message: 'Bu ayar daha yeni bir zaman damgasıyla güncellenmiş durumda (LWW koruması).',
+      currentValue: db.getSystemSetting(key),
+    });
+  }
+
+  res.json({
+    success: true,
+    key,
+    value,
+    updatedAt: effectiveTime,
+    message: `'${key}' sistem ayarı başarıyla kaydedildi.`,
+  });
+});
+
 // Simulator Router
 const simulatorRouter = Router();
 
@@ -1345,28 +1399,36 @@ simulatorRouter.get('/status', (req, res) => {
   });
 });
 
-simulatorRouter.post('/toggle', authenticateUser, requireAdmin, (req, res) => {
+simulatorRouter.post('/toggle', authenticateUser, requireAdmin, async (req, res) => {
   setSimulatorActive(!simulatorActive);
-  broadcast('simulator:updated', {
-    simulatorActive,
-    simulatorIntervalMs,
+  const now = new Date().toISOString();
+  const simConfig = {
+    active: simulatorActive,
+    intervalMs: simulatorIntervalMs,
     anomalyProbability,
     activeScenario,
-  });
+    updatedAt: now,
+  };
+  await db.saveSystemSetting('simulator_config', simConfig, now);
+  broadcast('simulator:updated', simConfig);
   res.json({
     simulatorActive,
     message: `Cihaz verisi simülatörü ${simulatorActive ? 'AÇILDI' : 'KAPATILDI'}.`,
   });
 });
 
-simulatorRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
+simulatorRouter.post('/config', authenticateUser, requireAdmin, async (req, res) => {
   setSimulatorConfig(req.body);
-  broadcast('simulator:updated', {
-    simulatorActive,
-    simulatorIntervalMs,
+  const now = new Date().toISOString();
+  const simConfig = {
+    active: simulatorActive,
+    intervalMs: simulatorIntervalMs,
     anomalyProbability,
     activeScenario,
-  });
+    updatedAt: now,
+  };
+  await db.saveSystemSetting('simulator_config', simConfig, now);
+  broadcast('simulator:updated', simConfig);
   res.json({
     success: true,
     simulatorActive,

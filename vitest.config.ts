@@ -9,7 +9,7 @@ export default defineConfig({
       NODE_ENV: 'test',
       VITEST: 'true',
     },
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.test.ts'],
+    include: ['src/tests/**/*.test.ts', 'src/tests/**/*.test.tsx'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -256,14 +256,56 @@ export function initSimulator(): boolean {
     return false;
   }
 
-  simulatorActive = isSimulatorEnabledFromEnv();
+  // Authoritative check: First inspect database system_settings for persisted admin config
+  const savedConfig = db.getSystemSetting<{
+    active?: boolean;
+    intervalMs?: number;
+    anomalyProbability?: number;
+    anomalyRate?: number;
+    activeScenario?: string;
+    scenario?: string;
+  }>('simulator_config');
+
+  if (savedConfig && typeof savedConfig.active === 'boolean') {
+    simulatorActive = savedConfig.active;
+    if (savedConfig.intervalMs && typeof savedConfig.intervalMs === 'number') {
+      simulatorIntervalMs = Math.max(200, Math.min(60000, savedConfig.intervalMs));
+    }
+    if (savedConfig.anomalyProbability !== undefined && typeof savedConfig.anomalyProbability === 'number') {
+      anomalyProbability = Math.max(0, Math.min(1, savedConfig.anomalyProbability));
+    } else if (savedConfig.anomalyRate !== undefined && typeof savedConfig.anomalyRate === 'number') {
+      anomalyProbability = Math.max(0, Math.min(1, savedConfig.anomalyRate));
+    }
+    if (savedConfig.activeScenario && typeof savedConfig.activeScenario === 'string') {
+      activeScenario = savedConfig.activeScenario;
+    } else if (savedConfig.scenario && typeof savedConfig.scenario === 'string') {
+      activeScenario = savedConfig.scenario;
+    }
+    console.log(`[Simulator] Kaydedilmiş ayarlar veritabanından yüklendi: Active=${simulatorActive}, Scenario=${activeScenario}, Interval=${simulatorIntervalMs}ms`);
+  } else {
+    simulatorActive = isSimulatorEnabledFromEnv();
+    if (simulatorActive) {
+      console.log('[Simulator] Sanal cihaz simülatörü aktif edildi (ENABLE_SIMULATOR=true).');
+    } else {
+      console.log('[Simulator] Simülatör kapalı tutuluyor (ENABLE_SIMULATOR != true).');
+    }
+  }
 
   if (simulatorActive) {
-    console.log('[Simulator] Sanal cihaz simülatörü aktif edildi (ENABLE_SIMULATOR=true).');
     scheduleSimulationStep();
-  } else {
-    console.log('[Simulator] Simülatör kapalı tutuluyor (ENABLE_SIMULATOR != true).');
   }
 
   return simulatorActive;
 }
+
+// Automatically re-initialize simulator when database enters READY state
+setImmediate(() => {
+  if (typeof db !== 'undefined' && db && typeof db.onStateChange === 'function') {
+    db.onStateChange((newState) => {
+      if (newState === DatabaseState.READY) {
+        initSimulator();
+      }
+    });
+  }
+});
+

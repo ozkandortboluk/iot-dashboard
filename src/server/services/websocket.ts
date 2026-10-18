@@ -560,8 +560,22 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // Explicitly whitelisted general events only (simulator:status, system:health)
-    if (event === 'simulator:status' || event === 'system:health') {
+    // 13. System and User Settings Multi-Session Live Synchronization
+    if (event === 'user:preferences:updated') {
+      const p = payload as any;
+      if (p && p.userId === clientUser.id) {
+        safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      }
+      return;
+    }
+
+    // Explicitly whitelisted general events
+    if (
+      event === 'system:settings:updated' ||
+      event === 'simulator:updated' ||
+      event === 'simulator:status' ||
+      event === 'system:health'
+    ) {
       safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       return;
     }
@@ -570,6 +584,13 @@ export function broadcast(event: string, payload: unknown) {
     return;
   });
 }
+
+// Bind database broadcast hook for real-time decoupled event delivery
+setImmediate(() => {
+  if (typeof db !== 'undefined' && db && typeof db.setBroadcastHook === 'function') {
+    db.setBroadcastHook(broadcast);
+  }
+});
 
 export function broadcastToTenant(tenantId: string, event: string, tenantPayload: unknown, adminPayload?: unknown) {
   if (!wss) return;

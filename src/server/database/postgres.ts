@@ -3388,6 +3388,7 @@ export class PostgresRepository {
     firmwares?: Firmware[];
     otaJobs?: OtaDeploymentJob[];
     serviceConfig?: NotificationServiceConfig;
+    systemSettings?: Record<string, any>;
   } | null> {
 
     if (!this.pool) return null;
@@ -3604,10 +3605,20 @@ export class PostgresRepository {
 
       // 8. Service Config / System Settings
       let serviceConfig: NotificationServiceConfig | undefined = undefined;
+      const systemSettings: Record<string, any> = {};
       try {
-        const scVal = await this.getSystemSetting<NotificationServiceConfig>('service_config');
-        if (scVal && typeof scVal === 'object') {
-          serviceConfig = scVal;
+        const settingsRes = await this.query(`SELECT key, value, updated_at FROM system_settings;`).catch(() => null);
+        if (settingsRes?.rows) {
+          settingsRes.rows.forEach((r: any) => {
+            let val = r.value;
+            if (typeof val === 'string') {
+              try { val = JSON.parse(val); } catch {}
+            }
+            systemSettings[r.key] = val;
+          });
+        }
+        if (systemSettings['service_config'] && typeof systemSettings['service_config'] === 'object') {
+          serviceConfig = systemSettings['service_config'];
         }
       } catch {}
 
@@ -3622,6 +3633,7 @@ export class PostgresRepository {
         firmwares,
         otaJobs,
         serviceConfig,
+        systemSettings,
       };
     } catch (err: any) {
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
@@ -4573,15 +4585,20 @@ export class PostgresRepository {
 
   /**
    * Save a system setting key-value pair into PostgreSQL (system_settings table)
+   * Supports Last-Write-Wins (LWW) conflict resolution via updatedAt timestamp.
    */
-  public async saveSystemSetting(key: string, value: any): Promise<boolean> {
+  public async saveSystemSetting(key: string, value: any, updatedAt?: string): Promise<boolean> {
     if (!this.pool || !this.isConnected) return false;
     try {
+      const effectiveTime = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
       await this.query(
         `INSERT INTO system_settings (key, value, updated_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW();`,
-        [key, JSON.stringify(value)]
+         VALUES ($1, $2, $3::timestamptz)
+         ON CONFLICT (key) DO UPDATE SET 
+           value = EXCLUDED.value, 
+           updated_at = EXCLUDED.updated_at
+         WHERE system_settings.updated_at <= EXCLUDED.updated_at;`,
+        [key, JSON.stringify(value), effectiveTime]
       );
       return true;
     } catch (err: any) {
@@ -4605,6 +4622,30 @@ export class PostgresRepository {
       console.warn(`[PostgresRepository] getSystemSetting error (${key}):`, err?.message || err);
     }
     return null;
+  }
+
+  /**
+   * Get all system settings from PostgreSQL (system_settings table)
+   */
+  public async getAllSystemSettings(): Promise<Record<string, any>> {
+    if (!this.pool || !this.isConnected) return {};
+    try {
+      const res = await this.query(`SELECT key, value, updated_at FROM system_settings;`);
+      const map: Record<string, any> = {};
+      if (res?.rows) {
+        res.rows.forEach((r: any) => {
+          let val = r.value;
+          if (typeof val === 'string') {
+            try { val = JSON.parse(val); } catch {}
+          }
+          map[r.key] = val;
+        });
+      }
+      return map;
+    } catch (err: any) {
+      console.warn(`[PostgresRepository] getAllSystemSettings error:`, err?.message || err);
+      return {};
+    }
   }
 
   /**

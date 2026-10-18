@@ -53,6 +53,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user]);
 
+  // Real-time Multi-Session & Cross-Tab User Preferences Synchronization
+  useEffect(() => {
+    // 1. Cross-session sync via WebSocket CustomEvent
+    const handlePreferencesSync = (event: Event) => {
+      const customEvt = event as CustomEvent;
+      const payload = customEvt.detail;
+      if (!payload || !user || payload.userId !== user.id) return;
+
+      setUser((prevUser) => {
+        if (!prevUser) return null;
+        const incomingTime = payload.updatedAt ? new Date(payload.updatedAt).getTime() : Date.now();
+        const currentSavedTime = prevUser.preferences?.updatedAt ? new Date(prevUser.preferences.updatedAt).getTime() : 0;
+
+        if (incomingTime >= currentSavedTime) {
+          const updated: User = {
+            ...prevUser,
+            preferences: {
+              ...(prevUser.preferences || {}),
+              ...payload.preferences,
+            },
+          };
+          try {
+            localStorage.setItem('dashboard_user', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        }
+        return prevUser;
+      });
+    };
+
+    // 2. Cross-tab sync in same browser via StorageEvent
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'dashboard_user' && e.newValue) {
+        try {
+          const updatedUser = JSON.parse(e.newValue);
+          if (updatedUser && updatedUser.id === user?.id) {
+            setUser((prevUser) => {
+              if (!prevUser) return updatedUser;
+              const incomingTime = updatedUser.preferences?.updatedAt ? new Date(updatedUser.preferences.updatedAt).getTime() : Date.now();
+              const currentSavedTime = prevUser.preferences?.updatedAt ? new Date(prevUser.preferences.updatedAt).getTime() : 0;
+              if (incomingTime >= currentSavedTime) {
+                return updatedUser;
+              }
+              return prevUser;
+            });
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('nexus:user:preferences:updated', handlePreferencesSync);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('nexus:user:preferences:updated', handlePreferencesSync);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [user?.id]);
+
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
     try {
@@ -238,9 +296,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updatePreferences = async (newPrefs: Partial<NonNullable<User['preferences']>>) => {
     if (!user) return;
+    const now = new Date().toISOString();
+    const prefsWithTimestamp = {
+      ...newPrefs,
+      updatedAt: now,
+    };
     const mergedPreferences = {
       ...(user.preferences || {}),
-      ...newPrefs,
+      ...prefsWithTimestamp,
     };
     const updatedUser: User = {
       ...user,
@@ -256,7 +319,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await apiFetch('/api/profile/preferences', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPrefs),
+        body: JSON.stringify(prefsWithTimestamp),
       });
       if (res.ok) {
         const data = await res.json().catch(() => null);

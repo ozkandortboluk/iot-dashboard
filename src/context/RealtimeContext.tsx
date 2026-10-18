@@ -824,6 +824,11 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               if (data.payload && data.payload.simulatorActive !== undefined) {
                 setSimulatorActive(data.payload.simulatorActive);
               }
+              window.dispatchEvent(new CustomEvent('nexus:simulator:updated', { detail: data.payload }));
+            } else if (data.event === 'system:settings:updated') {
+              window.dispatchEvent(new CustomEvent('nexus:system:settings:updated', { detail: data.payload }));
+            } else if (data.event === 'user:preferences:updated') {
+              window.dispatchEvent(new CustomEvent('nexus:user:preferences:updated', { detail: data.payload }));
             } else if (data.event === 'device:updated') {
               if (data.payload && data.payload.id) {
                 setRawDevices((prev) =>

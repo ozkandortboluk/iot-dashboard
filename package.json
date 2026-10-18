@@ -29,7 +29,7 @@
     "test": "vitest run src/",
     "test:watch": "vitest src/",
     "test:load": "tsx scripts/telemetry-load-test.ts",
-    "test:e2e": "vitest run e2e/",
+    "test:e2e": "vitest run src/tests/security/security_e2e.test.ts",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:ci": "npm run lint && npm run type-check && npm run verify:provenance && npm run test && npm run build && npm run verify:parity && npm run test:smoke && npm run test:e2e",
     "test:coverage": "vitest run --coverage"

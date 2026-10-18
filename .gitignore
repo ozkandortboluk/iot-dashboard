@@ -38,4 +38,9 @@ temp_*
 *.tmp
 cookies.txt
 
+# Explicitly ensure all test files in src/tests are tracked
+!src/tests/
+!src/tests/**
+
+
 
