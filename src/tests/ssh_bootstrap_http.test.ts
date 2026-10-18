@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setupValid: vi.fn((token: string) => token === 'valid-setup'),
   recoveryValid: vi.fn((token: string) => token === 'valid-recovery'),
   createToken: vi.fn(() => 'test-ephemeral-token'),
+  revokeToken: vi.fn(() => true),
 }));
 
 vi.mock('../server/database/connection.js', () => ({
@@ -18,8 +19,10 @@ vi.mock('../server/services/aiStudioBootstrapAuth.service.js', () => ({
   aiStudioBootstrapAuthService: {
     isBootstrapAllowed: mocks.bootstrapAllowed,
     createBootstrapToken: mocks.createToken,
+    revokeBootstrapToken: mocks.revokeToken,
     extractBootstrapToken: vi.fn(() => null),
     validateBootstrapToken: vi.fn(() => false),
+    REMEMBER_DEVICE_TTL_MS: 7 * 24 * 60 * 60 * 1000,
   },
 }));
 vi.mock('../server/services/setup.service.js', () => ({
@@ -106,5 +109,25 @@ describe('SSH bootstrap HTTP authorization', () => {
     const res = await request(app).get('/api/system/ssh-tunnel/bootstrap-token');
     expect(res.status).toBe(404);
     expect(mocks.createToken).not.toHaveBeenCalled();
+  });
+
+  it('passes 7-day TTL when rememberDevice is true', async () => {
+    const res = await request(app)
+      .post('/api/system/ssh-tunnel/bootstrap-token')
+      .set('X-Setup-Token', 'valid-setup')
+      .send({ rememberDevice: true });
+    expect(res.status).toBe(200);
+    expect(res.body.rememberedDevice).toBe(true);
+    expect(mocks.createToken).toHaveBeenCalledWith(7 * 24 * 60 * 60 * 1000, true);
+  });
+
+  it('revokes remembered device token via POST /revoke-bootstrap-token', async () => {
+    const res = await request(app)
+      .post('/api/system/ssh-tunnel/revoke-bootstrap-token')
+      .send({ token: 'test-token-to-revoke' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mocks.revokeToken).toHaveBeenCalledWith('test-token-to-revoke');
+    expect(res.headers['set-cookie']).toBeDefined();
   });
 });

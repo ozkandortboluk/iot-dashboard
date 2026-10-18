@@ -705,11 +705,30 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
       });
 
       newPool.on('error', (err: any) => {
-        console.warn('[Unified PostgreSQL Pool Error]:', err?.message);
-        systemLogger.warn('database', 'Birleşik PostgreSQL havuz hatası tespit edildi', err?.message);
+        const msg = err?.message || '';
+        if (
+          msg.includes('Connection terminated') ||
+          msg.includes('ECONNREFUSED') ||
+          msg.includes('ended by other party') ||
+          msg.includes('closed') ||
+          msg.includes('client has already been released')
+        ) {
+          return;
+        }
+        systemLogger.warn('database', 'Birleşik PostgreSQL havuz bildirimi', msg);
       });
       newPool.on('connect', (client: any) => {
         client.on('error', (err: any) => {
+          const msg = err?.message || '';
+          if (
+            msg.includes('Connection terminated') ||
+            msg.includes('ECONNREFUSED') ||
+            msg.includes('ended by other party') ||
+            msg.includes('client has already been released')
+          ) {
+            // Expected socket teardown on tunnel drop or reconnect
+            return;
+          }
           console.warn('[Unified PostgreSQL Client Error]:', err?.message);
         });
       });
@@ -769,4 +788,25 @@ export async function recycleSharedPgPool(): Promise<void> {
     } catch {}
     systemLogger.info('database', 'Birleşik PostgreSQL bağlantı havuzu sıfırlandı.');
   }
+}
+
+/**
+ * Safely handles background async Postgres persistence errors, suppressing transient connection teardowns.
+ */
+export function handlePostgresAsyncError(e: any): void {
+  const msg = e?.message || String(e || '');
+  if (
+    msg.includes('Connection terminated') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('not queryable') ||
+    msg.includes('isReady: false') ||
+    msg.includes('closed') ||
+    msg.includes('timeout') ||
+    msg.includes('ending') ||
+    msg.includes('ended') ||
+    msg.includes('client has already been released')
+  ) {
+    return;
+  }
+  systemLogger.warn('database', `PostgreSQL asenkron işlem bildirimi: ${msg}`);
 }

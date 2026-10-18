@@ -680,7 +680,19 @@ export class PostgresRepository {
         }
       } catch (err: any) {
         this.isSchemaEnsured = false;
-        console.error('[PostgreSQL ensureTelemetrySchema Error]:', err?.message || err);
+        const errMsg = err?.message || String(err);
+        const isConnErr =
+          errMsg.includes('Connection terminated') ||
+          errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('not queryable') ||
+          errMsg.includes('timeout') ||
+          errMsg.includes('client has already been released') ||
+          errMsg.includes('EAI_AGAIN');
+        if (isConnErr) {
+          systemLogger.info('database', 'Bağlantı kesintisi nedeniyle şema doğrulaması ertelendi.');
+        } else {
+          systemLogger.warn('database', `Şema doğrulama bildirimi: ${errMsg}`);
+        }
       } finally {
         if (client) {
           try { client.off('error', onEnsureClientErr); } catch {}
@@ -725,7 +737,7 @@ export class PostgresRepository {
 
     if (!this.pool || !this.isConnected || (this.pool as any).ending || (this.pool as any).ended) {
       const errMsg = `[PostgreSQL Veritabanı Hatası] Veritabanı bağlantısı aktif veya hazır değil (isReady: false). Sorgu yürütülemedi: ${text.substring(0, 120)}`;
-      systemLogger.error('database', errMsg);
+      systemLogger.warn('database', errMsg);
       throw new Error(errMsg);
     }
     try {
@@ -768,7 +780,7 @@ export class PostgresRepository {
         if (errMsg.includes('calling end on the pool') || errMsg.includes('Cannot use a pool after calling end')) {
           this.pool = null;
         }
-        systemLogger.error('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
+        systemLogger.warn('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
         this.notifyConnectionChange();
       } else {
         systemLogger.error('database', `PostgreSQL Sorgu Hatası: ${errMsg}`, { query: text.substring(0, 120) });
@@ -3387,7 +3399,7 @@ export class PostgresRepository {
     serviceConfig?: NotificationServiceConfig;
   } | null> {
 
-    if (!this.pool) return null;
+    if (!this.pool || !this.isConnected || !this.isSchemaEnsured) return null;
     try {
       // 1. Users (Fast path: if tables already exist, load immediately; otherwise ensure schema on demand)
       let usersRes: any;
@@ -3621,6 +3633,9 @@ export class PostgresRepository {
         serviceConfig,
       };
     } catch (err: any) {
+      if (!this.isConnected || !this.pool) {
+        return null;
+      }
       console.warn('[PostgreSQL Hydration Error]:', err.message || err);
       return null;
     }

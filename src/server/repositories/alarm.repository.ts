@@ -1,3 +1,4 @@
+import { handlePostgresAsyncError } from '../database/connection.js';
 import crypto from 'crypto';
 import type { NotificationItem, ActiveAlarm, ThresholdRule, DispatchLogItem, PaginatedResponse } from '../../types.js';
 
@@ -298,7 +299,7 @@ export class AlarmRepository {
     this.db.data.rules.push(newRule);
     this.db.addAuditLog(ownerId, ownerName, `Yeni eşik kuralı oluşturuldu: ${newRule.metricKey.toUpperCase()} ${newRule.operator} ${newRule.thresholdValue}`, 'medium');
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(newRule).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(newRule).catch(handlePostgresAsyncError); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return newRule;
   }
@@ -337,7 +338,7 @@ export class AlarmRepository {
     r.updatedAt = new Date().toISOString();
     r.version = (r.version || 1) + 1;
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch(handlePostgresAsyncError); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return { success: true, rule: r };
   }
@@ -354,7 +355,7 @@ export class AlarmRepository {
 
     this.db.data.rules.splice(idx, 1);
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteRule(id).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.deleteRule(id).catch(handlePostgresAsyncError); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return true;
   }
@@ -372,7 +373,7 @@ export class AlarmRepository {
     r.updatedAt = new Date().toISOString();
     r.version = (r.version || 1) + 1;
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveRule(r).catch(handlePostgresAsyncError); }
     this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     return true;
   }
@@ -475,7 +476,7 @@ export class AlarmRepository {
     if (count > 0) {
       this.db.saveData(this.db.data);
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkAcknowledgeAlarms(ackedIds, ackBy).catch((e: any) => console.warn('[PG Error]', e.message));
+        await this.db.postgresRepo.bulkAcknowledgeAlarms(ackedIds, ackBy).catch(handlePostgresAsyncError);
       }
       this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
     }
@@ -506,7 +507,7 @@ export class AlarmRepository {
     if (count > 0) {
       this.db.saveData(this.db.data);
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkResolveAlarms(resolvedIds, resBy).catch((e: any) => console.warn('[PG Error]', e.message));
+        await this.db.postgresRepo.bulkResolveAlarms(resolvedIds, resBy).catch(handlePostgresAsyncError);
       }
       this.db.notifyNotificationListeners('alarms:updated', this.db.data.activeAlarms);
     }
@@ -531,7 +532,7 @@ export class AlarmRepository {
     if (deletedIds.length > 0) {
       this.db.saveData(this.db.data);
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.bulkDeleteRules(deletedIds).catch((e: any) => console.warn('[PG Error]', e.message));
+        await this.db.postgresRepo.bulkDeleteRules(deletedIds).catch(handlePostgresAsyncError);
       }
       this.db.notifyNotificationListeners('rules:updated', this.db.data.rules);
     }
@@ -552,7 +553,7 @@ export class AlarmRepository {
           r.version = (r.version || 1) + 1;
           count++;
           if (this.db.postgresRepo?.isReady()) {
-            this.db.postgresRepo.saveRule(r).catch((e: any) => console.warn('[PG Error]', e.message));
+            this.db.postgresRepo.saveRule(r).catch(handlePostgresAsyncError);
           }
         }
       }

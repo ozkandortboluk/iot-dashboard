@@ -1,3 +1,4 @@
+import { handlePostgresAsyncError } from '../database/connection.js';
 import crypto from 'crypto';
 import { hashPassword, verifyPassword, verifyAndMigratePassword } from '../utils/crypto.js';
 import { normalizeEmail, validateEmail, validatePassword } from '../utils/validation.js';
@@ -217,9 +218,7 @@ export class UserRepository {
         if (storedHash && authCheck.isValid) {
           if (authCheck.needsMigration) {
             const newHashed = hashPassword(pass);
-            await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch((e: any) =>
-              console.warn('[PG Error]', e?.message || e)
-            );
+            await this.db.postgresRepo.updateUserPassword(user.id, newHashed).catch(handlePostgresAsyncError);
           }
           // Sync with in-memory store
           if (this.db.data.users) {
@@ -334,8 +333,8 @@ export class UserRepository {
         throw err;
       }
 
-      await this.db.postgresRepo.saveDashboard(dashboard).catch((e: any) => console.warn('[PG Error]', e?.message || e));
-      await this.db.postgresRepo.saveAuditLog(auditLog).catch((e: any) => console.warn('[PG Error]', e?.message || e));
+      await this.db.postgresRepo.saveDashboard(dashboard).catch(handlePostgresAsyncError);
+      await this.db.postgresRepo.saveAuditLog(auditLog).catch(handlePostgresAsyncError);
 
       // Also sync to in-memory store for instant cache retrieval
       if (!this.db.data.users) this.db.data.users = [];
@@ -774,7 +773,7 @@ export class UserRepository {
     };
 
     if (this.isPgReady()) {
-      await this.db.postgresRepo.saveAuditLog(logItem).catch((e: any) => console.warn('[PG Error]', e?.message || e));
+      await this.db.postgresRepo.saveAuditLog(logItem).catch(handlePostgresAsyncError);
       return;
     }
 

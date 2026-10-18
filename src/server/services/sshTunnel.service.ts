@@ -40,6 +40,7 @@ export interface SSHTunnelState {
 }
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
+
 // Use a dedicated local forwarding port to avoid collision with local PostgreSQL.
 export const DEFAULT_SSH_LOCAL_PORT = 15432;
 
@@ -65,7 +66,6 @@ export function verifyHostFingerprint(
   expectedFingerprint?: string
 ): { valid: boolean; actualSha256: string; actualMd5: string; pinned: boolean; error?: string } {
   const { sha256, md5 } = computeHostFingerprints(serverKey);
-
   if (!expectedFingerprint || !expectedFingerprint.trim()) {
     return {
       valid: false,
@@ -111,9 +111,42 @@ class SSHTunnelService {
   private activeHostFingerprint: string | null = null;
   private logs: string[] = [];
   private activeConfig: SSHTunnelConfig | null = null;
+  private lastActivityTime: number = Date.now();
+  private maxLifetimeTimer: any = null;
+  private idleCheckTimer: any = null;
+  private userExplicitlyClosed: boolean = false;
+  private reconnectAttempts: number = 0;
+  private reconnectTimer: any = null;
 
   constructor() {
     this.loadSavedConfig();
+    if (this.activeConfig && this.activeConfig.autoConnect) {
+      setTimeout(() => {
+        if (this.activeConfig) {
+          this.connectTunnel(this.activeConfig).catch(() => {});
+        }
+      }, 2000);
+    }
+    this.startWatchdogs();
+  }
+
+  private startWatchdogs() {
+    if (this.idleCheckTimer) clearInterval(this.idleCheckTimer);
+    this.idleCheckTimer = setInterval(() => {
+      if (this.status === 'connected') {
+        const idleMs = Date.now() - this.lastActivityTime;
+        const twentyMinsMs = 20 * 60 * 1000;
+        if (idleMs > twentyMinsMs) {
+          this.addLog('SSH Tüneli: 20 dakikadır veri alışverişi / komut olmadığından otomatik olarak kapatıldı.');
+          this.userExplicitlyClosed = true;
+          this.disconnectTunnel();
+        }
+      }
+    }, 60000);
+  }
+
+  private recordActivity() {
+    this.lastActivityTime = Date.now();
   }
 
   private addLog(msg: string) {
@@ -135,10 +168,8 @@ class SSHTunnelService {
         const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
         const parsed = JSON.parse(data);
         if (parsed && parsed.sshHost) {
-          // Retrieve sensitive credentials from Vault
           const vaultPassword = systemSecretsService.getSecret('ssh_tunnel_password');
           const vaultPrivateKey = systemSecretsService.getSecret('ssh_tunnel_private_key');
-
           this.activeConfig = {
             ...parsed,
             localPort: Number(parsed.localPort) || DEFAULT_SSH_LOCAL_PORT,
@@ -159,8 +190,6 @@ class SSHTunnelService {
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
-
-      // 1. Secure sensitive password & privateKey in System Secrets Vault
       if (config.password && !config.password.includes('••••••••')) {
         await systemSecretsService.setSecret('ssh_tunnel_password', config.password, {
           category: 'custom',
@@ -176,7 +205,6 @@ class SSHTunnelService {
         });
       }
 
-      // 2. Persist ONLY non-sensitive settings to disk
       const sanitizedConfigForDisk: Partial<SSHTunnelConfig> = {
         sshHost: config.sshHost,
         sshPort: config.sshPort || 22,
@@ -237,10 +265,6 @@ class SSHTunnelService {
     };
   }
 
-  /**
-   * Probes the remote SSH server's public host key fingerprint WITHOUT sending any credentials.
-   * Connects only to exchange keys and disconnects immediately during KEX, eliminating MITM exposure.
-   */
   public async probeHostFingerprint(
     host: string,
     port: number = 22
@@ -281,7 +305,6 @@ class SSHTunnelService {
           if (!isResolved) {
             isResolved = true;
             clearTimeout(timeout);
-            // End client connection immediately: host key obtained before any credentials sent
             if (typeof verifyCallback === 'function') {
               verifyCallback(false);
             }
@@ -316,7 +339,6 @@ class SSHTunnelService {
     }
 
     return new Promise((resolve) => {
-
       const client = new Client();
       let isResolved = false;
       let discoveredFingerprint: string | null = null;
@@ -327,9 +349,7 @@ class SSHTunnelService {
           isResolved = true;
           try {
             client.end();
-          } catch {
-            // ignore
-          }
+          } catch {}
           resolve({
             success: false,
             message: 'SSH bağlantı zaman aşımına uğradı (10s). Lütfen IP ve port bilgilerini kontrol edin.',
@@ -369,7 +389,6 @@ class SSHTunnelService {
         }
       });
 
-      // Resolve effective password / privateKey from config or Vault
       let effectivePassword = config.password;
       if (!effectivePassword || effectivePassword.includes('••••••••')) {
         effectivePassword = systemSecretsService.getSecret('ssh_tunnel_password') || '';
@@ -443,14 +462,15 @@ class SSHTunnelService {
     if (!config.expectedHostFingerprint?.trim()) {
       return { success: false, message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. VPS üzerinden doğruladığınız SHA256 parmak izini girin; bağlantı başlatılmadı.' };
     }
+
     if (this.status === 'connected' || this.status === 'connecting') {
       await this.disconnectTunnel();
     }
 
     this.status = 'connecting';
     this.lastError = null;
+    this.userExplicitlyClosed = false;
 
-    // Resolve effective password / privateKey from config or Vault if masked
     let effectivePassword = config.password;
     if (!effectivePassword || effectivePassword.includes('••••••••')) {
       effectivePassword = systemSecretsService.getSecret('ssh_tunnel_password') || '';
@@ -466,7 +486,6 @@ class SSHTunnelService {
       password: effectivePassword,
       privateKey: effectivePrivateKey,
     };
-
 
     this.activeConfig = fullConfig;
     await this.saveConfig(fullConfig);
@@ -494,7 +513,6 @@ class SSHTunnelService {
 
       sshClient.on('ready', () => {
         this.addLog(`SSH El sıkışması başarılı (${fullConfig.sshUser}@${fullConfig.sshHost})! Yerel port dinleyici oluşturuluyor...`);
-
         const localPort = fullConfig.localPort || DEFAULT_SSH_LOCAL_PORT;
         const remoteHost = fullConfig.remoteDbHost || '127.0.0.1';
         const remotePort = fullConfig.remoteDbPort || 5432;
@@ -504,7 +522,7 @@ class SSHTunnelService {
             socket.destroy();
             return;
           }
-
+          this.recordActivity();
           this.sshClient.forwardOut(
             socket.remoteAddress || '127.0.0.1',
             socket.remotePort || 0,
@@ -516,6 +534,7 @@ class SSHTunnelService {
                 socket.destroy();
                 return;
               }
+              this.recordActivity();
               socket.pipe(stream).pipe(socket);
               socket.on('error', () => stream.destroy());
               stream.on('error', () => socket.destroy());
@@ -544,101 +563,98 @@ class SSHTunnelService {
           }
         });
 
-        // Clean up previous netServer cleanly before listening
         const startListening = () => {
           netServer.listen(localPort, '127.0.0.1', async () => {
             this.addLog(`AKTİF: SSH Tüneli kuruldu! Yerel 127.0.0.1:${localPort} -> Uzak ${remoteHost}:${remotePort}`);
             this.status = 'connected';
             this.connectedAt = new Date().toISOString();
             this.netServer = netServer;
+            this.lastActivityTime = Date.now();
+            this.userExplicitlyClosed = false;
+            this.reconnectAttempts = 0;
 
-            if (!isResolved) {
-              isResolved = true;
-              clearTimeout(connectTimeout);
-
-              // 1. If custom database credentials were provided in the tunnel connection, persist to Vault
-              try {
-                const { systemSecretsService } = await import('./systemSecrets.service.js');
-                const updatePayload: any = {};
-                if (config.dbPassword && typeof config.dbPassword === 'string' && config.dbPassword.trim()) {
-                  updatePayload.password = config.dbPassword.trim();
-                }
-                if (config.dbUser && typeof config.dbUser === 'string' && config.dbUser.trim()) {
-                  updatePayload.user = config.dbUser.trim();
-                }
-                if (config.dbName && typeof config.dbName === 'string' && config.dbName.trim()) {
-                  updatePayload.database = config.dbName.trim();
-                }
-                if (Object.keys(updatePayload).length > 0) {
-                  await systemSecretsService.updateDatabaseSecrets(updatePayload, 'ssh_tunnel');
-                }
-              } catch (vaultErr: any) {
-                console.warn('[SSHTunnel] Vault credential save notice:', vaultErr?.message);
+            // Max lifetime: 1 hour (3600000 ms) unless user keeps using it or explicitly closes
+            if (this.maxLifetimeTimer) clearTimeout(this.maxLifetimeTimer);
+            this.maxLifetimeTimer = setTimeout(() => {
+              if (this.status === 'connected' && !this.userExplicitlyClosed) {
+                this.addLog('SSH Tüneli: 1 saatlik azami açık kalma süresi doldu, tünel yenileniyor...');
+                this.disconnectTunnel().then(() => {
+                  if (this.activeConfig && !this.userExplicitlyClosed) {
+                    this.connectTunnel(this.activeConfig).catch(() => {});
+                  }
+                });
               }
+            }, 60 * 60 * 1000);
 
-              // 2. Check whether PostgreSQL password is real or a default placeholder
+            try {
               const { systemSecretsService } = await import('./systemSecrets.service.js');
-              const { isDefaultPassword } = await import('../utils/startupSecurityPolicy.js');
-              const { recycleSharedPgPool, getSharedPgPool } = await import('../database/connection.js');
-              const currentDbPass = systemSecretsService.getDatabasePassword();
-              const hasValidDbPassword = Boolean(currentDbPass && !isDefaultPassword(currentDbPass));
+              const updatePayload: any = {};
+              if (config.dbPassword && typeof config.dbPassword === 'string' && config.dbPassword.trim()) {
+                updatePayload.password = config.dbPassword.trim();
+              }
+              if (config.dbUser && typeof config.dbUser === 'string' && config.dbUser.trim()) {
+                updatePayload.user = config.dbUser.trim();
+              }
+              if (config.dbName && typeof config.dbName === 'string' && config.dbName.trim()) {
+                updatePayload.database = config.dbName.trim();
+              }
+              if (Object.keys(updatePayload).length > 0) {
+                await systemSecretsService.updateDatabaseSecrets(updatePayload, 'ssh_tunnel');
+              }
+            } catch (vaultErr: any) {
+              console.warn('[SSHTunnel] Vault credential save notice:', vaultErr?.message);
+            }
 
-              let isPgConnected = false;
-              let dbState = 'DB_UNAVAILABLE';
+            const { systemSecretsService } = await import('./systemSecrets.service.js');
+            const { isDefaultPassword } = await import('../utils/startupSecurityPolicy.js');
+            const { recycleSharedPgPool, getSharedPgPool } = await import('../database/connection.js');
+            const currentDbPass = systemSecretsService.getDatabasePassword();
+            const hasValidDbPassword = Boolean(currentDbPass && !isDefaultPassword(currentDbPass));
+            let isPgConnected = false;
+            let dbState = 'DB_UNAVAILABLE';
 
-              if (!hasValidDbPassword) {
-                this.addLog(`SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). PostgreSQL parolası henüz girilmedi (varsayılan şablon parola kullanılamaz). Lütfen geçerli veritabanı parolanızı kaydedin.`);
-              } else {
-                try {
-                  this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
-                  await recycleSharedPgPool();
-                  const testPool = getSharedPgPool();
-                  if (testPool) {
-                    const testClient = await testPool.connect();
-                    try {
-                      await testClient.query('SELECT 1;');
-                      isPgConnected = true;
-                      this.addLog('PostgreSQL bağlantısı doğrulandı (SELECT 1 başarılı).');
-                    } finally {
-                      testClient.release();
-                    }
-                  }
-                  const { db } = await import('../db.js');
-                  if (db && typeof db.initPostgresRepository === 'function') {
-                    await db.initPostgresRepository();
-                    dbState = db.getDatabaseState();
-                  }
-
-                  // A successful SELECT 1 confirms connectivity only. It must not
-                  // permanently complete installation or persist the ephemeral
-                  // 127.0.0.1 tunnel endpoint as the canonical database config.
-                  // Setup completion remains owned by the setup/admin flow.
-                } catch (pgErr: any) {
-                  const errMsg = pgErr?.message || String(pgErr);
-                  const lowerMsg = errMsg.toLowerCase();
-                  if (lowerMsg.includes('password authentication failed') || lowerMsg.includes('sasl')) {
-                    this.addLog('PostgreSQL kimlik doğrulama uyarısı: Girilen veritabanı parolası veya kullanıcı adı geçersiz. Lütfen veritabanı şifrenizi kontrol edin.');
-                  } else {
-                    this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${errMsg}`);
+            if (!hasValidDbPassword) {
+              this.addLog(`SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). PostgreSQL parolası henüz girilmedi.`);
+            } else {
+              try {
+                this.addLog('Veritabanı bağlantısı SSH tüneli (127.0.0.1:' + localPort + ') üzerinden başlatılıyor...');
+                await recycleSharedPgPool();
+                const testPool = getSharedPgPool();
+                if (testPool) {
+                  const testClient = await testPool.connect();
+                  try {
+                    await testClient.query('SELECT 1;');
+                    isPgConnected = true;
+                    this.addLog('PostgreSQL bağlantısı doğrulandı (SELECT 1 başarılı).');
+                  } finally {
+                    testClient.release();
                   }
                 }
+                const { db } = await import('../db.js');
+                if (db && typeof db.initPostgresRepository === 'function') {
+                  await db.initPostgresRepository();
+                  dbState = db.getDatabaseState();
+                }
+              } catch (pgErr: any) {
+                const errMsg = pgErr?.message || String(pgErr);
+                this.addLog(`PostgreSQL bağlantı kontrolü uyarısı: ${errMsg}`);
               }
-
-              const successMsg = isPgConnected
-                ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
-                : !hasValidDbPassword
-                ? `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). Uzak veritabanına bağlanmak için lütfen PostgreSQL parolanızı giriniz.`
-                : `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL veritabanı bağlantısı kurulamadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
-
-              resolve({
-                success: isPgConnected || !hasValidDbPassword,
-                transportConnected: true,
-                isPgConnected,
-                databaseState: dbState,
-                message: successMsg,
-                localPort,
-              });
             }
+
+            const successMsg = isPgConnected
+              ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
+              : !hasValidDbPassword
+              ? `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}).`
+              : `SSH Tüneli kuruldu, ancak PostgreSQL veritabanı bağlantısı kurulamadı.`;
+
+            resolve({
+              success: isPgConnected || !hasValidDbPassword,
+              transportConnected: true,
+              isPgConnected,
+              databaseState: dbState,
+              message: successMsg,
+              localPort,
+            });
           });
         };
 
@@ -653,13 +669,11 @@ class SSHTunnelService {
       });
 
       let fingerprintError: string | null = null;
-
       sshClient.on('error', (err: any) => {
         const errMsg = fingerprintError || err?.message || 'SSH Tünel Hatası';
         this.addLog(`HATA: SSH tüneli kesildi veya kurulamadı: ${errMsg}`);
         this.lastError = errMsg;
         this.status = 'error';
-
         if (!isResolved) {
           isResolved = true;
           clearTimeout(connectTimeout);
@@ -670,6 +684,7 @@ class SSHTunnelService {
             hostFingerprint: this.activeHostFingerprint,
           });
         }
+        this.handleUnexpectedDrop();
       });
 
       sshClient.on('close', () => {
@@ -678,6 +693,7 @@ class SSHTunnelService {
           this.status = 'disconnected';
         }
         this.cleanup();
+        this.handleUnexpectedDrop();
       });
 
       const sshConnConfig: ConnectConfig = {
@@ -737,7 +753,29 @@ class SSHTunnelService {
     });
   }
 
+  private handleUnexpectedDrop() {
+    if (this.userExplicitlyClosed) return;
+    if (this.reconnectAttempts >= 5) {
+      this.addLog('SSH Tüneli: Otomatik yeniden bağlanma deneme sınırı aşıldı (5 kez).');
+      return;
+    }
+    this.reconnectAttempts++;
+    const delayMs = Math.min(this.reconnectAttempts * 3000, 15000);
+    this.addLog(`SSH Tüneli: Bağlantı düştü. ${delayMs / 1000} saniye içinde otomatik yeniden kurulacak (Deneme ${this.reconnectAttempts}/5)...`);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (!this.userExplicitlyClosed && this.activeConfig && this.status !== 'connected') {
+        this.connectTunnel(this.activeConfig).catch((err) => {
+          this.addLog(`Otomatik yeniden bağlanma başarısız: ${err?.message}`);
+        });
+      }
+    }, delayMs);
+  }
+
   public async disconnectTunnel(): Promise<{ success: boolean; message: string }> {
+    this.userExplicitlyClosed = true;
+    if (this.maxLifetimeTimer) clearTimeout(this.maxLifetimeTimer);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.addLog('SSH Tüneli kapatılıyor...');
     this.status = 'disconnected';
     this.cleanup();
@@ -749,9 +787,7 @@ class SSHTunnelService {
       if (db && typeof db.initPostgresRepository === 'function') {
         db.initPostgresRepository().catch(() => {});
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
     return { success: true, message: 'SSH Tüneli başarıyla kapatıldı.' };
   }
 
@@ -759,17 +795,13 @@ class SSHTunnelService {
     if (this.netServer) {
       try {
         this.netServer.close();
-      } catch {
-        // ignore
-      }
+      } catch {}
       this.netServer = null;
     }
     if (this.sshClient) {
       try {
         this.sshClient.end();
-      } catch {
-        // ignore
-      }
+      } catch {}
       this.sshClient = null;
     }
   }
