@@ -164,6 +164,9 @@ export class PostgresRepository {
   }
 
   public setPool(pool: Pool | null) {
+    if (this.pool === pool && pool !== null) {
+      return;
+    }
     this.pool = pool;
     this.isConnected = false;
     this.connectionErrorNotified = false;

@@ -374,9 +374,15 @@ class LocalDatabase {
       const isPgConfiguredNow = !!this.getPostgresUrl().trim();
       if (process.env.NODE_ENV === 'production' || isPgConfiguredNow) {
         if (!connected || !isReady) {
+          // Do not interfere if database is actively in the middle of initialization
+          if (this.isInitializingPostgres) {
+            return;
+          }
           if (this.dbState === DatabaseState.READY) {
-            console.warn('[Database State Machine] PostgreSQL bağlantısı kesildi. Durum DB_UNAVAILABLE olarak güncelleniyor.');
-            this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+            if (!connected) {
+              console.warn('[Database State Machine] PostgreSQL bağlantısı kesildi. Durum DB_UNAVAILABLE olarak güncelleniyor.');
+              this.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
+            }
           }
         } else if (connected && isReady) {
           if (
@@ -489,16 +495,20 @@ class LocalDatabase {
     this.pgPool = pool;
     this.pgPoolUrl = url;
 
-    if (pool && !this.postgresRepo.isReady()) {
+    if (pool && this.postgresRepo.getPool() !== pool) {
       this.postgresRepo.setPool(pool);
     }
 
     return pool;
   }
 
-  public async initPostgresRepository(): Promise<boolean> {
+  public async initPostgresRepository(force: boolean = false): Promise<boolean> {
     if (this.isInitializingPostgres) {
       return this.postgresRepo.isReady();
+    }
+    const currentUrl = this.getPostgresUrl().trim();
+    if (!force && this.dbState === DatabaseState.READY && this.postgresRepo.isReady() && this.pgPoolUrl === currentUrl) {
+      return true;
     }
     this.isInitializingPostgres = true;
 
@@ -544,7 +554,9 @@ class LocalDatabase {
       }
 
       const wasAlreadyReady = this.dbState === DatabaseState.READY;
-      this.postgresRepo.setPool(pool);
+      if (this.postgresRepo.getPool() !== pool) {
+        this.postgresRepo.setPool(pool);
+      }
       // Only transition to DB_CONNECTING during initial bootstrap or if not already marked unavailable.
       if (!wasAlreadyReady && this.dbState === DatabaseState.BOOTSTRAP) {
         this.setDatabaseState(DatabaseState.DB_CONNECTING);
@@ -576,7 +588,7 @@ class LocalDatabase {
         }
       }
 
-    this.postgresRepo.setConnected(true, true);
+    this.postgresRepo.setConnected(true, false);
     this.setDatabaseState(DatabaseState.DB_INITIALIZING);
 
     if (!this.data.databaseSettings) {
@@ -588,6 +600,7 @@ class LocalDatabase {
     // 1. Authoritative Schema Auto-Healing & Verification before hydration
     try {
       await this.postgresRepo.ensureTelemetrySchema(true);
+      this.postgresRepo.setConnected(true, true);
     } catch (tErr: any) {
       systemLogger.error('database', 'PostgreSQL Şema Doğrulama/Onarım Hatası:', tErr?.message || tErr);
       this.setDatabaseState(DatabaseState.MAINTENANCE);

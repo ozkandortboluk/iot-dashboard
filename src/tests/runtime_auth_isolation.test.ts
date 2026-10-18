@@ -101,6 +101,7 @@ describe('Centralized Runtime Environment & Cookie Auth Isolation Suite', () => 
       delete process.env.APP_ENV;
       process.env.VPS_PRODUCTION = 'true';
       expect(resolveRuntimeEnvironment()).toBe('vps');
+      delete process.env.VPS_PRODUCTION;
     });
   });
 

@@ -544,17 +544,17 @@ export class DatabaseAutoHealer {
 
       if (!isMigrationReady || !isSchemaVerifiedHealthy) {
         status = 'degraded';
-      } else if (latencyMs >= 0 && latencyMs < 2000 && hungCleared === 0) {
+      } else if (latencyMs >= 0 && hungCleared === 0) {
         status = 'healthy';
       } else if (status === 'recovering' || status === 'degraded') {
-        if (latencyMs >= 0 && latencyMs < 2000 && isSchemaVerifiedHealthy && isMigrationReady) {
+        if (latencyMs >= 0 && isSchemaVerifiedHealthy && isMigrationReady) {
           status = 'healthy';
         }
       }
 
       // Ensure repo state and databaseSettings reflect true verified state
       // Auto-Healer or SELECT 1 MUST NEVER elevate fatal migration drift / unverified state to READY!
-      const isPgReady = status === 'healthy' && isMigrationReady && isSchemaVerifiedHealthy;
+      const isPgReady = (status === 'healthy' || status === 'recovering') && isMigrationReady && isSchemaVerifiedHealthy && latencyMs >= 0;
       this.dbInstance.postgresRepo.setConnected(true, isPgReady);
       if (!isPgReady && (process.env.NODE_ENV === 'production' || this.dbInstance.getActiveEngine() === 'postgres')) {
         if (this.dbInstance.getDatabaseState() === DatabaseState.READY) {

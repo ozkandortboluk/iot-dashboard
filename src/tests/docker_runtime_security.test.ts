@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 
-const compose = fs.readFileSync('docker-compose.yml', 'utf8');
+const compose = fs.readFileSync('docker-compose.yml', 'utf8').replace(/\r\n/g, '\n');
 const app = compose.split('\n  app:\n')[1]?.split('\n  proxy:\n')[0] ?? '';
 const proxy = compose.split('\n  proxy:\n')[1]?.split('\n  adminer:\n')[0] ?? '';
 describe('Docker runtime least privilege', () => {

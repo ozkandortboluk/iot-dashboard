@@ -6,11 +6,14 @@ import { db } from '../server/db.js';
 
 describe('Factory Reset & Master Encryption Key Verification', () => {
   const secretFilePath = path.resolve(process.cwd(), 'secrets', 'encryption_key');
+  const vaultKeyPath = path.resolve(process.cwd(), 'data', '.vault_key');
   let activeKey = 'test_master_encryption_key_2026_secure';
 
   beforeEach(() => {
     if (fs.existsSync(secretFilePath)) {
       activeKey = fs.readFileSync(secretFilePath, 'utf8').trim();
+    } else if (fs.existsSync(vaultKeyPath)) {
+      activeKey = fs.readFileSync(vaultKeyPath, 'utf8').trim();
     } else {
       process.env.ENCRYPTION_KEY = activeKey;
     }
