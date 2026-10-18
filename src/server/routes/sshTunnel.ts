@@ -149,12 +149,7 @@ const handleBootstrapToken = (req: Request, res: Response) => {
     });
   }
 
-  const rememberDevice = Boolean(req.body?.rememberDevice);
-  const ttlMs = rememberDevice
-    ? (aiStudioBootstrapAuthService.REMEMBER_DEVICE_TTL_MS || 7 * 24 * 60 * 60 * 1000)
-    : 30 * 60 * 1000;
-
-  const token = aiStudioBootstrapAuthService.createBootstrapToken(ttlMs, rememberDevice);
+  const token = aiStudioBootstrapAuthService.createBootstrapToken();
   if (!token) {
     return res.status(403).json({
       success: false,
@@ -168,45 +163,19 @@ const handleBootstrapToken = (req: Request, res: Response) => {
     httpOnly: true,
     secure: isSecure,
     sameSite: isSecure ? 'none' : 'lax',
-    maxAge: ttlMs,
+    maxAge: 30 * 60 * 1000,
     path: '/',
   });
 
   return res.json({
     success: true,
     bootstrapToken: token,
-    expiresInSeconds: Math.floor(ttlMs / 1000),
-    rememberedDevice: rememberDevice,
+    expiresInSeconds: 1800,
     environment: 'aistudio',
   });
 };
 
 sshTunnelRouter.post('/bootstrap-token', guardSshTunnelPolicy, handleBootstrapToken);
-
-/**
- * POST /api/system/ssh-tunnel/revoke-bootstrap-token
- * Safely revokes remembered device scoped token and removes cookie.
- */
-sshTunnelRouter.post('/revoke-bootstrap-token', guardSshTunnelPolicy, (req: Request, res: Response) => {
-  try {
-    const token = aiStudioBootstrapAuthService.extractBootstrapToken(req) || req.body?.token;
-    if (token) {
-      aiStudioBootstrapAuthService.revokeBootstrapToken(token);
-    }
-    if (typeof res.clearCookie === 'function') {
-      res.clearCookie('nexus_ssh_bootstrap_token', { path: '/' });
-    }
-    return res.json({
-      success: true,
-      message: 'Güvenilir cihaz yetkilendirmesi başarıyla sıfırlandı.',
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      message: 'Cihaz yetkilendirmesi sıfırlanamadı: ' + (err?.message || err),
-    });
-  }
-});
 // Bootstrap tokens are created only by POST; GET must never mint credentials.
 
 /**

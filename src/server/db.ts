@@ -634,7 +634,7 @@ class LocalDatabase {
     const onVerifyErr = () => {};
     try {
       const currentPool = this.getPgPool();
-      if (this.postgresRepo.isReady() && currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
+      if (currentPool && !(currentPool as any).ending && !(currentPool as any).ended) {
         verifyClient = await currentPool.connect();
         if (verifyClient) verifyClient.on('error', onVerifyErr);
         const adminCheck = await verifyClient.query(`

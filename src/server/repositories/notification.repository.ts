@@ -1,4 +1,3 @@
-import { handlePostgresAsyncError } from '../database/connection.js';
 import crypto from 'node:crypto';
 import type { NotificationItem, DashboardLayout, WidgetConfig } from '../../types.js';
 import { defaultWidgets } from '../initialData.js';
@@ -58,7 +57,7 @@ export class NotificationRepository {
     const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
 
     if (!isSimulated || saveSimulatedDataToDb) {
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveNotification(fullNotif).catch(handlePostgresAsyncError); }
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveNotification(fullNotif).catch((e) => console.warn('[PG Error]', e.message)); }
     }
     return fullNotif;
   }
@@ -167,7 +166,7 @@ export class NotificationRepository {
     };
     this.db.data.dashboards.push(newDash);
     this.db.scheduleSave();
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(newDash).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(newDash).catch((e: any) => console.warn('[PG Error]', e.message)); }
     return newDash;
   }
 
@@ -191,7 +190,7 @@ export class NotificationRepository {
     if (title) userDash.title = title;
     userDash.updatedAt = new Date().toISOString();
     this.db.scheduleSave();
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(userDash).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDashboard(userDash).catch((e: any) => console.warn('[PG Error]', e.message)); }
     return userDash;
   }
 

@@ -72,7 +72,6 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [disconnecting, setDisconnecting] = useState(false);
   const [probingFingerprint, setProbingFingerprint] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  const [rememberDevice, setRememberDevice] = useState(true);
 
   const [setupTokenInput, setSetupTokenInput] = useState(() => {
     return (
@@ -107,8 +106,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       headers['x-auth-token'] = userToken;
     }
     const bootstrapToken =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token');
+      sessionStorage.getItem('nexus_ssh_bootstrap_token');
     if (bootstrapToken) {
       headers['X-SSH-Bootstrap-Token'] = bootstrapToken;
     }
@@ -116,19 +114,18 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   }, [setupTokenInput]);
 
   const ensureBootstrapToken = useCallback(async (): Promise<string | null> => {
-    const token =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token');
-    if (token) {
-      sessionStorage.setItem('nexus_ssh_bootstrap_token', token);
-      return token;
-    }
+    const token = sessionStorage.getItem('nexus_ssh_bootstrap_token');
+    if (token) return token;
 
     const setupToken =
       setupTokenInput.trim() ||
       sessionStorage.getItem('nexus_setup_token') ||
+      localStorage.getItem('nexus_setup_token') ||
       sessionStorage.getItem('setup_token') ||
-      sessionStorage.getItem('x-setup-token');
+      localStorage.getItem('setup_token') ||
+      sessionStorage.getItem('x-setup-token') ||
+      localStorage.getItem('x-setup-token');
+
     const userToken =
       sessionStorage.getItem('nexus_session_token') ||
       localStorage.getItem('nexus_session_token');
@@ -148,24 +145,15 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         method: 'POST',
         credentials: 'include',
         headers,
-        body: JSON.stringify({ rememberDevice }),
       });
       if (res.ok) {
         const data = await res.json();
         if (data.bootstrapToken) {
           sessionStorage.setItem('nexus_ssh_bootstrap_token', data.bootstrapToken);
-          if (rememberDevice) {
-            localStorage.setItem('nexus_ssh_bootstrap_token', data.bootstrapToken);
-          }
-          // Do not keep master setup key in memory once scoped token is acquired
-          setSetupTokenInput('');
-          sessionStorage.removeItem('nexus_setup_token');
-          localStorage.removeItem('nexus_setup_token');
           return data.bootstrapToken;
         }
       } else {
         sessionStorage.removeItem('nexus_ssh_bootstrap_token');
-        localStorage.removeItem('nexus_ssh_bootstrap_token');
         const errData = await res.json().catch(() => null);
         if (errData?.message) {
           setLastError(errData.message);
@@ -175,30 +163,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       // Best effort background bootstrap
     }
     return null;
-  }, [setupTokenInput, rememberDevice]);
-
-  const handleRevokeRememberedToken = async () => {
-    const token =
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token');
-    try {
-      await fetch('/api/system/ssh-tunnel/revoke-bootstrap-token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'X-SSH-Bootstrap-Token': token } : {}),
-        },
-        credentials: 'include',
-        body: JSON.stringify({ token }),
-      });
-    } catch {}
-    sessionStorage.removeItem('nexus_ssh_bootstrap_token');
-    localStorage.removeItem('nexus_ssh_bootstrap_token');
-    sessionStorage.removeItem('nexus_setup_token');
-    localStorage.removeItem('nexus_setup_token');
-    setSetupTokenInput('');
-    setActionMessage({ type: 'info', text: 'Güvenilir cihaz yetkilendirmesi sıfırlandı. Yeni bağlantı için anahtar gereklidir.' });
-  };
+  }, [setupTokenInput]);
 
   const handleVerifySetupToken = async () => {
     if (!setupTokenInput.trim()) {
@@ -258,7 +223,20 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         credentials: 'include',
       });
       if (res.status === 401) {
-        // Suppress 401 logging / noisy error updates when unauthenticated before setup token is entered
+        sessionStorage.removeItem('nexus_ssh_bootstrap_token');
+        const newToken = await ensureBootstrapToken();
+        if (newToken) {
+          const retryRes = await fetch('/api/system/ssh-tunnel/status', {
+            headers: getAuthHeaders(),
+            credentials: 'include',
+          });
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            handleStatusData(retryData);
+            return;
+          }
+        }
+        setLastError('SSH Tüneli yönetimi için yetkilendirme doğrulanıyor. Lütfen tüneli başlatın.');
         return;
       }
       if (res.ok) {
@@ -292,8 +270,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       localStorage.getItem('nexus_session_token')
     );
     const hasActiveBootstrap = Boolean(
-      sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-      localStorage.getItem('nexus_ssh_bootstrap_token')
+      sessionStorage.getItem('nexus_ssh_bootstrap_token')
     );
 
     return (
@@ -301,74 +278,43 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <h4 className="text-xs font-semibold text-slate-200 flex items-center gap-2">
             <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Güvenli Tünel Yetkilendirmesi</span>
+            <span>Kurulum & Kurtarma Güvenlik Anahtarı</span>
           </h4>
           {isUserAuth ? (
             <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
               ● Yönetici Oturumu Aktif
             </span>
           ) : hasActiveBootstrap ? (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                Güvenilir Cihaz Doğrulandı (7 Gün)
-              </span>
-              <button
-                type="button"
-                onClick={handleRevokeRememberedToken}
-                className="text-[10px] text-slate-400 hover:text-rose-400 underline transition-colors cursor-pointer"
-                title="Bu tarayıcıdaki yetkiyi sıfırla"
-              >
-                Yetkiyi Unut
-              </button>
-            </div>
+            <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
+              ● Ön Yetki Doğrulandı
+            </span>
           ) : (
             <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-              ● Ön Yetki Gerekli
+              ● Ön Bağlantı İçin Gerekli
             </span>
           )}
         </div>
-
-        {hasActiveBootstrap && !isUserAuth ? (
-          <p className="text-[11px] text-slate-300 bg-emerald-950/30 p-2 rounded-lg border border-emerald-800/40 leading-relaxed">
-            Bu cihaz güvenilir olarak yetkilendirildi. Kök kurulum anahtarı tarayıcıda saklanmaz; yalnızca SSH tüneli açmaya yetkili kısıtlı bir güvenlik bileti kullanılır.
-          </p>
-        ) : (
-          <>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              {isUserAuth
-                ? 'Yönetici oturumunuz aktif olduğu için SSH tüneli doğrudan yetkilendirilmiştir.'
-                : 'Veritabanı uzakta olduğu için ilk tüneli başlatırken sunucu kurulum anahtarı (data/.setup_token) bir kez doğrulanır.'}
-            </p>
-
-            <div className="flex gap-2 pt-1">
-              <input
-                type="password"
-                value={setupTokenInput}
-                onChange={(e) => setSetupTokenInput(e.target.value)}
-                placeholder="data/.setup_token dosyasındaki 64 haneli güvenlik anahtarı..."
-                className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
-              />
-              <button
-                type="button"
-                onClick={handleVerifySetupToken}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0 border border-indigo-500/30"
-              >
-                Doğrula & Kaydet
-              </button>
-            </div>
-
-            <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-300 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberDevice}
-                onChange={(e) => setRememberDevice(e.target.checked)}
-                className="rounded accent-indigo-500 w-3.5 h-3.5 cursor-pointer"
-              />
-              <span>Bu güvenilir cihazı 7 gün hatırla (Kök anahtar saklanmaz, kısıtlı tünel bileti kullanılır)</span>
-            </label>
-          </>
-        )}
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          {isUserAuth
+            ? 'Yönetici oturumunuz aktif olduğu için SSH tüneli doğrudan yetkilendirilmiştir.'
+            : 'Giriş yapılmadan veya veritabanı kurulmadan önce SSH tünelini yönetmek için sunucu kurulum/kurtarma anahtarı (data/.setup_token dosyasında yer alır) gereklidir.'}
+        </p>
+        <div className="flex gap-2 pt-1">
+          <input
+            type="password"
+            value={setupTokenInput}
+            onChange={(e) => setSetupTokenInput(e.target.value)}
+            placeholder="data/.setup_token veya konsoldaki 64 haneli güvenlik anahtarı..."
+            className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
+          />
+          <button
+            type="button"
+            onClick={handleVerifySetupToken}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0 border border-indigo-500/30"
+          >
+            Doğrula & Kaydet
+          </button>
+        </div>
       </div>
     );
   };
@@ -522,7 +468,6 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.success) {
         setActionMessage({ type: 'success', text: data.message });
         await fetchStatus();
-        setCanProceed(true);
         if (onConnectedSuccess) {
           onConnectedSuccess();
         }

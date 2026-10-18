@@ -1,4 +1,3 @@
-import { handlePostgresAsyncError } from '../database/connection.js';
 import zlib from 'zlib';
 import crypto from 'crypto';
 import type {
@@ -172,7 +171,7 @@ export class DeviceRepository {
     if (hasChanges) {
       this.db.saveData(this.db.data);
       for (const dev of this.db.data.devices) {
-        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
       }
     }
     return hasChanges;
@@ -420,7 +419,7 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(newDevice).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(newDevice).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return newDevice;
   }
@@ -446,7 +445,7 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev.apiKey;
   }
@@ -481,7 +480,7 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Rotasyonu Gerçekleştirildi: ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
 
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return {
       apiKey: dev.apiKey,
@@ -502,7 +501,7 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı İptal Edildi (Revoked): ${dev.name} (Neden: ${reason})`, 'high');
     this.db.saveData(this.db.data);
 
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -516,7 +515,7 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API Anahtarı Yeniden Aktifleştirildi: ${dev.name}`, 'medium');
     this.db.saveData(this.db.data);
 
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -538,7 +537,7 @@ export class DeviceRepository {
     this.db.addAuditLog('system', 'API Manager', `Cihaz API İzinleri ve Süresi Güncellendi: ${dev.name}`, 'medium');
     this.db.saveData(this.db.data);
 
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -567,7 +566,7 @@ export class DeviceRepository {
 
     this.db.addAuditLog(adminUserId, adminUserName, `Sanal Cihaz Fiziksel Donanıma Dönüştürüldü (Yeni API Anahtarı Atandı): ${dev.name}`, 'high');
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -709,7 +708,7 @@ export class DeviceRepository {
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -987,7 +986,7 @@ export class DeviceRepository {
 
       // In PostgreSQL: Remove device from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.deleteDevice(deviceId).catch(handlePostgresAsyncError);
+        await this.db.postgresRepo.deleteDevice(deviceId).catch((e: any) => console.warn('[PG Error]', e.message));
       }
     }
   }
@@ -1053,7 +1052,7 @@ export class DeviceRepository {
 
       // In PostgreSQL: Remove devices from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
-        await this.db.postgresRepo.removeDevicesFromActiveTable(removedIds).catch(handlePostgresAsyncError);
+        await this.db.postgresRepo.removeDevicesFromActiveTable(removedIds).catch((e: any) => console.warn('[PG Error]', e.message));
       }
     }
     return removedIds.length;
@@ -1706,7 +1705,7 @@ export class DeviceRepository {
     }
 
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     return dev;
   }
@@ -1885,7 +1884,7 @@ export class DeviceRepository {
     dev.maintenanceUntil = enabled && until ? until : undefined;
 
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     const operator = requestingUser?.name || 'Kullanıcı';
     this.db.addAuditLog(
@@ -1906,7 +1905,7 @@ export class DeviceRepository {
     dev.tags = cleanTags;
 
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch(handlePostgresAsyncError); }
+    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
 
     const operator = requestingUser?.name || 'Kullanıcı';
     this.db.addAuditLog(

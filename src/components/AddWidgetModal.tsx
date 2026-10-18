@@ -16,7 +16,6 @@ interface AddWidgetModalProps {
 }
 
 export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose, onNavigateToAlarms }) => {
-  if (!isOpen) return null;
   const { widgets, saveWidgets, devices, latestTelemetry, customersList } = useRealtime();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -213,6 +212,7 @@ export const AddWidgetModal: React.FC<AddWidgetModalProps> = ({ isOpen, onClose,
     }
   }, [isOpen]);
 
+  if (!isOpen) return null;
 
   const handleSaveAlarmRule = async (payload: Partial<ThresholdRule>) => {
     const res = await apiFetch('/api/rules', {

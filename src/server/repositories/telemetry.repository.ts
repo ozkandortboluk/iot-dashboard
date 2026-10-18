@@ -1,4 +1,3 @@
-import { handlePostgresAsyncError } from '../database/connection.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -491,7 +490,7 @@ export class TelemetryRepository {
             try {
               const packet: TelemetryPacket = JSON.parse(line);
               let txRes: any = null;
-              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch(handlePostgresAsyncError); }
+              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
               if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
                 fileInsertedCount++;
                 totalReplayedPackets++;
@@ -592,7 +591,7 @@ export class TelemetryRepository {
              try {
                 const packet = JSON.parse(line);
                 let txRes: any = null;
-              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch(handlePostgresAsyncError); }
+              if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.savePhysicalTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
                 if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
                    flushedPacketCount++;
                    flushedReadingCount += packet.readings.length;
@@ -686,7 +685,7 @@ export class TelemetryRepository {
         try {
           // Strictly insert into simulation hypertable (simulation_telemetry_readings)
           let txRes: any = null;
-          if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveSimulationTelemetryBatchInTransaction(packet.readings).catch(handlePostgresAsyncError); }
+          if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveSimulationTelemetryBatchInTransaction(packet.readings).catch((e) => console.warn('[PG Error]', e.message)); }
           if (txRes && (txRes.rowCount !== undefined ? txRes.rowCount >= 0 : true)) {
             flushedPacketCount++;
             flushedReadingCount += packet.readings.length;
@@ -890,7 +889,7 @@ export class TelemetryRepository {
     try {
       if (this.db.postgresRepo?.isReady()) {
         let txRes: any = null;
-        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(readings).catch(handlePostgresAsyncError); }
+        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(readings).catch((e) => console.warn('[PG Error]', e.message)); }
         const success = txRes.success && (txRes.rowCount > 0 || !!txRes.duplicateSkipped);
         batch.forEach((item) => item.resolve(success));
       } else {
@@ -1032,7 +1031,7 @@ export class TelemetryRepository {
     if (isReady && (!isSimulated || saveSimulatedDataToDb)) {
       try {
         let txRes: any = null;
-        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings).catch(handlePostgresAsyncError); }
+        if (this.db.postgresRepo?.isReady()) { txRes = await this.db.postgresRepo.saveTelemetryBatchInTransaction(fullReadings).catch((e) => console.warn('[PG Error]', e.message)); }
         affectedRows = txRes.rowCount;
         duplicateSkipped = !!txRes.duplicateSkipped;
         engine = duplicateSkipped
@@ -1717,7 +1716,7 @@ export class TelemetryRepository {
 
     // Sync to PostgreSQL Repository ONLY if real physical device OR if saveSimulatedDataToDb is true
     if (!isSimulated || saveSimulatedDataToDb) {
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAlarm(alarm).catch(handlePostgresAsyncError); }
+      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveAlarm(alarm).catch((e) => console.warn('[PG Error]', e.message)); }
     }
   }
 

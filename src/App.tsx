@@ -315,8 +315,7 @@ function SystemStateGuard() {
   const verifySshGate = useCallback(async (): Promise<boolean> => {
     try {
       let token =
-        sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
-        localStorage.getItem('nexus_ssh_bootstrap_token');
+        sessionStorage.getItem('nexus_ssh_bootstrap_token');
       if (!token) {
         try {
           const setupToken =
