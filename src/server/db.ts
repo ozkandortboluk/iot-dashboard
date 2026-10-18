@@ -372,6 +372,17 @@ class LocalDatabase {
       updatedAt: effectiveTime,
     });
 
+    // Publish to PostgreSQL cluster channel for cross-server synchronization (Dev <-> VPS)
+    import('./services/clusterSync.service.js')
+      .then(({ clusterSyncService }) => {
+        clusterSyncService.publish('system:settings:updated', {
+          key,
+          value,
+          updatedAt: effectiveTime,
+        });
+      })
+      .catch(() => {});
+
     return true;
   }
 
@@ -403,6 +414,12 @@ class LocalDatabase {
         } catch (e) {
           console.error('[Database State Machine] Listener error:', e);
         }
+      }
+
+      if (newState === DatabaseState.READY && this.postgresRepo?.isReady()) {
+        import('./services/clusterSync.service.js')
+          .then(({ clusterSyncService }) => clusterSyncService.startListener())
+          .catch(() => {});
       }
     }
   }
@@ -3060,6 +3077,17 @@ class LocalDatabase {
         preferences: user.preferences,
         updatedAt: user.preferences?.updatedAt || user.updatedAt,
       });
+
+      // Publish to PostgreSQL cluster channel for cross-server synchronization (Dev <-> VPS)
+      import('./services/clusterSync.service.js')
+        .then(({ clusterSyncService }) => {
+          clusterSyncService.publish('user:preferences:updated', {
+            userId: user.id,
+            preferences: user.preferences,
+            updatedAt: user.preferences?.updatedAt || user.updatedAt,
+          });
+        })
+        .catch(() => {});
     }
 
     this.safeFirestoreWrite(

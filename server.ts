@@ -24,6 +24,7 @@ import { isProductionVpsEnvironment } from './src/server/config/runtimeEnvironme
 import { resolveTrustProxy } from './src/server/config/trustProxyPolicy.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
 import { spaRouteGuardMiddleware, createSpaFallbackHandler } from './src/server/utils/spaFallbackGuard.js';
+import { clusterSyncService } from './src/server/services/clusterSync.service.js';
 
 // Bootstrap runtime security secrets early in dev/test only
 ensureRuntimeSecuritySecrets();
@@ -85,6 +86,7 @@ export async function performGracefulShutdown(reason: string, exitCode = 0) {
   try { setSimulatorActive(false); } catch {}
   try { db.autoHealer?.stopWatchdog(); } catch {}
   try { await sshTunnelService.disconnectTunnel(); } catch {}
+  try { clusterSyncService.cleanupListener(); } catch {}
 
   // 2. Close WebSocket server & disconnect all client sockets
   try { stopWebSocketServer(); } catch {}
@@ -564,11 +566,12 @@ export function startBackgroundWorkers() {
     return;
   }
   backgroundWorkersStarted = true;
-  console.log('[Workers] Veritabanı READY durumunda. Arka plan servisleri başlatılıyor (Simulator, OTA, NoData, CommandExpiry)...');
+  console.log('[Workers] Veritabanı READY durumunda. Arka plan servisleri başlatılıyor (Simulator, OTA, NoData, CommandExpiry, ClusterSync)...');
   initSimulator();
   startOtaWorker();
   startNoDataWorker();
   startCommandExpiryWorker();
+  clusterSyncService.startListener();
 }
 
 // Start the authenticated WebSocket upgrade/security layer with the HTTP server.

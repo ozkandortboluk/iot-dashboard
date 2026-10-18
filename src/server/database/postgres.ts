@@ -1282,6 +1282,11 @@ export class PostgresRepository {
 
     try {
       await this.query(sql, params);
+      import('../services/clusterSync.service.js')
+        .then(({ clusterSyncService }) => {
+          clusterSyncService.publish('device:updated', { device: dev });
+        })
+        .catch(() => {});
     } catch (saveErr: any) {
       const errMsg = saveErr?.message || String(saveErr);
       if (
@@ -1296,6 +1301,11 @@ export class PostgresRepository {
           // Setting user_id to null completely avoids foreign key constraint violation.
           fallbackParams[2] = null;
           await this.query(sql, fallbackParams);
+          import('../services/clusterSync.service.js')
+            .then(({ clusterSyncService }) => {
+              clusterSyncService.publish('device:updated', { device: dev });
+            })
+            .catch(() => {});
           return;
         } catch (retryErr: any) {
           console.warn('[PostgreSQL saveDevice fallback error]:', retryErr?.message || retryErr);
@@ -1310,6 +1320,11 @@ export class PostgresRepository {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
     await this.query(`DELETE FROM devices WHERE id = $1;`, [deviceId]);
+    import('../services/clusterSync.service.js')
+      .then(({ clusterSyncService }) => {
+        clusterSyncService.publish('device:deleted', { deviceId });
+      })
+      .catch(() => {});
   }
 
   public mapDeviceRow(r: any): Device {
