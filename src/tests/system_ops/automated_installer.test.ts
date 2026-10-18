@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { execSync } from 'child_process';
-import { APP_VERSION } from '../../config/version';
+import { APP_VERSION } from '../../config/version.js';
 
 // Run installer integration checks outside the protected GitHub runner checkout.
-const sourceRoot = path.resolve(__dirname, '../..');
-const sandboxRoot = fs.mkdtempSync('/tmp/nexus-installer-test-');
+const sourceRoot = path.resolve(__dirname, '../../..');
+const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-installer-test-'));
 fs.chmodSync(sandboxRoot, 0o755);
 const rootDir = path.join(sandboxRoot, 'project');
 fs.cpSync(sourceRoot, rootDir, {
@@ -61,6 +62,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   // 2. CLI Interface & Flag Parsing
   // =========================================================================
   it('2. ./install.sh --help outputs comprehensive CLI options and usage examples', () => {
+    if (process.platform === 'win32') return;
     const helpOutput = execSync(`bash ${installScriptPath} --help`, { cwd: rootDir, encoding: 'utf-8' });
     expect(helpOutput).toContain('KULLANIM:');
     expect(helpOutput).toContain('--quick');
@@ -75,6 +77,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   });
 
   it('3. ./install.sh --check runs system diagnostic inspection without errors', () => {
+    if (process.platform === 'win32') return;
     const checkOutput = execSync(`bash ${installScriptPath} --check`, { cwd: rootDir, encoding: 'utf-8' });
     expect(checkOutput).toMatch(/Sistem ve Donanım Analizi/i);
     expect(checkOutput).toMatch(/Ağ ve Port Çakışmaları/i);
@@ -85,6 +88,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   // 3. Cryptographic Secret Generation & Vault Policy Compliance
   // =========================================================================
   it('4. ./install.sh --init-only --quick generates cryptographic keys with strict 0600 POSIX permissions', () => {
+    if (process.platform === 'win32') return;
     const initOutput = execSync(`bash ${installScriptPath} --init-only --quick`, { cwd: rootDir, encoding: 'utf-8' });
     expect(initOutput).toMatch(/Kriptografik Kasa/i);
 
@@ -116,6 +120,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   // 4. Automated Backup & Disaster Recovery Engine
   // =========================================================================
   it('5. ./install.sh --backup creates a timestamped archive bundle of secrets and configuration', () => {
+    if (process.platform === 'win32') return;
     // A backup integration test must never inspect or copy live Docker resources.
     // Provide a minimal fake Docker CLI in the disposable installer sandbox.
     const mockBin = path.join(rootDir, 'data', 'mock-bin');
@@ -151,6 +156,7 @@ exit 1
   // 5. Extensible Plugin & Hook Execution
   // =========================================================================
   it('6. Setup plugin runner discovers and executes custom hooks in scripts/setup/plugins.d/', () => {
+    if (process.platform === 'win32') return;
     const testPluginPath = path.join(pluginsDir, '99-test-hook.sh');
     const markerFile = path.join(rootDir, 'data/.plugin_test_marker');
 
@@ -201,12 +207,12 @@ exit 1
   // =========================================================================
   // 7. Version Synchronization (Rule 1 & Rule 2)
   // =========================================================================
-  it('8. package.json, version.ts, and CHANGELOG.md are strictly synchronized to v1.47.0', () => {
+  it('8. package.json, version.ts, and CHANGELOG.md are strictly synchronized to v' + APP_VERSION, () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'));
     const changelog = fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf-8');
 
-    expect(pkg.version).toBe('1.47.0');
-    expect(APP_VERSION).toBe('1.47.0');
-    expect(changelog).toContain('## 🚀 [v1.47.0]');
+    expect(pkg.version).toBe(APP_VERSION);
+    expect(APP_VERSION).toBe(pkg.version);
+    expect(changelog).toContain(`## 🚀 [v${APP_VERSION}]`);
   });
 });

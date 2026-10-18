@@ -179,6 +179,10 @@ async function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'dashboard:layout', payload: userDashboard }));
     }
 
+    // Send persistent system settings to client
+    const allSettings = db.getAllSystemSettings();
+    safeSend(ws, JSON.stringify({ event: 'system:settings:bootstrap', payload: allSettings }));
+
     if (user.role === 'admin') {
       db.getAlarms('usr_admin', undefined, { status: 'active' }).then(a => safeSend(ws, JSON.stringify({ event: 'alarms:updated', payload: a }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
     } else {
@@ -905,6 +909,11 @@ export function initWebSocketServer(server: http.Server) {
     });
 
     // Send system greeting & initial status
+    const initialSettings = db.getAllSystemSettings();
+    const isSimActive = typeof initialSettings?.simulator_config?.active === 'boolean'
+      ? initialSettings.simulator_config.active
+      : (process.env.ENABLE_SIMULATOR === 'true');
+
     safeSend(
       ws,
       JSON.stringify({
@@ -913,6 +922,8 @@ export function initWebSocketServer(server: http.Server) {
           status: 'online',
           serverTime: new Date().toISOString(),
           authenticated: ws.isAuth,
+          simulatorActive: isSimActive,
+          systemSettings: initialSettings,
           user: ws.user ? { id: ws.user.id, name: ws.user.name, role: ws.user.role } : null,
           device: ws.device ? { id: ws.device.id, name: ws.device.name } : null,
         },

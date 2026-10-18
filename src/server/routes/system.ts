@@ -1237,20 +1237,24 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
 
 /**
  * Generic System Settings API
- * GET /api/system/settings - Retrieve all persistent system settings (Admin only)
+ * GET /api/system/settings - Retrieve all persistent system settings
  * GET /api/system/settings/:key - Retrieve single system setting
  * POST /api/system/settings/:key - Set system setting with Last-Write-Wins (LWW) resolution
  */
-systemRouter.get('/settings', authenticateUser, requireAdmin, (req, res) => {
-  const settings = db.getAllSystemSettings();
+systemRouter.get(['/system/settings', '/settings'], authenticateUser, (req, res) => {
+  const settings = { ...db.getAllSystemSettings() };
+  delete settings.service_config; // Ensure sensitive server configuration is not leaked
   res.json({
     success: true,
     settings,
   });
 });
 
-systemRouter.get('/settings/:key', authenticateUser, (req, res) => {
+systemRouter.get(['/system/settings/:key', '/settings/:key'], authenticateUser, (req, res) => {
   const { key } = req.params;
+  if (key === 'service_config' && (req as any).user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Bu ayara erişim yetkiniz bulunmamaktadır.' });
+  }
   const value = db.getSystemSetting(key);
   if (value === null || value === undefined) {
     return res.status(404).json({ error: `Ayar '${key}' bulunamadı.` });
@@ -1262,7 +1266,7 @@ systemRouter.get('/settings/:key', authenticateUser, (req, res) => {
   });
 });
 
-systemRouter.post('/settings/:key', authenticateUser, requireAdmin, async (req, res) => {
+systemRouter.post(['/system/settings/:key', '/settings/:key'], authenticateUser, requireAdmin, async (req, res) => {
   const { key } = req.params;
   const { value, updatedAt } = req.body;
   if (value === undefined) {
@@ -1404,6 +1408,7 @@ simulatorRouter.post('/toggle', authenticateUser, requireAdmin, async (req, res)
   const now = new Date().toISOString();
   const simConfig = {
     active: simulatorActive,
+    simulatorActive,
     intervalMs: simulatorIntervalMs,
     anomalyProbability,
     activeScenario,
@@ -1422,6 +1427,7 @@ simulatorRouter.post('/config', authenticateUser, requireAdmin, async (req, res)
   const now = new Date().toISOString();
   const simConfig = {
     active: simulatorActive,
+    simulatorActive,
     intervalMs: simulatorIntervalMs,
     anomalyProbability,
     activeScenario,

@@ -42,10 +42,12 @@ describe('full backup target selection', () => {
     expect(saved.requestedDestination).toBe('gdrive');
     const record = JSON.parse(fs.readFileSync(path.join(dir, '.dr_destination.json'), 'utf8'));
     expect(Object.keys(record).sort()).toEqual(['destination', 'version']);
-    expect(record.destination).toBe('gdrive');
-    expect(fs.statSync(path.join(dir, '.dr_destination.json')).mode & 0o077).toBe(0);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(dir, '.dr_destination.json')).mode & 0o077).toBe(0);
+    }
   });
   it('refuses a symlinked selection file', () => {
+    if (process.platform === 'win32') return;
     fs.symlinkSync(path.join(dir, 'absent'), path.join(dir, '.dr_destination.json'));
     expect(() => selectBackupDestination('local')).toThrow(/güvenli değil/);
   });

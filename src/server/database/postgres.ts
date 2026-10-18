@@ -660,6 +660,16 @@ export class PostgresRepository {
           CREATE INDEX IF NOT EXISTS idx_dashboard_layouts_user ON dashboard_layouts(user_id);
         `).catch(() => {});
 
+        // Ensure system_settings table is always present
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS system_settings (
+            key VARCHAR(64) PRIMARY KEY,
+            value JSONB NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at ON system_settings(updated_at DESC);
+        `).catch(() => {});
+
         // 2. Check existing user count in isolated test environments
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
@@ -4593,7 +4603,7 @@ export class PostgresRepository {
       const effectiveTime = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
       await this.query(
         `INSERT INTO system_settings (key, value, updated_at)
-         VALUES ($1, $2, $3::timestamptz)
+         VALUES ($1, $2::jsonb, $3::timestamptz)
          ON CONFLICT (key) DO UPDATE SET 
            value = EXCLUDED.value, 
            updated_at = EXCLUDED.updated_at

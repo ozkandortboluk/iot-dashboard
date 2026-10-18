@@ -45,6 +45,9 @@ interface RealtimeContextType {
   dashboardTitle: string;
   serverStats: ServerStats | null;
   simulatorActive: boolean;
+  systemSettings: Record<string, any>;
+  getSystemSetting: <T>(key: string, defaultValue?: T) => T;
+  updateSystemSetting: (key: string, value: any) => Promise<boolean>;
   selectedCustomerForAdmin: string; // 'all' or customer ID
   setSelectedCustomerForAdmin: (customerId: string) => void;
   customersList: User[];
@@ -111,6 +114,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [dashboardTitle, setDashboardTitle] = useState('Ana Analitik & Saha İzleme Dashboard');
   const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [simulatorActive, setSimulatorActive] = useState(true);
+  const [systemSettings, setSystemSettings] = useState<Record<string, any>>({});
   const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<string>('all');
   const [customersList, setCustomersList] = useState<User[]>([]);
 
@@ -814,18 +818,56 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             } else if (data.event === 'system:connected') {
               setIsConnected(true);
               setConnectionStatus('connected');
-              if (data.payload && data.payload.simulatorActive !== undefined) {
-                setSimulatorActive(data.payload.simulatorActive);
+              const simActive = data.payload?.simulatorActive !== undefined
+                ? data.payload.simulatorActive
+                : data.payload?.active;
+              if (simActive !== undefined) {
+                setSimulatorActive(Boolean(simActive));
+              }
+              if (data.payload?.systemSettings && typeof data.payload.systemSettings === 'object') {
+                setSystemSettings((prev) => ({ ...prev, ...data.payload.systemSettings }));
               }
               if (data.payload?.firestoreQuotaExceeded) {
                 handleQuotaExceeded();
               }
+            } else if (data.event === 'system:settings:bootstrap') {
+              if (data.payload && typeof data.payload === 'object') {
+                setSystemSettings((prev) => ({ ...prev, ...data.payload }));
+                const simActive = data.payload.simulator_config?.simulatorActive ?? data.payload.simulator_config?.active;
+                if (simActive !== undefined) {
+                  setSimulatorActive(Boolean(simActive));
+                }
+              }
             } else if (data.event === 'simulator:updated') {
-              if (data.payload && data.payload.simulatorActive !== undefined) {
-                setSimulatorActive(data.payload.simulatorActive);
+              const simActive = data.payload?.simulatorActive !== undefined
+                ? data.payload.simulatorActive
+                : data.payload?.active;
+              if (simActive !== undefined) {
+                setSimulatorActive(Boolean(simActive));
               }
               window.dispatchEvent(new CustomEvent('nexus:simulator:updated', { detail: data.payload }));
             } else if (data.event === 'system:settings:updated') {
+              if (data.payload && data.payload.key) {
+                const { key, value, updatedAt } = data.payload;
+                setSystemSettings((prev) => {
+                  const existing = prev[key];
+                  if (existing && typeof existing === 'object' && existing.updatedAt && updatedAt) {
+                    if (new Date(updatedAt).getTime() < new Date(existing.updatedAt).getTime()) {
+                      return prev; // LWW reject stale
+                    }
+                  }
+                  return {
+                    ...prev,
+                    [key]: value,
+                  };
+                });
+                if (key === 'simulator_config') {
+                  const simActive = value?.simulatorActive ?? value?.active;
+                  if (simActive !== undefined) {
+                    setSimulatorActive(Boolean(simActive));
+                  }
+                }
+              }
               window.dispatchEvent(new CustomEvent('nexus:system:settings:updated', { detail: data.payload }));
             } else if (data.event === 'user:preferences:updated') {
               window.dispatchEvent(new CustomEvent('nexus:user:preferences:updated', { detail: data.payload }));
@@ -1219,6 +1261,83 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  const fetchSystemSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/system/settings');
+      if (res.ok) {
+        const data = await safeJson<{ settings?: Record<string, any> }>(res, {});
+        if (data && data.settings) {
+          setSystemSettings(data.settings);
+          try {
+            Object.entries(data.settings).forEach(([k, v]) => {
+              localStorage.setItem(`sys_setting_${k}`, JSON.stringify(v));
+            });
+          } catch {}
+          const simActive = data.settings.simulator_config?.simulatorActive ?? data.settings.simulator_config?.active;
+          if (simActive !== undefined) {
+            setSimulatorActive(Boolean(simActive));
+          }
+        }
+      }
+    } catch (e) {
+      // quiet fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSystemSettings();
+  }, [fetchSystemSettings, user]);
+
+  const getSystemSetting = useCallback(
+    <T,>(key: string, defaultValue?: T): T => {
+      const val = systemSettings[key];
+      if (val !== undefined && val !== null) {
+        return val as T;
+      }
+      try {
+        const local = localStorage.getItem(`sys_setting_${key}`);
+        if (local !== null) {
+          return JSON.parse(local) as T;
+        }
+      } catch {}
+      return defaultValue as T;
+    },
+    [systemSettings]
+  );
+
+  const updateSystemSetting = useCallback(
+    async (key: string, value: any): Promise<boolean> => {
+      const now = new Date().toISOString();
+      const valWithTimestamp = typeof value === 'object' && value !== null
+        ? { ...value, updatedAt: value.updatedAt || now }
+        : value;
+
+      // Optimistic update
+      setSystemSettings((prev) => ({
+        ...prev,
+        [key]: valWithTimestamp,
+      }));
+
+      try {
+        const res = await fetch(`/api/system/settings/${encodeURIComponent(key)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: valWithTimestamp, updatedAt: now }),
+        });
+        if (res.ok) {
+          return true;
+        }
+        // Conflict or error, re-fetch authoritative
+        fetchSystemSettings();
+        return false;
+      } catch {
+        fetchSystemSettings();
+        return false;
+      }
+    },
+    [fetchSystemSettings]
+  );
+
   const subscribeChannel = useCallback((channel: 'physical' | 'simulation') => {
     activeSubscriptionsRef.current.add(channel);
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -1581,6 +1700,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       saveWidgets,
       resetWidgetsToDefault,
       toggleSimulator,
+      systemSettings,
+      getSystemSetting,
+      updateSystemSetting,
       triggerTestTelemetry,
       createNewDevice,
       updateDevice,
@@ -1613,6 +1735,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       dashboardTitle,
       serverStats,
       simulatorActive,
+      systemSettings,
+      getSystemSetting,
+      updateSystemSetting,
       selectedCustomerForAdmin,
       setSelectedCustomerForAdmin,
       customersList,

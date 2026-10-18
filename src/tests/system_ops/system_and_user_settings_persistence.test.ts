@@ -80,6 +80,31 @@ describe('Authoritative System Settings & User Preferences Multi-Session Persist
       expect(newerResult).toBe(true);
       expect(db.getSystemSetting('system_mode')).toEqual({ mode: 'active', updatedAt: time3 });
     });
+
+    it('should retrieve all system settings via getAllSystemSettings and delegate to postgresRepo when available', async () => {
+      const origRepo = (db as any).postgresRepo;
+      const mockSaveSetting = vi.fn().mockResolvedValue(true);
+      (db as any).postgresRepo = {
+        isReady: () => true,
+        saveSystemSetting: mockSaveSetting,
+      };
+
+      try {
+        await db.saveSystemSetting('panel_theme', { color: 'blue' });
+        await db.saveSystemSetting('auto_lock', { timeoutSec: 300 });
+
+        const all = db.getAllSystemSettings();
+        expect(all).toHaveProperty('panel_theme');
+        expect(all).toHaveProperty('auto_lock');
+        expect(all.panel_theme).toEqual({ color: 'blue' });
+        expect(all.auto_lock).toEqual({ timeoutSec: 300 });
+
+        expect(mockSaveSetting).toHaveBeenCalledWith('panel_theme', { color: 'blue' }, expect.any(String));
+        expect(mockSaveSetting).toHaveBeenCalledWith('auto_lock', { timeoutSec: 300 }, expect.any(String));
+      } finally {
+        (db as any).postgresRepo = origRepo;
+      }
+    });
   });
 
   describe('2. Simulator Configuration Update-Resilience Across Restarts', () => {
@@ -199,4 +224,88 @@ describe('Authoritative System Settings & User Preferences Multi-Session Persist
       );
     });
   });
+
+  describe('4. REST API Routing & System Settings Endpoint Verification', () => {
+    let app: any;
+    let adminToken: string;
+    let operatorToken: string;
+
+    beforeEach(async () => {
+      const express = (await import('express')).default;
+      const { systemRouter } = await import('../../server/routes/system.js');
+      app = express();
+      app.use(express.json());
+      app.use('/api', systemRouter);
+
+      const adminUser = db.data.users.find((u) => u.id === 'usr_alice')!;
+      const opUser = db.data.users.find((u) => u.id === 'usr_bob')!;
+      adminToken = await db.createSession(adminUser);
+      operatorToken = await db.createSession(opUser);
+    });
+
+    it('should retrieve all persistent settings via both /api/system/settings and /api/settings', async () => {
+      const request = (await import('supertest')).default;
+
+      await db.saveSystemSetting('simulator_config', { active: true, scenario: 'sine_wave' });
+      await db.saveSystemSetting('maintenance_mode', false);
+      await db.saveSystemSetting('service_config', { emailUser: 'admin@nexus.test', smtpPass: 'secret_smtp_pass' });
+
+      // Test primary route: /api/system/settings
+      const resPrimary = await request(app)
+        .get('/api/system/settings')
+        .set('Authorization', `Bearer ${operatorToken}`);
+
+      expect(resPrimary.status).toBe(200);
+      expect(resPrimary.body.success).toBe(true);
+      expect(resPrimary.body.settings.simulator_config).toEqual({ active: true, scenario: 'sine_wave' });
+      expect(resPrimary.body.settings.maintenance_mode).toBe(false);
+      // Ensure sensitive server configuration is excluded from generic settings
+      expect(resPrimary.body.settings.service_config).toBeUndefined();
+
+      // Test alias route: /api/settings
+      const resAlias = await request(app)
+        .get('/api/settings')
+        .set('Authorization', `Bearer ${operatorToken}`);
+
+      expect(resAlias.status).toBe(200);
+      expect(resAlias.body.settings.simulator_config).toEqual({ active: true, scenario: 'sine_wave' });
+    });
+
+    it('should save and update setting with LWW timestamp via POST /api/system/settings/:key', async () => {
+      const request = (await import('supertest')).default;
+      const now = new Date().toISOString();
+      const older = new Date(Date.now() - 60000).toISOString();
+
+      // Admin saves setting
+      const postRes = await request(app)
+        .post('/api/system/settings/night_mode')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ value: true, updatedAt: now });
+
+      expect(postRes.status).toBe(200);
+      expect(postRes.body.success).toBe(true);
+      expect(db.getSystemSetting('night_mode')).toBe(true);
+
+      // Stale write rejection (LWW protection)
+      const staleRes = await request(app)
+        .post('/api/system/settings/night_mode')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ value: false, updatedAt: older });
+
+      expect(staleRes.status).toBe(409);
+      expect(db.getSystemSetting('night_mode')).toBe(true); // Must remain true
+    });
+
+    it('should reject non-admin users from modifying system settings', async () => {
+      const request = (await import('supertest')).default;
+
+      const forbiddenRes = await request(app)
+        .post('/api/system/settings/alarm_threshold_global')
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .send({ value: 99 });
+
+      expect(forbiddenRes.status).toBe(403);
+    });
+  });
 });
+

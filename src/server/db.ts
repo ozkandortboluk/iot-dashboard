@@ -322,6 +322,8 @@ class LocalDatabase {
     }
   }
 
+  private systemSettingsTimestamps: Record<string, string> = {};
+
   public getSystemSetting<T>(key: string, defaultValue?: T): T | null {
     if (!this.data.systemSettings) {
       this.data.systemSettings = {};
@@ -343,14 +345,19 @@ class LocalDatabase {
     }
     const effectiveTime = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
 
-    // Check LWW conflict against in-memory value if it has timestamp
+    // Check LWW conflict against in-memory value if it has timestamp or recorded timestamp
     const existing = this.data.systemSettings[key];
-    if (existing && typeof existing === 'object' && existing.updatedAt && updatedAt) {
-      if (new Date(updatedAt).getTime() < new Date(existing.updatedAt).getTime()) {
+    const existingTime =
+      this.systemSettingsTimestamps[key] ||
+      (existing && typeof existing === 'object' && existing.updatedAt ? existing.updatedAt : null);
+
+    if (existingTime && updatedAt) {
+      if (new Date(updatedAt).getTime() < new Date(existingTime).getTime()) {
         return false;
       }
     }
 
+    this.systemSettingsTimestamps[key] = effectiveTime;
     this.data.systemSettings[key] = value;
     this.saveData(this.data);
 
@@ -1815,7 +1822,7 @@ class LocalDatabase {
     if (this.isPostgresProductionMode()) {
       return;
     }
-    if (this.postgresRepo.isReady() && !forceWrite) {
+    if (this.postgresRepo?.isReady() && !forceWrite) {
       return;
     }
     // Atomic Write Queue to handle concurrent incoming writes without data corruption

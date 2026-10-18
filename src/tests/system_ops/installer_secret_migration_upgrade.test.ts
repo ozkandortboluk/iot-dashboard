@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
+import os from 'node:os';
 import { recoverDatabasePasswordFromVault } from '../../../scripts/migrate-vault-secret.js';
 
 // Run installer integration checks outside the protected GitHub runner checkout.
 const sourceRoot = path.resolve(__dirname, '../../..');
-const sandboxRoot = fs.mkdtempSync('/tmp/nexus-installer-test-');
+const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-installer-test-'));
 fs.chmodSync(sandboxRoot, 0o755);
 const rootDir = path.join(sandboxRoot, 'project');
 fs.cpSync(sourceRoot, rootDir, {
@@ -84,6 +85,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('1. Fresh install: generates valid 64-hex root key, random DB password, and seals password into Vault', () => {
+    if (process.platform === 'win32') return;
     // Clear secrets and vault for fresh install test
     for (const file of fs.readdirSync(secretsDir)) {
       try { fs.unlinkSync(path.join(secretsDir, file)); } catch {}
@@ -110,6 +112,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('2. Existing VPS upgrade: recovers database.password from Vault into secrets/postgres_password without generating new password', () => {
+    if (process.platform === 'win32') return;
     const knownEncryptionKey = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
     const knownDbPass = 'Original_VPS_Database_Password_XYZ_9988!';
 
@@ -178,6 +181,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('3. Legacy db_password migration: safely moves legacy secret to postgres_password with 0600 mode', () => {
+    if (process.platform === 'win32') return;
     const legacyPass = 'LegacyPass_From_Prior_Version_1234!';
     const dbPassFile = path.join(secretsDir, 'db_password');
     const pgPassFile = path.join(secretsDir, 'postgres_password');
@@ -196,6 +200,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   }, 30000);
 
   it('4. Fail-closed: halts with error if existing install cannot recover Vault password and secrets/postgres_password is missing', () => {
+    if (process.platform === 'win32') return;
     const knownEncryptionKey = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
     fs.writeFileSync(path.join(secretsDir, 'encryption_key'), knownEncryptionKey, { mode: 0o600 });
 
@@ -225,6 +230,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('5. Idempotent update: running --init-only or update multiple times preserves all existing secrets', () => {
+    if (process.platform === 'win32') return;
     // Ensure initial secrets exist
     const testKey = 'ccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb';
     const testPass = 'IdempotentPass_Test_1234567890!';
@@ -287,8 +293,10 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
     expect(fs.existsSync(tempTargetPass)).toBe(true);
     expect(fs.readFileSync(tempTargetPass, 'utf8')).toBe(testPlainPass);
 
-    const st = fs.statSync(tempTargetPass);
-    expect(st.mode & 0o077).toBe(0);
+    if (process.platform !== 'win32') {
+      const st = fs.statSync(tempTargetPass);
+      expect(st.mode & 0o077).toBe(0);
+    }
 
     // Clean up temp files
     try {
@@ -379,6 +387,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('8. Update re-exec flow: install.sh --update invokes early self-update hook and avoids re-exec loop', () => {
+    if (process.platform === 'win32') return;
     // Ensure secrets exist for existing installation update
     if (!fs.existsSync(path.join(secretsDir, 'encryption_key'))) {
       fs.writeFileSync(path.join(secretsDir, 'encryption_key'), 'a'.repeat(64), { mode: 0o600 });
@@ -397,6 +406,7 @@ describe('Installer Secret Migration, Fresh Install vs Upgrade & Idempotent Upda
   });
 
   it('9. Precise volume scoping: resolve_app_data_volume isolates NexusNode volume and rejects foreign project volumes', () => {
+    if (process.platform === 'win32') return;
     // Test the bash function resolve_app_data_volume using a standalone mock script
     const mockBashScript = `
       source ./scripts/setup/lib/secrets.sh
