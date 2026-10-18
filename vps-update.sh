@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NexusNode VPS Update - v0.2 (Debian 13 / Docker Compose)
+# NexusNode VPS Update - v0.3 (Debian 13 / Docker Compose)
 # Run from the project root: sudo bash ./vps-update.sh --check|--run
 # Default: manual run. --check is read-only; --run performs the gated update.
 set -Eeuo pipefail
@@ -31,8 +31,10 @@ usage() {
   cat <<'EOF'
 Usage (from project root): sudo bash ./vps-update.sh [--check|--run|--help]
   --check  Read-only preflight checks; no apt update, pulls, backups or cleanup.
-  --run    New verified backup, safe APT upgrades, Docker/Node image updates,
-           Git main fast-forward, rebuild/deploy, health checks and reboot prompt.
+  --run    Verified backup, Git main fast-forward, rebuild/deploy and health checks.
+           Debian APT updates are disabled by default.
+  System updates: sudo env NEXUS_SYSTEM_UPDATE=1 bash ./vps-update.sh --run
+  Verbose output: sudo env NEXUS_VERBOSE=1 bash ./vps-update.sh --run
 Safety: never updates TimescaleDB image; never deletes volumes, backup files,
         secrets or old production images. No forced Git reset/clean.
 EOF
@@ -83,7 +85,12 @@ if [[ "$MODE" == --run ]]; then
   LOG_FILE="$LOG_ROOT/update-$STAMP.log"
   : > "$LOG_FILE"
   chmod 600 "$LOG_FILE"
-  exec > >(tee -a "$LOG_FILE") 2>&1
+  if [[ "${NEXUS_VERBOSE:-0}" == 1 ]]; then
+    exec > >(tee -a "$LOG_FILE") 2>&1
+  else
+    # All output is saved in the protected log; terminal only shows milestones.
+    exec > >(tee -a "$LOG_FILE" | grep --line-buffered -E '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]') 2>&1
+  fi
   [[ ! -e "$STATE_ROOT/rollback-needs-review" ]] || fail "Onceki rollback incelenmedi. $STATE_ROOT/rollback-needs-review dosyasini kontrol et."
 fi
 
@@ -185,10 +192,12 @@ verify_endpoints() {
 
 read_only_report() {
   step 'Disk / APT / yedek'
-  df -h "$REPO"
-  docker system df
-  note 'Bekleyen paketler (APT onbellegi; online tarama yapilmadi):'
-  apt list --upgradable 2>/dev/null || true
+  note "Bos disk: $(df -h "$REPO" | awk 'NR==2 {print $4}')"
+  if [[ "${NEXUS_VERBOSE:-0}" == 1 ]]; then
+    df -h "$REPO"
+    docker system df
+    apt list --upgradable 2>/dev/null || true
+  fi
   if [[ -f /run/reboot-required ]]; then note 'Yeniden baslatma GEREKLI'; else note 'Yeniden baslatma isareti yok'; fi
   systemctl show nexusnode-local-backup.service -p Result -p ExecMainStatus --no-pager
   local latest
@@ -477,8 +486,12 @@ fi
 (( $(free_kib) >= 1024 * 1024 )) || fail 'Yeni yedek olusturmak icin en az 1 GiB alan gerekli'
 backup_and_validate
 prepare_disk
-apt_upgrade
-prepare_disk
+if [[ "${NEXUS_SYSTEM_UPDATE:-0}" == 1 ]]; then
+  apt_upgrade
+  prepare_disk
+else
+  note 'Debian paket guncellemesi atlandi (istege bagli: NEXUS_SYSTEM_UPDATE=1).'
+fi
 upgrade_app
 upgrade_adminer
 final_checks
