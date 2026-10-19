@@ -48,7 +48,6 @@ import {
   Save,
   RotateCcw,
   Mail,
-  Flame,
   Key,
   ShieldCheck,
   Sparkles,
@@ -60,7 +59,6 @@ import { DatabaseAutoHealerPanel } from './database/DatabaseAutoHealerPanel';
 import { EmailServerSettingsPanel } from './database/EmailServerSettingsPanel';
 import { DatabaseGrowthPanel } from './database/DatabaseGrowthPanel';
 import { ScheduledBackupsPanel } from './database/ScheduledBackupsPanel';
-import { SystemFactoryResetModal } from './system/SystemFactoryResetModal';
 import type {
   DatabaseEngineType,
   DatabaseEngineConfig,
@@ -153,8 +151,7 @@ export const DatabaseDataView: React.FC = () => {
   };
 
   const [activeCategory, setActiveCategory] = useState<'analytics' | 'explorer' | 'settings'>('analytics');
-  const [activeTab, setActiveTab] = useState<'growth_analytics' | 'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users' | 'email_settings' | 'scheduled_backups' | 'factory_reset'>('growth_analytics');
-  const [showFactoryResetModal, setShowFactoryResetModal] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'growth_analytics' | 'auto_healer' | 'timescale' | 'postgres' | 'explorer' | 'retention' | 'collections' | 'users' | 'email_settings' | 'scheduled_backups'>('growth_analytics');
   const [opCategoryFilter, setOpCategoryFilter] = useState<'all' | 'widget' | 'api' | 'system' | 'sync'>('all');
 
   // Retention Policies State
@@ -916,14 +913,6 @@ export const DatabaseDataView: React.FC = () => {
 
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => setShowFactoryResetModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-xs font-semibold text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 rounded-lg transition cursor-pointer shadow-xs"
-              title="Tüm sistemi ve veritabanını Kasa Şifreleme Anahtarı ile sıfırla"
-            >
-              <Flame className="w-3.5 h-3.5 text-rose-500" />
-              <span className="hidden sm:inline">Sistemi Sıfırla</span>
-            </button>
 
             <button
               onClick={fetchDatabaseStats}
@@ -1144,7 +1133,6 @@ export const DatabaseDataView: React.FC = () => {
                 { id: 'postgres' as const, label: 'PostgreSQL & Sunucu Kurulumu', icon: Server },
                 { id: 'email_settings' as const, label: 'E-Posta & Mail Sunucu Ayarları', icon: Mail, badge: 'SMTP / Resend' },
                 { id: 'retention' as const, label: 'Veri Saklama & Otomatik Temizlik', icon: Trash2, badge: 'Eski Kayıt Silme' },
-                { id: 'factory_reset' as const, label: 'Sistem Sıfırlama (Fabrika Ayarları)', icon: Flame, badge: 'Kasa Doğrulamalı' },
               ].map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -1175,69 +1163,6 @@ export const DatabaseDataView: React.FC = () => {
 
       {/* TAB: SCHEDULED BACKUPS & DISASTER RECOVERY */}
       {activeTab === 'scheduled_backups' && <ScheduledBackupsPanel />}
-
-      {/* TAB: SYSTEM FACTORY RESET PANEL */}
-      {activeTab === 'factory_reset' && (
-        <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-rose-200 dark:border-rose-900/60 p-6 sm:p-8 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-rose-600 text-white rounded-2xl shadow-md shadow-rose-600/20">
-                <Flame className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span>Sistem Sıfırlama & Fabrika Ayarları (Factory Reset)</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                    Kritik Yönetici Alanı
-                  </span>
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Kasa Şifreleme Anahtarı (Vault Encryption Key) doğrulaması ile veritabanı ve sistem katmanlarını seçici veya tamamen sıfırlayın.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowFactoryResetModal(true)}
-              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-rose-600/25 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-            >
-              <Flame className="w-4 h-4" />
-              <span>Sıfırlama Sihirbazını Aç</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Database className="w-4 h-4 text-indigo-500" />
-                <span>Veritabanı & Tablo Katmanları</span>
-              </h4>
-              <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Cihaz kayıtları, telemetri hypertable geçmişi, müşteri hesapları, paneller, alarmlar ve jetonları ayrı ayrı veya tek seferde temizleyebilirsiniz.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Key className="w-4 h-4 text-amber-500" />
-                <span>Kriptografik İzolasyon</span>
-              </h4>
-              <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Sıfırlama işlemi yalnızca sunucu kök Kasa Şifreleme Anahtarı (256-bit AES) doğru girildiğinde çalışır; yetkisiz çağrılar engellenir.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-              <h4 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-rose-500" />
-                <span>Sıfırdan Kurulum & Esnek Seçenekler</span>
-              </h4>
-              <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Sıfırdan başlamak isterseniz tüm sistemi ilk kurulmamış (OOBE) haline döndürebilir veya mevcut yöneticiyi (<code className="text-rose-600 dark:text-rose-400 font-mono">usr_admin</code>) koruyarak standart fabrika sıfırlaması yapabilirsiniz.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* TAB: DATABASE GROWTH & CAPACITY ANALYTICS */}
       {activeTab === 'growth_analytics' && <DatabaseGrowthPanel />}
@@ -3253,14 +3178,6 @@ export const DatabaseDataView: React.FC = () => {
         </div>
       )}
 
-      {/* System Factory Reset Modal */}
-      <SystemFactoryResetModal
-        isOpen={showFactoryResetModal}
-        onClose={() => setShowFactoryResetModal(false)}
-        onSuccess={() => {
-          fetchDatabaseStats();
-        }}
-      />
     </div>
   );
 };

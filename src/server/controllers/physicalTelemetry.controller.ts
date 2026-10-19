@@ -91,7 +91,7 @@ export class PhysicalTelemetryController {
       devUpdates.heartbeatTimeoutSeconds = processedDev.heartbeatTimeoutSeconds;
     }
 
-    const updatedDev = await await db.updateDevice(device.id, devUpdates);
+    const updatedDev = await db.updateDevice(device.id, devUpdates, { skipClusterPublish: true, skipAuditLog: true });
 
     const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
@@ -208,7 +208,7 @@ export class PhysicalTelemetryController {
           autoDetectedIntervalSeconds: effectiveDev.autoDetectedIntervalSeconds,
           heartbeatTimeoutSeconds: effectiveDev.heartbeatTimeoutSeconds,
           ipAddress: device.ipAddress,
-        });
+        }, { skipClusterPublish: true, skipAuditLog: true });
         const commands = await commandService.getAndDeliverPendingCommands(device.id);
 
         const effInterval = effectiveDev.expectedIntervalSeconds || 30;

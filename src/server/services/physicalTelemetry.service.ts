@@ -46,9 +46,27 @@ export class PhysicalTelemetryService {
         device.metrics[lowerKey] = m.value;
       }
       
-      // Extract battery level dynamically
-      if (['battery', 'batterylevel', 'bat', 'pil'].includes(lowerKey)) {
-         batteryLevelUpdated = Math.max(0, Math.min(100, Math.round(m.value)));
+      // Extract battery level dynamically (e.g. 'mybattery', 'battery', 'bat', 'pil')
+      const cleanKey = lowerKey.replace(/[^a-z0-9]/g, '');
+      if (
+        cleanKey === 'mybattery' ||
+        cleanKey.includes('mybattery') ||
+        cleanKey.includes('battery') ||
+        cleanKey.includes('batterylevel') ||
+        cleanKey.includes('pil') ||
+        cleanKey === 'bat' ||
+        cleanKey === 'vbat'
+      ) {
+        const numVal = Number(m.value);
+        if (!isNaN(numVal)) {
+          if (numVal >= 2.5 && numVal <= 4.5) {
+            // 3.0V - 4.2V Li-Ion battery curve
+            batteryLevelUpdated = Math.max(0, Math.min(100, Math.round(((numVal - 3.0) / 1.2) * 100)));
+          } else {
+            batteryLevelUpdated = Math.max(0, Math.min(100, Math.round(numVal)));
+          }
+        }
+        device.powerSource = 'battery';
       }
     }
 
@@ -116,7 +134,7 @@ export class PhysicalTelemetryService {
       device.powerSource = 'battery';
     }
 
-    db.updateDevice(device.id, updatePayload);
+    db.updateDevice(device.id, updatePayload, { skipClusterPublish: true, skipAuditLog: true });
 
     broadcast('device:updated', device);
 

@@ -253,10 +253,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   useEffect(() => {
     if (isOpen || isPreLoginScreen) {
       fetchStatus();
-      const interval = setInterval(fetchStatus, 3000);
+      // Fast polling (1s) when connecting or waiting for database readiness, 3s once fully ready
+      const pollRate = (!databaseReady && sshConnected) || connecting ? 1000 : 3000;
+      const interval = setInterval(fetchStatus, pollRate);
       return () => clearInterval(interval);
     }
-  }, [isOpen, isPreLoginScreen, fetchStatus]);
+  }, [isOpen, isPreLoginScreen, fetchStatus, databaseReady, sshConnected, connecting]);
 
   useEffect(() => {
     if (logContainerRef.current) {

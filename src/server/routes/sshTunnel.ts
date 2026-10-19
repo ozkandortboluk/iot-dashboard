@@ -422,8 +422,11 @@ sshTunnelRouter.post('/connect', guardSshTunnelPolicy, requireSshTunnelAuth, asy
 
     const result = await sshTunnelService.connectTunnel(config);
     if (result.success && db.getDatabaseState() !== 'READY') {
-      // Re-initialize PostgreSQL repository and hydrate database over the newly established SSH tunnel if not already ready
-      db.initPostgresRepository().catch((e) => {
+      // Re-initialize PostgreSQL repository and hydrate database over the newly established SSH tunnel
+      await Promise.race([
+        db.initPostgresRepository(),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]).catch((e) => {
         systemLogger.error('database', `SSH Tüneli bağlandıktan sonra PostgreSQL re-init hatası: ${e?.message}`);
       });
     }

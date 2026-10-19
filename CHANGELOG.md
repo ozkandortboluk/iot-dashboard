@@ -3,6 +3,61 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.6] - 2026-10-19
+
+### 🔋 mybattery Telemetri Algılaması & "Sistemi Sıfırla" Butonunun Sınırlandırılması
+- **Pilli Donanımların ve `mybattery` Metriğinin Otomatik Tespiti**:
+  - `physicalTelemetry.service.ts` bileşeninde telemetri işleyicisi güçlendirildi; gelen metrikler arasında `mybattery` (veya battery/pil türevi) bulunduğunda cihazın güç kaynağı otomatik olarak `powerSource = 'battery'` olarak işaretlenir ve pil seviyesi (voltaj aralığı veya yüzde) dinamik hesaplanır.
+  - `device.repository.ts` dosyasındaki `updateDevice` metoduna `powerSource` ve `batteryLevel` alanlarının kalıcı kaydı entegre edildi; `metrics` içerisinde `mybattery` olduğunda otomatik pilli cihaz algılaması eklendi.
+  - `DevicePowerIcon.tsx` bileşeni güncellendi; `device.metrics` içerisinde `mybattery` veya benzeri batarya metriği bulunan cihazlarda fiş ikonu yerine otomatik olarak dinamik renk ve seviye göstergeli **batarya ikonu** gösterilmesi sağlandı.
+- **"Sistemi Sıfırla" Butonunun Sadece Sunucu Durumu ve Metrikler Sayfasına İndirgenmesi**:
+  - Sistem genelinde dağılmış olan fabrika ayarlarına sıfırlama butonları kullanıcı arayüzünü sadeleştirmek ve yanlışlıkla tetiklemeleri önlemek amacıyla temizlendi:
+    - `Header.tsx` profil menüsünden kaldırıldı.
+    - `CustomerManagement.tsx` (Müşteri Yönetimi) araç çubuğundan kaldırıldı.
+    - `DatabaseDataView.tsx` (Veritabanı Gezgini) araç çubuğundan kaldırıldı.
+    - `SecurityView.tsx` (Güvenlik & Audit) ekranından kaldırıldı.
+  - "Sistemi Sıfırla" butonu ve modalı yalnızca yetkili yöneticiler için **Sunucu Durumu & Canlı Sistem Metrikleri** (`ServerStatusView.tsx`) sayfasında tutuldu.
+
+---
+## 🚀 [v1.49.5] - 2026-10-19
+
+### ⚡ SSH Tüneli & Veritabanı Hazırlık Aşaması Hızlandırması & Dinamik Polling
+- **SSH Tüneli Bağlantı Endpoint'inde Eşzamanlı Veritabanı Başlatma (`/connect`)**:
+  - `src/server/routes/sshTunnel.ts` içerisinde tünel bağlantısı kurulduktan sonra `db.initPostgresRepository()` çağrısı arka planda bırakılmayıp `Promise.race` ile tünel yanıtı dönmeden önce eşzamanlı olarak tamamlanmaya alındı.
+  - Tünel bağlantı isteği tamamlandığı anda PostgreSQL veritabanı şema doğrulamasını ve in-memory snapshot yüklemesini (`hydrateFromPostgres`) bitirmiş ve doğrudan `READY` durumuna geçmiş olur.
+- **Ön Yüz Dinamik Yoklama Hızı (`SSHTunnelDrawer.tsx`)**:
+  - `SSHTunnelDrawer.tsx` bileşeninde durum sorgulama sıklığı dinamik hale getirildi; tünel başlatılırken veya veritabanı henüz `READY` durumuna geçmemişken yoklama aralığı 3 saniyeden **1 saniyeye** indirildi.
+  - Kullanıcının tünel açıldıktan sonra fazladan 3 saniyelik statik zamanlayıcı periyodunu beklemesi engellendi; 3 kartın (SSH Tüneli, PostgreSQL SELECT 1, Veritabanı Durumu) anında yeşile dönmesi sağlandı.
+
+---
+## 🚀 [v1.49.4] - 2026-10-19
+
+### 🛡️ Sistem Günlükleri İncelemesi, ClusterSync Telemetri Ayrıştırması & Bot Tarayıcı Filtrelemesi
+- **Rutin Saha Telemetrisi ve Ping İsteklerinin ClusterSync Bildirim Döngüsünden Ayrıştırılması**:
+  - `physicalTelemetry.service.ts`, `physicalTelemetry.controller.ts` ve `simulationTelemetry.service.ts` bileşenlerinde rutin telemetri ve heartbeat paketlerinin `db.updateDevice` çağrılarına `{ skipClusterPublish: true, skipAuditLog: true }` opsiyonu eklendi.
+  - Cihazdan her 30-60 saniyede bir gelen sensör okumalarının PostgreSQL `device:updated` bildirimleri tetikleyerek sistem loglarını `[ClusterSync] Cihaz senkronize edildi: ESP32-b714` kayıtlarıyla doldurması engellendi.
+  - `db.processDeviceTelemetryArrival` metodunda veritabanı kayıt işlemine `{ skipClusterPublish: true }` eklenerek canlı veri akışının gereksiz küme senkronizasyon olayı üretmesi önlendi.
+- **ClusterSync Değişiklik Algılama (`hasDeviceChanged`) Hassasiyet ve Sanal Cihaz Filtresi**:
+  - `clusterSync.service.ts` içinde `hasDeviceChanged` metodu güçlendirildi; sanal cihazların (`isSimulated: true`) simülasyon saat vuruşları küme senkronizasyonu dışına alındı (`[ClusterSync] Cihaz senkronize edildi: [Sanal] ...` gürültüsü kesildi).
+  - Telemetri geliş sürelerindeki mikro salınımlardan kaynaklanan ondalıklı `expectedIntervalSeconds` ve `heartbeatTimeoutSeconds` farkları `Math.round()` toleransı ile filtrelenerek sahte güncelleme alarmları bertaraf edildi.
+  - Veritabanı ve bellek arasındaki `tenantId` / `userId` eşleşmeleri normalize edilerek boş yere tetiklenen güncelleme bildirimleri engellendi.
+- **Harici Güvenlik Taramaları ve Bot 404 Kirliliğinin Filtrelenmesi**:
+  - `server.ts` içerisindeki `express_http_observer` ara yazılımına harici crawler ve bot zafiyet tarayıcı filtrelemesi (`isVulnerabilityScannerProbe`) eklendi.
+  - İnternetten gelen rastgele WordPress, PHP ve yapılandırma dosyası probları (`//sito/wp-includes/wlwmanifest.xml`, `//xmlrpc.php`, `setup.cgi`, `.env` vb.) için üretilen 404 yanıtlarının sistem denetim tablosuna `WARN` seviyesinde log basarak operatör panelini tıkaması engellendi; gerçek platform içi 404 ve 500 hatalarının kaydedilmesi korunmaya devam etti.
+
+---
+## 🚀 [v1.49.3] - 2026-10-19
+
+### ⏳ Otomatik Zaman Ayarlı ve Yumuşak Silinmeli (Fade-out) Bildirim Çubukları
+- **Bildirim Çubuklarının Ekranda Takılı Kalması Sorunu Giderildi**:
+  - `ToastNotification.tsx` bileşeninde `onClose` fonksiyon referansının live telemetri veya WebSocket güncellemelerinde sürekli yenilenmesi sonucu kapanma zamanlayıcısının sıfırlanması (`clearTimeout`) engellendi; `useRef(onClose)` kararlı referansı ile tam zamanında (4 saniye) kapanma sağlandı.
+- **Yumuşak Solma (Fade-out) ve Çıkış Animasyonu**:
+  - Bildirimin ekrandan aniden kaybolması yerine yumuşakça eriyerek solması (`opacity-0 translate-y-4 scale-95`) için `isExiting` geçiş durumu ve 350ms animasyon süresi entegre edildi.
+  - Bildirim altındaki geri sayım çubuğu GPU hızlandırmalı `@keyframes toast-progress` ile 60 FPS akıcı biçimde küçülerek kullanıcının kalan süreyi net görmesi sağlandı.
+- **Fare ile Üzerine Gelindiğinde Duraklatma (Hover-to-Pause)**:
+  - Kullanıcı bildirimi okurken farenin imlecini üzerine getirdiğinde (`onMouseEnter`) zamanlayıcı duraklatılır, fare çekildiğinde (`onMouseLeave`) süre kaldığı yerden akmaya devam eder.
+
+---
 ## 🚀 [v1.49.2] - 2026-10-19
 
 ### 🛠️ Cihaz Ayarları Kayıt Akışı, Sayfa Yenilenmesini Engelleme & UX İyileştirmesi

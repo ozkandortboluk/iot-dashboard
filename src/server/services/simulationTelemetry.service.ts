@@ -79,7 +79,7 @@ export class SimulationTelemetryService {
           metrics: device.metrics,
           lastSeen: new Date().toISOString(),
           status: 'online',
-        }).catch(() => {});
+        }, { skipClusterPublish: true, skipAuditLog: true }).catch(() => {});
       }
     } catch {}
 

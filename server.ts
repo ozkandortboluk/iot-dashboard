@@ -459,6 +459,14 @@ app.use((req, res, next) => {
     if (isSystemLogPath) return;
     if (isStaticAsset && res.statusCode < 400) return;
 
+    // Suppress external automated crawler/bot vulnerability scanner 404 noise (WordPress probes, PHP scripts, env dumps)
+    const isVulnerabilityScannerProbe =
+      res.statusCode === 404 &&
+      /(\b(wp-|wp\/|wlwmanifest|xmlrpc|\.php|phpmyadmin|pma|adminer|cgi-bin|setup\.cgi|\.env|\.git|actuator|telescope|solr|autodiscover|HNAP1|boaform)\b|\/\/(sito|cms|site|wp|media|shop|blog|news|web|website|wordpress|test|\d{4})\/)/i.test(
+        req.originalUrl || req.path
+      );
+    if (isVulnerabilityScannerProbe) return;
+
     const duration = Date.now() - start;
     const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
     const traceId = (req as any).traceId;

@@ -101,13 +101,47 @@ export class ClusterSyncService {
    */
   public hasDeviceChanged(existingDev: any, newDev: any): boolean {
     if (!existingDev) return true;
-    const fields: (keyof Device)[] = [
+
+    // 1. Virtual / simulated device noise suppression:
+    // If both are simulated and basic identity/configuration did not change, ignore simulation clock/metric ticks
+    if (Boolean(existingDev.isSimulated) && Boolean(newDev.isSimulated)) {
+      const isConfigChanged =
+        existingDev.name !== newDev.name ||
+        existingDev.type !== newDev.type ||
+        existingDev.intervalMode !== newDev.intervalMode ||
+        JSON.stringify(existingDev.simulatedMetrics || []) !== JSON.stringify(newDev.simulatedMetrics || []);
+      if (!isConfigChanged) {
+        return false;
+      }
+    }
+
+    // 2. Normalize and compare tenantId and userId (avoid false positives between DB column user_id and memory tenantId)
+    const existingTenant = String(existingDev.tenantId || existingDev.userId || '').trim();
+    const newTenant = String(newDev.tenantId || newDev.userId || '').trim();
+    if (newTenant && existingTenant && existingTenant !== newTenant) {
+      return true;
+    }
+
+    // 3. Dynamic intervals: ignore floating-point sub-second jitter and compare rounded seconds
+    if (
+      newDev.expectedIntervalSeconds !== undefined &&
+      Math.abs(Math.round(existingDev.expectedIntervalSeconds || 0) - Math.round(newDev.expectedIntervalSeconds || 0)) > 1
+    ) {
+      return true;
+    }
+    if (
+      newDev.heartbeatTimeoutSeconds !== undefined &&
+      Math.abs(Math.round(existingDev.heartbeatTimeoutSeconds || 0) - Math.round(newDev.heartbeatTimeoutSeconds || 0)) > 2
+    ) {
+      return true;
+    }
+
+    // 4. Check critical device configuration fields
+    const configFields: (keyof Device)[] = [
       'name',
       'status',
       'type',
       'deviceType',
-      'tenantId',
-      'userId',
       'location',
       'ipAddress',
       'macAddress',
@@ -117,15 +151,13 @@ export class ClusterSyncService {
       'otaProgress',
       'rateLimitPerMin',
       'intervalMode',
-      'expectedIntervalSeconds',
-      'heartbeatTimeoutSeconds',
       'customIntervalSeconds',
       'isSimulated',
       'saveSimulatedDataToDb',
       'dataFlowActive',
       'powerSource',
     ];
-    for (const f of fields) {
+    for (const f of configFields) {
       if (newDev[f] !== undefined && existingDev[f] !== newDev[f]) {
         return true;
       }

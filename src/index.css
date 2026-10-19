@@ -211,3 +211,14 @@ button, [role="button"], select, summary {
   background-color: #1e293b !important; /* bg-slate-800 */
   border-color: #334155 !important; /* border-slate-700 */
 }
+
+/* Toast Notification countdown progress bar animation */
+@keyframes toast-progress {
+  0% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+

@@ -1949,7 +1949,7 @@ class LocalDatabase {
   public async restoreApiKey(deviceId: string): Promise<Device> { return await this.deviceRepository.restoreApiKey(deviceId); }
   public async updateApiKeySettings(deviceId: string, settings: any, adminUserId?: string, adminUserName?: string): Promise<Device> { return await this.deviceRepository.updateApiKeySettings(deviceId, settings); }
   public async convertToPhysicalDevice(deviceId: string, adminUserId: string = 'system', adminUserName: string = 'System'): Promise<Device> { return await this.deviceRepository.convertToPhysicalDevice(deviceId, adminUserId, adminUserName); }
-  public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> { return await this.deviceRepository.updateDevice(deviceId, updates); }
+  public async updateDevice(deviceId: string, updates: Partial<Device>, options?: { skipClusterPublish?: boolean; skipAuditLog?: boolean }): Promise<Device> { return await this.deviceRepository.updateDevice(deviceId, updates, options); }
   public async deleteDevice(deviceId: string): Promise<void> { return await this.deviceRepository.deleteDevice(deviceId); }
   public recordUnregisteredDevice(discDev: DiscoveredNetworkDevice): DiscoveredNetworkDevice | null { return this.deviceRepository.recordUnregisteredDevice(discDev); }
   public removeUnregisteredDevice(ipOrMacOrToken: string): void { return this.deviceRepository.removeUnregisteredDevice(ipOrMacOrToken); }

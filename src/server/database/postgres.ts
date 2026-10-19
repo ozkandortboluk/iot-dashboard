@@ -1137,7 +1137,7 @@ export class PostgresRepository {
   // ==========================================
   // DEVICES
   // ==========================================
-  public async saveDevice(dev: Device): Promise<void> {
+  public async saveDevice(dev: Device, options?: { skipClusterPublish?: boolean }): Promise<void> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
@@ -1303,11 +1303,13 @@ export class PostgresRepository {
 
     try {
       await this.query(sql, params);
-      import('../services/clusterSync.service.js')
-        .then(({ clusterSyncService }) => {
-          clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
-        })
-        .catch(() => {});
+      if (!options?.skipClusterPublish && !dev.isSimulated) {
+        import('../services/clusterSync.service.js')
+          .then(({ clusterSyncService }) => {
+            clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
+          })
+          .catch(() => {});
+      }
     } catch (saveErr: any) {
       const errMsg = saveErr?.message || String(saveErr);
       if (
@@ -1322,11 +1324,13 @@ export class PostgresRepository {
           // Setting user_id to null completely avoids foreign key constraint violation.
           fallbackParams[2] = null;
           await this.query(sql, fallbackParams);
-          import('../services/clusterSync.service.js')
-            .then(({ clusterSyncService }) => {
-              clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
-            })
-            .catch(() => {});
+          if (!options?.skipClusterPublish && !dev.isSimulated) {
+            import('../services/clusterSync.service.js')
+              .then(({ clusterSyncService }) => {
+                clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
+              })
+              .catch(() => {});
+          }
           return;
         } catch (retryErr: any) {
           console.warn('[PostgreSQL saveDevice fallback error]:', retryErr?.message || retryErr);

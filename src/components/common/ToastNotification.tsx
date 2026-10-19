@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X, Loader2 } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading' | 'pending';
@@ -29,7 +29,7 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
   title: propTitle,
   progress: propProgress,
   onClose,
-  duration = 4500,
+  duration = 4000,
 }) => {
   const activeObj = toast || message;
 
@@ -49,17 +49,36 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
   }
 
   const isPendingType = type === 'loading' || type === 'pending';
+  const [isExiting, setIsExiting] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Keep a stable ref to onClose so re-renders in parent (due to live WebSocket telemetry)
+  // NEVER cancel or restart the dismiss timer!
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Handle smooth dismissal with fade-out
+  const handleDismiss = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      onCloseRef.current();
+    }, 350);
+  }, []);
+
+  useEffect(() => {
+    setIsExiting(false);
+  }, [activeObj]);
 
   useEffect(() => {
     // Do not auto-dismiss if no active toast or loading/pending toasts; they wait for real backend completion
-    if (!activeObj || isPendingType) {
+    if (!activeObj || isPendingType || isPaused) {
       return;
     }
     const timer = setTimeout(() => {
-      onClose();
+      handleDismiss();
     }, duration);
     return () => clearTimeout(timer);
-  }, [activeObj, isPendingType, onClose, duration]);
+  }, [activeObj, isPendingType, isPaused, duration, handleDismiss]);
 
   if (!activeObj) return null;
 
@@ -119,7 +138,13 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
   return (
     <div
       id="app-toast-notification"
-      className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 z-[9999] max-w-full sm:max-w-md w-auto pointer-events-auto transition-all duration-300 animate-in fade-in slide-in-from-bottom-5"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      className={`fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 z-[9999] max-w-full sm:max-w-md w-auto pointer-events-auto transition-all duration-350 ease-out ${
+        isExiting
+          ? 'opacity-0 translate-y-4 scale-95 pointer-events-none'
+          : 'opacity-100 translate-y-0 scale-100 animate-in fade-in slide-in-from-bottom-5'
+      }`}
     >
       <div
         className={`relative overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl p-4 sm:p-4.5 flex items-start gap-3.5 ${typeStyles.bg}`}
@@ -159,18 +184,20 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({
 
         <button
           type="button"
-          onClick={onClose}
-          className="p-2 sm:p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 active:bg-slate-700 transition-colors shrink-0 min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center"
+          onClick={handleDismiss}
+          className="p-2 sm:p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 active:bg-slate-700 transition-colors shrink-0 min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center cursor-pointer"
           title="Bildirimi Kapat"
         >
           <X className="w-4 h-4" />
         </button>
 
-        {/* Animated Progress Bar for auto-dismissing toasts */}
+        {/* Animated Countdown Bar for auto-dismissing toasts */}
         {!isPendingType && (
           <div
-            className={`absolute bottom-0 left-0 right-0 h-1 ${typeStyles.bar} opacity-75 animate-[shrink_linear_forwards]`}
-            style={{ animationDuration: `${duration}ms` }}
+            className={`absolute bottom-0 left-0 right-0 h-1 ${typeStyles.bar} opacity-75 origin-left`}
+            style={{
+              animation: isPaused ? 'none' : `toast-progress ${duration}ms linear forwards`,
+            }}
           />
         )}
       </div>

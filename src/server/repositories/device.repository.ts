@@ -584,7 +584,11 @@ export class DeviceRepository {
     return dev;
   }
 
-  public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> {
+  public async updateDevice(
+    deviceId: string,
+    updates: Partial<Device>,
+    options?: { skipClusterPublish?: boolean; skipAuditLog?: boolean }
+  ): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
 
@@ -597,16 +601,13 @@ export class DeviceRepository {
       'tenantId',
       'rateLimitPerMin',
       'encryptionMethod',
-      'heartbeatTimeoutSeconds',
-      'expectedIntervalSeconds',
       'intervalMode',
       'customIntervalSeconds',
-      'autoDetectedIntervalSeconds',
       'isSimulated',
       'saveSimulatedDataToDb',
       'simulatedMetrics',
     ];
-    const isConfigUpdated = configKeys.some((k) => updates[k] !== undefined);
+    const isConfigUpdated = !options?.skipAuditLog && configKeys.some((k) => updates[k] !== undefined);
 
     if (updates.name !== undefined) dev.name = updates.name;
     if (updates.type !== undefined) dev.type = updates.type;
@@ -716,14 +717,48 @@ export class DeviceRepository {
       }
     }
 
-    if (isConfigUpdated) {
+    if (updates.powerSource !== undefined) dev.powerSource = updates.powerSource;
+    if (updates.batteryLevel !== undefined) dev.batteryLevel = updates.batteryLevel;
+
+    // Auto-detect battery power source if metric such as 'mybattery' is present
+    if (dev.metrics) {
+      const batKey = Object.keys(dev.metrics).find((k) => {
+        const lk = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (
+          lk === 'mybattery' ||
+          lk.includes('mybattery') ||
+          lk.includes('battery') ||
+          lk.includes('batterylevel') ||
+          lk.includes('pil') ||
+          lk === 'bat' ||
+          lk === 'vbat'
+        );
+      });
+      if (batKey) {
+        dev.powerSource = 'battery';
+        const rawBat = Number(dev.metrics[batKey]);
+        if (!isNaN(rawBat)) {
+          if (rawBat >= 2.5 && rawBat <= 4.5) {
+            dev.batteryLevel = Math.max(0, Math.min(100, Math.round(((rawBat - 3.0) / 1.2) * 100)));
+          } else {
+            dev.batteryLevel = Math.max(0, Math.min(100, Math.round(rawBat)));
+          }
+        }
+      }
+    }
+
+    if (isConfigUpdated && !options?.skipAuditLog) {
       this.db.addAuditLog('system', 'API Manager', `Cihaz Ayarları Güncellendi: ${dev.name}`, 'medium');
     }
 
     this.db.saveData(this.db.data);
 
     // Sync to PostgreSQL Repository
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo
+        .saveDevice(dev, { skipClusterPublish: options?.skipClusterPublish })
+        .catch((e) => console.warn('[PG Error]', e.message));
+    }
 
     return dev;
   }
@@ -1747,7 +1782,11 @@ export class DeviceRepository {
     }
 
     this.db.saveData(this.db.data);
-    if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
+    if (this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo
+        .saveDevice(dev, { skipClusterPublish: true })
+        .catch((e) => console.warn('[PG Error]', e.message));
+    }
 
     return dev;
   }

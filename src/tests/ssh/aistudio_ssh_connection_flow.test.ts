@@ -8,7 +8,7 @@ import { sshTunnelService } from '../../server/services/sshTunnel.service.js';
 import { db } from '../../server/db.js';
 import { DatabaseState } from '../../types.js';
 
-vi.mock('../server/services/setup.service.js', () => ({
+vi.mock('../../server/services/setup.service.js', () => ({
   setupService: {
     isSetupCompleted: vi.fn(() => false),
     validateSetupToken: vi.fn((token: string) => token === 'valid-setup'),
