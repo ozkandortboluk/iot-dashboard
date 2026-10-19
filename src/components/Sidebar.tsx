@@ -22,7 +22,13 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { getRoleBadgeInfo } from '../lib/permissions';
 import { NexusNodeLogo } from './NexusNodeLogo';
-import { APP_RELEASE_TAG } from '../config/version';
+import {
+  APP_RELEASE_TAG,
+  APP_VERSION,
+  GITHUB_RELEASE_TAG,
+  GITHUB_VERSION,
+  GITHUB_RELEASES_URL,
+} from '../config/version';
 import { apiFetch } from '../lib/apiFetch';
 import { canShowSshControls } from '../lib/sshRuntimePolicy';
 
@@ -41,6 +47,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user } = useAuth();
   const [canShowSsh, setCanShowSsh] = useState(false);
+  const [runtimeEnv, setRuntimeEnv] = useState<'vps' | 'aistudio' | 'local'>('local');
+  const [githubVersionTag, setGithubVersionTag] = useState<string>(GITHUB_RELEASE_TAG);
 
   useEffect(() => {
     let active = true;
@@ -49,10 +57,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
       .then((data) => {
         if (!active) return;
         setCanShowSsh(canShowSshControls(data));
+        if (data?.isVps || data?.environment === 'vps') {
+          setRuntimeEnv('vps');
+        } else if (data?.isAiStudio || data?.environment === 'aistudio') {
+          setRuntimeEnv('aistudio');
+        } else {
+          setRuntimeEnv('local');
+        }
       })
       .catch(() => {
         if (active) setCanShowSsh(false);
       });
+
+    apiFetch('/api/system/version', { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (data.github?.releaseTag) {
+          setGithubVersionTag(data.github.releaseTag);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       active = false;
     };
@@ -501,27 +527,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         <a
-          href="https://github.com/ozkan-1403/iot-telemetry-platform/releases"
+          href={GITHUB_RELEASES_URL}
           target="_blank"
           rel="noopener noreferrer"
           className="group block p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/70 hover:border-indigo-500/50 dark:hover:border-indigo-500/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
-          title="GitHub Sürüm Notları & Değişiklik Günlüğü (Changelog)"
+          title={`Çalışan Sürüm: ${APP_RELEASE_TAG} (${runtimeEnv === 'vps' ? 'VPS Sunucu' : runtimeEnv === 'aistudio' ? 'AI Studio' : 'Yerel Geliştirme'}) | GitHub Depo Sürümü: ${githubVersionTag}`}
         >
+          {/* Active Version & Environment */}
           <div className="flex items-center justify-between gap-2 mb-1.5">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <div className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">
                 <GitBranch className="w-3.5 h-3.5" />
               </div>
-              <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100">
-                {APP_RELEASE_TAG}
-              </span>
+              <div className="flex flex-col min-w-0">
+                <span className="font-mono font-bold text-xs text-slate-900 dark:text-slate-100 tracking-tight leading-none">
+                  {APP_RELEASE_TAG}
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight mt-0.5 truncate">
+                  {runtimeEnv === 'vps' ? 'VPS Canlı' : runtimeEnv === 'aistudio' ? 'AI Studio' : 'Yerel Ortam'}
+                </span>
+              </div>
             </div>
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase tracking-wider">
-              GitHub
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider shrink-0 ${
+                runtimeEnv === 'vps'
+                  ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+                  : runtimeEnv === 'aistudio'
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                  : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20'
+              }`}
+            >
+              {runtimeEnv === 'vps' ? 'VPS' : runtimeEnv === 'aistudio' ? 'Cloud' : 'Yerel'}
             </span>
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+          {/* GitHub Tracked Version & Sync Status */}
+          <div className="pt-1.5 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
+                GitHub:
+              </span>
+              <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300 truncate">
+                {githubVersionTag}
+              </span>
+            </div>
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide shrink-0 ${
+                APP_RELEASE_TAG === githubVersionTag
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                  : APP_VERSION > GITHUB_VERSION
+                  ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+              }`}
+            >
+              {APP_RELEASE_TAG === githubVersionTag
+                ? 'Güncel'
+                : APP_VERSION > GITHUB_VERSION
+                ? 'Yerel +1'
+                : 'Güncelleme Var'}
+            </span>
+          </div>
+
+          {/* Sürüm Detayları & Notlar Footer Link */}
+          <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
             <span className="truncate">Sürüm Detayları & Notlar</span>
             <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0 ml-1" />
           </div>

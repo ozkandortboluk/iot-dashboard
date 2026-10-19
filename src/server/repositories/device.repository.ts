@@ -789,7 +789,7 @@ export class DeviceRepository {
     }
   }
 
-  private async createArchivedRecord(
+  public async createArchivedRecord(
     device: Device,
     deletedBy?: string,
     deletedByName?: string,

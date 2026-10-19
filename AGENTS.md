@@ -1,20 +1,18 @@
 # Project Guidelines & Autonomous Developer Rules
 
-## KURAL 1: Anlamlı ve Planlı Sürümleme Politikası (Selective Semantic Versioning)
+## KURAL 1: Sürümlendirme ve Ortam/GitHub Takip Politikası (Continuous Patch Versioning & Environment Sync)
 
-1. **Küçük Değişikliklerde Sürüm Yükseltme Yapılmaz**:
-   - Her küçük UI düzeltmesi, CSS/stil rötuşu, ufak hata giderimi (bugfix) veya tekil refaktör için **ayrı bir sürüm numarası yükseltilmez**.
-   - Küçük düzeltmeler ve ara ayarlamalar, sürüm yükseltilmesi gereken anlamlı kilometre taşlarının (büyük özellikler, yeni modüller, mimari güncellemeler veya konsolide yayınlar) altına iliştirilir.
-2. **Sürüm Yükseltme Kriterleri**:
-   - Sürüm yükseltme yalnızca aşağıdaki durumlarda gerçekleştirilir:
-     - **PATCH bump (`x.y.Z`)**: Kritik güvenlik yamaları veya toplu/konsolide hata düzeltme paketleri yayınlandığında.
-     - **MINOR bump (`x.Y.0`)**: Yeni bir özellik, yeni bir API uç noktası, yeni bir görünüm veya kapsamlı işlevsellik eklendiğinde.
-     - **MAJOR bump (`X.0.0`)**: Geriye dönük uyumsuz köklü mimari veya veritabanı şema değişikliklerinde.
-3. **Senkronize Sürüm Güncelleme**:
-   - Bir sürüm yükseltildiğinde `package.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları birbiriyle tam senkron tutulur.
-   - `CHANGELOG.md` gereksiz mikro-girdilerle şişirilmez; yapılan işler sade, derli toplu ve anlamlı başlıklar altında özetlenir.
-4. **Bileşenlerde Sabit Sürüm Metni Bulunamaz**:
+1. **Her Değişiklikte Son Hane 1 Kademe Artar (Patch Increment)**:
+   - Projede yapılan her değişiklik, yeni özellik, hata düzeltmesi veya sistem geliştirmesinde sürüm numarasının son hanesi (`x.y.Z` -> `x.y.Z+1`) 1 kademe artırılır.
+   - Yeni büyük modüller veya köklü mimari dönüşümlerde MINOR (`x.Y.0`) veya MAJOR (`X.0.0`) kuralları geçerliliğini korur.
+2. **Senkronize Sürüm Güncelleme**:
+   - Her sürüm yükseltildiğinde `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları birbiriyle tam senkron tutulur.
+   - `CHANGELOG.md` dosyasına yapılan işler derli toplu ve anlamlı başlıklar halinde yeni sürüm başlığı altına eklenir.
+3. **Bileşenlerde Sabit Sürüm Metni Bulunamaz**:
    - Tüm UI bileşenleri sürüm bilgisini `src/config/version.ts` dosyasından içe aktarır.
+4. **Sol Alt Sürüm Kartında Ortam ve GitHub Sürümü Görünür**:
+   - Sayfanın sol altındaki sürüm kartında hem o anki çalışma ortamının (Yerel Geliştirme / VPS Sunucu) aktif sürüm numarası hem de GitHub deposundaki son sürüm numarası açıkça gösterilir.
+   - Kullanıcı veya operatör, sunucu ya da çalışma ortamında hangi sürümün çalıştığını ve GitHub ile olan farkını (`Yerel +1`, `GitHub ile Eşit` vb.) anında görebilir.
 
 ---
 

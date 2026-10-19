@@ -3,6 +3,21 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.1] - 2026-10-19
+
+### 🔄 ClusterSync Kararlılığı, Mezar Taşı (Tombstone) Koruması & GitHub Sürüm Takibi
+- **Silinen Cihazların Dirilmesini Önleme (Tombstone Mekanizması)**:
+  - Silinen cihazların küme içi eski paketler veya catch-up senkronizasyonu ile veritabanına geri dönmesini engelleyen bellek-içi ve veritabanı mezar taşı (`deletedDeviceTombstones`) koruması uygulandı.
+  - `device:deleted` ve toplu silmeler için `devices:deleted` küme olayları dinlenip işlenerek VPS ve geliştirme ortamları arasında tam silme tutarlılığı sağlandı.
+- **Akıllı Diff Kontrolü & Log Kirliliğini Önleme**:
+  - Sistem ayarları, simülatör durumları ve cihaz güncellemelerinde veri içeriği kontrol edilerek (`hasSettingChanged`, `hasDeviceChanged`), değer değişmemişse disk yazımı, gereksiz WebSocket yayını ve log üretimi engellendi.
+  - Periyodik catch-up intervali 120 saniyeye çekildi ve PostgreSQL ana tablosuyla çift yönlü uzlaştırma (reconciliation) eklendi.
+- **Dinamik Sürüm Takibi & Sol Alt Gösterge**:
+  - Sol menü altındaki sürüm kartına hem çalışan aktif ortamın sürümü (Yerel / VPS) hem de GitHub deposundaki son sürüm numarası eklendi.
+  - Yerel ile GitHub arasındaki farkı gösteren anlık durum rozeti (`Yerel +1`, `GitHub ile Eşit`, `Güncelleme Var`) entegre edildi.
+  - Sürümlendirme kuralı güncellendi: Sürüm numarasının son hanesi (`x.y.Z`) her geliştirmede 1 kademe artırılır.
+
+---
 ## 🚀 [v1.49.0] - 2026-10-16
 
 ### 📊 Detaylı Sistem Log Motoru & Konfigüre Edilebilir Alan Seçimi

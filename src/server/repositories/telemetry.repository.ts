@@ -52,7 +52,7 @@ export class TelemetryRepository {
   private consecutiveFailures = 0;
   private circuitOpen = false;
   private lastQueueAlarmAt = 0;
-  private latestTelemetryCache: Record<string, Record<string, TelemetryReading>> = {};
+  public latestTelemetryCache: Record<string, Record<string, TelemetryReading>> = {};
 
   constructor(private db: any) {
     this.loadPersistentQueue();

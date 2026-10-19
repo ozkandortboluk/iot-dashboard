@@ -28,6 +28,17 @@ import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
 import { readBackupDestinationStatus, selectBackupDestination } from '../services/backupDestination.service.js';
+import {
+  APP_NAME,
+  APP_VERSION,
+  APP_RELEASE_TAG,
+  RELEASE_DATE,
+  GITHUB_REPO,
+  GITHUB_REPO_URL,
+  GITHUB_RELEASES_URL,
+  GITHUB_VERSION,
+  GITHUB_RELEASE_TAG,
+} from '../../config/version.js';
 
 const startTime = Date.now();
 
@@ -150,6 +161,37 @@ systemRouter.get('/runtime', (req, res) => {
     sshTunnelAllowed: isSshTunnelAllowed(),
     cookieMode,
     databaseTransport,
+  });
+});
+
+// System Version & GitHub Sync Diagnostic Endpoint
+systemRouter.get(['/system/version', '/version'], (req, res) => {
+  const config = getRuntimeConfig();
+  const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
+
+  let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
+  if (APP_VERSION > GITHUB_VERSION) {
+    syncStatus = 'ahead';
+  } else if (APP_VERSION < GITHUB_VERSION) {
+    syncStatus = 'behind';
+  }
+
+  return res.json({
+    appName: APP_NAME,
+    version: APP_VERSION,
+    releaseTag: APP_RELEASE_TAG,
+    releaseDate: RELEASE_DATE,
+    environment,
+    isVps: config.isVps,
+    isAiStudio: config.isAiStudio,
+    github: {
+      repo: GITHUB_REPO,
+      repoUrl: GITHUB_REPO_URL,
+      releasesUrl: GITHUB_RELEASES_URL,
+      version: GITHUB_VERSION,
+      releaseTag: GITHUB_RELEASE_TAG,
+      syncStatus,
+    },
   });
 });
 
