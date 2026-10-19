@@ -629,10 +629,10 @@ export function getPostgresPoolLimits(): {
   statementTimeoutMillis: number;
 } {
   const envMax = parseInt(
-    process.env.PG_POOL_MAX || process.env.SQL_POOL_MAX || process.env.DATABASE_POOL_MAX || '10',
+    process.env.PG_POOL_MAX || process.env.SQL_POOL_MAX || process.env.DATABASE_POOL_MAX || '5',
     10
   );
-  const max = Number.isFinite(envMax) && envMax > 0 ? Math.min(Math.max(envMax, 2), 25) : 10;
+  const max = Number.isFinite(envMax) && envMax > 0 ? Math.min(Math.max(envMax, 2), 25) : 5;
 
   const envConnTimeout = parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '8000', 10);
   const connectionTimeoutMillis = Number.isFinite(envConnTimeout) && envConnTimeout > 0 ? envConnTimeout : 8000;
@@ -702,6 +702,7 @@ export function getSharedPgPool(customUrl?: string): pg.Pool | null {
         query_timeout: limits.statementTimeoutMillis,
         max: limits.max,
         ssl: getPostgresSslOption(url),
+        allowExitOnIdle: true,
       });
 
       newPool.on('error', (err: any) => {

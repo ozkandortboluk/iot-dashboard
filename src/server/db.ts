@@ -782,29 +782,25 @@ class LocalDatabase {
 
   /**
    * Directly queries PostgreSQL pool with 'SELECT 1;' to verify live database connectivity.
+   * Uses pool.query() directly so clients are always automatically released back to the pool.
    */
   public async verifyPostgresSelect1(): Promise<boolean> {
     const pool = this.postgresRepo?.getPool() || this.getPgPool();
-    if (!pool) return false;
-    let client: any = null;
-    const onErr = () => {};
+    if (!pool || (pool as any).ending || (pool as any).ended) return false;
     try {
-      client = await Promise.race([
-        pool.connect(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('PostgreSQL SELECT 1 timeout')), 3000)
-        ),
-      ]);
-      if (client) client.on('error', onErr);
-      await client.query('SELECT 1;');
+      let timeoutId: any;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('PostgreSQL SELECT 1 timeout')), 3000);
+      });
+      const queryPromise = pool.query('SELECT 1;');
+      try {
+        await Promise.race([queryPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId);
+      }
       return true;
     } catch {
       return false;
-    } finally {
-      if (client) {
-        try { client.off('error', onErr); } catch {}
-        try { client.release(); } catch {}
-      }
     }
   }
 
@@ -3469,8 +3465,8 @@ class LocalDatabase {
         audit_logs: existingTables.has('audit_logs'),
       };
 
-      client.release();
-      await pool.end();
+      try { client.release(); client = null; } catch {}
+      try { await pool.end(); pool = null; } catch {}
 
       // Update cached stats in local state
       if (!this.data.databaseSettings) {

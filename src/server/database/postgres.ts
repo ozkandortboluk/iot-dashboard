@@ -765,6 +765,10 @@ export class PostgresRepository {
       }
 
       const isConnectionIssue =
+        errMsg.toLowerCase().includes('sorry, too many clients') ||
+        errMsg.toLowerCase().includes('too many connections') ||
+        errMsg.toLowerCase().includes('too many clients') ||
+        err?.code === '53300' ||
         errMsg.includes('timeout') ||
         errMsg.includes('Connection terminated') ||
         errMsg.includes('ECONNREFUSED') ||
@@ -778,8 +782,17 @@ export class PostgresRepository {
 
       if (isConnectionIssue) {
         this.isConnected = false;
-        if (errMsg.includes('calling end on the pool') || errMsg.includes('Cannot use a pool after calling end')) {
+        if (
+          errMsg.includes('calling end on the pool') ||
+          errMsg.includes('Cannot use a pool after calling end') ||
+          errMsg.toLowerCase().includes('too many clients') ||
+          errMsg.toLowerCase().includes('too many connections') ||
+          err?.code === '53300'
+        ) {
           this.pool = null;
+          try {
+            import('./connection.js').then((conn) => conn.recycleSharedPgPool()).catch(() => {});
+          } catch {}
         }
         systemLogger.error('database', `PostgreSQL Bağlantı Kesintisi Tespit Edildi: ${errMsg}. Bağlantı durumu pasif olarak işaretlendi.`);
         this.notifyConnectionChange();

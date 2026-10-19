@@ -92,8 +92,18 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
   } | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
-  // QR Simulation
+  // QR Simulation & Camera
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  // Matched Discovered Device
+  const [matchedDiscoveredInfo, setMatchedDiscoveredInfo] = useState<{
+    hostname?: string;
+    ip?: string;
+    mac?: string;
+    hardwareModel?: string;
+  } | null>(null);
 
   // Initialize from props
   useEffect(() => {
@@ -119,15 +129,6 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
   const availableSites = sites.filter((s) => !selectedTenantId || s.tenantId === selectedTenantId);
   const availableZones = zones.filter((z) => (!selectedTenantId || z.tenantId === selectedTenantId) && (!selectedSiteId || z.siteId === selectedSiteId));
   const availableGroups = groups.filter((g) => (!selectedTenantId || g.tenantId === selectedTenantId) && (!selectedZoneId || g.zoneId === selectedZoneId));
-
-  if (!isOpen) return null;
-
-  const [matchedDiscoveredInfo, setMatchedDiscoveredInfo] = useState<{
-    hostname?: string;
-    ip?: string;
-    mac?: string;
-    hardwareModel?: string;
-  } | null>(null);
 
   // STEP 1 -> STEP 2 (Collision Check)
   const handleProceedToStep2 = async () => {
@@ -285,9 +286,6 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
     }
   };
 
-  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-
   const handleSimulateQrScan = async () => {
     setIsCameraActive(true);
     setCameraError(null);
@@ -314,6 +312,8 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
       setIsCameraActive(false);
     }, 1200);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">

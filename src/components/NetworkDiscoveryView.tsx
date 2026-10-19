@@ -799,7 +799,7 @@ export const NetworkDiscoveryView: React.FC<{
       )}
 
       {/* PROVISIONING WIZARD MODAL */}
-      {user && (
+      {isWizardOpen && user && (
         <ProvisioningWizardModal
           isOpen={isWizardOpen}
           onClose={() => setIsWizardOpen(false)}

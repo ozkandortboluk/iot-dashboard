@@ -807,14 +807,25 @@ export class SetupService {
       let client: any = null;
       const onStatusClientErr = () => {};
       try {
+        let timedOut = false;
         const connectPromise = pool.connect().then((c) => {
+          if (timedOut) {
+            try { c.release(); } catch {}
+            return null;
+          }
           c.on('error', onStatusClientErr);
           return c;
+        }).catch((err) => {
+          if (timedOut) return null;
+          throw err;
         });
         let timeoutId: any;
         const connectTimeoutMs = isTestEnv ? 1500 : 7000;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error(`PostgreSQL bağlantısı zaman aşımına uğradı (${connectTimeoutMs}ms).`)), connectTimeoutMs);
+          timeoutId = setTimeout(() => {
+            timedOut = true;
+            reject(new Error(`PostgreSQL bağlantısı zaman aşımına uğradı (${connectTimeoutMs}ms).`));
+          }, connectTimeoutMs);
         });
         try {
           client = await Promise.race([connectPromise, timeoutPromise]);
