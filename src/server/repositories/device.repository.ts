@@ -1945,7 +1945,10 @@ export class DeviceRepository {
 
     // If pairingCode is provided, resolve from discovered pool
     if (data.pairingCode) {
-      const discovered = (this.db.data.unregisteredDevices || []).find((d: any) => d.pairingCode === data.pairingCode);
+      const cleanPairCode = data.pairingCode.trim().toUpperCase();
+      const discovered = (this.db.data.unregisteredDevices || []).find(
+        (d: any) => d.pairingCode && d.pairingCode.trim().toUpperCase() === cleanPairCode
+      );
       if (discovered) {
         newMac = discovered.mac || newMac;
         newIp = discovered.ip || newIp;
@@ -1953,6 +1956,9 @@ export class DeviceRepository {
         newModel = discovered.hardwareModel || newModel;
         if (discovered.ip) this.db.removeUnregisteredDevice(discovered.ip);
         if (discovered.mac) this.db.removeUnregisteredDevice(discovered.mac);
+        if (discovered.pairingCode) this.db.removeUnregisteredDevice(discovered.pairingCode);
+      } else {
+        throw new Error(`"${data.pairingCode}" eşleştirme koduna sahip bekleyen bir donanım keşif havuzunda bulunamadı. Lütfen cihazın açık ve ağa bağlı olduğundan emin olun.`);
       }
     }
 
@@ -2376,40 +2382,43 @@ export class DeviceRepository {
       resolvedApiKey = undefined;
     }
 
-    // 2. If no valid key was explicitly entered by user, look up tokenProvided from unregisteredDevices cache
-    if (!resolvedApiKey) {
-      const cleanDevMac = request.macAddress?.replace(/[:-]/g, '').toLowerCase();
-      const unreg = (this.db.data.unregisteredDevices || []).find((d: any) => {
-        const cleanUnregMac = d.mac?.replace(/[:-]/g, '').toLowerCase();
-        const macMatch = cleanDevMac && cleanUnregMac && cleanDevMac === cleanUnregMac;
-        const ipMatch = request.ipAddress && d.ip && d.ip === request.ipAddress;
-        const codeMatch = request.pairingCode && d.pairingCode && d.pairingCode === request.pairingCode;
-        const nameMatch = request.name && (d.hostname === request.name || d.name === request.name);
-        return macMatch || ipMatch || codeMatch || nameMatch;
-      });
+    // 2. Resolve matching unregistered device from discovery pool if pairingCode / mac / ip is provided
+    const cleanDevMac = request.macAddress?.replace(/[:-]/g, '').toLowerCase();
+    const cleanPairCode = request.pairingCode?.trim().toUpperCase();
+    const matchedUnreg = (this.db.data.unregisteredDevices || []).find((d: any) => {
+      const cleanUnregMac = d.mac?.replace(/[:-]/g, '').toLowerCase();
+      const codeMatch = Boolean(cleanPairCode && d.pairingCode && d.pairingCode.trim().toUpperCase() === cleanPairCode);
+      const macMatch = Boolean(cleanDevMac && cleanUnregMac && cleanDevMac === cleanUnregMac);
+      const ipMatch = Boolean(request.ipAddress && d.ip && d.ip === request.ipAddress);
+      const nameMatch = Boolean(request.name && (d.hostname === request.name || d.name === request.name));
+      return codeMatch || macMatch || ipMatch || nameMatch;
+    });
 
-      if (unreg && unreg.tokenProvided && typeof unreg.tokenProvided === 'string') {
-        const candidate = unreg.tokenProvided.trim();
-        if (
-          candidate !== 'Yok' &&
-          candidate !== '__USE_CACHED_TOKEN__' &&
-          !candidate.includes('USE_CACHED') &&
-          candidate !== 'undefined' &&
-          candidate !== 'null' &&
-          candidate.length >= 8
-        ) {
-          resolvedApiKey = candidate;
-        }
+    const finalIpAddress = request.ipAddress?.trim() || matchedUnreg?.ip || '';
+    const finalMacAddress = request.macAddress?.trim() || matchedUnreg?.mac || '';
+    const finalType = request.type || matchedUnreg?.hardwareModel || matchedUnreg?.vendor || 'ESP32';
+
+    if (!resolvedApiKey && matchedUnreg && matchedUnreg.tokenProvided && typeof matchedUnreg.tokenProvided === 'string') {
+      const candidate = matchedUnreg.tokenProvided.trim();
+      if (
+        candidate !== 'Yok' &&
+        candidate !== '__USE_CACHED_TOKEN__' &&
+        !candidate.includes('USE_CACHED') &&
+        candidate !== 'undefined' &&
+        candidate !== 'null' &&
+        candidate.length >= 8
+      ) {
+        resolvedApiKey = candidate;
       }
     }
 
     // Standard new device creation
     const createdDev = await this.createDevice({
       name: resolvedDeviceName,
-      type: request.type || 'ESP32',
+      type: finalType,
       location: request.location || 'Merkez Tesis',
-      ipAddress: request.ipAddress || '',
-      macAddress: request.macAddress || '',
+      ipAddress: finalIpAddress,
+      macAddress: finalMacAddress,
       tenantId: targetTenantId,
       userId: targetTenantId,
       siteId: request.siteId,
@@ -2424,9 +2433,12 @@ export class DeviceRepository {
       isSimulated: false,
     });
 
-    if (request.macAddress) this.removeUnregisteredDevice(request.macAddress);
-    if (request.ipAddress) this.removeUnregisteredDevice(request.ipAddress);
+    if (finalMacAddress) this.removeUnregisteredDevice(finalMacAddress);
+    if (finalIpAddress) this.removeUnregisteredDevice(finalIpAddress);
     if (request.pairingCode) this.removeUnregisteredDevice(request.pairingCode);
+    if (matchedUnreg?.mac) this.removeUnregisteredDevice(matchedUnreg.mac);
+    if (matchedUnreg?.ip) this.removeUnregisteredDevice(matchedUnreg.ip);
+    if (matchedUnreg?.pairingCode) this.removeUnregisteredDevice(matchedUnreg.pairingCode);
 
     const auditRecord: PairingAuditRecord = {
       id: 'pair_audit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),

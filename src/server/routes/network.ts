@@ -159,9 +159,9 @@ networkRouter.get('/ping/:taskId', authenticateUser, requireNetworkAdminOrOperat
   res.json(result);
 });
 
-// 6. POST /api/network/check-duplicate - Checks collisions for MAC, IP, or Device Name
+// 6. POST /api/network/check-duplicate - Checks collisions for MAC, IP, or Device Name and matches pairing codes
 networkRouter.post('/check-duplicate', authenticateUser, (req, res) => {
-  const { mac, ip, name, excludeDeviceId, tenantId } = req.body;
+  const { mac, ip, name, excludeDeviceId, tenantId, pairingCode } = req.body;
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   
@@ -174,7 +174,28 @@ networkRouter.post('/check-duplicate', authenticateUser, (req, res) => {
     tenantId: targetTenant,
   });
 
-  res.json(result);
+  let matchedDiscovered: any = null;
+  if (pairingCode && typeof pairingCode === 'string') {
+    const cleanCode = pairingCode.trim().toUpperCase();
+    const discoveredList = db.getDiscoveredDevices(currentUser.id, currentUser.role === 'admin' ? targetTenant : undefined);
+    const found = discoveredList.find((d: any) => d.pairingCode && d.pairingCode.trim().toUpperCase() === cleanCode);
+    if (found) {
+      matchedDiscovered = {
+        hostname: found.hostname || (found as any).name || `Düğüm-${(found.mac || '0000').replace(/[:-]/g, '').slice(-4)}`,
+        ip: found.ip,
+        mac: found.mac,
+        hardwareModel: found.hardwareModel || found.vendor || 'ESP32',
+        firmwareVersion: found.firmwareVersion,
+        pairingCode: found.pairingCode,
+        hasAuthToken: found.hasAuthToken,
+      };
+    }
+  }
+
+  res.json({
+    ...result,
+    matchedDiscovered,
+  });
 });
 
 // 7. POST /api/network/pair - Full Provisioning & Pairing Wizard Execution

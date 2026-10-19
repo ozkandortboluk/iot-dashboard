@@ -142,9 +142,15 @@ export const NetworkDiscoveryView: React.FC<{
     return () => clearInterval(interval);
   }, []);
 
+  const [pingNotification, setPingNotification] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
   // Ping Test Action
   const handlePingTest = async (ip: string) => {
     setPingingIp(ip);
+    setPingNotification(null);
     try {
       const res = await fetch('/api/network/ping', {
         method: 'POST',
@@ -153,14 +159,24 @@ export const NetworkDiscoveryView: React.FC<{
       });
       if (res.ok) {
         const data = await res.json();
-        alert(`[PING BAŞARILI] Hedef IP: ${ip}\nGecikme: ${data.timeMs || '<5'} ms`);
+        setPingNotification({
+          type: 'success',
+          message: `[PING BAŞARILI] Hedef IP: ${ip} | Gecikme: ${data.timeMs || '<5'} ms`,
+        });
       } else {
-        alert(`[PING HATASI] Hedef IP: ${ip} yanıt vermedi.`);
+        setPingNotification({
+          type: 'error',
+          message: `[PING HATASI] Hedef IP: ${ip} yanıt vermedi.`,
+        });
       }
     } catch {
-      alert(`[PING HATASI] ${ip} adresine ulaşılamadı.`);
+      setPingNotification({
+        type: 'error',
+        message: `[PING HATASI] ${ip} adresine ulaşılamadı.`,
+      });
     } finally {
       setPingingIp(null);
+      setTimeout(() => setPingNotification(null), 5000);
     }
   };
 
@@ -326,6 +342,25 @@ export const NetworkDiscoveryView: React.FC<{
             Ağdaki fiziksel donanımları keşfedin, QR/PIN ile güvenli eşleştirin ve hiyerarşik organizasyona dahil edin.
           </p>
         </div>
+
+        {pingNotification && (
+          <div
+            className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between border animate-fade-in ${
+              pingNotification.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+            }`}
+          >
+            <span>{pingNotification.message}</span>
+            <button
+              type="button"
+              onClick={() => setPingNotification(null)}
+              className="text-slate-400 hover:text-white ml-2 text-xs"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <button

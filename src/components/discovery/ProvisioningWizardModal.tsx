@@ -31,6 +31,7 @@ import type {
   DeviceGroup,
   User,
 } from '../../types';
+import { apiFetch } from '../../lib/apiFetch';
 
 interface ProvisioningWizardModalProps {
   isOpen: boolean;
@@ -121,31 +122,69 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
 
   if (!isOpen) return null;
 
+  const [matchedDiscoveredInfo, setMatchedDiscoveredInfo] = useState<{
+    hostname?: string;
+    ip?: string;
+    mac?: string;
+    hardwareModel?: string;
+  } | null>(null);
+
   // STEP 1 -> STEP 2 (Collision Check)
   const handleProceedToStep2 = async () => {
-    if (!deviceName.trim()) {
+    let resolvedName = deviceName.trim();
+    if (method === 'pairing_code') {
+      if (!pairingCode.trim()) {
+        setPairError('Lütfen 6 haneli geçici eşleşme kodunu giriniz.');
+        return;
+      }
+      if (!resolvedName) {
+        resolvedName = `Düğüm-${pairingCode.trim().toUpperCase()}`;
+        setDeviceName(resolvedName);
+      }
+    } else if (!resolvedName) {
       setPairError('Lütfen cihaz için bir isim giriniz.');
       return;
     }
+
     setPairError(null);
     setIsCheckingCollision(true);
 
     try {
       const targetTenant = currentUser.role === 'admin' ? (selectedTenantId || currentUser.id) : currentUser.id;
-      const res = await fetch('/api/network/check-duplicate', {
+      const res = await apiFetch('/api/network/check-duplicate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: deviceName.trim(),
+          name: resolvedName,
           mac: macAddress.trim() || undefined,
           ip: ipAddress.trim() || undefined,
+          pairingCode: pairingCode.trim() || undefined,
           tenantId: targetTenant,
         }),
       });
 
-      if (!res.ok) throw new Error('Kimlik çakışma kontrolü yapılamadı.');
-      const data: CollisionCheckResult = await res.json();
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || 'Kimlik çakışma kontrolü yapılamadı.');
+      }
+      const data: any = await res.json();
       setCollisionResult(data);
+
+      if (data.matchedDiscovered) {
+        setMatchedDiscoveredInfo(data.matchedDiscovered);
+        if (data.matchedDiscovered.hostname && (!deviceName.trim() || deviceName.startsWith('Düğüm-'))) {
+          setDeviceName(data.matchedDiscovered.hostname);
+        }
+        if (data.matchedDiscovered.ip && !ipAddress.trim()) {
+          setIpAddress(data.matchedDiscovered.ip);
+        }
+        if (data.matchedDiscovered.mac && !macAddress.trim()) {
+          setMacAddress(data.matchedDiscovered.mac);
+        }
+        if (data.matchedDiscovered.hardwareModel) {
+          setDeviceType(data.matchedDiscovered.hardwareModel);
+        }
+      }
 
       if (data.hasCollision) {
         if (data.collisionType === 'mac') {
@@ -201,7 +240,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
         targetDeviceIdToReplace: collisionStrategy === 'replace_hardware' ? targetDeviceIdToReplace : undefined,
       };
 
-      const res = await fetch('/api/network/pair', {
+      const res = await apiFetch('/api/network/pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -209,7 +248,7 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'Cihaz eşleştirme işlemi başarısız oldu.');
+        throw new Error(data.message || data.error || 'Cihaz eşleştirme işlemi başarısız oldu.');
       }
 
       setPairedResult({
@@ -423,6 +462,18 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
                 </div>
               )}
 
+              {matchedDiscoveredInfo && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold block text-emerald-200">Eşleştirme Kodu ile Donanım Doğrulandı!</span>
+                    <span className="text-[11px] text-emerald-300/80">
+                      Hostname: {matchedDiscoveredInfo.hostname || '—'} | IP: {matchedDiscoveredInfo.ip || '—'} | MAC: {matchedDiscoveredInfo.mac || '—'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -456,15 +507,27 @@ export const ProvisioningWizardModal: React.FC<ProvisioningWizardModalProps> = (
 
                 {method === 'pairing_code' && (
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">6 Haneli Geçici Eşleşme Kodu</label>
+                    <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                      <span>6 Haneli Geçici Eşleşme Kodu</span>
+                      {pairingCode.length === 6 && (
+                        <span className="text-[10px] text-cyan-400 font-mono">6/6 Hane</span>
+                      )}
+                    </label>
                     <input
                       type="text"
                       maxLength={6}
                       placeholder="123456"
                       value={pairingCode}
-                      onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase();
+                        setPairingCode(val);
+                        if (pairError) setPairError(null);
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-cyan-400 font-mono tracking-widest font-bold focus:outline-none focus:border-cyan-500"
                     />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Cihaz seri portunda veya ekranında görünen 6 haneli kodu girin. Doğrulandığında donanım bilgileri otomatik doldurulur.
+                    </p>
                   </div>
                 )}
 

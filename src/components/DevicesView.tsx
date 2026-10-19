@@ -908,7 +908,6 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
         },
         body: JSON.stringify({ pairingCode: replacePairingCode.trim() }),
       });
