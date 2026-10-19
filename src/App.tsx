@@ -51,16 +51,34 @@ import {
 
 function DashboardContent() {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>(() => user?.preferences?.defaultTab || 'dashboard');
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    try {
+      const stored = sessionStorage.getItem('nexus_active_tab');
+      if (stored) return stored;
+    } catch {}
+    return user?.preferences?.defaultTab || 'dashboard';
+  });
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [editMode, setEditMode] = useUserPreference<boolean>('editMode', false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { selectedCustomerForAdmin, setSelectedCustomerForAdmin, customersList, devices, refreshData, isConnected } = useRealtime();
 
-  // Site her açıldığında ve kullanıcı giriş yaptığında/değiştiğinde kullanıcının tercih ettiği veya varsayılan dashboard sekmesi açılır
+  const setActiveTab = useCallback((tab: string) => {
+    try {
+      sessionStorage.setItem('nexus_active_tab', tab);
+    } catch {}
+    setActiveTabState(tab);
+  }, []);
+
+  // Kullanıcı değiştiğinde veya oturum ilk açıldığında tercih edilen sekmeye geç
   useEffect(() => {
-    setActiveTab(user?.preferences?.defaultTab || 'dashboard');
-  }, [user?.id, user?.preferences?.defaultTab]);
+    try {
+      const stored = sessionStorage.getItem('nexus_active_tab');
+      if (!stored && user?.preferences?.defaultTab) {
+        setActiveTab(user.preferences.defaultTab);
+      }
+    } catch {}
+  }, [user?.id, user?.preferences?.defaultTab, setActiveTab]);
 
   // If the URL contains a password reset token/link, force showing the reset screen even if a session is open
   const isResetPasswordUrl = Boolean(

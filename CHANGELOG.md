@@ -3,6 +3,17 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.2] - 2026-10-19
+
+### 🛠️ Cihaz Ayarları Kayıt Akışı, Sayfa Yenilenmesini Engelleme & UX İyileştirmesi
+- **Cihaz Ayarlarında Sayfa Yenilenmesi ve Dashboard'a Dönüş Hatası Düzeltildi**:
+  - `DevicesView.tsx` bileşeninde `handleSaveEdit` metoduna eksik olan `e.preventDefault()` çağrısı eklendi. Tarayıcının varsayılan HTML form gönderimiyle sayfayı baştan yükleyip kullanıcıyı canlı dashboard ekranına atması engellendi.
+  - Cihaz ayarları kaydedildiğinde modal kapanarak kullanıcıyı bulunduğu cihaz ekranında tutar ve anlık yeşil başarı bildirim kartı (`ToastNotification`) gösterir.
+  - Çift tıklama ve mükerrer istekleri engellemek için `isSavingEdit` yükleme durumu ve dinamik buton animasyonu (`Kaydediliyor...`) entegre edildi.
+- **Aktif Sekme Oturum Koruması (`sessionStorage`)**:
+  - `App.tsx` içerisinde kullanıcının çalıştığı aktif sekme (`sessionStorage.getItem('nexus_active_tab')`) bazında hafızada tutulacak şekilde güçlendirildi; manuel tarayıcı yenilemelerinde (F5) dahi kullanıcının üzerinde çalıştığı sekmede kalması sağlandı.
+
+---
 ## 🚀 [v1.49.1] - 2026-10-19
 
 ### 🔄 ClusterSync Kararlılığı, Mezar Taşı (Tombstone) Koruması & GitHub Sürüm Takibi

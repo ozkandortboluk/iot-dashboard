@@ -347,6 +347,7 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [editSaveSimulatedDataToDb, setEditSaveSimulatedDataToDb] = useState<boolean>(false);
   const [editSimMetrics, setEditSimMetrics] = useState<string[]>([]);
   const [editCustomSimMetricInput, setEditCustomSimMetricInput] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Replace Hardware modal state
   const [replacingDevice, setReplacingDevice] = useState<Device | null>(null);
@@ -737,7 +738,9 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
-    if (!editingDevice) return;
+    e.preventDefault();
+    if (!editingDevice || isSavingEdit) return;
+    setIsSavingEdit(true);
     try {
       const targetOwner = editOwnerId || 'usr_admin';
       const updated = await updateDevice(editingDevice.id, {
@@ -767,8 +770,17 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
       if (selectedDevice?.id === editingDevice.id) {
         setSelectedDeviceId(updated.id);
       }
-    } catch (err) {
-      alert('Cihaz ayarları güncellenemedi.');
+      setToast({
+        message: `"${updated.name}" cihaz ayarları başarıyla kaydedildi.`,
+        type: 'success',
+      });
+    } catch (err: any) {
+      setToast({
+        message: err?.message || 'Cihaz ayarları güncellenemedi.',
+        type: 'error',
+      });
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -3105,17 +3117,28 @@ void sendHeartbeat() {
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
+                  disabled={isSavingEdit}
                   onClick={() => setEditingDevice(null)}
-                  className="px-5 py-2.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-bold text-slate-700 dark:text-slate-300 transition cursor-pointer"
+                  className="px-5 py-2.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl font-bold text-slate-700 dark:text-slate-300 transition cursor-pointer disabled:opacity-50"
                 >
                   İptal
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/25 transition cursor-pointer flex items-center gap-2"
+                  disabled={isSavingEdit}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold shadow-lg shadow-indigo-600/25 transition cursor-pointer flex items-center gap-2"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Değişiklikleri Kaydet</span>
+                  {isSavingEdit ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Kaydediliyor...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Değişiklikleri Kaydet</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

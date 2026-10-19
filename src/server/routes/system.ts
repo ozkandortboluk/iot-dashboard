@@ -164,7 +164,7 @@ systemRouter.get('/runtime', (req, res) => {
   });
 });
 
-// System Version & GitHub Sync Diagnostic Endpoint
+// System Version & GitHub Sync Diagnostic Endpoint (v1.49.2)
 systemRouter.get(['/system/version', '/version'], (req, res) => {
   const config = getRuntimeConfig();
   const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
