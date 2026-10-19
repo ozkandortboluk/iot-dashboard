@@ -357,6 +357,22 @@ class LocalDatabase {
       }
     }
 
+    // Check if value actually changed to prevent redundant disk I/O, broadcasts, and cluster synchronization loops
+    let isChanged = true;
+    if (existing !== undefined && existing !== null && value !== undefined && value !== null) {
+      try {
+        isChanged = JSON.stringify(existing) !== JSON.stringify(value);
+      } catch {
+        isChanged = true;
+      }
+    }
+
+    if (!isChanged) {
+      // Value is identical: silently update timestamp if newer without triggering save/broadcast/cluster notifications
+      this.systemSettingsTimestamps[key] = effectiveTime;
+      return true;
+    }
+
     this.systemSettingsTimestamps[key] = effectiveTime;
     this.data.systemSettings[key] = value;
     this.saveData(this.data);

@@ -99,11 +99,14 @@ export class DeviceRepository {
   public async checkDeviceStatuses(): Promise<boolean> {
     const now = Date.now();
     let hasChanges = false;
+    const changedDevices: Device[] = [];
     for (const dev of this.db.data.devices) {
       const prevStatus = dev.status;
       const evalResult = smartIntervalService.evaluateDeviceWatchdog(dev, now);
+      let devChanged = false;
       if (evalResult.changed) {
         hasChanges = true;
+        devChanged = true;
       }
 
       // Cihazın çevrimdışından tekrar çevrimiçiye dönüşü (Recovery) - Kararlı çevrimiçi paketi doğrulama (Anti-Flap)
@@ -127,6 +130,7 @@ export class DeviceRepository {
         });
         dev.lastOfflineNotifiedAt = undefined;
         hasChanges = true;
+        devChanged = true;
       }
 
       // Ağ gecikmesi/jitter toleransı aşılmış, doğrulanmış çevrimdışı bildirimi
@@ -140,6 +144,7 @@ export class DeviceRepository {
           dev.lastOfflineNotificationTime = now;
           dev.stableOnlineCount = 0;
           hasChanges = true;
+          devChanged = true;
 
           const timeoutSec = evalResult.timeoutSeconds;
           const timeFormatted = timeoutSec >= 3600 
@@ -166,12 +171,20 @@ export class DeviceRepository {
           });
         }
       }
+
+      if (devChanged) {
+        dev.updatedAt = new Date(now).toISOString();
+        changedDevices.push(dev);
+      }
     }
 
     if (hasChanges) {
       this.db.saveData(this.db.data);
-      for (const dev of this.db.data.devices) {
-        if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message)); }
+      // Noise reduction: Only save devices whose status or watchdog actually changed
+      for (const dev of changedDevices) {
+        if (this.db.postgresRepo?.isReady()) {
+          await this.db.postgresRepo.saveDevice(dev).catch((e) => console.warn('[PG Error]', e.message));
+        }
       }
     }
     return hasChanges;
@@ -574,6 +587,8 @@ export class DeviceRepository {
   public async updateDevice(deviceId: string, updates: Partial<Device>): Promise<Device> {
     const dev = this.db.data.devices.find((d: Device) => d.id === deviceId);
     if (!dev) throw new Error('Cihaz bulunamadı');
+
+    dev.updatedAt = new Date().toISOString();
 
     const configKeys: (keyof Device)[] = [
       'name',
@@ -984,6 +999,14 @@ export class DeviceRepository {
       );
       this.db.saveData(this.db.data);
 
+      // Record tombstone and publish to ClusterSync so remote nodes prune this device
+      import('../services/clusterSync.service.js')
+        .then(({ clusterSyncService }) => {
+          clusterSyncService.recordDeviceDeletion(deviceId);
+          clusterSyncService.publish('device:deleted', { deviceId });
+        })
+        .catch(() => {});
+
       // In PostgreSQL: Remove device from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
         await this.db.postgresRepo.deleteDevice(deviceId).catch((e: any) => console.warn('[PG Error]', e.message));
@@ -1049,6 +1072,16 @@ export class DeviceRepository {
         'high'
       );
       this.db.saveData(this.db.data);
+
+      // Record tombstones and publish to ClusterSync
+      import('../services/clusterSync.service.js')
+        .then(({ clusterSyncService }) => {
+          for (const id of removedIds) {
+            clusterSyncService.recordDeviceDeletion(id);
+          }
+          clusterSyncService.publish('devices:deleted', { deviceIds: removedIds });
+        })
+        .catch(() => {});
 
       // In PostgreSQL: Remove devices from active table only (telemetry and alarms remain safe for restore)
       if (this.db.postgresRepo?.isReady()) {
@@ -1329,6 +1362,15 @@ export class DeviceRepository {
     );
 
     this.db.saveData(this.db.data);
+
+    // Clear tombstone so device is permitted to sync and persist
+    (restoredDevice as any).isRestoring = true;
+    import('../services/clusterSync.service.js')
+      .then(({ clusterSyncService }) => {
+        clusterSyncService.clearDeviceTombstone(deviceId);
+        clusterSyncService.publish('device:updated', { device: restoredDevice, isRestore: true, updatedAt: restoredDevice.updatedAt });
+      })
+      .catch(() => {});
 
     // Sync to PostgreSQL Repository
     if (this.db.postgresRepo?.isReady()) {

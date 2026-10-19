@@ -1146,6 +1146,14 @@ export class PostgresRepository {
       return; // Do not persist ephemeral test devices to PostgreSQL
     }
 
+    // Tombstone protection: Do not resurrect deleted devices
+    try {
+      const { clusterSyncService } = await import('../services/clusterSync.service.js');
+      if (clusterSyncService.isDeviceDeleted(dev.id) && !(dev as any).isRestoring) {
+        return;
+      }
+    } catch {}
+
     // Resolve user_id and tenant_id referencing users(id) foreign key constraint
     const validUsers = await this.getValidUserIds();
     const fallbackTenant = validUsers.has('usr_admin') ? 'usr_admin' : (validUsers.has('usr_test_admin') ? 'usr_test_admin' : 'usr_admin');
@@ -1297,7 +1305,7 @@ export class PostgresRepository {
       await this.query(sql, params);
       import('../services/clusterSync.service.js')
         .then(({ clusterSyncService }) => {
-          clusterSyncService.publish('device:updated', { device: dev });
+          clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
         })
         .catch(() => {});
     } catch (saveErr: any) {
@@ -1316,7 +1324,7 @@ export class PostgresRepository {
           await this.query(sql, fallbackParams);
           import('../services/clusterSync.service.js')
             .then(({ clusterSyncService }) => {
-              clusterSyncService.publish('device:updated', { device: dev });
+              clusterSyncService.publish('device:updated', { device: dev, updatedAt: dev.updatedAt || new Date().toISOString() });
             })
             .catch(() => {});
           return;
@@ -1335,6 +1343,7 @@ export class PostgresRepository {
     await this.query(`DELETE FROM devices WHERE id = $1;`, [deviceId]);
     import('../services/clusterSync.service.js')
       .then(({ clusterSyncService }) => {
+        clusterSyncService.recordDeviceDeletion(deviceId);
         clusterSyncService.publish('device:deleted', { deviceId });
       })
       .catch(() => {});
@@ -2197,6 +2206,14 @@ export class PostgresRepository {
   public async removeDevicesFromActiveTable(deviceIds: string[]): Promise<void> {
     if (!this.pool || !this.isConnected || !deviceIds.length) return;
     await this.query(`DELETE FROM devices WHERE id = ANY($1::text[]);`, [deviceIds]).catch(() => {});
+    import('../services/clusterSync.service.js')
+      .then(({ clusterSyncService }) => {
+        for (const id of deviceIds) {
+          clusterSyncService.recordDeviceDeletion(id);
+        }
+        clusterSyncService.publish('devices:deleted', { deviceIds });
+      })
+      .catch(() => {});
   }
 
   public async permanentlyPurgeDevices(deviceIds: string[]): Promise<void> {

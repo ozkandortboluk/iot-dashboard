@@ -140,12 +140,82 @@ describe('PostgreSQL Distributed Cross-Environment Live Synchronization (Dev <->
         device: { id: 'dev_vps_sensor_01' },
       });
 
-      // Also support deviceId field
+      // Verify that device is completely removed from memory
+      expect(db.data.devices.some((d) => d.id === 'dev_vps_sensor_01')).toBe(false);
+      expect(broadcastSpy).toHaveBeenCalledWith('device:deleted', { id: 'dev_vps_sensor_01' });
+
+      // 3. Tombstone protection: Stale update arriving for deleted device must be rejected and NOT resurrect it
       await clusterSyncService.handleIncomingEvent({
         senderId: 'remote_vps_node_456',
-        type: 'device:deleted',
-        payload: { deviceId: 'dev_vps_sensor_01' },
+        type: 'device:updated',
+        device: newDev,
+        updatedAt: '2026-10-18T18:00:00.000Z',
       });
+      expect(db.data.devices.some((d) => d.id === 'dev_vps_sensor_01')).toBe(false);
+
+      // 4. Bulk deletion via devices:deleted
+      db.data.devices.push({ id: 'dev_bulk_1', name: 'Bulk 1', type: 'sensor', status: 'online' } as any);
+      db.data.devices.push({ id: 'dev_bulk_2', name: 'Bulk 2', type: 'sensor', status: 'online' } as any);
+      expect(db.data.devices.length).toBe(2);
+
+      await clusterSyncService.handleIncomingEvent({
+        senderId: 'remote_vps_node_456',
+        type: 'devices:deleted',
+        deviceIds: ['dev_bulk_1', 'dev_bulk_2'],
+      });
+      expect(db.data.devices.length).toBe(0);
+      expect(clusterSyncService.isDeviceDeleted('dev_bulk_1')).toBe(true);
+      expect(clusterSyncService.isDeviceDeleted('dev_bulk_2')).toBe(true);
+    });
+
+    it('should protect against stale overwrites (LWW) and ignore identical device updates', async () => {
+      const broadcastSpy = vi.fn();
+      db.setBroadcastHook(broadcastSpy);
+
+      const dev1 = {
+        id: 'dev_sensor_lww',
+        name: 'Sensör V1',
+        type: 'sensor',
+        status: 'online',
+        updatedAt: '2026-10-18T20:00:00.000Z',
+      };
+
+      await clusterSyncService.handleIncomingEvent({
+        senderId: 'remote_vps_node_456',
+        type: 'device:updated',
+        device: dev1,
+        updatedAt: dev1.updatedAt,
+      });
+
+      expect(db.data.devices.find((d) => d.id === 'dev_sensor_lww')?.name).toBe('Sensör V1');
+      expect(broadcastSpy).toHaveBeenCalledTimes(1);
+
+      // A) Identical incoming update: Must NOT trigger another broadcast
+      await clusterSyncService.handleIncomingEvent({
+        senderId: 'remote_vps_node_456',
+        type: 'device:updated',
+        device: { ...dev1 },
+        updatedAt: '2026-10-18T20:05:00.000Z',
+      });
+      expect(broadcastSpy).toHaveBeenCalledTimes(1); // Still 1, no duplicate noise!
+
+      // B) Stale incoming update (older timestamp): Must be rejected
+      await clusterSyncService.handleIncomingEvent({
+        senderId: 'remote_vps_node_456',
+        type: 'device:updated',
+        device: { ...dev1, name: 'Sensör Eski Ad' },
+        updatedAt: '2026-10-18T19:00:00.000Z',
+      });
+      expect(db.data.devices.find((d) => d.id === 'dev_sensor_lww')?.name).toBe('Sensör V1'); // Unchanged!
+
+      // C) Newer incoming update: Must be applied
+      await clusterSyncService.handleIncomingEvent({
+        senderId: 'remote_vps_node_456',
+        type: 'device:updated',
+        device: { ...dev1, name: 'Sensör V2 Yeni Ad' },
+        updatedAt: '2026-10-18T21:00:00.000Z',
+      });
+      expect(db.data.devices.find((d) => d.id === 'dev_sensor_lww')?.name).toBe('Sensör V2 Yeni Ad');
     });
 
     it('should synchronize user preferences modified on remote server', async () => {
@@ -172,6 +242,10 @@ describe('PostgreSQL Distributed Cross-Environment Live Synchronization (Dev <->
       expect(broadcastSpy).toHaveBeenCalledWith('user:preferences:updated', expect.objectContaining({
         userId: 'usr_admin',
       }));
+
+      // Redundant identical preferences update must NOT broadcast again
+      await clusterSyncService.handleIncomingEvent(prefEvent);
+      expect(broadcastSpy).toHaveBeenCalledTimes(1);
     });
   });
 
