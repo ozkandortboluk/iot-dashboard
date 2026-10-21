@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.8] - 2026-10-21
+
+### 🔐 Sunucu Başlangıcında Kurulum Tokeni Konsol Bildirimi
+- **Konsola Kurulum Tokeni Yazdırma Özelliği**:
+  - Sunucu başlatılırken (`server.ts`), sistem kurulumu henüz tamamlanmamışsa (`!isSetupCompleted()`), otomatik olarak `setupService.getOrInitSetupToken()` tetiklenerek ilk kurulum güvenlik anahtarı (Setup Token) doğrudan konsola ve `data/.setup_token` dosyasına yazdırılacak şekilde ayarlandı.
+  - Güvenlik anahtarı konsolda açık ve şık bir çerçeve içinde listelenerek yöneticinin hızlıca kurulum sihirbazına giriş yapabilmesi sağlandı.
+
+---
 ## 🚀 [v1.49.7] - 2026-10-21
 
 ### 🛡️ PostgreSQL `chk_active_alarms_state` Kısıt Genişletmesi & Alarm Durumu Senkronizasyonu

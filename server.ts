@@ -678,6 +678,25 @@ async function setupViteOrStatic() {
     console.log(` IoT Telemetri & Alarm Sunucusu Port ${PORT} Üzerinde Aktif!`);
     console.log(` WebSocket & REST API: http://0.0.0.0:${PORT}`);
     console.log(` Modüler Mimari (Routes / Services / DB) Başlatıldı.`);
+    
+    try {
+      const isCompleted = setupService.isSetupCompleted();
+      if (!isCompleted) {
+        const token = setupService.getOrInitSetupToken(false);
+        if (token) {
+          console.log(`----------------------------------------------------`);
+          console.log(`🔐 İLK KURULUM GÜVENLİK ANAHTARI (SETUP TOKEN):`);
+          console.log(`   ${token}`);
+          console.log(`   Dosya Yolu: data/.setup_token`);
+          console.log(`----------------------------------------------------`);
+        }
+      } else {
+        console.log(` [Setup] Sistem kurulumu daha önce tamamlanmıştır.`);
+      }
+    } catch (e) {
+      // Ignore startup token print error if db/file system not ready
+    }
+
     console.log(`====================================================`);
   });
 
