@@ -3,6 +3,21 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.7] - 2026-10-21
+
+### 🛡️ PostgreSQL `chk_active_alarms_state` Kısıt Genişletmesi & Alarm Durumu Senkronizasyonu
+- **PostgreSQL `active_alarms` Tablosu `chk_active_alarms_state` Check Constraint Güncellemesi**:
+  - Saha cihazlarından (`ESP32-b714` vb.) telemetri akışı sırasında üretilen `ACTIVE` ve `BREACH_PENDING` durumundaki alarmların veritabanına yazılırken `violates check constraint "chk_active_alarms_state"` hatası vermesi ve loglarda binlerce hata kaydı oluşturması giderildi.
+  - `canonicalSchema.ts` içerisindeki `chk_active_alarms_state` kısıtı, uygulamanın kullandığı tüm alarm durumlarını (`'ACTIVE'`, `'BREACH_PENDING'`, `'OPEN'`, `'ACKNOWLEDGED'`, `'RESOLVED'`, `'SILENCED'`, `'MUTED'`, `'NORMAL'`) kapsayacak şekilde genişletildi.
+  - `postgres.ts` içindeki `ensureTelemetrySchema` yordamına kısıtın otomatik ve kesintisiz olarak güncellenmesi (`ALTER TABLE active_alarms DROP CONSTRAINT ... ADD CONSTRAINT ...`) eklendi.
+  - `postgres.ts` içindeki `saveAlarm` fonksiyonunda durum metni büyük harfe normalize edildi (`toUpperCase()`); kısıt hatasıyla karşılaşılması durumunda otomatik canlı şema düzeltmesi ve geriye dönük `OPEN` eşleme güvencesi sağlandı.
+- **Şema Denetleyicisi & Görünüm Senkronizasyonu (`schemaAuditor.ts`, `ddl.sql`)**:
+  - `schemaAuditor.ts` içindeki `autoHeal` adımına `chk_active_alarms_state` için otomatik veri normalizasyonu ve kurtarma bloğu eklendi.
+  - `canonicalSchema.ts` ve `ddl.sql` içerisindeki `view_device_health_metrics` ve `v_system_health_overview` SQL görünümleri, açık alarmları sayarken `WHERE state IN ('ACTIVE', 'OPEN', 'BREACH_PENDING')` durumlarını kapsayacak şekilde güncellendi.
+- **Arayüz ve Depo Katmanı (`AlarmOverview.tsx`, `ActiveAlarmTable.tsx`, `alarm.repository.ts`)**:
+  - Arayüz bileşenlerinde kritik/uyarı alarm sayıları ve satır renklendirmelerinde hem `ACTIVE` hem `OPEN` durumları eşzamanlı desteklendi.
+
+---
 ## 🚀 [v1.49.6] - 2026-10-19
 
 ### 🔋 mybattery Telemetri Algılaması & "Sistemi Sıfırla" Butonunun Sınırlandırılması

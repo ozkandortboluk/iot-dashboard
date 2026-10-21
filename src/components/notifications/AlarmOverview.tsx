@@ -30,9 +30,9 @@ export const AlarmOverview: React.FC<AlarmOverviewProps> = ({
   onOpenNewRule,
   onNavigateToTab,
 }) => {
-  const criticalCount = activeAlarms.filter((a) => a.severity === 'critical' && a.state === 'ACTIVE').length;
-  const warningCount = activeAlarms.filter((a) => a.severity === 'warning' && a.state === 'ACTIVE').length;
-  const acknowledgedCount = activeAlarms.filter((a) => a.acknowledged || a.state === 'SILENCED').length;
+  const criticalCount = activeAlarms.filter((a) => a.severity === 'critical' && (a.state === 'ACTIVE' || a.state === 'OPEN')).length;
+  const warningCount = activeAlarms.filter((a) => a.severity === 'warning' && (a.state === 'ACTIVE' || a.state === 'OPEN')).length;
+  const acknowledgedCount = activeAlarms.filter((a) => a.acknowledged || a.state === 'ACKNOWLEDGED' || a.state === 'SILENCED' || a.state === 'MUTED').length;
   const activeRulesCount = rules.filter((r) => r.enabled).length;
   const pendingQueueCount = queueItems.filter((q) => q.status === 'pending' || q.status === 'retrying').length;
 

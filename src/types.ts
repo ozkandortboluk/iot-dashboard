@@ -727,7 +727,7 @@ export interface DashboardLayout {
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 
-export type AlarmState = 'NORMAL' | 'BREACH_PENDING' | 'ACTIVE' | 'SILENCED' | 'RESOLVED';
+export type AlarmState = 'NORMAL' | 'BREACH_PENDING' | 'ACTIVE' | 'OPEN' | 'ACKNOWLEDGED' | 'SILENCED' | 'MUTED' | 'RESOLVED';
 
 export interface AutomationTrigger {
   deviceId: string;

@@ -290,7 +290,7 @@ FROM devices d
 LEFT JOIN (
     SELECT device_id, COUNT(*) AS open_alarm_count
     FROM active_alarms
-    WHERE state = 'OPEN'
+    WHERE state IN ('ACTIVE', 'OPEN', 'BREACH_PENDING')
     GROUP BY device_id
 ) alarm_counts ON d.id = alarm_counts.device_id
       `.trim()
@@ -313,7 +313,7 @@ SELECT
     COUNT(DISTINCT a.id) AS total_active_alarms
 FROM users u
 LEFT JOIN devices d ON u.id = d.user_id OR u.id = d.tenant_id
-LEFT JOIN active_alarms a ON (u.id = a.user_id OR u.id = a.tenant_id) AND a.state = 'OPEN'
+LEFT JOIN active_alarms a ON (u.id = a.user_id OR u.id = a.tenant_id) AND a.state IN ('ACTIVE', 'OPEN', 'BREACH_PENDING')
 GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       `.trim()
     }
@@ -677,7 +677,7 @@ GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status
       primaryKey: ['id'],
       checkConstraints: [
         { name: 'chk_active_alarms_severity', condition: "severity IN ('info', 'low', 'medium', 'warning', 'high', 'critical')" },
-        { name: 'chk_active_alarms_state', condition: "state IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED', 'MUTED')" }
+        { name: 'chk_active_alarms_state', condition: "state IN ('ACTIVE', 'BREACH_PENDING', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED', 'MUTED', 'NORMAL')" }
       ],
       columns: [
         { name: 'id', type: 'VARCHAR(128)', nullable: false, primaryKey: true },
@@ -2058,7 +2058,7 @@ FROM devices d
 LEFT JOIN (
     SELECT device_id, COUNT(*) AS open_alarm_count
     FROM active_alarms
-    WHERE state = 'OPEN'
+    WHERE state IN ('ACTIVE', 'OPEN', 'BREACH_PENDING')
     GROUP BY device_id
 ) alarm_counts ON d.id = alarm_counts.device_id;
 
@@ -2076,7 +2076,7 @@ SELECT
     COUNT(DISTINCT a.id) AS total_active_alarms
 FROM users u
 LEFT JOIN devices d ON u.id = d.user_id OR u.id = d.tenant_id
-LEFT JOIN active_alarms a ON (u.id = a.user_id OR u.id = a.tenant_id) AND a.state = 'OPEN'
+LEFT JOIN active_alarms a ON (u.id = a.user_id OR u.id = a.tenant_id) AND a.state IN ('ACTIVE', 'OPEN', 'BREACH_PENDING')
 GROUP BY u.id, u.name, u.email, u.role, u.company_name, u.status;
 
 -- 4. ROW LEVEL SECURITY (RLS) POLICIES

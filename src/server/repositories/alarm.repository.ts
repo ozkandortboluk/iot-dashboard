@@ -50,12 +50,12 @@ export class AlarmRepository {
     // Apply filtering
     if (options.status && options.status !== 'all') {
       const st = options.status.toLowerCase();
-      if (st === 'active') {
-        list = list.filter((a) => a.state === 'ACTIVE' || a.state === 'BREACH_PENDING' || a.state === 'SILENCED');
+      if (st === 'active' || st === 'open') {
+        list = list.filter((a) => a.state === 'ACTIVE' || a.state === 'OPEN' || a.state === 'BREACH_PENDING' || a.state === 'SILENCED');
       } else if (st === 'acknowledged') {
         list = list.filter((a) => a.acknowledged);
       } else if (st === 'unacknowledged') {
-        list = list.filter((a) => !a.acknowledged && (a.state === 'ACTIVE' || a.state === 'BREACH_PENDING'));
+        list = list.filter((a) => !a.acknowledged && (a.state === 'ACTIVE' || a.state === 'OPEN' || a.state === 'BREACH_PENDING'));
       } else if (st === 'silenced') {
         list = list.filter((a) => a.state === 'SILENCED');
       } else if (st === 'resolved') {

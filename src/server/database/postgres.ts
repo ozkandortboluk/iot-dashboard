@@ -670,6 +670,13 @@ export class PostgresRepository {
           CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at ON system_settings(updated_at DESC);
         `).catch(() => {});
 
+        // Ensure active_alarms state check constraint allows ACTIVE and BREACH_PENDING
+        await client.query(`
+          ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS chk_active_alarms_state;
+          ALTER TABLE active_alarms ADD CONSTRAINT chk_active_alarms_state 
+            CHECK (state IN ('ACTIVE', 'BREACH_PENDING', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED', 'MUTED', 'NORMAL'));
+        `).catch(() => {});
+
         // 2. Check existing user count in isolated test environments
         const userCountRes = await client.query('SELECT COUNT(*) FROM users');
         const totalUsers = parseInt(userCountRes.rows[0]?.count || '0', 10);
@@ -1975,7 +1982,8 @@ export class PostgresRepository {
         environment = EXCLUDED.environment,
         updated_at = CURRENT_TIMESTAMP;
     `;
-    await this.query(sql, [
+    const normalizedState = (alarm.state || 'ACTIVE').toUpperCase();
+    const params = [
       alarm.id,
       alarm.incidentId || null,
       alarm.lastEvaluatedAt || null,
@@ -1990,7 +1998,7 @@ export class PostgresRepository {
       alarm.currentValue,
       trigVal,
       alarm.severity,
-      alarm.state,
+      normalizedState,
       alarm.firstBreachAt || null,
       alarm.triggeredAt || null,
       alarm.lastNotifiedAt || null,
@@ -2005,7 +2013,30 @@ export class PostgresRepository {
       src,
       env,
       alarm.updatedAt || new Date().toISOString(),
-    ]);
+    ];
+
+    try {
+      await this.query(sql, params);
+    } catch (saveErr: any) {
+      if (saveErr?.message?.includes('chk_active_alarms_state')) {
+        try {
+          await this.query(`
+            ALTER TABLE active_alarms DROP CONSTRAINT IF EXISTS chk_active_alarms_state;
+            ALTER TABLE active_alarms ADD CONSTRAINT chk_active_alarms_state 
+              CHECK (state IN ('ACTIVE', 'BREACH_PENDING', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED', 'MUTED', 'NORMAL'));
+          `);
+          await this.query(sql, params);
+          return;
+        } catch {
+          if (params[14] === 'ACTIVE' || params[14] === 'BREACH_PENDING') {
+            params[14] = 'OPEN';
+            await this.query(sql, params);
+            return;
+          }
+        }
+      }
+      throw saveErr;
+    }
   }
 
   public async deleteActiveAlarm(alarmId: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {

@@ -449,7 +449,7 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
                       className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
                         isChecked
                           ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
-                          : isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
+                          : isCritical && (alarm.state === 'ACTIVE' || alarm.state === 'OPEN') && !alarm.acknowledged
                           ? 'bg-rose-50/30 dark:bg-rose-950/10'
                           : ''
                       }`}
@@ -605,7 +605,7 @@ export const ActiveAlarmTable: React.FC<ActiveAlarmTableProps> = ({
                   className={`p-4 space-y-3 ${
                     isChecked
                       ? 'bg-indigo-50/40 dark:bg-indigo-950/20'
-                      : isCritical && alarm.state === 'ACTIVE' && !alarm.acknowledged
+                      : isCritical && (alarm.state === 'ACTIVE' || alarm.state === 'OPEN') && !alarm.acknowledged
                       ? 'bg-rose-50/40 dark:bg-rose-950/20'
                       : ''
                   }`}

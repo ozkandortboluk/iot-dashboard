@@ -1593,6 +1593,23 @@ export class SchemaAuditor {
               table: missingConstraint.table,
             }, 'schema_auditor');
           }
+        } else if (missingConstraint.constraintName === 'chk_active_alarms_state' || errMsg.includes('chk_active_alarms_state')) {
+          // Automatic recovery for active_alarms state violation
+          try {
+            await poolOrClient.query(`
+              UPDATE "active_alarms" 
+              SET "state" = 'ACTIVE' 
+              WHERE "state" IS NULL OR "state" = '' OR "state" NOT IN ('ACTIVE', 'BREACH_PENDING', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SILENCED', 'MUTED', 'NORMAL');
+            `);
+            await poolOrClient.query(missingConstraint.suggestedFixSql);
+            actionsTaken.push(`Kısıt (Constraint) veriler normalize edilerek onarıldı: [${missingConstraint.constraintType}] ${missingConstraint.constraintName} on ${missingConstraint.table}`);
+          } catch (retryErr: any) {
+            errors.push(`Kısıt onarım hatası (${missingConstraint.constraintName} on ${missingConstraint.table}): ${retryErr?.message || String(retryErr)}`);
+            systemLogger.error('database', `Kısıt onarım hatası: ${retryErr?.message || String(retryErr)}`, {
+              constraint: missingConstraint.constraintName,
+              table: missingConstraint.table,
+            }, 'schema_auditor');
+          }
         } else {
           errors.push(`Kısıt onarım hatası (${missingConstraint.constraintName} on ${missingConstraint.table}): ${errMsg}`);
           systemLogger.error('database', `Kısıt onarım hatası: ${errMsg}`, {
