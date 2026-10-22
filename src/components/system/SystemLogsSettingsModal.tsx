@@ -373,7 +373,7 @@ export const SystemLogsSettingsModal: React.FC<SystemLogsSettingsModalProps> = (
                 <span>Diske Yazma (File Persistence)</span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Logları <code className="text-indigo-400 font-mono">logs/system_events.log</code> dosyasına kalıcı olarak append eder.
+                Logları <code className="text-indigo-400 font-mono">{config?.filePath ? (config.filePath.replace(/\\/g, '/').split('/').slice(-3).join('/')) : 'data/logs/system_events.log'}</code> dosyasına kalıcı olarak kaydeder (güncelleme ve derlemelerde silinmez).
               </p>
             </div>
             <button

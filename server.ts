@@ -87,6 +87,7 @@ export async function performGracefulShutdown(reason: string, exitCode = 0) {
   try { db.autoHealer?.stopWatchdog(); } catch {}
   try { await sshTunnelService.disconnectTunnel(); } catch {}
   try { clusterSyncService.cleanupListener(); } catch {}
+  try { systemLogger.flush(); } catch {}
 
   // 2. Close WebSocket server & disconnect all client sockets
   try { stopWebSocketServer(); } catch {}

@@ -25,33 +25,33 @@ describe('WebSocket HTTP upgrade request target validation', () => {
 describe('Production device authentication policy', () => {
   it('requires PostgreSQL readiness for both production flags', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toMatch(/\(process\.env\.NODE_ENV === 'production' \|\| process\.env\.VPS_PRODUCTION === 'true'\) && !db\.postgresRepo\?\.isReady\(\)/);
   });
   it('enforces PostgreSQL readiness on upgrades for VPS production', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source.match(/\(process\.env\.NODE_ENV === 'production' \|\| process\.env\.VPS_PRODUCTION === 'true'\) && !db\.postgresRepo\?\.isReady\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
   it('rejects user heartbeat without session credentials', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toContain("ws.close(1008, 'Session credentials missing')");
   });
   it('rejects malformed device key expiry timestamps', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toContain('!Number.isFinite(new Date(foundDev.apiKeyExpiresAt).getTime())');
   });
   it('rechecks active device credentials without metadata writes', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toContain('resolveDevice(ws.sessionToken, false)');
     expect(source).toContain("ws.close(1008, 'Device credentials revoked or expired')");
   });
   it('does not use in-memory device fallback with VPS_PRODUCTION enabled', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/websocket.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
     expect(source).toContain("process.env.VPS_PRODUCTION !== 'true'");
   });
 });
@@ -60,18 +60,18 @@ describe('Production device authentication policy', () => {
 describe('Unified device message production authorization safeguards', () => {
   it('does not authorize device messages from unauthenticated sockets', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
     expect(source).toContain('if (!ws.isAuth || (!ws.device && !ws.user)) return null;');
   });
   it('requires PostgreSQL readiness before production device lookup', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
     expect(source).toContain('if (production && !db.postgresRepo?.isReady()) return null;');
     expect(source).toContain('let targetDevice = production ? null :');
   });
   it('rejects revoked and malformed-expiry device credentials during dispatch', async () => {
     const { readFileSync } = await import('node:fs');
-    const source = readFileSync(new URL('../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../../server/services/deviceWsProtocol.service.ts', import.meta.url), 'utf8');
     expect(source).toContain('targetDevice.apiKeyRevoked === true');
     expect(source).toContain('!Number.isFinite(new Date(targetDevice.apiKeyExpiresAt).getTime())');
   });

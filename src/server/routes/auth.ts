@@ -606,9 +606,10 @@ profileRouter.get('/activity', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   try {
-    const allLogs = db.getAuditLogs() || [];
+    const allLogs = (await db.getAuditLogsAsync(currentUser.id, 50)) || [];
     const userLogs = allLogs.filter((log: any) =>
       log.userId === currentUser.id ||
+      log.tenantId === currentUser.id ||
       (log.action && (log.action.includes(currentUser.name) || log.action.includes(currentUser.id)))
     ).slice(0, 15);
 

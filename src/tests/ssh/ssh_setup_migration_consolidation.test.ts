@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('Consolidated development SSH and deferred migration safety', () => {
-  const setup = readFileSync(new URL('../server/services/setup.service.ts', import.meta.url), 'utf8');
-  const runner = readFileSync(new URL('../server/database/migrations/migrationRunner.ts', import.meta.url), 'utf8');
-  const migration = readFileSync(new URL('../server/database/migrations/023_reconcile_timescale_hypertables.ts', import.meta.url), 'utf8');
+  const setup = readFileSync(new URL('../../server/services/setup.service.ts', import.meta.url), 'utf8');
+  const runner = readFileSync(new URL('../../server/database/migrations/migrationRunner.ts', import.meta.url), 'utf8');
+  const migration = readFileSync(new URL('../../server/database/migrations/023_reconcile_timescale_hypertables.ts', import.meta.url), 'utf8');
 
   it('uses connected development SSH transport before saved direct DB config', () => {
     const method = setup.split('public getRuntimeConfig(): DatabaseConfigPayload | null {')[1]?.split('public saveRuntimeSecretConfig(')[0];

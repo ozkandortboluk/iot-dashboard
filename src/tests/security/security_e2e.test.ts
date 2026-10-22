@@ -28,8 +28,11 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
 
     // Start production bundle if exists, else tsx server.ts
     const isBundled = fs.existsSync(path.join(projectRoot, 'dist/server.cjs'));
-    const cmd = isBundled ? 'node' : 'npx';
-    const args = isBundled ? [path.join(projectRoot, 'dist/server.cjs')] : ['tsx', path.join(projectRoot, 'server.ts')];
+    const tsxCli = path.join(projectRoot, 'node_modules/tsx/dist/cli.mjs');
+    const cmd = 'node';
+    const args = isBundled
+      ? [path.join(projectRoot, 'dist/server.cjs')]
+      : [tsxCli, path.join(projectRoot, 'server.ts')];
 
     serverProcess = spawn(cmd, args, {
       cwd: isolatedWorkingDir,
@@ -52,7 +55,10 @@ describe('Security & E2E Regressions (CSRF, CORS, HttpOnly, WS Auth)', () => {
       }
     });
     serverProcess.stderr?.on('data', (data: Buffer) => {
-      // console.error(`[E2E Server stderr]: ${data}`);
+      console.error(`[E2E Server stderr]: ${data}`);
+    });
+    serverProcess.stdout?.on('data', (data: Buffer) => {
+      console.log(`[E2E Server stdout]: ${data}`);
     });
 
     let isUp = false;

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  */
 describe('SSH tunnel transient configuration boundary', () => {
   const source = readFileSync(
-    new URL('../server/services/sshTunnel.service.ts', import.meta.url),
+    new URL('../../server/services/sshTunnel.service.ts', import.meta.url),
     'utf8'
   );
 

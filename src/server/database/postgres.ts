@@ -2626,6 +2626,44 @@ export class PostgresRepository {
     ]);
   }
 
+  public async getAuditLogs(tenantId?: string, limit: number = 100): Promise<AuditLog[]> {
+    if (!this.pool || !this.isConnected) {
+      return [];
+    }
+    const safeLimit = Math.min(Math.max(1, limit), 500);
+    let sql = `
+      SELECT id, tenant_id as "tenantId", user_id as "userId", user_name as "userName",
+             action, resource_type as "resourceType", resource_id as "resourceId",
+             details, ip_address as ip, severity, created_at as timestamp
+      FROM audit_logs
+    `;
+    const params: any[] = [];
+    if (tenantId && tenantId !== 'usr_admin') {
+      sql += ` WHERE tenant_id = $1 OR user_id = $1`;
+      params.push(tenantId);
+    }
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1};`;
+    params.push(safeLimit);
+
+    try {
+      const res = await this.query(sql, params);
+      return res.rows.map((r: any) => ({
+        id: r.id,
+        timestamp: r.timestamp ? new Date(r.timestamp).toISOString() : new Date().toISOString(),
+        tenantId: r.tenantId,
+        userId: r.userId,
+        userName: r.userName || '',
+        action: r.action || '',
+        ip: r.ip || '',
+        severity: r.severity || 'low',
+        details: r.details ? (typeof r.details === 'string' ? JSON.parse(r.details) : r.details) : undefined,
+      }));
+    } catch (err: any) {
+      console.warn('[PostgreSQL] getAuditLogs sorgu hatası:', err?.message || err);
+      return [];
+    }
+  }
+
   // ==========================================
   // DEVICE COMMANDS (Full PostgreSQL Command Engine)
   // ==========================================
@@ -3272,6 +3310,8 @@ export class PostgresRepository {
         counts.telemetry = deletedPhysical + deletedSim;
       }
 
+      if (!this.isConnected || !this.pool) return counts;
+
       // 2. Resolved Alarms
       if (options.resolvedAlarmsDays && options.resolvedAlarmsDays > 0) {
         try {
@@ -3284,6 +3324,8 @@ export class PostgresRepository {
           console.warn('[PostgreSQL Alarms Retention Error]:', err?.message || err);
         }
       }
+
+      if (!this.isConnected || !this.pool) return counts;
 
       // 3. Read Notifications
       if (options.readNotificationsDays && options.readNotificationsDays > 0) {
@@ -3298,6 +3340,8 @@ export class PostgresRepository {
         }
       }
 
+      if (!this.isConnected || !this.pool) return counts;
+
       // 4. Audit Logs
       if (options.auditLogsDays && options.auditLogsDays > 0) {
         try {
@@ -3311,6 +3355,8 @@ export class PostgresRepository {
         }
       }
 
+      if (!this.isConnected || !this.pool) return counts;
+
       // 5. Dispatch Logs
       if (options.dispatchLogsDays && options.dispatchLogsDays > 0) {
         try {
@@ -3323,6 +3369,8 @@ export class PostgresRepository {
           console.warn('[PostgreSQL Dispatch Logs Retention Error]:', err?.message || err);
         }
       }
+
+      if (!this.isConnected || !this.pool) return counts;
 
       // 6. Device Commands (Delivered or Failed)
       if (options.deviceCommandsDays && options.deviceCommandsDays > 0) {

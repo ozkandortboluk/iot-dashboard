@@ -729,16 +729,36 @@ export class SchemaAuditor {
             if (c.type !== 'c') return false;
             if (c.name !== chk.name) return false;
             
-            const normalize = (str: string) => str.toLowerCase().replace(/[\s"']/g, '').replace(/::\w+(\[\])?/g, '').replace(/=any\(array\[/g, 'in(').replace(/\]\)/g, ')').replace(/\]/g, '').replace(/\[/g, '');
-            const match = c.def.match(/CHECK\s*\((.*)\)/i);
-            if (match) {
-               const dbCond = normalize(match[1]);
-               const expectedCond = normalize(chk.condition);
-               if (!dbCond.includes(expectedCond) && !expectedCond.includes(dbCond)) {
-                  return false;
-               }
+            const normalize = (str: string) => {
+              let s = str.toLowerCase();
+              const m = s.match(/check\s*\((.*)\)/i);
+              if (m) s = m[1];
+              s = s.replace(/::[\w\s]+(\[\])?/g, '');
+              s = s.replace(/=\s*any\s*\(\s*\(?\s*array\s*\[/g, 'in(');
+              s = s.replace(/[\s"'\[\]()]/g, '');
+              return s;
+            };
+
+            const dbCond = normalize(c.def);
+            const expCond = normalize(chk.condition);
+
+            if (dbCond === expCond || dbCond.includes(expCond) || expCond.includes(dbCond)) {
+              return true;
             }
-            return true;
+
+            // Value-set comparison for "IN (...)" checks
+            const expInMatch = chk.condition.match(/in\s*\(([^)]+)\)/i);
+            if (expInMatch) {
+              const expValues = expInMatch[1]
+                .split(',')
+                .map((v) => v.replace(/[\s"']/g, '').toLowerCase())
+                .filter(Boolean);
+              const dbClean = c.def.toLowerCase().replace(/[\s"']/g, '');
+              const allPresent = expValues.every((val) => dbClean.includes(val));
+              if (allPresent) return true;
+            }
+
+            return false;
           });
           if (!exists) {
             const chkSql = `ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${chk.name}"; ALTER TABLE "${tableName}" ADD CONSTRAINT "${chk.name}" CHECK (${chk.condition});`;

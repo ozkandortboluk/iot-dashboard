@@ -11,10 +11,10 @@ const mocks = vi.hoisted(() => ({
   createToken: vi.fn(() => 'test-ephemeral-token'),
 }));
 
-vi.mock('../server/database/connection.js', () => ({
+vi.mock('../../server/database/connection.js', () => ({
   isSshTunnelAllowed: mocks.isAllowed,
 }));
-vi.mock('../server/services/aiStudioBootstrapAuth.service.js', () => ({
+vi.mock('../../server/services/aiStudioBootstrapAuth.service.js', () => ({
   aiStudioBootstrapAuthService: {
     isBootstrapAllowed: mocks.bootstrapAllowed,
     createBootstrapToken: mocks.createToken,
@@ -22,33 +22,33 @@ vi.mock('../server/services/aiStudioBootstrapAuth.service.js', () => ({
     validateBootstrapToken: vi.fn(() => false),
   },
 }));
-vi.mock('../server/services/setup.service.js', () => ({
+vi.mock('../../server/services/setup.service.js', () => ({
   setupService: {
     isSetupCompleted: mocks.setupCompleted,
     validateSetupToken: mocks.setupValid,
     validateRecoveryToken: mocks.recoveryValid,
   },
 }));
-vi.mock('../server/middleware/setupAuth.js', () => ({
+vi.mock('../../server/middleware/setupAuth.js', () => ({
   isRequestSetupAuthenticated: vi.fn(() => false),
   extractSetupToken: (req: { headers: Record<string, unknown> }) =>
     typeof req.headers['x-setup-token'] === 'string' ? req.headers['x-setup-token'] : null,
 }));
-vi.mock('../server/services/rateLimiter.service.js', () => ({
+vi.mock('../../server/services/rateLimiter.service.js', () => ({
   rateLimiterService: { checkIpRateLimit: vi.fn(() => ({ allowed: true })) },
 }));
-vi.mock('../server/services/sshTunnel.service.js', () => ({
+vi.mock('../../server/services/sshTunnel.service.js', () => ({
   DEFAULT_SSH_LOCAL_PORT: 15432,
   sshTunnelService: {},
 }));
-vi.mock('../server/services/systemLogger.service.js', () => ({
+vi.mock('../../server/services/systemLogger.service.js', () => ({
   systemLogger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
-vi.mock('../server/middleware/auth.js', () => ({
+vi.mock('../../server/middleware/auth.js', () => ({
   authenticateUser: vi.fn((_req, res) => res.status(401).json({ success: false })),
   requireAdmin: vi.fn((_req, res) => res.status(403).json({ success: false })),
 }));
-vi.mock('../server/db.js', () => ({ db: {} }));
+vi.mock('../../server/db.js', () => ({ db: {} }));
 
 import { sshTunnelRouter } from '../../server/routes/sshTunnel.js';
 

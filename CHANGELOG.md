@@ -3,6 +3,42 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.10] - 2026-10-22
+
+### 💾 Canlı Dağıtım / Güncelleme Veri Kalıcılığı ve Sistem Günlükleri İzolasyonu
+- **Sistem Günlükleri Kalıcı Dizin Entegrasyonu (`systemLogger.service.ts`)**:
+  - Docker Compose ortamında container yeniden oluşturulduğunda (`docker compose up --force-recreate` / `vps-update.sh`) `/app/logs` dizininin sıfırlanarak logların kaybolması sorunu giderildi.
+  - Canlı üretim (`NODE_ENV === 'production'`) modunda loglama dizini, Docker'da kalıcı volume olarak bağlı olan `app_data:/app/data` altındaki `data/logs` (`system_events.log` ve rotasyon yedekleri `system_events_*.log.bak`) yoluna taşındı. `LOGS_DIR` ortam değişkeni desteği eklendi.
+  - **Otomatik Legacy Log Taşıma (Migration)**: Servis ilk başlatıldığında eski `logs/system_events.log` dosyası varsa otomatik olarak kalıcı `data/logs/system_events.log` dizinine kopyalanması sağlandı.
+  - **Yeniden Başlatmada Bellek Ön Bellek Geri Yüklemesi**: `system_events.json` dışında `system_events.log` dosyasındaki son olayların da okunarak `maxInMemoryEvents` sınırına kadar RAM'e geri yüklenmesi sağlandı.
+  - **Graceful Shutdown Log Boşaltma (`systemLogger.flush()`)**: Kapanış ve yeniden başlatma sırasında bellekte kuyrukta bekleyen logların diske anında yazılması sağlanarak veri kaybı engellendi (`server.ts` entegrasyonu).
+- **PostgreSQL Denetim Günlükleri Kalıcılığı ve Sorgulama API'si (`postgres.ts`, `user.repository.ts`, `db.ts`, `alarms.ts`, `auth.ts`)**:
+  - `saveAuditLog` ile veritabanına kaydedilen denetim kayıtlarının (`audit_logs`), sunucu yeniden başladığında `/api/audit-logs` ve `/api/profile/activity` uç noktalarında kaybolmuş gibi görünmesi (yalnızca boş in-memory array okunması) hatası düzeltildi.
+  - PostgreSQL `getAuditLogs` sorgusu ve repository katmanında `getAuditLogsAsync` metodu uygulanarak hem PostgreSQL'den kalıcı verilerin okunması hem de bellek içi önbelleğin güncel tutulması sağlandı.
+- **Kullanıcı Arayüzü & Test Senkronizasyonu**:
+  - Sistem log ayarları modalinde (`SystemLogsSettingsModal.tsx`) dosya yolu dinamik olarak `data/logs/system_events.log` kalıcı yoluyla senkronize edildi.
+  - Yeni doğrulama testleri (`system_log_and_audit_persistence.test.ts`) eklendi.
+
+---
+## 🚀 [v1.49.9] - 2026-10-21
+
+### 🛠️ Sistem Log İyileştirmeleri & Şema Denetleyici Kısıt Senkronizasyonu
+- **Otomatik Şema Denetleyicisi CHECK Kısıt Normalizasyonu (`schemaAuditor.ts`)**:
+  - PostgreSQL'in `state IN (...)` kontrol kısıtlarını içsel olarak `CHECK (((state)::text = ANY ((ARRAY[...])::text[])))` formatına dönüştürmesi nedeniyle, `schemaAuditor.ts` tarafından her periyodik kontrolde (30 saniyede bir) `chk_active_alarms_state` kısıtının eksik/uyumsuz sanılarak gereksiz `DROP & ADD CONSTRAINT` onarım döngüsüne sokulması ve log üretmesi giderildi.
+  - Şema denetleyicisine PostgreSQL dizi (array), tip dönüştürme (`::text`) ve parantez yapılarını doğru çözümleyen normalizasyon ve değer kümesi karşılaştırma algoritması eklendi.
+- **WebSocket Upgrade Soket Hata Yönetimi & Zarif Kapanış (`websocket.ts`)**:
+  - İstemci sekmelerinin kapatılması veya ağ kopmalarında oluşan olağan `ECONNRESET`, `EPIPE` ve `ERR_STREAM_PREMATURE_CLOSE` olaylarının sistem günlüğüne `warn` olarak basılması filtrelendi.
+  - Yetkisiz (401) ve yasaklı (403) upgrade taleplerinde TCP RST paketi oluşturan agresif `destroy()` yerine zarif HTTP `socket.end()` sonlandırması sağlandı.
+- **Veritabanı Saklama (Retention) Temizliğinde Bağlantı Koruması (`postgres.ts`)**:
+  - `deleteOldRecords` fonksiyonunda sorgular arasında bağlantı durumunun (`this.isConnected`) denetlenmesi eklendi; veritabanı koptuğunda sonraki temizleme adımlarının denenmeyip erken çıkılması sağlanarak peş peşe 6 adet `isReady: false` log hatası üretilmesi önlendi.
+- **SSH Tüneli Üzerinden PostgreSQL Bağlantı Zaman Aşımı Esnekliği (`connection.ts`)**:
+  - SSH tüneli üzerinden uzak VPS'e bağlanırken varsayılan bağlantı havuzu zaman aşımı (`connectionTimeoutMillis`) 8 saniyeden 15 saniyeye çıkarılarak ağ dalgalanmalarında veritabanının gereksiz yere pasife düşmesi engellendi.
+- **Test ve CI Platform Uyumluluk İyileştirmeleri**:
+  - `src/tests/` altındaki derin dizinli test dosyalarında (`ws_upgrade_path`, `ssh_connect_gate_refresh`, `ssh_setup_migration_consolidation`, `ssh_tunnel_transient_config`, `ssh_bootstrap_http`) hatalı göreceli yollar (`../server/` -> `../../server/`) düzeltildi.
+  - Windows platformunda `os.tmpdir()` ve `npx.cmd` uyumluluğu eklendi.
+  - `package-lock.json` sürümü `package.json` ile `1.49.9` olarak senkronize edildi.
+
+---
 ## 🚀 [v1.49.8] - 2026-10-21
 
 ### 🔐 Sunucu Başlangıcında Kurulum Tokeni Konsol Bildirimi

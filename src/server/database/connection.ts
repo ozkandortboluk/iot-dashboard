@@ -634,8 +634,9 @@ export function getPostgresPoolLimits(): {
   );
   const max = Number.isFinite(envMax) && envMax > 0 ? Math.min(Math.max(envMax, 2), 25) : 5;
 
-  const envConnTimeout = parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || '8000', 10);
-  const connectionTimeoutMillis = Number.isFinite(envConnTimeout) && envConnTimeout > 0 ? envConnTimeout : 8000;
+  const defaultTimeout = sshTunnelService.isConnected() ? 15000 : 8000;
+  const envConnTimeout = parseInt(process.env.PG_CONNECTION_TIMEOUT_MS || String(defaultTimeout), 10);
+  const connectionTimeoutMillis = Number.isFinite(envConnTimeout) && envConnTimeout > 0 ? envConnTimeout : defaultTimeout;
 
   const envIdleTimeout = parseInt(process.env.PG_IDLE_TIMEOUT_MS || '10000', 10);
   const idleTimeoutMillis = Number.isFinite(envIdleTimeout) && envIdleTimeout > 0 ? envIdleTimeout : 10000;

@@ -574,8 +574,10 @@ export { notificationServicesRouter };
 
 // Audit Logs Router
 const auditLogsRouter = Router();
-auditLogsRouter.get('/', authenticateUser, requireAdmin, (req, res) => {
-  res.json(db.getAuditLogs());
+auditLogsRouter.get('/', authenticateUser, requireAdmin, async (req, res) => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+  const logs = await db.getAuditLogsAsync(undefined, limit);
+  res.json(logs);
 });
 export { auditLogsRouter };
 

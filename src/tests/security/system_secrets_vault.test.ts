@@ -413,7 +413,9 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
           user: 'durable_user', sslMode: 'disable',
         });
         expect(sync).toHaveBeenCalled();
-        expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        if (process.platform !== 'win32') {
+          expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        }
         expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).database).toBe('durable_config');
       } finally {
         sync.mockRestore();
@@ -514,7 +516,9 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
         expect(saved.isCompleted).toBe(true);
         expect(saved.completedAt).toBeTruthy();
         expect(saved.password).toBeUndefined();
-        expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        if (process.platform !== 'win32') {
+          expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        }
       } finally {
         if (previous === null) fs.rmSync(configPath, { force: true });
         else fs.writeFileSync(configPath, previous, { mode: 0o600 });

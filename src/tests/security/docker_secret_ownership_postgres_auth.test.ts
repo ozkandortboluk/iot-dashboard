@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { MasterKeyProvider } from '../../server/services/masterKeyProvider.js';
 import { getVaultStatus } from '../../server/utils/crypto.js';
@@ -9,7 +10,7 @@ import { getVaultStatus } from '../../server/utils/crypto.js';
 // Isolate destructive installer/ownership tests from the checked-out repository.
 // /home/runner is not traversable by UID 1000 on GitHub-hosted runners.
 const sourceRoot = path.resolve(__dirname, '../..');
-const sandboxRoot = fs.mkdtempSync('/tmp/nexus-secret-test-');
+const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-secret-test-'));
 // mkdtemp defaults to 0700; the UID 1000 runtime must traverse this parent.
 // Only the disposable parent is traversable: secrets remain private inside.
 fs.chmodSync(sandboxRoot, 0o755);
@@ -48,7 +49,7 @@ const resetOwner = () => {
 };
 
 
-describe('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verification', () => {
+describe.skipIf(process.platform === 'win32')('Docker Secret Ownership, Vault Bootstrap & PostgreSQL Password Verification', () => {
   let backupSecrets: Record<string, string> = {};
   let backupVault: string | null = null;
 

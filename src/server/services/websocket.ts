@@ -718,14 +718,18 @@ export function initWebSocketServer(server: http.Server) {
   // Setup server-level HTTP upgrade routing
   server.on('upgrade', async (request, socket, head) => {
     socket.on('error', (err: any) => {
+      const code = err?.code || '';
+      if (code === 'ECONNRESET' || code === 'EPIPE' || code === 'ERR_STREAM_PREMATURE_CLOSE') {
+        // Normal client-side disconnect, tab close or aborted handshake
+        return;
+      }
       systemLogger.warn('websocket', 'İstemci socket upgrade hatası', err?.message || err);
     });
     try {
       const origin = request.headers?.origin as string | undefined;
       if (origin && !isAllowedWsOrigin(origin)) {
         console.warn(`[WebSocket Security] Cross-Site WebSocket Hijacking attempt blocked from origin: ${origin}`);
-        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-        socket.destroy();
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
         return;
       }
 
@@ -782,8 +786,7 @@ export function initWebSocketServer(server: http.Server) {
 
         // Strict 401 Unauthorized for Unauthenticated or Invalid WebSocket Upgrade Requests
         if (!user && !device) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-          socket.destroy();
+          socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
           return;
         }
 
@@ -791,8 +794,7 @@ export function initWebSocketServer(server: http.Server) {
         // When in production (or strict maintenance mode), PostgreSQL must be READY before accepting authenticated WebSocket connections.
         if ((process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') && !db.postgresRepo?.isReady()) {
           console.warn('[WebSocket Security] WebSocket upgrade reddedildi (503 Service Unavailable): PostgreSQL üretim modunda hazır değil.');
-          socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\n\r\n');
-          socket.destroy();
+          socket.end('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nConnection: close\r\n\r\n');
           return;
         }
 

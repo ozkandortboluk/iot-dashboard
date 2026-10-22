@@ -757,6 +757,26 @@ export class UserRepository {
     return (this.db.data.auditLogs || []).slice(-100).reverse();
   }
 
+  public async getAuditLogsAsync(tenantId?: string, limit: number = 100): Promise<import('../../types.js').AuditLog[]> {
+    if (this.isPgReady() && this.db.postgresRepo?.getAuditLogs) {
+      try {
+        const pgLogs = await this.db.postgresRepo.getAuditLogs(tenantId, limit);
+        if (pgLogs && Array.isArray(pgLogs) && pgLogs.length > 0) {
+          // Keep in-memory cache primed with latest logs (reverse to match newest-at-end in array)
+          this.db.data.auditLogs = [...pgLogs].reverse();
+          return pgLogs;
+        }
+      } catch (err: any) {
+        console.warn('[UserRepo] PostgreSQL audit_logs okunamadı, bellek içi önbellek kullanılıyor:', err?.message || err);
+      }
+    }
+    let list = this.getAuditLogs();
+    if (tenantId && tenantId !== 'usr_admin') {
+      list = list.filter((l) => l.tenantId === tenantId || l.userId === tenantId);
+    }
+    return list.slice(0, limit);
+  }
+
   public async addAuditLog(
     userId: string,
     userName: string,
@@ -773,13 +793,18 @@ export class UserRepository {
       severity,
     };
 
+    // Always maintain recent in-memory cache for fast synchronous access
+    if (!this.db.data.auditLogs) this.db.data.auditLogs = [];
+    this.db.data.auditLogs.push(logItem);
+    if (this.db.data.auditLogs.length > 200) {
+      this.db.data.auditLogs = this.db.data.auditLogs.slice(-200);
+    }
+
     if (this.isPgReady()) {
       await this.db.postgresRepo.saveAuditLog(logItem).catch((e: any) => console.warn('[PG Error]', e?.message || e));
       return;
     }
 
-    if (!this.db.data.auditLogs) this.db.data.auditLogs = [];
-    this.db.data.auditLogs.push(logItem);
     this.db.saveData(this.db.data);
   }
 }

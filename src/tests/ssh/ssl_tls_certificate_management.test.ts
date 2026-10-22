@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execSync } from 'node:child_process';
 
 const sourceRoot = path.resolve(__dirname, '../..');
-const sandboxRoot = fs.mkdtempSync('/tmp/nexus-tls-test-');
+const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tls-test-'));
 fs.chmodSync(sandboxRoot, 0o755);
 const rootDir = path.join(sandboxRoot, 'project');
 fs.cpSync(sourceRoot, rootDir, { recursive: true, filter: (src) => {
@@ -15,7 +16,7 @@ fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true, mode: 0o755 });
 const sslLibPath = path.join(rootDir, 'scripts/setup/lib/ssl.sh');
 const colorsLibPath = path.join(rootDir, 'scripts/setup/lib/colors.sh');
 
-describe('TLS / SSL Certificate Management & Security Hardening', () => {
+describe.skipIf(process.platform === 'win32')('TLS / SSL Certificate Management & Security Hardening', () => {
   const testCertsDir = path.join(rootDir, 'data', 'temp_ssl_test_certs');
   const testCrtPath = path.join(testCertsDir, 'server.crt');
   const testKeyPath = path.join(testCertsDir, 'server.key');

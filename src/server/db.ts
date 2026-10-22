@@ -2083,6 +2083,7 @@ class LocalDatabase {
   public async toggleRule(id: string, enabled: boolean, requestingUser?: any): Promise<boolean> { return await this.alarmRepository.toggleRule(id, enabled, requestingUser); }
   // Audit Logs
   public getAuditLogs(): AuditLog[] { return this.userRepository.getAuditLogs(); }
+  public async getAuditLogsAsync(tenantId?: string, limit?: number): Promise<AuditLog[]> { return await this.userRepository.getAuditLogsAsync(tenantId, limit); }
   public async addAuditLog(userId: string, userName: string, action: string, severity?: AuditLog['severity']): Promise<void> { return await this.userRepository.addAuditLog(userId, userName, action, severity); }
   
   // ==========================================

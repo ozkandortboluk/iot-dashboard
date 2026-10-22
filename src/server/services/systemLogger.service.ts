@@ -13,13 +13,25 @@ const LEVEL_WEIGHTS: Record<SystemEventLevel, number> = {
 class SystemLoggerService {
   private inMemoryEvents: SystemEvent[] = [];
   private maxInMemoryEvents = 1000;
-  private logDir = path.join(process.cwd(), 'logs');
+  private logDir = this.getResolvedLogDir();
   private logFilePath = path.join(this.logDir, 'system_events.log');
   private jsonBackupPath = path.join(process.cwd(), 'data', 'system_events.json');
   private configFilePath = path.join(process.cwd(), 'data', 'system_logger_config.json');
   private flushTimeout: NodeJS.Timeout | null = null;
   private pendingFileWrites: string[] = [];
   private logListeners: Set<(event: SystemEvent) => void> = new Set();
+
+  private getResolvedLogDir(): string {
+    if (process.env.LOGS_DIR) {
+      return path.resolve(process.env.LOGS_DIR);
+    }
+    // In production, data/ is the persistent volume mounted in Docker (app_data:/app/data).
+    // Storing logs under data/logs ensures log files are NOT wiped on container rebuild/recreation.
+    if (process.env.NODE_ENV === 'production') {
+      return path.join(process.cwd(), 'data', 'logs');
+    }
+    return path.join(process.cwd(), 'logs');
+  }
 
   // Toggle & Config state
   private enabled: boolean = true;
@@ -57,8 +69,35 @@ class SystemLoggerService {
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
+      this.migrateLegacyLogsIfNeeded();
     } catch (err) {
       console.warn('[SystemLogger] Dizin oluşturulamadı:', err);
+    }
+  }
+
+  private migrateLegacyLogsIfNeeded(): void {
+    try {
+      const legacyLogDir = path.join(process.cwd(), 'logs');
+      // If our target logDir is not root logs/ and legacy logs/ directory exists
+      if (path.resolve(this.logDir) !== path.resolve(legacyLogDir) && fs.existsSync(legacyLogDir)) {
+        const legacyLogFile = path.join(legacyLogDir, 'system_events.log');
+        if (fs.existsSync(legacyLogFile) && !fs.existsSync(this.logFilePath)) {
+          fs.copyFileSync(legacyLogFile, this.logFilePath);
+          console.log('[SystemLogger] Eski logs/system_events.log kalıcı dizine aktarıldı:', this.logFilePath);
+        }
+        // Also copy any rotation backups
+        const legacyFiles = fs.readdirSync(legacyLogDir);
+        for (const f of legacyFiles) {
+          if (f.startsWith('system_events_') && f.endsWith('.log.bak')) {
+            const dest = path.join(this.logDir, f);
+            if (!fs.existsSync(dest)) {
+              fs.copyFileSync(path.join(legacyLogDir, f), dest);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] Legacy log taşıma uyarısı:', err);
     }
   }
 
@@ -121,24 +160,37 @@ class SystemLoggerService {
 
   private loadPersistedEvents(): void {
     try {
+      const existingIds = new Set<string>();
       if (fs.existsSync(this.jsonBackupPath)) {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           this.inMemoryEvents = parsed.slice(-this.maxInMemoryEvents);
+          for (const ev of this.inMemoryEvents) {
+            if (ev?.id) existingIds.add(ev.id);
+          }
         }
       }
-      // Fallback: If inMemoryEvents is empty but system_events.log exists, read from log file
-      if (this.inMemoryEvents.length === 0 && fs.existsSync(this.logFilePath)) {
+      // If inMemoryEvents has room and system_events.log exists, read missing lines from log file
+      if (this.inMemoryEvents.length < this.maxInMemoryEvents && fs.existsSync(this.logFilePath)) {
         const raw = fs.readFileSync(this.logFilePath, 'utf-8');
         const lines = raw.split('\n').filter(Boolean);
         const parsed: SystemEvent[] = [];
-        for (const line of lines) {
+        for (let i = lines.length - 1; i >= 0; i--) {
           try {
-            parsed.push(JSON.parse(line));
+            const item = JSON.parse(lines[i]);
+            if (item && item.id && !existingIds.has(item.id)) {
+              parsed.push(item);
+              existingIds.add(item.id);
+              if (this.inMemoryEvents.length + parsed.length >= this.maxInMemoryEvents) {
+                break;
+              }
+            }
           } catch {}
         }
-        this.inMemoryEvents = parsed.reverse().slice(0, this.maxInMemoryEvents);
+        if (parsed.length > 0) {
+          this.inMemoryEvents = [...this.inMemoryEvents, ...parsed].slice(0, this.maxInMemoryEvents);
+        }
       }
     } catch {
       this.inMemoryEvents = [];
@@ -489,6 +541,17 @@ class SystemLoggerService {
     } catch (err) {
       console.warn('[SystemLogger] Dosyaya yazılamadı:', err);
     }
+  }
+
+  /**
+   * Immediately flushes any queued log writes to disk (used during graceful shutdown)
+   */
+  public flush(): void {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+    this.flushPendingWrites();
   }
 
   private rotateLogFileIfNeeded(): void {
