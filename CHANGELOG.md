@@ -3,6 +3,45 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.13] - 2026-10-22
+
+### 💾 Zamanlanmış Snapshot Yedeği & Afet Kurtarma Modülü Kapsamlı Geliştirmesi (`ScheduledBackupsPanel.tsx`, `db.ts`, `system.ts`)
+- **Tam Kurtarma Yedeği Saklama Hedefleri Paneli Yenilendi**:
+  - `DisasterRecoveryDestinationPanel` kart tabanlı modern bir arayüze kavuşturuldu.
+  - Yerel Disk, İkincil VPS Montajlı Disk / SAN, Google Drive, Dropbox ve SFTP hedefleri net durum etiketleri ("Hazır & Aktif", "VPS Hedefi Tanımlı", "VPS Bağlantısı Kurulmadı") ve dinamik simgelerle donatıldı.
+  - Seçilen hedefin anında kaydedilmesi ve son aktarım durumu geri bildirimi güçlendirildi.
+- **Snapshot Bütünlük ve Güvenlik İnceleme Modalı (`SnapshotDetailModal`)**:
+  - Tablodaki her yedek için "İncele" butonu eklendi.
+  - Tam dosya adı, byte ve MB cinsinden dosya boyutu, doğrulanmış tablo sayısı ve toplam kayıt/INSERT sayısı gösterildi.
+  - 64 karakterlik SHA-256 kriptografik sağlama özeti (checksum) için tek tıkla panoya kopyalama desteği sağlandı.
+  - Canlı re-verification (`/api/database/scheduled-backups/verify/:filename`) butonu ile yedeğin anlık fiziksel ve yapısal doğrulaması eklendi.
+- **Güvenli Afet Kurtarma ve Geri Yükleme Prosedürü (`SafeRestoreModal`)**:
+  - Canlı üretim ortamında (`import.meta.env.PROD`) veritabanı kilitlenmelerini ve şema bozulmalarını önlemek amacıyla doğrudan web restore kilitli tutularak, VPS terminalinde güvenli tek-işlemli (single-transaction atomic) kurtarma adımları ve tek tıkla kopyalanabilen CLI komutu sunuldu:
+    `docker exec -i iot-postgres-1 psql -U postgres -d iot_dashboard -v ON_ERROR_STOP=1 --single-transaction < /data/backups/<filename>`
+  - Geliştirme / test ortamlarında ise güvenli onay kutusuyla anlık atomic geri yükleme ve UI senkronizasyonu sağlandı.
+- **Backend Yedekleme Motoru & Hata Yakalama Geliştirmeleri (`src/server/db.ts`)**:
+  - `createBackup()` fonksiyonuna `triggerType` desteği eklendi; zamanlanmış yedeklerin dosya isimlerine `scheduled_` öneki getirilerek tetiklenme tipi ayrımı kalıcı hale getirildi.
+  - PostgreSQL `pg_dump` sistem PATH'inde bulunamadığında veya hata verdiğinde dönen hata mesajları açıklayıcı hale getirildi; geliştirme ortamında yerel JSON snapshot'a güvenli geçiş mekanizması kuruldu.
+  - Yeni API uç noktası eklendi: `GET /api/database/scheduled-backups/verify/:filename`.
+- **Arama, Filtreleme ve KPI Göstergeleri**:
+  - Snapshot geçmişi tablosuna canlı dosya adı araması ve tetiklenme tipine göre filtreleme ("Tümü", "Zamanlanmış", "Manuel") eklendi.
+  - Son otomatik snapshot, planlanan bir sonraki snapshot zamanı, aktif retention kullanım çubuğu ve toplam disk kaplaması KPI kartları güncellendi.
+
+---
+## 🚀 [v1.49.12] - 2026-10-22
+
+### 🔄 Güvenli Rollback Rotasyonu & Canlı Dağıtım Otomatik Temizliği (`vps-update.sh`, `VPS-UPDATE-KULLANIM.md`)
+- **`--run` Moduna Otomatik Temizlik ve 3-Yükleme Saklama Politikası Entegrasyonu**:
+  - `vps-update.sh --run` ile yapılan canlı yükseltmelerde, yeni uygulama derlenip sağlık testleri (`wait_health`) başarıyla geçtikten sonra otomatik temizlik adımı devreye alındı.
+  - **Aday İmaj Temizliği**: Geçici derleme etiketi (`iot-dashboard-app:candidate-*`), yeni uygulama yayına alınır alınmaz diskte yer tutmaması için anında kaldırılır.
+  - **3-Yükleme Güvenlik Payı (`MAX_ROLLBACK_KEEP=3`)**:
+    - `prune_old_rollbacks()` fonksiyonu eklenerek hem `nexusnode-app-rollback:*` hem de `nexusnode-adminer-rollback:*` imajlarından geriye dönük **en son 3 yükleme güvenlik marjı olarak saklanır**, 4. ve daha eski yüklemeler otomatik temizlenir.
+    - Operatörün isteğe bağlı olarak `NEXUS_MAX_ROLLBACK_KEEP` ortam değişkeni ile bu sayıyı değiştirebilmesi sağlandı.
+  - **`clean_disk` Entegrasyonu**: Manuel `--clean` komutu da aynı şekilde son 3 yüklemeyi koruyup eskileri temizleyecek şekilde senkronize edildi.
+- **Kullanım Kılavuzu Senkronizasyonu (`VPS-UPDATE-KULLANIM.md`)**:
+  - Güncelleme adımlarına 10. madde olarak otomatik aday temizliği ve 3 rollback saklama kuralı eklendi.
+
+---
 ## 🚀 [v1.49.11] - 2026-10-22
 
 ### 🧹 VPS Güvenli Disk Temizliği ve Gelişmiş Komut Kılavuzu (`vps-update.sh`, `VPS-UPDATE-KULLANIM.md`)

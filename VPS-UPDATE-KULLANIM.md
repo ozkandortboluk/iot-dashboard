@@ -63,7 +63,7 @@ sudo bash ./vps-update.sh --clean -y
 1. **Docker BuildKit Önbelleği (`docker builder prune -af`)**: Docker derlemelerinden kalan ve genellikle GB'larca yer tutan katman önbelleği.
 2. **Sahipsiz (Dangling) Docker İmajları (`docker image prune -f`)**: Etiketsiz (`<none>`) ara imajlar.
 3. **Durdurulmuş Konteynerler ve Boş Ağlar**: Çıkış yapmış geçici konteynerler (`docker container prune -f`) ve boş Docker köprü ağları.
-4. **Eski Derleme Adayları ve Rollback İmajları**: `iot-dashboard-app:candidate-*` geçici imajları temizlenir; `nexusnode-app-rollback` ve `adminer-rollback` imajlarından en sonuncusu acil geri dönüş için korunur, daha eskileri silinir.
+4. **Eski Derleme Adayları ve Rollback İmajları**: `iot-dashboard-app:candidate-*` geçici derleme imajları silinir; `nexusnode-app-rollback` ve `adminer-rollback` imajlarından güvenlik payı olarak **en son 3 yükleme korunur**, daha eski olanlar otomatik olarak temizlenir.
 5. **Host Derleme Kalıntıları**: Host üzerindeki `dist/`, `build/`, `server.js` çıktıları.
 6. **Önbellek ve Hata Günlükleri**: `node_modules/.cache`, `.eslintcache`, `.tsbuildinfo`, test/coverage raporları, npm/yarn debug logları, core dökümleri.
 7. **Debian APT Arşiv Önbelleği**: `/var/cache/apt/archives` altındaki `.deb` paketleri (`apt-get clean & autoclean`). `--deep` modunda kullanılmayan bağımlılıklar ve eski çekirdek paketleri (`apt-get autoremove --purge`) de kaldırılır.
@@ -96,7 +96,8 @@ sudo bash ./vps-update.sh --run
 6. GitHub `origin/main` dalını güvenli **fast-forward** ile günceller. Uzak dalda `docker-compose.yml`/Compose yapılandırması değişmişse otomatik dağıtım yerine manuel inceleme için durur.
 7. NexusNode yeni sürümünü önce ayrı bir Docker imajında derler, sonra yalnızca uygulama servisini yeniden oluşturur. Sağlık kontrolü başarısızsa yalnızca kısıtlı ve teknik olarak doğrulanmış koşullarda eski uygulama imajına dönmeye çalışır. DB migration değişiklikleri için otomatik rollback yapılmaz.
 8. Compose'taki sabit sürüm etiketiyle Adminer imajını kontrol eder. **Yeni sürüm etiketini kendi kendine seçmez.**
-9. HTTPS/API/veritabanı ve temel sistem servislerini kontrol eder. `/run/reboot-required` varsa yeniden başlatmak için terminalden **`evet`** yanıtını bekler.
+9. Dağıtım ve sağlık kontrolleri başarılı olduğunda geçici aday derleme imajını siler, güvenlik payı olarak **son 3 yüklemenin rollback imajını koruyarak** daha eski olanları otomatik temizler.
+10. HTTPS/API/veritabanı ve temel sistem servislerini kontrol eder. `/run/reboot-required` varsa yeniden başlatmak için terminalden **`evet`** yanıtını bekler.
 
 **TimescaleDB/PostgreSQL imajını güncellemez.** Bunun için ayrıca kullanıcı onaylı, ayrı bir işlem tasarlanacaktır. PostgreSQL ve uygulama Docker volume'ları korunur.
 

@@ -1219,18 +1219,21 @@ class LocalDatabase {
     }
   }
 
-  public async createBackup(): Promise<{ success: boolean; filename: string; size: number }> {
+  public async createBackup(triggerType: 'scheduled' | 'manual' | 'auto_healer' = 'manual'): Promise<{ success: boolean; filename: string; size: number; error?: string }> {
     this.ensureBackupDir();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const isScheduled = triggerType === 'scheduled';
+    const prefix = isScheduled ? 'scheduled_' : '';
 
     if (this.isPostgresProductionMode()) {
-      const filename = `pg_backup_${timestamp}.sql`;
+      const filename = `pg_backup_${prefix}${timestamp}.sql`;
       const backupPath = path.join(this.BACKUP_DIR, filename);
       const dbUrl = resolvePostgresConnectionString();
 
       if (!dbUrl) {
-        console.error('[BACKUP] Connection URL could not be resolved for pg_dump');
-        return { success: false, filename: '', size: 0 };
+        const errStr = 'PostgreSQL bağlantı dizesi çözümlenemedi (DATABASE_URL yapılandırması eksik).';
+        console.error('[BACKUP]', errStr);
+        return { success: false, filename: '', size: 0, error: errStr };
       }
 
       try {
@@ -1241,8 +1244,21 @@ class LocalDatabase {
         try {
           await execFileAsync('pg_dump', ['--version']);
         } catch (missingErr) {
-          console.error('[BACKUP] pg_dump is not available in environment. Failing PostgreSQL backup.');
-          return { success: false, filename: '', size: 0 };
+          const isDev = process.env.NODE_ENV !== 'production' && process.env.VPS_PRODUCTION !== 'true';
+          if (isDev) {
+            console.warn('[BACKUP] pg_dump bulunamadı; geliştirme ortamında yerel veri snapshot yedeğine dönülüyor...');
+            const jsonFilename = `db_backup_${prefix}${timestamp}.json`;
+            const jsonBackupPath = path.join(this.BACKUP_DIR, jsonFilename);
+            const serialized = JSON.stringify(this.data, null, 2);
+            await fs.promises.writeFile(jsonBackupPath, serialized, 'utf-8');
+            const v = this.verifyBackupFile(jsonFilename);
+            if (!v.isHealthy) throw new Error('JSON backup verification failed: ' + (v.error || 'Geçersiz JSON'));
+            this.pruneBackups();
+            return { success: true, filename: jsonFilename, size: Buffer.byteLength(serialized, 'utf-8') };
+          }
+          const errStr = 'PostgreSQL pg_dump aracı sistem PATH içinde bulunamadı (postgresql-client gerekli).';
+          console.error('[BACKUP]', errStr);
+          return { success: false, filename: '', size: 0, error: errStr };
         }
 
         // Pass connection credentials via process environment variables to avoid leaking passwords in CLI process arguments
@@ -1256,11 +1272,12 @@ class LocalDatabase {
 
         const stats = await fs.promises.stat(backupPath);
         if (stats.size === 0) {
-          throw new Error('pg_dump produced an empty file');
+          throw new Error('pg_dump boş bir dosya üretti (0 bayt)');
         }
 
         // Retention is only applied after structural verification of the new backup.
-        if (!this.verifyBackupFile(filename).isHealthy) throw new Error('SQL backup structural verification failed');
+        const v = this.verifyBackupFile(filename);
+        if (!v.isHealthy) throw new Error('SQL backup structural verification failed: ' + (v.error || 'Geçersiz yapı'));
         this.pruneBackups();
         return { success: true, filename, size: stats.size };
       } catch (err: any) {
@@ -1268,18 +1285,19 @@ class LocalDatabase {
         if (fs.existsSync(backupPath)) {
           try { await fs.promises.unlink(backupPath); } catch {}
         }
-        return { success: false, filename: '', size: 0 };
+        return { success: false, filename: '', size: 0, error: err?.message || 'pg_dump işlemi başarısız oldu' };
       }
     }
 
-    const filename = `db_backup_${timestamp}.json`;
+    const filename = `db_backup_${prefix}${timestamp}.json`;
     const backupPath = path.join(this.BACKUP_DIR, filename);
 
     try {
       const serialized = JSON.stringify(this.data, null, 2);
       await fs.promises.writeFile(backupPath, serialized, 'utf-8');
 
-      if (!this.verifyBackupFile(filename).isHealthy) throw new Error('JSON backup verification failed');
+      const v = this.verifyBackupFile(filename);
+      if (!v.isHealthy) throw new Error('JSON backup verification failed: ' + (v.error || 'Geçersiz veri'));
       this.pruneBackups();
 
       return {
@@ -1287,9 +1305,9 @@ class LocalDatabase {
         filename,
         size: Buffer.byteLength(serialized, 'utf-8'),
       };
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create database backup:', err);
-      return { success: false, filename: '', size: 0 };
+      return { success: false, filename: '', size: 0, error: err?.message || 'JSON yedekleme dosyası oluşturulamadı' };
     }
   }
 
@@ -1366,10 +1384,10 @@ class LocalDatabase {
 
   public async triggerSnapshot(triggerType: 'scheduled' | 'manual' | 'auto_healer' = 'manual'): Promise<BackupSnapshotItem> {
     const config = this.getScheduledBackupConfig();
-    const backupRes = await this.createBackup();
+    const backupRes = await this.createBackup(triggerType);
 
     if (!backupRes.success || !backupRes.filename) {
-      throw new Error('Snapshot dosyası oluşturulamadı (PostgreSQL dump veya dosya yazma hatası).');
+      throw new Error(backupRes.error || 'Snapshot dosyası oluşturulamadı (PostgreSQL dump veya dosya yazma hatası).');
     }
 
     const verification = this.verifyBackupFile(backupRes.filename);

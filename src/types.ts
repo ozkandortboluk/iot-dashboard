@@ -939,6 +939,7 @@ export interface BackupSnapshotItem {
     isHealthy: boolean;
     tablesVerified: number;
     verifiedAt: string;
+    error?: string;
   };
 }
 

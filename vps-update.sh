@@ -18,6 +18,7 @@ MIN_FREE_GIB=6
 APP_IMAGE=iot-dashboard-app:latest
 HEALTH_URL=http://127.0.0.1:3000/api/health/ready
 PUBLIC_URL=https://nexusnodeiot.com.tr/
+MAX_ROLLBACK_KEEP=${NEXUS_MAX_ROLLBACK_KEEP:-3}
 
 MODE=${1:---check}
 CLEAN_DRY_RUN=false
@@ -60,6 +61,7 @@ ANA MODLAR:
       7. Yalnizca app servisinin sifira yakin kesintiyle yayinlanmasi
       8. Saglik kontrolleri ve basarisizlikta otomatik UI rollback korumasi
       9. Adminer imaj kontrolu, son sistem saglik ve opsiyonel reboot denetimi
+      10. Basarili yayin sonrasi otomatik temizlik (Gecici aday silinir, son 3 rollback saklanir)
 
   --clean | --cleanup [SEÇENEKLER]
       VPS uzerinde gereksiz dosyalari, artik derleme ciktilarini, Docker onbelleklerini
@@ -70,7 +72,7 @@ ANA MODLAR:
       • Sahipsiz (dangling) ve etiketsiz (<none>) Docker imajlari
       • Durdurulmus gecici konteynerler ve kullanilmayan Docker aglari
       • Eski gecici aday derleme imajlari (iot-dashboard-app:candidate-*)
-      • Eski rollback imajlari (nexusnode-app/adminer-rollback:* -> en son 1 tanesi korunur)
+      • Eski rollback imajlari (nexusnode-app/adminer-rollback:* -> guvenlik payi olarak son 3 tanesi korunur)
       • Host uzerindeki derleme artiklari (dist/, build/, server.js)
       • Node & derleyici onbellekleri (node_modules/.cache, .eslintcache, .tsbuildinfo)
       • Test ve kapsam raporlari (coverage/, .nyc_output/)
@@ -358,6 +360,47 @@ confirm() {
   [[ "$answer" == evet ]]
 }
 
+prune_old_rollbacks() {
+  local keep="${1:-$MAX_ROLLBACK_KEEP}"
+  step "Rollback ve gecici imaj rotasyonu (Guvenlik icin son $keep yukleme saklaniyor)"
+
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    note 'Docker calismiyor; rollback rotasyonu atlandi.'
+    return 0
+  fi
+
+  # 1. Gecici aday (candidate) derleme imajlarini temizle
+  local cand_imgs
+  cand_imgs=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^iot-dashboard-app:candidate-' || true)
+  if [[ -n "$cand_imgs" ]]; then
+    note "Gecici aday derleme imajlari siliniyor..."
+    # shellcheck disable=SC2086
+    docker rmi $cand_imgs 2>/dev/null || true
+  fi
+
+  # 2. App rollback imajlari: son $keep tanesini koru, daha eskileri sil
+  local old_app_rb
+  old_app_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-app-rollback:' | sort -r | awk -F'\t' -v k="$keep" 'NR > k {print $2}' || true)
+  if [[ -n "$old_app_rb" ]]; then
+    note "Son $keep yukleme haricindeki eski app rollback imajlari siliniyor: $(echo "$old_app_rb" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    docker rmi $old_app_rb 2>/dev/null || true
+  else
+    note "App rollback imajlari guvenli sinirda (son $keep yukleme korundu)."
+  fi
+
+  # 3. Adminer rollback imajlari: son $keep tanesini koru, daha eskileri sil
+  local old_adminer_rb
+  old_adminer_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-adminer-rollback:' | sort -r | awk -F'\t' -v k="$keep" 'NR > k {print $2}' || true)
+  if [[ -n "$old_adminer_rb" ]]; then
+    note "Son $keep yukleme haricindeki eski adminer rollback imajlari siliniyor: $(echo "$old_adminer_rb" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    docker rmi $old_adminer_rb 2>/dev/null || true
+  else
+    note "Adminer rollback imajlari guvenli sinirda (son $keep yukleme korundu)."
+  fi
+}
+
 clean_disk() {
   step 'Disk Temizligi ve Alan Kazanimi'
   local before_kib after_kib diff_kib
@@ -376,9 +419,9 @@ clean_disk() {
       cand_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^iot-dashboard-app:candidate-' || true)
       rb_app_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^nexusnode-app-rollback:' || true)
       rb_adm_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^nexusnode-adminer-rollback:' || true)
-      note "  Gecici aday Docker imajlari       : $cand_count adet"
-      note "  App rollback Docker imajlari      : $rb_app_count adet"
-      note "  Adminer rollback Docker imajlari  : $rb_adm_count adet"
+      note "  Gecici aday Docker imajlari       : $cand_count adet (tamami temizlenecek)"
+      note "  App rollback Docker imajlari      : $rb_app_count adet (guvenlik icin son $MAX_ROLLBACK_KEEP tanesi korunacak)"
+      note "  Adminer rollback Docker imajlari  : $rb_adm_count adet (guvenlik icin son $MAX_ROLLBACK_KEEP tanesi korunacak)"
     fi
 
     note '--- Proje Ici Derleme ve Onbellek Boyutlari ---'
@@ -411,8 +454,8 @@ clean_disk() {
 
   if [[ "$CLEAN_YES" != true ]]; then
     note 'Bu islem Docker builder onbellegini, sahipsiz imajlari, host derleme kalintilarini,'
-    note 'APT paket onbellegini ve eski sistem gunluklerini guvenle temizleyecektir.'
-    note 'GUVENCE: Veritabani (TimescaleDB), Docker volume, yedekler ve secrets ASLA SILINMEZ.'
+    note "APT paket onbellegini, eski sistem gunluklerini ve son $MAX_ROLLBACK_KEEP haricindeki eski rollback imajlarini temizleyecektir."
+    note "GUVENCE: Veritabani (TimescaleDB), Docker volume, yedekler, secrets ve son $MAX_ROLLBACK_KEEP yukleme ASLA SILINMEZ."
     confirm 'Disk temizligini baslatmak istiyor musunuz?' || {
       note 'Kullanici onayi verilmedi; temizlik iptal edildi.'
       return 0
@@ -447,30 +490,8 @@ clean_disk() {
     note 'Kullanilmayan aglar temizleniyor...'
     docker network prune -f 2>/dev/null || true
 
-    # Gecici aday imajlari temizle
-    local cand_imgs
-    cand_imgs=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^iot-dashboard-app:candidate-' || true)
-    if [[ -n "$cand_imgs" ]]; then
-      note "Gecici aday imajlar siliniyor..."
-      # shellcheck disable=SC2086
-      docker rmi $cand_imgs 2>/dev/null || true
-    fi
-
-    # Rollback imajlari: en son 1 tanesini koru, daha eskileri sil
-    local old_app_rb old_adminer_rb
-    old_app_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-app-rollback:' | sort -r | awk -F'\t' 'NR>1 {print $2}' || true)
-    if [[ -n "$old_app_rb" ]]; then
-      note "Eski app rollback imajlari temizleniyor..."
-      # shellcheck disable=SC2086
-      docker rmi $old_app_rb 2>/dev/null || true
-    fi
-
-    old_adminer_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-adminer-rollback:' | sort -r | awk -F'\t' 'NR>1 {print $2}' || true)
-    if [[ -n "$old_adminer_rb" ]]; then
-      note "Eski adminer rollback imajlari temizleniyor..."
-      # shellcheck disable=SC2086
-      docker rmi $old_adminer_rb 2>/dev/null || true
-    fi
+    # Rollback imajlari ve gecici aday imajlar (Son $MAX_ROLLBACK_KEEP yukleme korunur)
+    prune_old_rollbacks "$MAX_ROLLBACK_KEEP"
     note 'Docker nesne temizligi tamamlandi.'
   else
     note 'Docker calismiyor; Docker temizligi atlandi.'
@@ -741,6 +762,7 @@ upgrade_app() {
   docker compose up -d --no-deps --no-build --force-recreate app || deployed=false
   if [[ "$deployed" == true ]] && wait_health; then
     note 'Yeni app yayinlandi; health testleri gecti.'
+    docker rmi "$candidate" 2>/dev/null || true
   else
     note 'Yeni app saglik testi basarisiz; rollback uygunlugu kontrol ediliyor.'
     running_image=$(docker inspect nexus_app --format '{{.Image}}' 2>/dev/null || true)
@@ -826,4 +848,5 @@ else
 fi
 upgrade_app
 upgrade_adminer
+prune_old_rollbacks "$MAX_ROLLBACK_KEEP"
 final_checks

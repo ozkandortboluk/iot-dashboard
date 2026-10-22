@@ -798,12 +798,30 @@ databaseRouter.get('/scheduled-backups/download/:filename', authenticateUser, re
   }
 });
 
+databaseRouter.get('/scheduled-backups/verify/:filename', authenticateUser, requireAdmin, (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = db.getBackupFilePath(filename);
+    if (!filePath) {
+      return res.status(404).json({ success: false, error: 'İstenen snapshot dosyası bulunamadı.' });
+    }
+    const verification = db.verifyBackupFile(filename);
+    res.json({
+      success: true,
+      filename,
+      verification,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Doğrulama hatası: ' + (err?.message || err) });
+  }
+});
+
 databaseRouter.post('/backup', authenticateUser, requireAdmin, async (req, res) => {
   const result = await db.createBackup();
   if (result.success) {
     res.json({ message: 'Veritabanı yedeği başarıyla oluşturuldu.', result });
   } else {
-    res.status(500).json({ error: 'Yedekleme oluşturulamadı.' });
+    res.status(500).json({ error: result.error || 'Yedekleme oluşturulamadı.' });
   }
 });
 
