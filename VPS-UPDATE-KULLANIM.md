@@ -1,10 +1,10 @@
-# NexusNode VPS Update — v0.2
+# NexusNode VPS Update & Disk Temizleme — v0.4
 
 Bu betik NexusNode Git deposunun **ana dizininde** (`/opt/iot-dashboard/iot-dashboard/vps-update.sh`) bulunacak şekilde düzenlenmiştir. Ek bir `/tmp` aktarımı veya `/usr/local/sbin` kurulumu **gerekmez**. Bütün komutları sunucuda **proje ana dizininden** çalıştırın.
 
 ## 1. Dosyaların yeri
 
-Aşağıdaki iki dosyayı proje ana dizinine yerleştirin:
+Aşağıdaki dosyaları proje ana dizinine yerleştirin:
 
 ```text
 /opt/iot-dashboard/iot-dashboard/
@@ -18,22 +18,66 @@ Aşağıdaki iki dosyayı proje ana dizinine yerleştirin:
 
 **Not:** Betik gerçek çalışmada proje dizinini kendi bulunduğu konumdan otomatik bulur. `--run` sırasında çalışmakta olan betiğin Git güncellemesiyle değişmesini önlemek için `/var/lib/nexusnode-update` altında root'a özel bir *çalıştırma kopyası* oluşturur. Ana dosya yine proje dizininde kalır. `--check` hiçbir kopya veya log oluşturmaz.
 
-## 2. Birinci çalıştırma — hiçbir güncelleme yapmadan kontrol
+## 2. Yardım ve Salt Okunur Ön Kontrol
+
+Tüm komut seçeneklerini ve detaylı yardım kılavuzunu görüntülemek için:
 
 ```bash
 cd /opt/iot-dashboard/iot-dashboard
+sudo bash ./vps-update.sh --help
+```
+
+Hiçbir değişiklik yapmadan sistemi denetlemek için:
+
+```bash
 sudo bash ./vps-update.sh --check
 ```
 
 `--check`, mevcut APT paket listesini, disk durumunu, Docker/Compose, Git çalışma ağacı, yedekleme servisi, HTTPS ve API sağlığını **salt okunur** kontrol eder. Ne yeni yedek oluşturur ne paket/image indirir ne de dosya siler. Güncel uzak paket veya GitHub sürümlerini sorgulamaz.
 
-Yardım için:
+## 3. Güvenli Disk Temizliği ve Alan Kazanımı (--clean)
 
+VPS diski dolmaya başladığında veya derleme öncesinde yer açmak gerektiğinde bu komut kullanılır.
+
+### Temel Temizlik:
 ```bash
-sudo bash ./vps-update.sh --help
+sudo bash ./vps-update.sh --clean
 ```
 
-## 3. Gerçek güncelleme
+### Derin Temizlik (Eski Çekirdekler ve Paketler Dahil):
+```bash
+sudo bash ./vps-update.sh --clean --deep
+```
+
+### Simülasyon (Silmeden Taramak İçin):
+```bash
+sudo bash ./vps-update.sh --clean --dry-run
+```
+
+### Onaysız Otomatik Temizlik (Cron / Scriptler İçin):
+```bash
+sudo bash ./vps-update.sh --clean -y
+```
+
+### Neler Temizlenir?
+1. **Docker BuildKit Önbelleği (`docker builder prune -af`)**: Docker derlemelerinden kalan ve genellikle GB'larca yer tutan katman önbelleği.
+2. **Sahipsiz (Dangling) Docker İmajları (`docker image prune -f`)**: Etiketsiz (`<none>`) ara imajlar.
+3. **Durdurulmuş Konteynerler ve Boş Ağlar**: Çıkış yapmış geçici konteynerler (`docker container prune -f`) ve boş Docker köprü ağları.
+4. **Eski Derleme Adayları ve Rollback İmajları**: `iot-dashboard-app:candidate-*` geçici imajları temizlenir; `nexusnode-app-rollback` ve `adminer-rollback` imajlarından en sonuncusu acil geri dönüş için korunur, daha eskileri silinir.
+5. **Host Derleme Kalıntıları**: Host üzerindeki `dist/`, `build/`, `server.js` çıktıları.
+6. **Önbellek ve Hata Günlükleri**: `node_modules/.cache`, `.eslintcache`, `.tsbuildinfo`, test/coverage raporları, npm/yarn debug logları, core dökümleri.
+7. **Debian APT Arşiv Önbelleği**: `/var/cache/apt/archives` altındaki `.deb` paketleri (`apt-get clean & autoclean`). `--deep` modunda kullanılmayan bağımlılıklar ve eski çekirdek paketleri (`apt-get autoremove --purge`) de kaldırılır.
+8. **Systemd Journal Günlükleri**: `journalctl --vacuum-time=7d --vacuum-size=100M` ile 7 günden eski veya 100M üzerindeki sistem logları güvenle vakumlanır.
+9. **Eski Güncelleme Logları ve Betikleri**: `/var/log/nexusnode-update/` altındaki 14 günden eski loglar ve `/var/lib/nexusnode-update/` altındaki 7 günden eski dondurulmuş betikler.
+10. **Geçici Artık Dosyalar**: `/tmp` ve `/var/tmp` altındaki 7 günden eski standart dosyalar.
+
+### Kesin Güvenlik İlkeleri (Asla Silinmeyenler):
+- **Veritabanı ve Docker Volume'ları ASLA Silinmez**: PostgreSQL / TimescaleDB (`timescaledb_data`) ve uygulama kalıcı dizinleri (`app_data`) asla temizlenmez.
+- **Yedekler ASLA Silinmez**: `/var/backups/nexusnode/gunluk` altındaki kurtarma yedekleri korunur.
+- **Gizli Anahtarlar ASLA Silinmez**: `secrets/`, `.env` ve `.system_secrets.json` dosyalarına dokunulmaz.
+- **Canlı Üretim Konteynerleri ASLA Durdurulmaz**.
+
+## 4. Gerçek Güncelleme (--run)
 
 **Yalnızca `--check` sonuçlarındaki engeller giderildikten sonra:**
 
@@ -56,18 +100,19 @@ sudo bash ./vps-update.sh --run
 
 **TimescaleDB/PostgreSQL imajını güncellemez.** Bunun için ayrıca kullanıcı onaylı, ayrı bir işlem tasarlanacaktır. PostgreSQL ve uygulama Docker volume'ları korunur.
 
-## 4. Mevcut VPS durumunda beklenen engel
+## 5. Mevcut VPS durumunda beklenen engel
 
 18 Ekim 2026 denetiminde `main` dalında değişmemiş dosyalar olmakla beraber `ort`, `category:`, `docker-compose.yml.before-vault-fix`, `full_backup.sql` gibi **takip edilmeyen diğer dosyalar** vardı. Betik bunları **silmez, taşımaz veya otomatik yoksaymaz**. `--check` bunları gösterecek; `--run` güvenlik gerekçesiyle duracaktır. Gerekenler ayrı ayrı incelenmeli, hassas veriler proje dışına güvenli izinlerle alınmalı veya kullanıcının kararıyla düzenlenmelidir. Körlemesine `git clean -fd` veya `git reset --hard` kullanmayın.
 
-Ayrıca diskte yaklaşık **4,4 GiB boş alan** görülmüştü. Betiğin güncelleme/derleme önkoşulu **6 GiB** olup ilk yedek için en az 1 GiB gerekir. Betik yalnızca onay verilen build-cache temizliğini deneyebilir; alan hâlâ yetmiyorsa durur.
+Ayrıca diskte yaklaşık **4,4 GiB boş alan** görülmüştü. Betiğin güncelleme/derleme önkoşulu **6 GiB** olup ilk yedek için en az 1 GiB gerekir. Betik yetersiz alanda güvenli disk temizliği (`--clean`) önerir ve onay verildiğinde alan açar.
 
-## 5. Günlükler ve çalışma dosyaları
+## 6. Günlükler ve çalışma dosyaları
 
-Gerçek güncelleme günlükleri:
+Gerçek güncelleme ve temizlik günlükleri:
 
 ```text
 /var/log/nexusnode-update/update-YYYYMMDDTHHMMSSZ.log
+/var/log/nexusnode-update/clean-YYYYMMDDTHHMMSSZ.log
 ```
 
 Kilitleme ve sürüm anlık kopyaları:
@@ -80,21 +125,21 @@ Bu dizinler root erişimine özeldir. Günlüğü kontrol etmek için:
 
 ```bash
 sudo ls -lt /var/log/nexusnode-update/
-sudo bash -c 'f=$(ls -1t /var/log/nexusnode-update/update-*.log 2>/dev/null | head -1); [ -n "$f" ] && tail -n 100 "$f"'
+sudo bash -c 'f=$(ls -1t /var/log/nexusnode-update/*.log 2>/dev/null | head -1); [ -n "$f" ] && tail -n 100 "$f"'
 ```
 
 Günlükleri paylaşmadan önce hassas bilgi içermediğini doğrulayın.
 
-## 6. Yedekleme güvenliği ve sınırlamalar
+## 7. Yedekleme güvenliği ve sınırlamalar
 
 - Mevcut yedekte `database.dump`, `app_data`, `.env`, Vault ve `secrets/encryption_key` dahil hassas içerik bulunuyor. **Yedek klasörü ve dosyaları root-only erişimli olmalıdır.** İzinler beklenen güvenlik düzeyinde değilse betik durur; kendi kendine izin genişletmez.
 - SHA256 kontrolü ve `pg_restore --list` **tam geri yükleme testi değildir**. Gerçekten geri yüklenebilirliği doğrulamak için ayrıca izole test gerekir.
 - Yerel yedekler VPS ile aynı diskte kaldığından sunucu/disk arızasına karşı koruma sağlamaz. Sunucu dışı yedekleme ayrı aşamada eklenecek.
 - Uygulama yayını kısa kesinti yaratabilir. Docker/OS paketi veya migration geri dönüşü otomatik ve risksiz sayılamaz.
-- Bu betik `--check` için salt okunur; `--run` paketler, kaynak kodu, imajlar, servisler ve yedekler üzerinde **gerçek değişiklik** yapar.
+- Bu betik `--check` için salt okunur; `--clean` ve `--run` paketler, önbellekler, servisler veya yedekler üzerinde **kontrollü değişiklik** yapar.
 - Betik internetten indirdiği yeni GitHub kodunu, Debian paketlerini ve imajları çalıştıracağından, yetkili kişiler dışında hiç kimse proje kaynak dosyalarını veya `vps-update.sh` dosyasını değiştirememelidir. Root izinli çalıştırma yalnızca güvenilen kod için uygundur.
 
-## 7. Doğrulama
+## 8. Doğrulama
 
 Dosyayı VPS'ye kopyaladıktan sonra şu sıra önerilir:
 

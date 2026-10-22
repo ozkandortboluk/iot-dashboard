@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# NexusNode VPS Update - v0.3 (Debian 13 / Docker Compose)
-# Run from the project root: sudo bash ./vps-update.sh --check|--run
-# Default: manual run. --check is read-only; --run performs the gated update.
+# NexusNode VPS Update - v0.4 (Debian 13 / Docker Compose)
+# Run from the project root: sudo bash ./vps-update.sh [--check|--run|--clean|--help]
+# Default: manual run. --check is read-only; --run performs update; --clean frees disk.
 set -Eeuo pipefail
 umask 077
 export LC_ALL=C
@@ -18,7 +18,12 @@ MIN_FREE_GIB=6
 APP_IMAGE=iot-dashboard-app:latest
 HEALTH_URL=http://127.0.0.1:3000/api/health/ready
 PUBLIC_URL=https://nexusnodeiot.com.tr/
+
 MODE=${1:---check}
+CLEAN_DRY_RUN=false
+CLEAN_DEEP=false
+CLEAN_YES=false
+
 STAGE=initial
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 OLD_APP_IMAGE=''
@@ -29,20 +34,127 @@ SCHEMA_BEFORE=''
 
 usage() {
   cat <<'EOF'
-Usage (from project root): sudo bash ./vps-update.sh [--check|--run|--help]
-  --check  Read-only preflight checks; no apt update, pulls, backups or cleanup.
-  --run    Verified backup, Git main fast-forward, rebuild/deploy and health checks.
-           Debian APT updates are disabled by default.
-  System updates: sudo env NEXUS_SYSTEM_UPDATE=1 bash ./vps-update.sh --run
-  Verbose output: sudo env NEXUS_VERBOSE=1 bash ./vps-update.sh --run
-Safety: never updates TimescaleDB image; never deletes volumes, backup files,
-        secrets or old production images. No forced Git reset/clean.
+================================================================================
+  NexusNode VPS Yonetim, Guncelleme & Disk Temizleme Araci (vps-update.sh v0.4)
+  Debian 13 / Docker Compose Mimarisi Icin Ozel Olarak Tasarlanmistir
+================================================================================
+
+KULLANIM:
+  sudo bash ./vps-update.sh [MOD] [SEÇENEKLER]
+
+ANA MODLAR:
+  --check
+      Salt okunur (read-only) on denetim gerceklestirir.
+      Git agaci, Docker servisleri, Nginx, TimescaleDB, HTTPS/API uclari,
+      disk alani ve son yedek durumunu inceler ve raporlar.
+      Hicbir dosya silmez, paket indirmez veya servisleri degistirmez.
+
+  --run
+      Tam denetimli ve guvenli guncelleme surecini baslatir:
+      1. Git main dali ve calisma agaci dogrulamasi
+      2. Servis saglik ve secret dosya izin kontrolleri
+      3. Otomatik yerel kurtarma yedegi olusturma ve pg_restore/SHA256 dogrulamasi
+      4. Disk alani kontrolu (gerekirse guvenli build-cache temizligi onayi)
+      5. origin/main dalindan guvenli fast-forward birlestirme
+      6. Dockerfile ile yeni uygulamanin yalitimli imaj derlemesi
+      7. Yalnizca app servisinin sifira yakin kesintiyle yayinlanmasi
+      8. Saglik kontrolleri ve basarisizlikta otomatik UI rollback korumasi
+      9. Adminer imaj kontrolu, son sistem saglik ve opsiyonel reboot denetimi
+
+  --clean | --cleanup [SEÇENEKLER]
+      VPS uzerinde gereksiz dosyalari, artik derleme ciktilarini, Docker onbelleklerini
+      ve birikmis gunlukleri guvenle temizleyerek disk alani kazandirir.
+
+      TEMIZLENEN OGELER:
+      • Docker Builder / BuildKit onbellegi (docker builder prune -af)
+      • Sahipsiz (dangling) ve etiketsiz (<none>) Docker imajlari
+      • Durdurulmus gecici konteynerler ve kullanilmayan Docker aglari
+      • Eski gecici aday derleme imajlari (iot-dashboard-app:candidate-*)
+      • Eski rollback imajlari (nexusnode-app/adminer-rollback:* -> en son 1 tanesi korunur)
+      • Host uzerindeki derleme artiklari (dist/, build/, server.js)
+      • Node & derleyici onbellekleri (node_modules/.cache, .eslintcache, .tsbuildinfo)
+      • Test ve kapsam raporlari (coverage/, .nyc_output/)
+      • Debian APT paket arsiv onbellegi (/var/cache/apt/archives)
+      • Systemd Journal loglari (7 gunden eski veya 100M uzeri gunlukler vakumlanir)
+      • Guncelleme kayitlari (/var/log/nexusnode-update/ -> 14 gunden eskiler)
+      • Dondurulmus gecici betikler (/var/lib/nexusnode-update/ -> 7 gunden eskiler)
+      • /tmp ve /var/tmp altindaki 7 gunden eski gecici artik dosyalar
+
+  --help | -h
+      Bu detayli komut kilavuzunu goruntuler.
+
+--clean MODU SECENEKLERI:
+  --dry-run
+      Simulasyon modu. Hicbir dosya veya imaj silinmez; temizlenebilecek
+      kaynaklarin boyutlarini ve potansiyel disk kazancini raporlar.
+
+  --deep | --all
+      Derin temizlik modu. Standart temizlige ek olarak:
+      • 'apt-get -y --purge autoremove' ile eski cekirdek ve artik paketleri kaldirir.
+      • Journal loglarini son 3 gune (veya maks 50M) daha agresif vakumlar.
+      • Guncelleme loglari icin saklama suresini 7 gune indirir.
+
+  --yes | -y
+      Kullanici onay sorusunu atlar (Cron gorevleri veya otomatik betikler icin).
+
+CEVRE DEGISKENLERI:
+  NEXUS_SYSTEM_UPDATE=1
+      --run calismasi sirasinda Debian isletim sistemi paketlerini (apt upgrade) de gunceller.
+  NEXUS_VERBOSE=1
+      Terminalde tum detayli ciktilari ve log akisini gosterir.
+
+GUVENLIK VE VERI KORUMA GARANTISI:
+  • ASLA Docker volume'larini (timescaledb_data, app_data) silmez.
+  • ASLA PostgreSQL/TimescaleDB veri tabanini silmez.
+  • ASLA yedek arsivlerini (/var/backups/nexusnode/) silmez.
+  • ASLA secret anahtarlarini (secrets/, .env) silmez.
+  • ASLA aktif calisan uretim konteynerlerini durdurmaz veya silmez.
+  • ASLA zorla Git sifirlamasi (git reset --hard / git clean -fd) yapmaz.
+
+ORNEK KULLANIMLAR:
+  sudo bash ./vps-update.sh --check            # Guvenli on kontrol
+  sudo bash ./vps-update.sh --clean            # Standart guvenli disk temizligi
+  sudo bash ./vps-update.sh --clean --deep     # Derin sistem & kernel temizligi
+  sudo bash ./vps-update.sh --clean --dry-run  # Silmeden temizlik analizi
+  sudo bash ./vps-update.sh --clean -y         # Onaysiz otomatik temizlik
+  sudo bash ./vps-update.sh --run              # Canli guncelleme
+  sudo env NEXUS_SYSTEM_UPDATE=1 bash ./vps-update.sh --run # Sistem paketleriyle guncelleme
+================================================================================
 EOF
 }
+
 case "$MODE" in
-  --help|-h) usage; exit 0 ;;
-  --check|--run) [[ $# -le 1 ]] || { usage >&2; exit 2; } ;;
-  *) usage >&2; exit 2 ;;
+  --help|-h|help)
+    usage
+    exit 0
+    ;;
+  --check)
+    [[ $# -le 1 ]] || { usage >&2; exit 2; }
+    ;;
+  --run)
+    [[ $# -le 1 ]] || { usage >&2; exit 2; }
+    ;;
+  --clean|--cleanup)
+    shift
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dry-run) CLEAN_DRY_RUN=true ;;
+        --deep|--all) CLEAN_DEEP=true ;;
+        --yes|-y) CLEAN_YES=true ;;
+        --help|-h) usage; exit 0 ;;
+        *)
+          echo "HATA: Bilinmeyen temizlik secenegi: $1" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+      shift
+    done
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
 esac
 
 note() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
@@ -51,8 +163,8 @@ step() { STAGE="$1"; note "===== $STAGE ====="; }
 on_failure() {
   rc=$?
   if (( rc != 0 )); then
-    note "GUNCELLEME DURDU: asama=$STAGE, exit=$rc. Otomatik DB/OS geri alma YOK."
-    if [[ "$MODE" == --run ]]; then
+    note "ISLEM DURDU: asama=$STAGE, exit=$rc. Otomatik DB/OS geri alma YOK."
+    if [[ "$MODE" == --run || "$MODE" =~ ^(--clean|--cleanup)$ ]]; then
       if [[ -n "${LOG_FILE:-}" ]]; then note "Log: $LOG_FILE"; fi
       note "Calisan container/volume ve mevcut yedekler otomatik silinmedi."
     fi
@@ -76,7 +188,7 @@ if [[ "$MODE" == --run && "${NEXUS_UPDATE_FROZEN:-0}" != 1 ]]; then
     /bin/bash "$FROZEN_SCRIPT" "$MODE"
 fi
 
-# Serialize real update runs. --check does not create or change files.
+# Serialize update or cleanup runs. --check does not create or change files.
 if [[ "$MODE" == --run ]]; then
   command -v flock >/dev/null || fail "flock bulunamadi"
   install -d -m 700 -o root -g root "$LOG_ROOT" "$STATE_ROOT"
@@ -92,6 +204,21 @@ if [[ "$MODE" == --run ]]; then
     exec > >(tee -a "$LOG_FILE" | grep --line-buffered -E '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]') 2>&1
   fi
   [[ ! -e "$STATE_ROOT/rollback-needs-review" ]] || fail "Onceki rollback incelenmedi. $STATE_ROOT/rollback-needs-review dosyasini kontrol et."
+elif [[ "$MODE" =~ ^(--clean|--cleanup)$ && "$CLEAN_DRY_RUN" != true ]]; then
+  command -v flock >/dev/null 2>&1 || true
+  if command -v flock >/dev/null 2>&1; then
+    install -d -m 700 -o root -g root "$LOG_ROOT" "$STATE_ROOT" 2>/dev/null || true
+    if [[ -d "$STATE_ROOT" ]]; then
+      exec 9>"$STATE_ROOT/update.lock"
+      flock -n 9 || fail "Baska bir VPS guncelleme veya temizlik islemi calisiyor"
+    fi
+  fi
+  if [[ -d "$LOG_ROOT" ]]; then
+    LOG_FILE="$LOG_ROOT/clean-$STAMP.log"
+    : > "$LOG_FILE" 2>/dev/null || true
+    chmod 600 "$LOG_FILE" 2>/dev/null || true
+    exec > >(tee -a "$LOG_FILE") 2>&1
+  fi
 fi
 
 for cmd in git docker curl df find sha256sum systemctl stat; do
@@ -112,11 +239,21 @@ repo_git() {
 }
 
 free_kib() { df -Pk "$REPO" | awk 'NR==2 {print $4}'; }
+format_kib() {
+  local kib="${1:-0}"
+  if (( kib >= 1048576 )); then
+    awk -v k="$kib" 'BEGIN {printf "%.2f GiB", k/1048576}'
+  elif (( kib >= 1024 )); then
+    awk -v k="$kib" 'BEGIN {printf "%.1f MiB", k/1024}'
+  else
+    printf "%d KiB" "$kib"
+  fi
+}
 require_disk() {
   local free required
   free=$(free_kib)
   required=$((MIN_FREE_GIB * 1024 * 1024))
-  note "Bos disk: ${free} KiB / alt esik: ${required} KiB"
+  note "Bos disk: $(format_kib "$free") (${free} KiB) / alt esik: $(format_kib "$required") (${required} KiB)"
   (( free >= required )) || return 1
 }
 
@@ -221,15 +358,205 @@ confirm() {
   [[ "$answer" == evet ]]
 }
 
+clean_disk() {
+  step 'Disk Temizligi ve Alan Kazanimi'
+  local before_kib after_kib diff_kib
+  before_kib=$(free_kib)
+  note "Temizlik oncesi bos disk: $(format_kib "$before_kib")"
+  note "Mevcut disk durumu: $(df -h "$REPO" 2>/dev/null | awk 'NR==2 {printf "Toplam: %s | Kullanilan: %s | Bos: %s (%s)", $2, $3, $4, $5}')"
+
+  if [[ "$CLEAN_DRY_RUN" == true ]]; then
+    step 'Simulasyon Modu (--dry-run) - Temizlenebilir Alan Taramasi'
+    note 'Hicbir dosya veya imaj silinmeyecektir; potansiyel temizlik kaynaklari listeleniyor:'
+
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+      note '--- Docker Kaynaklari ve Geri Kazanilabilir Alan ---'
+      docker system df 2>/dev/null || true
+      local cand_count rb_app_count rb_adm_count
+      cand_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^iot-dashboard-app:candidate-' || true)
+      rb_app_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^nexusnode-app-rollback:' || true)
+      rb_adm_count=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -c -E '^nexusnode-adminer-rollback:' || true)
+      note "  Gecici aday Docker imajlari       : $cand_count adet"
+      note "  App rollback Docker imajlari      : $rb_app_count adet"
+      note "  Adminer rollback Docker imajlari  : $rb_adm_count adet"
+    fi
+
+    note '--- Proje Ici Derleme ve Onbellek Boyutlari ---'
+    local item
+    for item in "$REPO/dist" "$REPO/build" "$REPO/node_modules/.cache" "$REPO/coverage" "$REPO/.nyc_output"; do
+      if [[ -d "$item" ]]; then
+        note "  $(du -sh "$item" 2>/dev/null || true)"
+      fi
+    done
+
+    if [[ -d /var/cache/apt/archives ]]; then
+      note '--- APT Paket Onbellegi ---'
+      note "  /var/cache/apt/archives: $(du -sh /var/cache/apt/archives 2>/dev/null || true)"
+    fi
+
+    if command -v journalctl >/dev/null 2>&1; then
+      note '--- Systemd Journal Log Kullanimi ---'
+      journalctl --disk-usage 2>/dev/null || true
+    fi
+
+    if [[ -d "$LOG_ROOT" ]]; then
+      note "--- Guncelleme Loglari ($LOG_ROOT) ---"
+      note "  $(du -sh "$LOG_ROOT" 2>/dev/null || true)"
+    fi
+
+    note 'Simulasyon tamamlandi. Hicbir degisiklik yapilmadi.'
+    note 'Temizligi uygulamak icin: sudo bash ./vps-update.sh --clean'
+    return 0
+  fi
+
+  if [[ "$CLEAN_YES" != true ]]; then
+    note 'Bu islem Docker builder onbellegini, sahipsiz imajlari, host derleme kalintilarini,'
+    note 'APT paket onbellegini ve eski sistem gunluklerini guvenle temizleyecektir.'
+    note 'GUVENCE: Veritabani (TimescaleDB), Docker volume, yedekler ve secrets ASLA SILINMEZ.'
+    confirm 'Disk temizligini baslatmak istiyor musunuz?' || {
+      note 'Kullanici onayi verilmedi; temizlik iptal edildi.'
+      return 0
+    }
+  fi
+
+  # 1. Proje Ici Derleme Kalintilari ve Onbellekler
+  step 'Temizlik 1/6: Proje derleme ve onbellek kalintilari'
+  local target
+  for target in "$REPO/dist" "$REPO/build" "$REPO/server.js" "$REPO/node_modules/.cache" \
+               "$REPO/.eslintcache" "$REPO/.tsbuildinfo" "$REPO/coverage" "$REPO/.nyc_output"; do
+    if [[ -e "$target" ]]; then
+      note "Siliniyor: ${target#"$REPO"/}"
+      rm -rf "$target" 2>/dev/null || true
+    fi
+  done
+  find "$REPO" -maxdepth 2 -type f \( -name 'npm-debug.log*' -o -name 'yarn-error.log*' -o -name 'pnpm-debug.log*' -o -name 'core.*' \) -delete 2>/dev/null || true
+  note 'Proje ici derleme artigi ve onbellek temizligi tamamlandi.'
+
+  # 2. Docker Temizligi
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    step 'Temizlik 2/6: Docker BuildKit onbellegi ve sahipsiz nesneler'
+    note 'Docker builder onbellegi temizleniyor (docker builder prune -af)...'
+    docker builder prune -af 2>/dev/null || true
+
+    note 'Sahipsiz (dangling) imajlar temizleniyor (docker image prune -f)...'
+    docker image prune -f 2>/dev/null || true
+
+    note 'Durdurulmus gecici konteynerler temizleniyor...'
+    docker container prune -f 2>/dev/null || true
+
+    note 'Kullanilmayan aglar temizleniyor...'
+    docker network prune -f 2>/dev/null || true
+
+    # Gecici aday imajlari temizle
+    local cand_imgs
+    cand_imgs=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^iot-dashboard-app:candidate-' || true)
+    if [[ -n "$cand_imgs" ]]; then
+      note "Gecici aday imajlar siliniyor..."
+      # shellcheck disable=SC2086
+      docker rmi $cand_imgs 2>/dev/null || true
+    fi
+
+    # Rollback imajlari: en son 1 tanesini koru, daha eskileri sil
+    local old_app_rb old_adminer_rb
+    old_app_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-app-rollback:' | sort -r | awk -F'\t' 'NR>1 {print $2}' || true)
+    if [[ -n "$old_app_rb" ]]; then
+      note "Eski app rollback imajlari temizleniyor..."
+      # shellcheck disable=SC2086
+      docker rmi $old_app_rb 2>/dev/null || true
+    fi
+
+    old_adminer_rb=$(docker images --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'nexusnode-adminer-rollback:' | sort -r | awk -F'\t' 'NR>1 {print $2}' || true)
+    if [[ -n "$old_adminer_rb" ]]; then
+      note "Eski adminer rollback imajlari temizleniyor..."
+      # shellcheck disable=SC2086
+      docker rmi $old_adminer_rb 2>/dev/null || true
+    fi
+    note 'Docker nesne temizligi tamamlandi.'
+  else
+    note 'Docker calismiyor; Docker temizligi atlandi.'
+  fi
+
+  # 3. APT Paket Onbellegi ve Paketler
+  if command -v apt-get >/dev/null 2>&1; then
+    step 'Temizlik 3/6: APT paket onbellegi'
+    note 'Indirilmis .deb paketleri temizleniyor (apt-get clean & autoclean)...'
+    apt-get clean 2>/dev/null || true
+    apt-get autoclean 2>/dev/null || true
+
+    if [[ "$CLEAN_DEEP" == true ]]; then
+      note 'Derin mod: Kullanilmayan paketler ve eski cekirdekler kaldiriliyor (apt-get autoremove --purge)...'
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get -y --purge autoremove 2>/dev/null || true
+    fi
+    note 'APT temizligi tamamlandi.'
+  fi
+
+  # 4. Systemd Journal Loglari
+  if command -v journalctl >/dev/null 2>&1; then
+    step 'Temizlik 4/6: Systemd Journal gunlukleri'
+    if [[ "$CLEAN_DEEP" == true ]]; then
+      note 'Journal gunlukleri vakumlaniyor (son 3 gun / maks 50M)...'
+      journalctl --vacuum-time=3d 2>/dev/null || true
+      journalctl --vacuum-size=50M 2>/dev/null || true
+    else
+      note 'Journal gunlukleri vakumlaniyor (son 7 gun / maks 100M)...'
+      journalctl --vacuum-time=7d 2>/dev/null || true
+      journalctl --vacuum-size=100M 2>/dev/null || true
+    fi
+    note 'Journal log temizligi tamamlandi.'
+  fi
+
+  # 5. Guncelleme Loglari ve Dondurulmus Betikler
+  step 'Temizlik 5/6: Eski guncelleme kayitlari ve gecici betikler'
+  if [[ -d "$LOG_ROOT" ]]; then
+    local log_days=14
+    if [[ "$CLEAN_DEEP" == true ]]; then log_days=7; fi
+    note "$LOG_ROOT altinda $log_days gunden eski loglar temizleniyor..."
+    find "$LOG_ROOT" -type f \( -name 'update-*.log' -o -name 'clean-*.log' \) -mtime "+$log_days" -delete 2>/dev/null || true
+  fi
+  if [[ -d "$STATE_ROOT" ]]; then
+    local script_days=7
+    if [[ "$CLEAN_DEEP" == true ]]; then script_days=3; fi
+    note "$STATE_ROOT altinda $script_days gunden eski dondurulmus betikler temizleniyor..."
+    find "$STATE_ROOT" -type f -name 'source-*.sh' -mtime "+$script_days" -delete 2>/dev/null || true
+  fi
+
+  # 6. /tmp ve /var/tmp Temizligi
+  step 'Temizlik 6/6: Eski gecici dosyalar (/tmp, /var/tmp)'
+  find /tmp -mindepth 1 -maxdepth 2 -type f -mtime +7 -delete 2>/dev/null || true
+  find /var/tmp -mindepth 1 -maxdepth 2 -type f -mtime +7 -delete 2>/dev/null || true
+
+  # Raporlama
+  step 'Disk Temizligi Basariyla Tamamlandi'
+  after_kib=$(free_kib)
+  diff_kib=$(( after_kib - before_kib ))
+  note "Temizlik oncesi bos alan : $(format_kib "$before_kib")"
+  note "Temizlik sonrasi bos alan: $(format_kib "$after_kib")"
+  if (( diff_kib > 0 )); then
+    note "KAZANILAN BOS ALAN        : +$(format_kib "$diff_kib")"
+  else
+    note "Kazanilan bos alan        : Onemli bir degisiklik olmadi (disk zaten temizdi)."
+  fi
+  note "Guncel Disk Durumu        : $(df -h "$REPO" 2>/dev/null | awk 'NR==2 {printf "Toplam: %s | Kullanilan: %s | Bos: %s (%s)", $2, $3, $4, $5}')"
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker system df 2>/dev/null || true
+  fi
+  note 'TEMIZLIK ISLEMI BASARIYLA BITTI.'
+}
+
 prepare_disk() {
   step 'Disk on kosulu'
   if require_disk; then return 0; fi
-  note 'Yetersiz disk alani. Yalnizca kullanilmayan Docker build cache temizligi oneriliyor.'
-  docker system df
-  confirm 'docker builder prune -af calissin mi (volume, image ve yedekleri SILMEZ)?' || \
+  note "Yetersiz disk alani (en az ${MIN_FREE_GIB} GiB gerekli)."
+  note 'Guvenli disk temizligi yapilmasi oneriliyor.'
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker system df 2>/dev/null || true
+  fi
+  confirm "Disk alani ${MIN_FREE_GIB} GiB altinda. Guvenli disk temizligi calistirilsin mi (volume, image ve yedekleri SILMEZ)?" || \
     fail 'Alan yetersiz; temizlik onaylanmadi.'
-  docker builder prune -af || fail 'Build cache temizligi basarisiz'
-  require_disk || fail 'Temizlikten sonra da disk alani yetersiz'
+  CLEAN_YES=true
+  clean_disk
+  require_disk || fail "Temizlikten sonra da disk alani yetersiz (en az ${MIN_FREE_GIB} GiB gerekli)"
 }
 
 check_private_path() {
@@ -474,6 +801,11 @@ final_checks() {
   fi
   note 'GUNCELLEME BASARILI.'
 }
+
+if [[ "$MODE" =~ ^(--clean|--cleanup)$ ]]; then
+  clean_disk
+  exit 0
+fi
 
 check_git
 check_services

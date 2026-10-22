@@ -3,6 +3,39 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.11] - 2026-10-22
+
+### 🧹 VPS Güvenli Disk Temizliği ve Gelişmiş Komut Kılavuzu (`vps-update.sh`, `VPS-UPDATE-KULLANIM.md`)
+- **Kapsamlı Güvenli Disk Temizleme Fonksiyonu (`--clean` / `--cleanup`)**:
+  - VPS sunucularında disk dolmaya başladığında veya derleme öncesinde tek komutla gereksiz tüm artık ve önbellek dosyalarını temizleme özelliği eklendi.
+  - **Docker Temizliği**:
+    - BuildKit derleme katman önbelleği temizliği (`docker builder prune -af`).
+    - Sahipsiz / etiketsiz `<none>` ara imaj temizliği (`docker image prune -f`).
+    - Durdurulmuş / çıkış yapmış geçici konteynerler (`docker container prune -f`) ve kullanılmayan ağlar (`docker network prune -f`).
+    - Geçici aday derleme imajları (`iot-dashboard-app:candidate-*`) ve eski rollback imajları temizliği (en son rollback imajı acil kurtarma için saklanır, eskileri temizlenir).
+  - **Host Proje & Derleme Kalıntıları**:
+    - Host seviyesinde kalmış `dist/`, `build/`, `server.js` derleme çıktıları, `node_modules/.cache`, `.eslintcache`, `.tsbuildinfo`, test ve coverage raporları, npm/yarn debug günlükleri ve core dump dosyaları temizliği.
+  - **Debian / Linux İşletim Sistemi & Paket Temizliği**:
+    - `/var/cache/apt/archives` altındaki indirilmiş paket arşivleri temizliği (`apt-get clean & autoclean`).
+    - Derin modda (`--deep` / `--all`) kullanılmayan eski çekirdek (kernel) ve bağımlılık paketlerinin kaldırılması (`apt-get autoremove -y --purge`).
+  - **Systemd Journal & Sistem Günlükleri**:
+    - `journalctl --vacuum-time=7d --vacuum-size=100M` ile şişen journal günlüklerinin güvenle vakumlanması (derin modda 3 gün / 50M).
+    - `/var/log/nexusnode-update/` altındaki 14 günden eski güncelleme loglarının ve `/var/lib/nexusnode-update/` altındaki 7 günden eski dondurulmuş betiklerin temizlenmesi.
+    - `/tmp` ve `/var/tmp` altındaki 7 günden eski geçici dosyaların silinmesi.
+  - **Kazanılan Disk Alanı Raporlaması**:
+    - Temizlik öncesi ve sonrası boş alan kıyaslanarak kazanılan toplam alan insan okunabilir formatta (`+X.XX GiB` / `MiB`) terminalde ve log dosyasında raporlanır.
+  - **Kesin Veri ve Servis Güvenlik Koruması**:
+    - Docker volume'ları (`timescaledb_data`, `app_data`), PostgreSQL veri tabanı tabloları, yedek arşivleri (`/var/backups/nexusnode/`), gizli anahtarlar (`secrets/`, `.env`) ve canlı üretim konteynerleri ASLA silinmez.
+- **Alt Seçenekler ve Parametre Desteği**:
+  - `--dry-run`: Hiçbir dosya veya imaj silinmeden potansiyel temizlik alanlarını tarayan simülasyon modu.
+  - `--deep` / `--all`: Eski çekirdekleri kaldıran ve logları daha agresif vakumlayan derin temizlik modu.
+  - `--yes` / `-y`: Cron veya otomatik görevler için onay sormadan temizlik başlatma.
+- **Detaylı `--help` / `-h` Komut Kılavuzu**:
+  - `--check`, `--run`, `--clean` modları, alt parametreler, çevre değişkenleri, koruma ilkeleri ve pratik örnekler içeren zengin terminal kılavuzu eklendi.
+- **Dokümantasyon Güncellemesi (`VPS-UPDATE-KULLANIM.md`)**:
+  - Yeni disk temizliği komutları, parametreleri ve güvenlik garantileri Türkçe kullanım kılavuzuna işlendi.
+
+---
 ## 🚀 [v1.49.10] - 2026-10-22
 
 ### 💾 Canlı Dağıtım / Güncelleme Veri Kalıcılığı ve Sistem Günlükleri İzolasyonu
