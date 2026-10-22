@@ -27,7 +27,12 @@ import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
-import { readBackupDestinationStatus, selectBackupDestination } from '../services/backupDestination.service.js';
+import {
+  readBackupDestinationStatus,
+  selectBackupDestination,
+  enableBackupDestination,
+  disableBackupDestination,
+} from '../services/backupDestination.service.js';
 import {
   APP_NAME,
   APP_VERSION,
@@ -727,6 +732,26 @@ databaseRouter.put('/dr/destination', authenticateUser, requireAdmin, (req, res)
       return res.status(400).json({ error: e.message });
     }
     return res.status(503).json({ error: 'Hedef seçimi saklanamadı; mevcut seçim değişmedi.' });
+  }
+});
+
+databaseRouter.post('/dr/destination/enable', authenticateUser, requireAdmin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { destination } = req.body || {};
+    return res.json(enableBackupDestination(destination));
+  } catch (e: any) {
+    return res.status(400).json({ error: e?.message || 'Hedef etkinleştirilemedi.' });
+  }
+});
+
+databaseRouter.post('/dr/destination/disable', authenticateUser, requireAdmin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { destination } = req.body || {};
+    return res.json(disableBackupDestination(destination));
+  } catch (e: any) {
+    return res.status(400).json({ error: e?.message || 'Hedef devre dışı bırakılamadı.' });
   }
 });
 

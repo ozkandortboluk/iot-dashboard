@@ -6,6 +6,8 @@ import {
   getBackupDestination,
   readBackupDestinationStatus,
   selectBackupDestination,
+  enableBackupDestination,
+  disableBackupDestination,
 } from '../../server/services/backupDestination.service.js';
 
 let dir: string;
@@ -58,5 +60,17 @@ describe('full backup target selection', () => {
     }));
     const status = readBackupDestinationStatus();
     expect(JSON.stringify(status)).not.toContain('untrusted-secret');
+  });
+  it('enables and disables non-local providers dynamically', () => {
+    expect(readBackupDestinationStatus().destinations.find(x => x.id === 'sftp')?.configured).toBe(false);
+    const enabled = enableBackupDestination('sftp');
+    expect(enabled.destinations.find(x => x.id === 'sftp')?.configured).toBe(true);
+
+    const saved = selectBackupDestination('sftp');
+    expect(saved.requestedDestination).toBe('sftp');
+
+    const disabled = disableBackupDestination('sftp');
+    expect(disabled.destinations.find(x => x.id === 'sftp')?.configured).toBe(false);
+    expect(disabled.requestedDestination).toBe('local');
   });
 });

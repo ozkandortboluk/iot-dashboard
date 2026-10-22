@@ -103,3 +103,42 @@ export function selectBackupDestination(destination: unknown): ReturnType<typeof
   }
   return readBackupDestinationStatus();
 }
+
+export function enableBackupDestination(destination: unknown): ReturnType<typeof readBackupDestinationStatus> {
+  if (!validDestination(destination)) throw new Error('Geçersiz yedekleme hedefi.');
+  const dir = stateDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = capabilityPath();
+  const currentReady = capabilities();
+  const newReady = [...new Set<BackupDestination>([...currentReady, destination])];
+  const tmp = path.join(dir, '.dr_capabilities-' + process.pid + '-' + Math.random().toString(16).slice(2) + '.tmp');
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, ready: newReady }) + '\n', { flag: 'wx', mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+  return readBackupDestinationStatus();
+}
+
+export function disableBackupDestination(destination: unknown): ReturnType<typeof readBackupDestinationStatus> {
+  if (!validDestination(destination)) throw new Error('Geçersiz yedekleme hedefi.');
+  if (destination === 'local') throw new Error('Yerel disk yedekleme hedefi devre dışı bırakılamaz.');
+  const dir = stateDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = capabilityPath();
+  const currentReady = capabilities();
+  const newReady = currentReady.filter((d) => d !== destination);
+  const tmp = path.join(dir, '.dr_capabilities-' + process.pid + '-' + Math.random().toString(16).slice(2) + '.tmp');
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, ready: newReady }) + '\n', { flag: 'wx', mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+  if (getBackupDestination() === destination) {
+    selectBackupDestination('local');
+  }
+  return readBackupDestinationStatus();
+}
+

@@ -3,6 +3,26 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.14] - 2026-10-22
+
+### 🌐 Afet Kurtarma Hedefleri Kurulum Sihirbazı & Canlı Etkinleştirme Sistemi (`ScheduledBackupsPanel.tsx`, `backupDestination.service.ts`, `system.ts`)
+- **Tüm Harici Hedefler Kullanılabilir & Yapılandırılabilir Hale Getirildi**:
+  - `DisasterRecoveryDestinationPanel` içindeki devre dışı buton kısıtlaması kaldırıldı; her hedef için dinamik durum gösterimi ve kurulum/yapılandırma akışı entegre edildi.
+  - Kartlar üzerinden hem hazır durumdaki hedefler seçilebilir hem de henüz kurulmamış hedeflere tıklandığında doğrudan kurulum sihirbazı açılabilir hale getirildi.
+- **Her Hedefe Özel İnteraktif Kurulum & Yapılandırma Rehberi Modalı (`DestinationSetupModal`)**:
+  - **Yerel Disk (NVMe/SSD)**: Dizin hazırlığı, yetkilendirme (0700) ve disk alanı doğrulama adımları.
+  - **İkincil VPS Montajlı Disk / SAN**: Blok aygıtı tespiti (`lsblk`), `mkfs.ext4`, `/etc/fstab` kalıcı montaj kaydı, UUID bağlama ve sembolik bağlayıcı (`symlink`) komutları.
+  - **Google Drive Cloud Storage**: `rclone` ve `age` paket kurulumu, asimetrik anahtar üretimi (`age-keygen`), Google Cloud Console OAuth Client ID entegrasyonu ve uzak klasör test komutları.
+  - **Dropbox Enterprise**: App Console Scoped Access Token üretimi, rclone remote tanımlama ve doğrulama komutları.
+  - **Harici SFTP / SSH Uzak Sunucusu**: Ed25519 SSH anahtar çifti üretimi (`ssh-keygen`), `ssh-copy-id` açık anahtar aktarımı, parolasız SSH ve SFTP test komutları.
+  - Tüm komut blokları için tek tıkla panoya kopyalama desteği sağlandı.
+- **Dinamik Hedef Etkinleştirme ve Devre Dışı Bırakma API'si**:
+  - `enableBackupDestination()` ve `disableBackupDestination()` servis fonksiyonları geliştirildi.
+  - `POST /api/database/dr/destination/enable`: Kurulumu tamamlanan hedefi güvenli `.dr_capabilities.json` kayıtlarına ekler ve UI'da `Hazır & Aktif` durumuna getirir.
+  - `POST /api/database/dr/destination/disable`: İstenmeyen harici hedefleri güvenli şekilde listeden çıkarır.
+  - Kapsamlı birim testleri `src/tests/system_ops/backupDestination.test.ts` içine eklendi ve başarıyla doğrulandı.
+
+---
 ## 🚀 [v1.49.13] - 2026-10-22
 
 ### 💾 Zamanlanmış Snapshot Yedeği & Afet Kurtarma Modülü Kapsamlı Geliştirmesi (`ScheduledBackupsPanel.tsx`, `db.ts`, `system.ts`)

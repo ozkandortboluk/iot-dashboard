@@ -24,8 +24,10 @@ import {
   Cloud,
   Search,
   Terminal,
-  Info,
   FileCode,
+  BookOpen,
+  Wrench,
+  ExternalLink,
 } from 'lucide-react';
 import { apiFetch as fetch } from '../../lib/apiFetch';
 import type { ScheduledBackupConfig, BackupSnapshotItem } from '../../types';
@@ -44,6 +46,241 @@ type DestinationStatus = {
   note: string;
 };
 
+interface DestinationSetupInfo {
+  id: DestinationId;
+  title: string;
+  badge: string;
+  shortDesc: string;
+  architecture: string;
+  requirements: string[];
+  steps: Array<{
+    stepNumber: number;
+    title: string;
+    description: string;
+    command?: string;
+  }>;
+  verificationCmd?: string;
+  securityNote: string;
+}
+
+const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
+  local: {
+    id: 'local',
+    title: 'Yerel Sunucu Diski (NVMe/SSD)',
+    badge: 'Varsayılan & Aktif',
+    shortDesc: 'VPS ana depolama biriminde root korumalı yerel yedek dizini.',
+    architecture:
+      'Yedek dosyaları sunucunun ana dosya sisteminde (/var/backups/nexusnode/ veya data/backups/) izole şekilde saklanır. Ekstra bir dış ağ bağımlılığı olmadan en hızlı anlık snapshot ve kurtarma sağlar.',
+    requirements: [
+      'En az 5-10 GB boş yerel NVMe/SSD disk alanı',
+      'Root veya node process yazma izni (0700 güvenli klasör modu)',
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Yedek Dizinini Hazırlama',
+        description: 'VPS üzerinde kök korumalı yedek dizininin varlığını ve yetkilerini doğrulayın.',
+        command: 'sudo mkdir -p /var/backups/nexusnode/gunluk && sudo chmod 700 /var/backups/nexusnode/gunluk',
+      },
+      {
+        stepNumber: 2,
+        title: 'Kullanıcı İzinlerini Ayarlama',
+        description: 'Node.js servis kullanıcısının bu dizine yazabilmesi için sahipliği tanımlayın.',
+        command: 'sudo chown -R 1000:1000 /var/backups/nexusnode',
+      },
+      {
+        stepNumber: 3,
+        title: 'Disk Doluluk Oranını Kontrol Etme',
+        description: 'Ana diskte yeterli depolama alanı olduğunu teyit edin.',
+        command: 'df -h /var/backups/nexusnode/',
+      },
+    ],
+    verificationCmd: 'ls -ld /var/backups/nexusnode/gunluk',
+    securityNote:
+      'Yerel disk yedekleme daima etkindir ve devre dışı bırakılamaz. Fiziksel donanım veya ana VPS arızalarına karşı diğer hedeflerden (SAN, GDrive, Dropbox veya SFTP) en az birinin yapılandırılması önerilir.',
+  },
+  disk: {
+    id: 'disk',
+    title: 'İkincil VPS Montajlı Disk / SAN / Harici Blok Depolama',
+    badge: 'İzole Blok Hacmi',
+    shortDesc: 'VPS ana kök diskinden bağımsız, ayrı bir SCSI/NVMe blok depolama hacmi veya SAN montaj noktası.',
+    architecture:
+      'Sunucunuza bağlı ikincil bir sanal disk (/dev/sdb vb.) /mnt/nexus-backups konumuna kalıcı olarak bağlanır. Ana işletim sistemi çökse bile veriler harici blok depolama hacminde güvende kalır.',
+    requirements: [
+      'Bulut sağlayıcınızdan (Hetzner, DigitalOcean, AWS, OVH vb.) ek blok depolama hacmi (Volume)',
+      'ext4 veya xfs dosya sistemi ile biçimlendirilmiş aygıt',
+      '/etc/fstab üzerinde kalıcı montaj kaydı',
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'İkincil Diski Tespit Etme & Biçimlendirme',
+        description: 'VPS terminalinde bağlı blok aygıtlarını listeleyin ve ikincil diski ext4 ile biçimlendirin.',
+        command: 'sudo lsblk\nsudo mkfs.ext4 -F /dev/sdb',
+      },
+      {
+        stepNumber: 2,
+        title: 'Montaj Dizinini Oluşturma',
+        description: 'Diskin bağlanacağı sistem dizinini hazırlayın.',
+        command: 'sudo mkdir -p /mnt/nexus-backups',
+      },
+      {
+        stepNumber: 3,
+        title: 'Kalıcı Montaj Kaydı (/etc/fstab)',
+        description: 'Sunucu yeniden başladığında diskin otomatik bağlanması için UUID değerini fstab dosyasına ekleyin.',
+        command:
+          'UUID=$(sudo blkid -s UUID -o value /dev/sdb)\necho "UUID=$UUID /mnt/nexus-backups ext4 defaults,noatime,nofail 0 2" | sudo tee -a /etc/fstab\nsudo mount -a',
+      },
+      {
+        stepNumber: 4,
+        title: 'Dizin Güvenlik İzinleri',
+        description: 'Klasör sahipliğini ve okuma/yazma izinlerini kısıtlayın.',
+        command: 'sudo chown -R 1000:1000 /mnt/nexus-backups\nsudo chmod 700 /mnt/nexus-backups',
+      },
+      {
+        stepNumber: 5,
+        title: 'Sistem Bağlantısı (Symlink)',
+        description: 'Yedekleme servisinin bu diski görmesi için sistem bağıntısını oluşturun.',
+        command: 'sudo mkdir -p /var/backups/nexusnode\nsudo ln -sfn /mnt/nexus-backups /var/backups/nexusnode/mounted-disk',
+      },
+    ],
+    verificationCmd: 'df -h /mnt/nexus-backups',
+    securityNote:
+      'Blok depolama birimi VPS ana diskinden bağımsız bir donanım katmanında çalışır. Bu sayede işletim sistemi güncellemelerinde veya çöküşlerde sıfır veri kaybı riski sunar.',
+  },
+  gdrive: {
+    id: 'gdrive',
+    title: 'Google Drive Cloud Storage',
+    badge: 'Offsite Bulut Arşivleme',
+    shortDesc: 'Google Drive API ve rclone üzerinden client-side age şifrelemeli bulut yedekleme.',
+    architecture:
+      'Yedek arşivleri sunucudan çıkmadan önce modern "age" 256-bit asimetrik anahtarı ile şifrelenir. Google Drive üzerinde açılan klasöre yalnızca şifreli ikili dosyalar aktarılır; Google dahil kimse içeriği okuyamaz.',
+    requirements: [
+      'Google Cloud Console üzerinde ücretsiz bir proje',
+      'Google Drive API etkinleştirilmiş ve Desktop App OAuth Client ID alınmış olmalı',
+      'VPS sunucusunda rclone ve age paketleri kurulu olmalı',
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Gerekli Araçların (rclone & age) Kurulumu',
+        description: 'VPS terminalinde rclone ve age şifreleme paketlerini yükleyin.',
+        command: 'sudo apt-get update && sudo apt-get install -y rclone age',
+      },
+      {
+        stepNumber: 2,
+        title: 'Kriptografik Asimetrik Anahtar Üretme',
+        description: 'Yedeklerin buluta yüklenmeden önce şifrelenmesi için güvenli bir age anahtar çifti oluşturun.',
+        command:
+          'sudo mkdir -p /root/.nexusnode-keys\nsudo age-keygen -o /root/.nexusnode-keys/backup_age.key\nsudo chmod 600 /root/.nexusnode-keys/backup_age.key',
+      },
+      {
+        stepNumber: 3,
+        title: 'Google Drive rclone Yapılandırması',
+        description: 'Google Cloud Console OAuth bilgileriyle rclone remote tanımını yapın.',
+        command:
+          'rclone config\n# 1. "n" (New remote) seçin\n# 2. İsim: gdrive-backup\n# 3. Storage türü: drive\n# 4. client_id ve client_secret bilgilerinizi girin\n# 5. Scope: 1 (Full access to all files)',
+      },
+      {
+        stepNumber: 4,
+        title: 'Yedek Klasörü Oluşturma & Yetki Doğrulama',
+        description: 'Google Drive üzerinde NexusNode yedek klasörünü açın ve bağlantıyı test edin.',
+        command: 'rclone mkdir gdrive-backup:NexusNode-Backups\nrclone lsd gdrive-backup:',
+      },
+    ],
+    verificationCmd: 'rclone about gdrive-backup:',
+    securityNote:
+      'Oluşturulan age anahtar çiftinin açık anahtarı (public key) şifrelemede kullanılırken, gizli anahtar (private key) yalnızca felaket kurtarmada gereklidir. Gizli anahtarınızı harici bir kasada saklayınız.',
+  },
+  dropbox: {
+    id: 'dropbox',
+    title: 'Dropbox Enterprise / Cloud Storage',
+    badge: 'Offsite Bulut Depolama',
+    shortDesc: 'Dropbox App API ve rclone üzerinden client-side şifrelenmiş otomatik senkronizasyon.',
+    architecture:
+      'Yedekler yerel sunucuda sıkıştırılıp şifrelendikten sonra Dropbox API üzerinden ayrılmış uygulama klasörüne (/Apps/NexusNode-Backups/) yüklenir.',
+    requirements: [
+      'Dropbox hesabı',
+      'Dropbox Developers Console (developers.dropbox.com) üzerinde App Access Token',
+      'VPS sunucusunda rclone ve age paketleri',
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'rclone ve age Paketlerini Kurma',
+        description: 'Aktarım ve şifreleme kütüphanelerini VPS üzerine kurun.',
+        command: 'sudo apt-get update && sudo apt-get install -y rclone age',
+      },
+      {
+        stepNumber: 2,
+        title: 'Dropbox Geliştirici Portalında Uygulama Açma',
+        description:
+          'developers.dropbox.com adresine gidin. "Scoped Access" ve "App folder" izinlerine sahip yeni uygulama oluşturun. Permissions sekmesinde "files.content.write" ve "files.content.read" yetkilerini onaylayın.',
+      },
+      {
+        stepNumber: 3,
+        title: 'Erişim Tokenı ile rclone Remote Tanımlama',
+        description: 'Dropbox App Console üzerinden ürettiğiniz Generated Access Token ile remote ekleyin.',
+        command:
+          'rclone config\n# 1. "n" (New remote) seçin\n# 2. İsim: dropbox-backup\n# 3. Storage türü: dropbox\n# 4. token alanına aldığınız Token\'ı yapıştırın',
+      },
+      {
+        stepNumber: 4,
+        title: 'Dropbox Yedek Klasörünü Test Etme',
+        description: 'Uzak sunucuda klasörü oluşturup bağlantıyı test edin.',
+        command: 'rclone mkdir dropbox-backup:NexusNode-Backups\nrclone ls dropbox-backup:',
+      },
+    ],
+    verificationCmd: 'rclone about dropbox-backup:',
+    securityNote:
+      'Dropbox token bilgisi sunucunun şifreli root konfigürasyonunda saklanır. Dosyalar aktarılmadan önce yerel olarak şifrelendiğinden üçüncü taraf depolama sağlayıcısı verilerin içeriğini göremez.',
+  },
+  sftp: {
+    id: 'sftp',
+    title: 'Harici Güvenli SFTP / SSH Uzak Sunucusu',
+    badge: 'Sunucudan Sunucuya Replikasyon',
+    shortDesc: 'Ed25519 SSH anahtarıyla ikinci bir Linux sunucusuna izole ve şifrelenmiş otomatik veri aktarımı.',
+    architecture:
+      'Farklı bir veri merkezindeki (datacenter) veya ofisinizdeki bir yedekleme sunucusuna SFTP protokolüyle parola girmeden, yüksek güvenlikli açık/kapalı anahtar şifrelemesiyle transfer yapılır.',
+    requirements: [
+      'SSH/SFTP servisi çalışan ikincil bir Linux sunucusu veya NAS cihazı',
+      'Yedek sunucusunda ayrılmış bir kullanıcı hesabı (ör. backupuser)',
+      '22 numaralı SSH portu (veya özel SFTP portu) erişimi',
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        title: 'Özel Ed25519 SSH Anahtar Çifti Üretme',
+        description: 'Ana VPS üzerinde yedeklemeye özel şifresiz Ed25519 SSH anahtarı oluşturun.',
+        command:
+          'sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/nexus_backup_ed25519 -C "nexusnode-backup-agent"\nsudo chmod 600 /root/.ssh/nexus_backup_ed25519',
+      },
+      {
+        stepNumber: 2,
+        title: 'Açık Anahtarı Hedef Sunucuya Kopyalama',
+        description: 'Oluşturulan açık anahtarı hedef yedekleme sunucusuna aktarın.',
+        command: 'ssh-copy-id -i /root/.ssh/nexus_backup_ed25519.pub backupuser@HEDEF_SUNUCU_IP',
+      },
+      {
+        stepNumber: 3,
+        title: 'Parolasız SSH ve Dizin Oluşturma Testi',
+        description: 'Hedef sunucuya parolasız bağlanabildiğinizi test edin ve yedek dizinini açın.',
+        command:
+          'ssh -i /root/.ssh/nexus_backup_ed25519 backupuser@HEDEF_SUNUCU_IP "mkdir -p ~/nexusnode-backups && ls -ld ~/nexusnode-backups"',
+      },
+      {
+        stepNumber: 4,
+        title: 'SFTP Oturum Testi',
+        description: 'SFTP üzerinden veri aktarım oturumunu doğrulayın.',
+        command: 'echo "ls" | sftp -i /root/.ssh/nexus_backup_ed25519 backupuser@HEDEF_SUNUCU_IP',
+      },
+    ],
+    verificationCmd: 'ssh -i /root/.ssh/nexus_backup_ed25519 backupuser@HEDEF_SUNUCU_IP "df -h ~/nexusnode-backups"',
+    securityNote:
+      'Hedef sunucuda SSH güvenliğini artırmak için ForceCommand internal-sftp ve ChrootDirectory kullanarak yedek kullanıcısını yalnızca kendi klasörüne hapsedebilirsiniz.',
+  },
+};
+
 const DESTINATION_ICONS: Record<DestinationId, React.ElementType> = {
   local: HardDrive,
   disk: Server,
@@ -52,12 +289,230 @@ const DESTINATION_ICONS: Record<DestinationId, React.ElementType> = {
   sftp: Terminal,
 };
 
+interface DestinationSetupModalProps {
+  info: DestinationSetupInfo;
+  isConfigured: boolean;
+  onClose: () => void;
+  onToggleEnable: (id: DestinationId, enable: boolean) => Promise<void>;
+  activating: boolean;
+}
+
+const DestinationSetupModal: React.FC<DestinationSetupModalProps> = ({
+  info,
+  isConfigured,
+  onClose,
+  onToggleEnable,
+  activating,
+}) => {
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedVerify, setCopiedVerify] = useState(false);
+  const Icon = DESTINATION_ICONS[info.id] || HardDrive;
+
+  const copyText = (text: string, index?: number) => {
+    navigator.clipboard.writeText(text);
+    if (index !== undefined) {
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2500);
+    } else {
+      setCopiedVerify(true);
+      setTimeout(() => setCopiedVerify(false), 2500);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+              <Icon className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">{info.title}</h3>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
+                    isConfigured
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                  }`}
+                >
+                  {isConfigured ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                  {isConfigured ? 'Yapılandırıldı & Hazır' : 'Kurulum & Yapılandırma Gerekli'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{info.shortDesc}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-5 space-y-5 overflow-y-auto text-xs">
+          {/* Architecture Overview */}
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-1.5">
+            <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
+              <BookOpen className="w-4 h-4 text-indigo-500" />
+              Çalışma Mimarisi & Güvenlik Prensibi
+            </span>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">{info.architecture}</p>
+          </div>
+
+          {/* Requirements Checklist */}
+          <div className="space-y-1.5">
+            <span className="font-bold text-slate-800 dark:text-slate-200 block text-xs">Ön Koşullar & Gereksinimler:</span>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {info.requirements.map((req, idx) => (
+                <li
+                  key={idx}
+                  className="p-2 rounded-lg bg-slate-100/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 flex items-start gap-2 text-[11px] text-slate-700 dark:text-slate-300"
+                >
+                  <Check className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                  <span>{req}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Step-by-Step Instructions */}
+          <div className="space-y-3">
+            <span className="font-bold text-slate-900 dark:text-white block text-xs">
+              Adım Adım VPS Kurulum ve Yapılandırma Talimatları:
+            </span>
+
+            <div className="space-y-3">
+              {info.steps.map((step, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                      {step.stepNumber}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-bold text-slate-900 dark:text-white text-xs block">{step.title}</span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{step.description}</p>
+                    </div>
+                  </div>
+
+                  {step.command && (
+                    <div className="flex items-start gap-2 bg-slate-950 text-slate-100 p-2.5 rounded-lg font-mono text-[11px]">
+                      <pre className="overflow-x-auto select-all flex-1 text-emerald-400 font-mono whitespace-pre-wrap">
+                        {step.command}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => copyText(step.command!, idx)}
+                        className="p-1 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0"
+                        title="Komutu Kopyala"
+                      >
+                        {copiedIndex === idx ? (
+                          <CheckCheck className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Verification Command */}
+          {info.verificationCmd && (
+            <div className="p-3.5 rounded-xl border border-indigo-100 dark:border-indigo-950/80 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2">
+              <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                <Terminal className="w-4 h-4 text-indigo-500" />
+                Kurulum Doğrulama & Bağlantı Test Komutu
+              </span>
+              <div className="flex items-center gap-2 bg-slate-950 text-slate-100 p-2.5 rounded-lg font-mono text-[11px]">
+                <code className="break-all select-all flex-1 text-indigo-300">{info.verificationCmd}</code>
+                <button
+                  type="button"
+                  onClick={() => copyText(info.verificationCmd!)}
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0"
+                  title="Komutu Kopyala"
+                >
+                  {copiedVerify ? <CheckCheck className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Security Note */}
+          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+            <Lock className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <span>{info.securityNote}</span>
+          </div>
+        </div>
+
+        {/* Modal Footer & Actions */}
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[11px] text-slate-500">
+            {isConfigured
+              ? 'Bu hedef sistemde hazır durumdadır. İsterseniz devre dışı bırakabilirsiniz.'
+              : 'Kurulum adımlarını tamamladıktan sonra butona tıklayarak hedefi kullanıma açın.'}
+          </span>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3.5 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition"
+            >
+              Kapat
+            </button>
+
+            {info.id !== 'local' && (
+              <button
+                type="button"
+                onClick={() => onToggleEnable(info.id, !isConfigured)}
+                disabled={activating}
+                className={`px-4 py-2 rounded-lg font-semibold text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50 cursor-pointer ${
+                  isConfigured
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                }`}
+              >
+                {activating ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : isConfigured ? (
+                  <Trash2 className="w-3.5 h-3.5" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {activating
+                    ? 'İşleniyor...'
+                    : isConfigured
+                    ? 'Hedefi Devre Dışı Bırak'
+                    : '✓ Kurulumu Tamamla & Hedefi Etkinleştir'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DisasterRecoveryDestinationPanel: React.FC = () => {
   const [status, setStatus] = useState<DestinationStatus | null>(null);
   const [choice, setChoice] = useState<DestinationId>('local');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [setupModalTarget, setSetupModalTarget] = useState<DestinationSetupInfo | null>(null);
+  const [activating, setActivating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,8 +557,49 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
     }
   };
 
+  const handleToggleEnable = async (id: DestinationId, enable: boolean) => {
+    setActivating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const endpoint = enable ? '/api/database/dr/destination/enable' : '/api/database/dr/destination/disable';
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination: id }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'İşlem başarısız');
+      setStatus(data);
+      if (enable) {
+        setChoice(id);
+        setNotice(`${DESTINATION_SETUP_GUIDES[id]?.title || id} hedefi başarıyla etkinleştirildi ve kullanıma açıldı.`);
+      } else {
+        setChoice(data.requestedDestination);
+        setNotice(`${DESTINATION_SETUP_GUIDES[id]?.title || id} hedefi devre dışı bırakıldı.`);
+      }
+      setSetupModalTarget(null);
+      setTimeout(() => setNotice(null), 5000);
+    } catch (e: any) {
+      setError(e.message || 'Hedef durumu güncellenemedi.');
+    } finally {
+      setActivating(false);
+    }
+  };
+
   return (
     <section className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
+      {/* Setup Guide Modal */}
+      {setupModalTarget && (
+        <DestinationSetupModal
+          info={setupModalTarget}
+          isConfigured={status?.destinations.find((x) => x.id === setupModalTarget.id)?.configured ?? false}
+          onClose={() => setSetupModalTarget(null)}
+          onToggleEnable={handleToggleEnable}
+          activating={activating}
+        />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800/80 pb-3">
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -112,6 +608,7 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             PostgreSQL veritabanı, konfigürasyonlar, Vault anahtarları ve telemetri verilerinin saklanacağı hedef depolama birimini belirleyin.
+            Kurulum adımlarını inceleyebilir ve istediğiniz hedefi doğrudan aktifleştirebilirsiniz.
           </p>
         </div>
         {status && (
@@ -126,78 +623,119 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
 
       {status ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {status.destinations.map((item) => {
               const Icon = DESTINATION_ICONS[item.id] || HardDrive;
               const isSelected = choice === item.id;
-              const isDisabled = !item.configured;
+              const isConfigured = item.configured;
+              const setupInfo = DESTINATION_SETUP_GUIDES[item.id];
 
               return (
-                <label
+                <div
                   key={item.id}
-                  className={`relative rounded-xl border p-3.5 flex flex-col justify-between transition cursor-pointer select-none ${
+                  className={`relative rounded-xl border p-4 flex flex-col justify-between transition select-none ${
                     isSelected
                       ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-950/20 ring-1 ring-indigo-500'
                       : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
-                  } ${isDisabled ? 'opacity-55 cursor-not-allowed' : ''}`}
+                  }`}
                 >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`p-2 rounded-lg shrink-0 ${
-                        isSelected
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`p-2.5 rounded-xl shrink-0 ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          <Icon className="w-5 h-5" />
+                        </div>
+
+                        <div>
+                          <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                            {item.label}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold mt-0.5 px-2 py-0.5 rounded-full ${
+                              isConfigured
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                            }`}
+                          >
+                            {isConfigured ? (
+                              <>
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                Hazır & Aktif
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                Kurulum Gerekli
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Selection Radio */}
+                      <input
+                        type="radio"
+                        name="dr-destination"
+                        value={item.id}
+                        checked={isSelected}
+                        onChange={() => {
+                          if (isConfigured) {
+                            setChoice(item.id);
+                          } else if (setupInfo) {
+                            setSetupModalTarget(setupInfo);
+                          }
+                        }}
+                        className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 rounded-full cursor-pointer mt-1"
+                        title={isConfigured ? 'Bu hedefi seç' : 'Bu hedefi yapılandır'}
+                      />
                     </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          {item.label}
-                        </span>
-                        <input
-                          type="radio"
-                          name="dr-destination"
-                          value={item.id}
-                          checked={isSelected}
-                          disabled={isDisabled}
-                          onChange={() => setChoice(item.id)}
-                          className="h-3.5 w-3.5 text-indigo-600 focus:ring-indigo-500 rounded-full cursor-pointer"
-                        />
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                        {item.description}
-                      </p>
-                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2.5 leading-relaxed">
+                      {item.description}
+                    </p>
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[10px]">
-                    <span
-                      className={`font-semibold flex items-center gap-1 ${
-                        item.configured
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-amber-600 dark:text-amber-400'
-                      }`}
+                  {/* Actions & Setup Button */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setupInfo && setSetupModalTarget(setupInfo)}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-indigo-200/80 dark:border-indigo-800"
                     >
-                      {item.configured ? (
-                        <>
-                          <CheckCircle2 className="w-3 h-3" />
-                          {item.id === 'local' ? 'Hazır & Aktif' : 'VPS Hedefi Tanımlı'}
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="w-3 h-3" />
-                          VPS Bağlantısı Kurulmadı
-                        </>
-                      )}
-                    </span>
-                    {item.requiresHostSetup && (
-                      <span className="text-slate-400 dark:text-slate-500">Host Kurulumu</span>
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>{isConfigured ? 'Kurulum & Detay' : '📖 Kurulum Adımları'}</span>
+                    </button>
+
+                    {isConfigured ? (
+                      <button
+                        type="button"
+                        onClick={() => setChoice(item.id)}
+                        className={`text-[11px] font-semibold px-2.5 py-1 rounded-md transition cursor-pointer ${
+                          isSelected
+                            ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                        }`}
+                      >
+                        {isSelected ? '✓ Seçili Hedef' : 'Hedef Seç'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setupInfo && setSetupModalTarget(setupInfo)}
+                        className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Wrench className="w-3 h-3" />
+                        <span>Yapılandır</span>
+                      </button>
                     )}
                   </div>
-                </label>
+                </div>
               );
             })}
           </div>
@@ -215,7 +753,7 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
                   {status.lastDelivery.result === 'success' ? 'Başarılı' : 'Başarısız'})
                 </span>
               ) : (
-                <span>Harici yedekleme için VPS ortamında hedef bağlantı parametreleri tanımlanmalıdır.</span>
+                <span>Tüm hedeflerin kurulum adımlarını inceleyebilir ve VPS ortamında anında devreye alabilirsiniz.</span>
               )}
             </div>
 
@@ -223,7 +761,7 @@ const DisasterRecoveryDestinationPanel: React.FC = () => {
               type="button"
               onClick={save}
               disabled={busy || choice === status.requestedDestination}
-              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50 transition shadow-sm cursor-pointer self-start sm:self-auto flex items-center gap-1.5"
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50 transition shadow-sm cursor-pointer self-start sm:self-auto flex items-center gap-1.5 active:scale-95"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{busy ? 'Kaydediliyor...' : 'Hedefi Kaydet'}</span>
@@ -389,7 +927,7 @@ const SnapshotDetailModal: React.FC<SnapshotDetailModalProps> = ({ snapshot, onC
               <button
                 type="button"
                 onClick={() => copyToClipboard(activeChecksum, 'checksum')}
-                className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-indigo-600 transition shrink-0"
+                className="p-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-indigo-600 transition shrink-0 cursor-pointer"
                 title="Panoya Kopyala"
               >
                 {copiedChecksum ? (
@@ -417,7 +955,7 @@ const SnapshotDetailModal: React.FC<SnapshotDetailModalProps> = ({ snapshot, onC
               <button
                 type="button"
                 onClick={() => copyToClipboard(restoreCommand, 'cmd')}
-                className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0"
+                className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0 cursor-pointer"
                 title="Komutu Kopyala"
               >
                 {copiedCmd ? <CheckCheck className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -432,7 +970,7 @@ const SnapshotDetailModal: React.FC<SnapshotDetailModalProps> = ({ snapshot, onC
             type="button"
             onClick={handleLiveReverify}
             disabled={reverifying}
-            className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+            className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${reverifying ? 'animate-spin' : ''}`} />
             <span>{reverifying ? 'Doğrulanıyor...' : 'Bütünlüğü Yeniden Kontrol Et'}</span>
@@ -442,7 +980,7 @@ const SnapshotDetailModal: React.FC<SnapshotDetailModalProps> = ({ snapshot, onC
             <button
               type="button"
               onClick={() => onDownload(snapshot.filename)}
-              className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition shadow-sm"
+              className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Yedeği İndir</span>
@@ -450,7 +988,7 @@ const SnapshotDetailModal: React.FC<SnapshotDetailModalProps> = ({ snapshot, onC
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition"
+              className="px-3.5 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
             >
               Kapat
             </button>
@@ -554,7 +1092,7 @@ const SafeRestoreModal: React.FC<SafeRestoreModalProps> = ({
                   <button
                     type="button"
                     onClick={copyCmd}
-                    className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0"
+                    className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white transition shrink-0 cursor-pointer"
                     title="Komutu Kopyala"
                   >
                     {copiedCmd ? <CheckCheck className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -592,7 +1130,7 @@ const SafeRestoreModal: React.FC<SafeRestoreModalProps> = ({
           <button
             type="button"
             onClick={() => onDownload(filename)}
-            className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition"
+            className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Yedeği İndir</span>
@@ -603,7 +1141,7 @@ const SafeRestoreModal: React.FC<SafeRestoreModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={restoring}
-              className="px-3.5 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition"
+              className="px-3.5 py-2 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
             >
               Vazgeç
             </button>
@@ -613,7 +1151,7 @@ const SafeRestoreModal: React.FC<SafeRestoreModalProps> = ({
                 type="button"
                 onClick={() => onConfirmRestore(filename)}
                 disabled={restoring}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 <RotateCcw className={`w-3.5 h-3.5 ${restoring ? 'animate-spin' : ''}`} />
                 <span>{restoring ? 'Geri Yükleniyor...' : 'Onaylıyorum, Geri Yükle'}</span>
