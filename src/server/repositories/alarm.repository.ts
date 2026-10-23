@@ -685,9 +685,7 @@ export class AlarmRepository {
         this.db.data.notifications = this.db.data.notifications.filter(
           (n: NotificationItem) =>
             n.tenantId !== requestingUserId &&
-            (n as any).userId !== requestingUserId &&
-            n.tenantId !== 'all' &&
-            Boolean(n.tenantId)
+            (n as any).userId !== requestingUserId
         );
         memDeletedCount = beforeLen - this.db.data.notifications.length;
       }
