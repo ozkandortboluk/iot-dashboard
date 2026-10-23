@@ -115,8 +115,8 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
       {
         stepNumber: 1,
         title: 'İkincil Diski Tespit Etme & Biçimlendirme',
-        description: 'VPS terminalinde bağlı blok aygıtlarını listeleyin ve ikincil diski ext4 ile biçimlendirin.',
-        command: 'sudo lsblk\nsudo mkfs.ext4 -F /dev/sdb',
+        description: 'Önce bağlı aygıtları ve mevcut dosya sistemlerini salt okunur biçimde inceleyin. Doğru aygıt, mevcut veri ve yedek durumu doğrulanmadan biçimlendirme yapmayın.',
+        command: 'sudo lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL\n# Biçimlendirmeden önce aygıt kimliğini ve içindeki verileri ayrıca doğrulayın; bu örnekte otomatik mkfs komutu özellikle verilmemiştir.',
       },
       {
         stepNumber: 2,
@@ -146,7 +146,7 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
     ],
     verificationCmd: 'df -h /mnt/nexus-backups',
     securityNote:
-      'Blok depolama birimi VPS ana diskinden bağımsız bir donanım katmanında çalışır. Bu sayede işletim sistemi güncellemelerinde veya çöküşlerde sıfır veri kaybı riski sunar.',
+      'Blok depolama birimi VPS ana diskinden bağımsız bir donanım katmanında çalışır. Bu, yedekleri ana kök dosya sisteminden ayırmaya yardımcı olabilir; ancak disk, montaj veya yapılandırma hatalarına karşı sıfır veri kaybı garantisi vermez.',
   },
   gdrive: {
     id: 'gdrive',
