@@ -220,6 +220,20 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
       expect(db.data.notifications.find((n: any) => n.id === shared.id)?.read).toBe(false);
     });
 
+    it('should preserve shared notifications when a customer clears all notifications', async () => {
+      const sharedId = `security_shared_delete_all_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const shared = await db.addNotification({
+        id: sharedId,
+        title: 'Genel sistem bildirimi',
+        message: 'Müşteri genel bildirimi topluca silememeli.',
+        severity: 'info',
+        tenantId: 'all',
+      });
+
+      await db.alarmRepository.deleteAllNotifications(customerUser.id, customerUser);
+      expect(db.data.notifications.some((n: any) => n.id === shared.id)).toBe(true);
+    });
+
     it('should be idempotent when deleting an already deleted notification', async () => {
       const result = await db.alarmRepository.deleteNotification('non_existent_id_99999', customerUser);
       expect(result).toBe(true);
