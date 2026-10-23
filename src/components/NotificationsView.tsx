@@ -94,7 +94,7 @@ export const NotificationsView: React.FC = () => {
   const ensureSuccess = async (res: Response) => {
     if (res.ok) return;
     const data = await safeJson<{ error?: string }>(res, {});
-    throw new Error(data.error || `İşlem başarısız (${res.status})`);
+    throw new Error(data.error || `İşlem gerçekleştirilemedi (${res.status}). Lütfen tekrar deneyin.`);
   };
 
   // 1. Initial REST Fetch for Primary Data (Alarms, Rules, Profile)

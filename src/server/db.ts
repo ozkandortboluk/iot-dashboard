@@ -1252,7 +1252,7 @@ class LocalDatabase {
             const serialized = JSON.stringify(this.data, null, 2);
             await fs.promises.writeFile(jsonBackupPath, serialized, 'utf-8');
             const v = this.verifyBackupFile(jsonFilename);
-            if (!v.isHealthy) throw new Error('JSON backup verification failed: ' + (v.error || 'Geçersiz JSON'));
+            if (!v.isHealthy) throw new Error('JSON backup verification failed: ' + (v.error || 'Geçersiz JSON'), { cause: missingErr });
             this.pruneBackups();
             return { success: true, filename: jsonFilename, size: Buffer.byteLength(serialized, 'utf-8') };
           }
@@ -2967,8 +2967,9 @@ class LocalDatabase {
   public clearQueue(requestingUserId?: string) {
     if (!requestingUserId) return;
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
-    const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+    const reqUser = (this.data.users || []).find((u) => u.id === requestingUserId);
+    const role = String(reqUser?.role || '').toLowerCase();
+    const isAdmin = Boolean(reqUser && (role === 'admin' || role === 'operator' || role === 'superadmin' || reqUser.id === 'usr_admin') && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.tenantId !== requestingUserId);
@@ -2976,8 +2977,12 @@ class LocalDatabase {
       this.data.notificationQueue = [];
     }
 
-    this.saveData(this.data);
-    this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
+    try {
+      this.saveData(this.data);
+    } catch {}
+    try {
+      this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
+    } catch {}
   }
 
   public async getDispatchLogs(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): Promise<any> {
@@ -4477,14 +4482,27 @@ SELECT add_compression_policy('telemetry_readings', INTERVAL '7 days', if_not_ex
       optionsForPg.deviceCommandsDays = days;
     }
 
-    if (this.postgresRepo.isReady()) {
-      const pgCleaned = await this.postgresRepo.deleteOldRecords(optionsForPg);
-      cleaned.telemetry = Math.max(cleaned.telemetry, pgCleaned.telemetry);
-      cleaned.alarms = Math.max(cleaned.alarms, pgCleaned.alarms);
-      cleaned.notifications = Math.max(cleaned.notifications, pgCleaned.notifications);
-      cleaned.auditLogs = Math.max(cleaned.auditLogs, pgCleaned.auditLogs);
-      cleaned.dispatchLogs = Math.max(cleaned.dispatchLogs, pgCleaned.dispatchLogs);
-      cleaned.deviceCommands = Math.max(cleaned.deviceCommands, pgCleaned.deviceCommands);
+    if (this.postgresRepo?.isReady()) {
+      try {
+        const pgCleaned = await this.postgresRepo.deleteOldRecords(optionsForPg);
+        cleaned.telemetry = Math.max(cleaned.telemetry, pgCleaned?.telemetry || 0);
+        cleaned.alarms = Math.max(cleaned.alarms, pgCleaned?.alarms || 0);
+        cleaned.notifications = Math.max(cleaned.notifications, pgCleaned?.notifications || 0);
+        cleaned.auditLogs = Math.max(cleaned.auditLogs, pgCleaned?.auditLogs || 0);
+        cleaned.dispatchLogs = Math.max(cleaned.dispatchLogs, pgCleaned?.dispatchLogs || 0);
+        cleaned.deviceCommands = Math.max(cleaned.deviceCommands, pgCleaned?.deviceCommands || 0);
+      } catch (err: any) {
+        console.warn('[executeCategoryCleanup pg error]:', err?.message || err);
+      }
+    }
+
+    if (category === 'readNotifications' || category === 'notifications') {
+      try {
+        const remaining = await this.getNotifications('usr_admin');
+        if (typeof this.notifyNotificationListeners === 'function') {
+          this.notifyNotificationListeners('notifications:updated', remaining);
+        }
+      } catch {}
     }
 
     cleaned.total =

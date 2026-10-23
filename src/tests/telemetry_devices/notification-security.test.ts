@@ -148,4 +148,60 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
       expect(maskSecret(internal.whatsapp.apiToken)).toBe('••••••••7777');
     });
   });
+
+  describe('4. Notification Clear & Deletion Resiliency Test Suite', () => {
+    it('should allow admin to deleteAllNotifications without error', async () => {
+      await db.addNotification({
+        title: 'Kritik Basınç Uyarısı',
+        message: 'Kazan basıncı 8.5 bar seviyesine ulaştı.',
+        severity: 'critical',
+        tenantId: 'usr_test_admin',
+      });
+      await db.addNotification({
+        title: 'Sıcaklık Normalleşti',
+        message: 'Kazan sıcaklığı 45°C.',
+        severity: 'info',
+        tenantId: 'usr_test_admin',
+      });
+
+      const deletedCount = await db.alarmRepository.deleteAllNotifications(adminUser.id, adminUser);
+      expect(deletedCount).toBeGreaterThanOrEqual(0);
+
+      const remaining = await db.getNotifications(adminUser.id);
+      expect(remaining.length).toBe(0);
+    });
+
+    it('should allow customer to delete their notification without permission error', async () => {
+      const notif = await db.addNotification({
+        title: 'Müşteri Telemetri Uyarısı',
+        message: 'Debi sınırı aşıldı.',
+        severity: 'warning',
+        tenantId: customerUser.id,
+      });
+
+      const deleted = await db.alarmRepository.deleteNotification(notif.id, customerUser);
+      expect(deleted).toBe(true);
+
+      const customerNotifs = await db.getNotifications(customerUser.id);
+      expect(customerNotifs.some((n: any) => n.id === notif.id)).toBe(false);
+    });
+
+    it('should be idempotent when deleting an already deleted notification', async () => {
+      const result = await db.alarmRepository.deleteNotification('non_existent_id_99999', customerUser);
+      expect(result).toBe(true);
+    });
+
+    it('should mark all notifications as read via markAllNotificationsRead', async () => {
+      await db.addNotification({
+        title: 'Yeni Olay 1',
+        message: 'Sistem başlatıldı.',
+        severity: 'info',
+        tenantId: adminUser.id,
+      });
+
+      await db.markAllNotificationsRead(adminUser.id);
+      const afterList = await db.getNotifications(adminUser.id);
+      expect(afterList.every((n: any) => n.read)).toBe(true);
+    });
+  });
 });

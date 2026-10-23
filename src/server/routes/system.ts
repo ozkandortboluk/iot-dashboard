@@ -1144,10 +1144,15 @@ databaseRouter.post('/retention/cleanup-simulated', authenticateUser, requireAdm
 });
 
 databaseRouter.post('/retention/cleanup-category', authenticateUser, requireAdmin, async (req, res) => {
-  const { category, days } = req.body;
-  if (!category) return res.status(400).json({ error: 'Kategori belirtilmedi.' });
-  const result = await db.executeCategoryCleanup(category, days ? Number(days) : undefined);
-  res.json(result);
+  try {
+    const { category, days } = req.body || {};
+    if (!category) return res.status(400).json({ error: 'Kategori belirtilmedi.' });
+    const result = await db.executeCategoryCleanup(category, days ? Number(days) : undefined);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[retention/cleanup-category error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'Kategori temizliği sırasında hata oluştu.' });
+  }
 });
 
 databaseRouter.post('/factory-reset', authenticateUser, requireAdmin, handleFactoryReset);

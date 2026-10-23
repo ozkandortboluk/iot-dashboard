@@ -3,6 +3,24 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.15] - 2026-10-23
+
+### 🔔 Bildirim Temizleme & Silme İşlemleri Hata İyileştirmesi ve Dayanıklılık Güçlendirmesi (`alarms.ts`, `alarm.repository.ts`, `notification.repository.ts`, `NotificationHistoryList.tsx`, `DatabaseDataView.tsx`)
+- **Bildirim Temizleme Uç Noktaları Kapsamlı Try/Catch ve Hata İzolasyonuyla Güçlendirildi**:
+  - `POST /api/notifications/delete-all`, `POST /api/notifications/clear`, `POST /api/notifications/bulk-delete` ve `DELETE /api/notifications/:id` rotaları güvenli `try/catch` blokları içerisine alındı; sunucu tarafı beklenmeyen istisnaların 500 hatası döndürmesi ve arayüzde "İşlem başarısız" uyarısı üretmesi engellendi.
+  - PostgreSQL ve bellek içi (in-memory) veri silme adımları izole edildi; veritabanı geçiş veya kopma durumlarında operasyonel dayanıklılık (graceful error handling) sağlandı.
+- **Rol ve Yetkilendirme Kontrolleri İyileştirildi**:
+  - `deleteAllNotifications`, `bulkDeleteNotifications` ve `deleteNotification` metotlarında büyük/küçük harf duyarsız rol doğrulaması (`admin`, `operator`, `superadmin`, `usr_admin`) devreye alındı.
+  - Müşteri (`customer`) hesaplarının kendi bildirimlerini veya genel bildirimleri silmesi sırasında oluşan yetki hataları (`403 Forbidden`) giderildi; bildirim silme operasyonu idempotent hale getirildi.
+- **Arayüz Bildirim & Geri Bildirim Entegrasyonu**:
+  - `NotificationHistoryList.tsx` üzerindeki "Tümünü Okundu İşaretle" ve "Tümünü Temizle" aksiyonlarına net Türkçe toast bildirimleri bağlandı.
+  - `NotificationsView.tsx` içindeki `ensureSuccess` hata mesajları daha anlaşılır ve kullanıcı dostu hale getirildi.
+- **Veritabanı Saklama Politikaları Yetki Başlığı Düzeltildi**:
+  - `DatabaseDataView.tsx` içindeki `getAuthHeaders` metodu oturum jetonunu (`Authorization: Bearer <token>` ve `x-auth-token`) otomatik ekleyecek şekilde güncellendi; "Okunmuş Bildirimler" retention temizleme isteğinin 401 hatası vermesi önlendi.
+- **Sürüm ve Paket Kilidi Senkronizasyonu**:
+  - `package-lock.json`, `package.json`, `src/config/version.ts` ve `CHANGELOG.md` tam senkronize edilerek `v1.49.15` sürümüne yükseltildi.
+
+---
 ## 🚀 [v1.49.14] - 2026-10-22
 
 ### 🌐 Afet Kurtarma Hedefleri Kurulum Sihirbazı & Canlı Etkinleştirme Sistemi (`ScheduledBackupsPanel.tsx`, `backupDestination.service.ts`, `system.ts`)

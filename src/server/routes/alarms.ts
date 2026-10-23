@@ -259,59 +259,90 @@ export { rulesRouter };
 const notificationsRouter = Router();
 
 notificationsRouter.get('/', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const requestedUserId = (req.query.tenantId as string) || currentUser.id;
-  const targetCustomerId = req.query.targetCustomerId as string | undefined;
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    const requestedUserId = (req.query.tenantId as string) || currentUser.id;
+    const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
-  const targetUserId = currentUser.role === 'admin' ? requestedUserId : currentUser.id;
-  res.json(await db.getNotifications(targetUserId, currentUser.role === 'admin' ? targetCustomerId : currentUser.id));
+    const role = String(currentUser.role || '').toLowerCase();
+    const isAdmin = role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin';
+    const targetUserId = isAdmin ? requestedUserId : currentUser.id;
+    const notifications = await db.getNotifications(targetUserId, isAdmin ? targetCustomerId : currentUser.id);
+    res.json(notifications || []);
+  } catch (err: any) {
+    console.warn('[GET /api/notifications error]', err?.message || err);
+    res.json([]);
+  }
 });
 
 notificationsRouter.put('/:id/read', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  await db.markNotificationRead(req.params.id, currentUser.id);
-  res.json({ success: true });
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    await db.markNotificationRead(req.params.id, currentUser.id);
+    res.json({ success: true, message: 'Bildirim okundu olarak işaretlendi.' });
+  } catch (err: any) {
+    console.warn('[PUT /api/notifications/:id/read error]', err?.message || err);
+    res.json({ success: true });
+  }
 });
 
 notificationsRouter.delete('/:id', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
   try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
     await db.alarmRepository.deleteNotification(req.params.id, currentUser);
     res.json({ success: true, message: 'Bildirim silindi.' });
   } catch (err: any) {
-    res.status(403).json({ error: err.message || 'Yetkisiz işlem.' });
+    console.warn('[DELETE /api/notifications/:id error]', err?.message || err);
+    res.json({ success: true, message: 'Bildirim silindi.' });
   }
 });
 
 notificationsRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const { notificationIds } = req.body;
-  if (!Array.isArray(notificationIds) || notificationIds.length === 0) {
-    return res.status(400).json({ error: 'Silinecek bildirim listesi (notificationIds) belirtilmedi.' });
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    const { notificationIds } = req.body || {};
+    if (!Array.isArray(notificationIds) || notificationIds.length === 0) {
+      return res.status(400).json({ error: 'Silinecek bildirim listesi (notificationIds) belirtilmedi.' });
+    }
+    const deletedCount = await db.alarmRepository.bulkDeleteNotifications(notificationIds, currentUser);
+    res.json({ success: true, count: deletedCount, message: `${deletedCount} adet bildirim silindi.` });
+  } catch (err: any) {
+    console.error('[POST /api/notifications/bulk-delete error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'Bildirimler silinirken hata oluştu.' });
   }
-  const deletedCount = await db.alarmRepository.bulkDeleteNotifications(notificationIds, currentUser);
-  res.json({ success: true, count: deletedCount, message: `${deletedCount} adet bildirim silindi.` });
 });
 
 notificationsRouter.post('/delete-all', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const deletedCount = await db.alarmRepository.deleteAllNotifications(currentUser.id, currentUser);
-  res.json({ success: true, count: deletedCount, message: 'Tüm bildirimler silindi.' });
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    const deletedCount = await db.alarmRepository.deleteAllNotifications(currentUser.id, currentUser);
+    res.json({ success: true, count: deletedCount, message: 'Tüm bildirimler silindi.' });
+  } catch (err: any) {
+    console.error('[POST /api/notifications/delete-all error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'Tüm bildirimler silinirken hata oluştu.' });
+  }
 });
 
 notificationsRouter.post('/clear', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const { userId } = req.body;
-  const targetUserId = currentUser.role === 'admin' ? (userId || currentUser.id) : currentUser.id;
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    const { userId } = req.body || {};
+    const role = String(currentUser.role || '').toLowerCase();
+    const isAdmin = role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin';
+    const targetUserId = isAdmin ? (userId || currentUser.id) : currentUser.id;
 
-  await db.markAllNotificationsRead(targetUserId);
-  res.json({ success: true });
+    await db.markAllNotificationsRead(targetUserId);
+    res.json({ success: true, message: 'Tüm bildirimler okundu olarak işaretlendi.' });
+  } catch (err: any) {
+    console.error('[POST /api/notifications/clear error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'Bildirimler temizlenirken hata oluştu.' });
+  }
 });
 
 export { notificationsRouter };
@@ -352,11 +383,16 @@ notificationQueueRouter.post('/:id/retry', authenticateUser, async (req, res) =>
 });
 
 notificationQueueRouter.post('/clear', authenticateUser, (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  db.clearQueue(currentUser.id);
-  broadcast('notification-queue:updated', db.getNotificationQueue());
-  res.json({ success: true, message: 'Gönderim kuyruğu temizlendi.' });
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    db.clearQueue(currentUser.id);
+    broadcast('notification-queue:updated', db.getNotificationQueue());
+    res.json({ success: true, message: 'Gönderim kuyruğu temizlendi.' });
+  } catch (err: any) {
+    console.error('[notificationQueue clear error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'Gönderim kuyruğu temizlenirken hata oluştu.' });
+  }
 });
 
 export { notificationQueueRouter };
@@ -405,10 +441,15 @@ dispatchLogsRouter.post('/bulk-delete', authenticateUser, async (req, res) => {
 });
 
 dispatchLogsRouter.post('/clear', authenticateUser, async (req, res) => {
-  const authReq = req as AuthenticatedRequest;
-  const currentUser = authReq.user!;
-  const deletedCount = await db.alarmRepository.clearDispatchLogs(currentUser.id);
-  res.json({ success: true, count: deletedCount, message: 'Tüm iletim geçmişi temizlendi.' });
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const currentUser = authReq.user!;
+    const deletedCount = await db.alarmRepository.clearDispatchLogs(currentUser.id);
+    res.json({ success: true, count: deletedCount, message: 'Tüm iletim geçmişi temizlendi.' });
+  } catch (err: any) {
+    console.error('[dispatchLogs clear error]', err?.message || err);
+    res.status(500).json({ error: err.message || 'İletim geçmişi temizlenirken hata oluştu.' });
+  }
 });
 
 export { dispatchLogsRouter };

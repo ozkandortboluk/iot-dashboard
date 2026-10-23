@@ -164,6 +164,20 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     }
   };
 
+  const handleClearAll = async () => {
+    setIsProcessing(true);
+    try {
+      await clearAllNotifications();
+      setSelectedIds(new Set());
+      fetchNotifications();
+      onShowToast?.('Tüm okunmamış bildirimler okundu olarak işaretlendi.');
+    } catch (err: any) {
+      onShowToast?.(err.message || 'Bildirimler güncellenirken hata oluştu.', true);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleConfirmDeleteAll = async () => {
     setShowDeleteAllModal(false);
     setIsProcessing(true);
@@ -171,7 +185,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
       await deleteAllNotifications();
       setSelectedIds(new Set());
       fetchNotifications();
-      onShowToast?.('Tüm bildirim geçmişi silindi.');
+      onShowToast?.('Tüm bildirim geçmişi başarıyla temizlendi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler silinirken hata oluştu.', true);
     } finally {
@@ -244,7 +258,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
               <button
                 type="button"
                 disabled={isProcessing}
-                onClick={clearAllNotifications}
+                onClick={handleClearAll}
                 className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
                 title="Tüm okunmamış bildirimleri okundu olarak işaretler"
               >

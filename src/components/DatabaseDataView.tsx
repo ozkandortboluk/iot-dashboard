@@ -144,8 +144,12 @@ export const DatabaseDataView: React.FC = () => {
   const { isConnected, wsLatency } = useRealtime();
 
   const getAuthHeaders = (extra: Record<string, string> = {}) => {
+    const token = typeof window !== 'undefined'
+      ? (sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token'))
+      : null;
     return {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}`, 'x-auth-token': token } : {}),
       ...extra,
     };
   };
