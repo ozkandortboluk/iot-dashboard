@@ -73,7 +73,7 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
       'Yedek dosyaları sunucunun ana dosya sisteminde (/var/backups/nexusnode/ veya data/backups/) izole şekilde saklanır. Ekstra bir dış ağ bağımlılığı olmadan en hızlı anlık snapshot ve kurtarma sağlar.',
     requirements: [
       'En az 5-10 GB boş yerel NVMe/SSD disk alanı',
-      'Root veya node process yazma izni (0700 güvenli klasör modu)',
+      'Yedekleme servisi root olarak çalışır; yedek kökü root:root sahipliğinde ve 0700 izinli olmalıdır.',
     ],
     steps: [
       {
@@ -85,8 +85,8 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
       {
         stepNumber: 2,
         title: 'Kullanıcı İzinlerini Ayarlama',
-        description: 'Node.js servis kullanıcısının bu dizine yazabilmesi için sahipliği tanımlayın.',
-        command: 'sudo chown -R 1000:1000 /var/backups/nexusnode',
+        description: 'Yedekleme betiği root-owned dizin gerektirir; dizini node kullanıcısına devretmeyin.',
+        command: 'sudo chown root:root /var/backups/nexusnode /var/backups/nexusnode/gunluk && sudo chmod 700 /var/backups/nexusnode /var/backups/nexusnode/gunluk',
       },
       {
         stepNumber: 3,
@@ -105,7 +105,7 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
     badge: 'İzole Blok Hacmi',
     shortDesc: 'VPS ana kök diskinden bağımsız, ayrı bir SCSI/NVMe blok depolama hacmi veya SAN montaj noktası.',
     architecture:
-      'Sunucunuza bağlı ikincil bir sanal disk (/dev/sdb vb.) /mnt/nexus-backups konumuna kalıcı olarak bağlanır. Ana işletim sistemi çökse bile veriler harici blok depolama hacminde güvende kalır.',
+      'Sunucuya bağlı ikincil disk, teslim betiğinin beklediği /mnt/nexusnode-backup konumuna ayrı bir dosya sistemi olarak kalıcı bağlanır. Bu, kök diskin dolması riskini azaltır ancak disk veya montaj hatalarına karşı tek başına yedek garantisi değildir.',
     requirements: [
       'Bulut sağlayıcınızdan (Hetzner, DigitalOcean, AWS, OVH vb.) ek blok depolama hacmi (Volume)',
       'ext4 veya xfs dosya sistemi ile biçimlendirilmiş aygıt',
@@ -122,29 +122,28 @@ const DESTINATION_SETUP_GUIDES: Record<DestinationId, DestinationSetupInfo> = {
         stepNumber: 2,
         title: 'Montaj Dizinini Oluşturma',
         description: 'Diskin bağlanacağı sistem dizinini hazırlayın.',
-        command: 'sudo mkdir -p /mnt/nexus-backups',
+        command: 'sudo mkdir -p /mnt/nexusnode-backup',
       },
       {
         stepNumber: 3,
         title: 'Kalıcı Montaj Kaydı (/etc/fstab)',
-        description: 'Sunucu yeniden başladığında diskin otomatik bağlanması için UUID değerini fstab dosyasına ekleyin.',
-        command:
-          'UUID=$(sudo blkid -s UUID -o value /dev/sdb)\necho "UUID=$UUID /mnt/nexus-backups ext4 defaults,noatime,nofail 0 2" | sudo tee -a /etc/fstab\nsudo mount -a',
+        description: 'Doğru aygıtın UUID değerini salt okunur olarak alın; mevcut fstab kayıtlarını kontrol edin ve yalnızca doğrulanmış UUID için tek bir kalıcı kayıt ekleyin. Ardından yapılandırmayı doğrulayın.',
+        command: 'sudo lsblk -f\nsudo blkid\nsudo findmnt --verify --verbose',
       },
       {
         stepNumber: 4,
         title: 'Dizin Güvenlik İzinleri',
-        description: 'Klasör sahipliğini ve okuma/yazma izinlerini kısıtlayın.',
-        command: 'sudo chown -R 1000:1000 /mnt/nexus-backups\nsudo chmod 700 /mnt/nexus-backups',
+        description: 'Teslim betiği bağlama noktasının root-owned olmasını ve ayrı dosya sistemi olarak bağlanmasını şart koşar.',
+        command: 'sudo chown root:root /mnt/nexusnode-backup\nsudo chmod 700 /mnt/nexusnode-backup\nsudo findmnt /mnt/nexusnode-backup',
       },
       {
         stepNumber: 5,
         title: 'Sistem Bağlantısı (Symlink)',
-        description: 'Yedekleme servisinin bu diski görmesi için sistem bağıntısını oluşturun.',
-        command: 'sudo mkdir -p /var/backups/nexusnode\nsudo ln -sfn /mnt/nexus-backups /var/backups/nexusnode/mounted-disk',
+        description: 'Teslim betiği harici diski doğrudan /mnt/nexusnode-backup yolundan denetler; sembolik bağlantı oluşturmayın.',
+        command: 'sudo findmnt /mnt/nexusnode-backup\ndf -h /mnt/nexusnode-backup\nsudo stat -c "%U:%G %a %n" /mnt/nexusnode-backup',
       },
     ],
-    verificationCmd: 'df -h /mnt/nexus-backups',
+    verificationCmd: 'findmnt /mnt/nexusnode-backup && df -h /mnt/nexusnode-backup',
     securityNote:
       'Blok depolama birimi VPS ana diskinden bağımsız bir donanım katmanında çalışır. Bu, yedekleri ana kök dosya sisteminden ayırmaya yardımcı olabilir; ancak disk, montaj veya yapılandırma hatalarına karşı sıfır veri kaybı garantisi vermez.',
   },
