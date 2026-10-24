@@ -134,6 +134,7 @@ export const AccountSettingsView: React.FC = () => {
 
   const [savingNotif, setSavingNotif] = useState(false);
   const [notifSuccessMsg, setNotifSuccessMsg] = useState<string | null>(null);
+  const [notifErrorMsg, setNotifErrorMsg] = useState<string | null>(null);
 
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsSuccessMsg, setPrefsSuccessMsg] = useState<string | null>(null);
@@ -292,6 +293,7 @@ export const AccountSettingsView: React.FC = () => {
   const handleSaveNotifications = async () => {
     setSavingNotif(true);
     setNotifSuccessMsg(null);
+    setNotifErrorMsg(null);
 
     try {
       const payload: Partial<User> = {
@@ -325,14 +327,15 @@ export const AccountSettingsView: React.FC = () => {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (res.ok && data.user) {
-        updateUser(data.user);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.user) {
+        throw new Error(data.error || `Bildirim tercihleri kaydedilemedi (HTTP ${res.status}).`);
       }
+      updateUser(data.user);
       setNotifSuccessMsg('Bildirim kanal ve eşik tercihleriniz başarıyla kaydedildi.');
       setTimeout(() => setNotifSuccessMsg(null), 5000);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setNotifErrorMsg(err?.message || 'Bildirim tercihleri kaydedilemedi.');
     } finally {
       setSavingNotif(false);
     }
@@ -476,18 +479,20 @@ export const AccountSettingsView: React.FC = () => {
         }),
       });
 
-      const data = await res.json();
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const dispatch = data?.result;
+      const succeeded = Boolean(res.ok && (dispatch ? dispatch.success === true && !dispatch.simulated : data.success === true));
+      if (succeeded) {
         setTestResult({
           channel,
           success: true,
-          message: data.message || `Test iletisi ${recipient} adresine başarıyla kuyruğa alındı ve gönderildi.`,
+          message: data.message || dispatch?.providerResponse || `Test iletisi ${recipient} adresine sağlayıcı tarafından kabul edildi.`,
         });
       } else {
         setTestResult({
           channel,
           success: false,
-          message: data.error || 'Test gönderimi gerçekleştirilemedi.',
+          message: data.error || dispatch?.errorDetails || dispatch?.providerResponse || 'Test gönderimi başarısız oldu veya gerçek sağlayıcı teslimatı doğrulamadı.',
         });
       }
     } catch (err: any) {
@@ -1455,6 +1460,13 @@ export const AccountSettingsView: React.FC = () => {
               <div className="mb-5 p-3.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl text-xs text-emerald-800 dark:text-emerald-200 flex items-center gap-2 animate-fadeIn">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                 <span>{notifSuccessMsg}</span>
+              </div>
+            )}
+
+            {notifErrorMsg && (
+              <div className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 rounded-xl text-xs text-rose-800 dark:text-rose-200 flex items-center gap-2 animate-fadeIn">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>{notifErrorMsg}</span>
               </div>
             )}
 
