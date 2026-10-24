@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.23] - 2026-10-24
+
+### 🔔 Telegram Delivery Status & Privacy
+- Report Telegram Bot API acceptance without claiming recipient delivery.
+- Omit recipient Chat IDs from provider response text and verify missing-token failures do not make network requests.
+- Add regression coverage for provider acceptance, delivery wording, recipient privacy, and missing credentials.
+
+---
 ## 🚀 [v1.49.22] - 2026-10-24
 
 ### 🧾 System Log Persistence
