@@ -766,18 +766,16 @@ export class AlarmRepository {
     const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
     const remainingLogs = await this.db.getDispatchLogs(currentUser.id);
     this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
-    return totalDeleted > 0 ? totalDeleted : logIds.length;
+    return totalDeleted;
   }
 
   public async clearDispatchLogs(requestingUserId: string): Promise<number> {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
-    const pgDeletedCount = 0;
+    let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo
-        .clearDispatchLogs(isAdmin ? undefined : requestingUserId)
-        .catch((e: any) => console.warn('[PG Error clearDispatchLogs]', e.message));
+      pgDeletedCount = await this.db.postgresRepo.clearDispatchLogs(isAdmin ? undefined : requestingUserId);
     }
 
     let memDeletedCount = 0;
