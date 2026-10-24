@@ -59,7 +59,13 @@ export class NotificationRepository {
     // PostgreSQL is authoritative in production: persist first and propagate failures
     // so the API cannot report a notification as created when storage failed.
     if ((!isSimulated || saveSimulatedDataToDb) && this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.saveNotification(fullNotif);
+      const persisted = await this.db.postgresRepo.saveNotification(fullNotif);
+      if (!persisted && fullNotif.eventKey) {
+        const existing = await this.db.postgresRepo.getNotifications(fullNotif.tenantId);
+        const canonical = existing.find((item: any) => item.eventKey === fullNotif.eventKey);
+        if (canonical) return canonical;
+        throw new Error('Bildirim olay anahtarı zaten kayıtlı ancak kanonik kayıt okunamadı.');
+      }
     }
 
     this.db.data.notifications.unshift(fullNotif);
