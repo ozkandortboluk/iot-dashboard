@@ -437,7 +437,8 @@ app.use((req, res, next) => {
 
     const logDetails = {
       method: req.method,
-      url: req.originalUrl,
+      // Query strings may contain credentials or tokens; path is sufficient for request logs.
+      url: req.path,
       statusCode: res.statusCode,
       ip: clientIp,
       durationMs: duration,
@@ -449,14 +450,14 @@ app.use((req, res, next) => {
     if (res.statusCode >= 500) {
       systemLogger.error(
         'http',
-        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+        `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
         logDetails,
         'express_http_observer'
       );
     } else if (res.statusCode >= 400) {
       systemLogger.warn(
         'http',
-        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+        `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
         logDetails,
         'express_http_observer'
       );
@@ -472,7 +473,7 @@ app.use((req, res, next) => {
       if (shouldLogSuccessfulRequest) {
         systemLogger.info(
           'http',
-          `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+          `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
           logDetails,
           'express_http_observer'
         );
