@@ -179,7 +179,7 @@ class SystemLoggerService {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
         const parsed: unknown = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          for (const candidate of parsed) {
+          for (const candidate of parsed.slice(0, this.maxInMemoryEvents)) {
             if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
               eventsById.set(candidate.id, candidate);
             }
@@ -217,16 +217,20 @@ class SystemLoggerService {
     }
 
     for (const filePath of logFiles) {
-      if (eventsById.size >= this.maxInMemoryEvents) break;
+      // Keep up to max entries from each source, then sort globally. Counting
+      // snapshot entries against this cap would let a stale snapshot crowd out
+      // newer records that are still present in the append-only files.
+      let recoveredFromFile = 0;
       try {
         const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
         for (let i = lines.length - 1; i >= 0; i--) {
-          if (eventsById.size >= this.maxInMemoryEvents) break;
+          if (recoveredFromFile >= this.maxInMemoryEvents) break;
           if (!lines[i].trim()) continue;
           try {
             const candidate: unknown = JSON.parse(lines[i]);
             if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
               eventsById.set(candidate.id, candidate);
+              recoveredFromFile++;
             }
           } catch {
             // A partial/corrupt line must not discard otherwise valid history.
