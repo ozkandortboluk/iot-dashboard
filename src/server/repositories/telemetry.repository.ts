@@ -34,7 +34,7 @@ function getQuietHoursResumeAt(user: any, now = new Date()): string | undefined 
   if (!quietHours?.enabled) return undefined;
 
   const parseTime = (value: unknown): number | null => {
-    if (typeof value !== 'string' || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+    if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
     const [hour, minute] = value.split(':').map(Number);
     return hour * 60 + minute;
   };
@@ -1834,7 +1834,9 @@ export class TelemetryRepository {
 
     const notifEventKey = `alarm:${alarm.id}:${eventType}:${eventType === 'REPEAT' ? alarm.repeatCount : (alarm.incidentId || alarm.triggeredAt || 'latest')}`;
 
-    this.db.addNotification({
+    const tenantUser = (this.db.data.users || []).find((u: any) => u.id === alarm.tenantId);
+    if (tenantUser?.notificationPreferences?.app !== false) {
+      this.db.addNotification({
       tenantId: alarm.tenantId,
       title: formattedTitle,
       message: msg,
@@ -1855,7 +1857,8 @@ export class TelemetryRepository {
       source: alarm.source || (isSimulated ? 'simulator' : 'physical'),
       isSimulation: isSimulated,
       environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
-    });
+      });
+    }
 
     if (alarm.tenantId !== 'usr_admin') {
       this.db.addNotification({
