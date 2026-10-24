@@ -583,14 +583,20 @@ export class AlarmRepository {
     const idx = this.db.data.notifications.findIndex((n: NotificationItem) => n.id === notificationId);
     if (idx >= 0) {
       const notif = this.db.data.notifications[idx];
-      if (isPrivileged || notif.tenantId === currentUser.id || (notif as any).userId === currentUser.id) {
-        this.db.data.notifications.splice(idx, 1);
-        try {
-          this.db.saveData(this.db.data);
-        } catch {}
-        memDeleted = true;
+      if (!isPrivileged && notif.tenantId !== currentUser.id && (notif as any).userId !== currentUser.id) {
+        return false;
       }
+      this.db.data.notifications.splice(idx, 1);
+      try {
+        this.db.saveData(this.db.data);
+      } catch {}
+      memDeleted = true;
     }
+
+    // DELETE is idempotent: a notification that is already absent from the
+    // caller's visible data has reached the requested state. Existing records
+    // outside the caller's scope still return false above.
+    if (!pgDeleted && !memDeleted && idx < 0) return true;
 
     try {
       const remaining = await this.db.getNotifications(currentUser.id);

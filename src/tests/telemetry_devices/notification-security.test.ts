@@ -197,7 +197,8 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
       await db.markNotificationRead(shared.id, customerUser.id);
       expect(db.data.notifications.find((n: any) => n.id === shared.id)?.read).toBe(false);
 
-      await db.alarmRepository.deleteNotification(shared.id, customerUser);
+      const deleted = await db.alarmRepository.deleteNotification(shared.id, customerUser);
+      expect(deleted).toBe(false);
       expect(db.data.notifications.some((n: any) => n.id === shared.id)).toBe(true);
 
       await db.alarmRepository.bulkDeleteNotifications([shared.id], customerUser);
@@ -229,8 +230,17 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
     });
 
     it('should be idempotent when deleting an already deleted notification', async () => {
-      const result = await db.alarmRepository.deleteNotification('non_existent_id_99999', customerUser);
+      const notification = await db.addNotification({
+        title: 'Tekrarlı silme testi',
+        message: 'İlk silme sonrası tekrar silme çağrısı güvenli biçimde tamamlanmalı.',
+        severity: 'info',
+        tenantId: customerUser.id,
+      });
+
+      expect(await db.alarmRepository.deleteNotification(notification.id, customerUser)).toBe(true);
+      const result = await db.alarmRepository.deleteNotification(notification.id, customerUser);
       expect(result).toBe(true);
+      expect(db.data.notifications.some((item: any) => item.id === notification.id)).toBe(false);
     });
 
     it('should mark all notifications as read via markAllNotificationsRead', async () => {
