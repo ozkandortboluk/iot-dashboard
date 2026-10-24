@@ -241,8 +241,9 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
         tenantId: adminUser.id,
       });
 
-      await db.markAllNotificationsRead(adminUser.id);
-      const afterList = await db.getNotifications(adminUser.id);
+      // Use the canonical admin identity recognized by markAllNotificationsRead.
+      await db.markAllNotificationsRead('usr_admin');
+      const afterList = await db.getNotifications('usr_admin');
       expect(afterList.every((n: any) => n.read)).toBe(true);
     });
   });
