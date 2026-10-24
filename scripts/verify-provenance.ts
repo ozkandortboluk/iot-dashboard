@@ -4,6 +4,9 @@ import child_process from 'node:child_process';
 import crypto from 'node:crypto';
 import esbuild from 'esbuild';
 import os from 'node:os';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 import {
   ALL_MIGRATIONS,
   CANONICAL_MIGRATION_MANIFEST,
@@ -68,8 +71,9 @@ async function verifyProvenance() {
             // Verify if commit SHA or tag exists in local repository history
             child_process.execSync(`git rev-parse --verify ${h.verifiedGitCommitOrTag}`, { stdio: 'ignore' });
 
-            // Extract the migration file contents exactly at that Git commit
-            const gitShowCmd = `git show ${h.verifiedGitCommitOrTag}:${filePath}`;
+            // Git revision paths must use forward slashes on Windows as well as POSIX.
+            const gitFilePath = filePath.replace(/\\/g, '/');
+            const gitShowCmd = `git show ${h.verifiedGitCommitOrTag}:${gitFilePath}`;
             const fileContentAtRevision = child_process.execSync(gitShowCmd, { stdio: ['pipe', 'pipe', 'ignore'] }).toString();
 
             if (!fileContentAtRevision || !fileContentAtRevision.trim()) {
