@@ -2145,7 +2145,7 @@ export class PostgresRepository {
     }
   }
 
-  public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<void> {
+  public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
@@ -2155,7 +2155,8 @@ export class PostgresRepository {
       sql += ` AND (tenant_id = $2 OR user_id = $2)`;
       params.push(userId);
     }
-    await this.query(sql, params);
+    const result = await this.query(sql, params);
+    return (result?.rowCount || 0) > 0;
   }
 
   public async markAllNotificationsRead(userId?: string): Promise<void> {
