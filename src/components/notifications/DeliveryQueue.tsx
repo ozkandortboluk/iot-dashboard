@@ -249,9 +249,9 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center mb-3">
             <SendHorizontal className="w-6 h-6" />
           </div>
-          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Kuyrukta Bekleyen İleti Yok</h4>
+          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Gösterilecek kuyruk kaydı yok</h4>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-            Sistemdeki tüm alarmlar ilgili alıcılara iletildi veya gönderim kuyruğu temizlendi.
+            Seçili filtrelerle eşleşen kayıt bulunamadı. Bekleyen, yeniden denenen, başarısız ve gönderilmiş kayıtları görmek için filtreleri değiştirebilir veya listeyi yenileyebilirsiniz. Bu ekranın boş olması tek başına mesajların alıcıya teslim edildiğini göstermez.
           </p>
         </div>
       ) : (
