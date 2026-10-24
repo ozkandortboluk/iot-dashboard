@@ -3,7 +3,7 @@ import { emailService } from './services/email.service.js';
 
 function escapeHtml(value: string): string {
   const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  return value.replace(/[&<>\"']/g, (char) => entities[char] || char);
+  return value.replace(/[&<>"']/g, (char) => entities[char] || char);
 }
 
 export const defaultNotificationConfig: NotificationServiceConfig = {
@@ -110,7 +110,7 @@ export async function dispatchMessageToChannel(
 
     if (channel === 'email') {
       if (!config.email.enabled) throw new Error('E-posta servisi devre dışı bırakılmış.');
-      if (!item.recipient || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(item.recipient.trim())) {
+      if (!item.recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.recipient.trim())) {
         throw new Error('Geçersiz e-posta adresi.');
       }
       const emailConfig = emailService.getEmailConfig();
@@ -121,7 +121,7 @@ export async function dispatchMessageToChannel(
         to: item.recipient.trim(),
         subject: item.title,
         text: item.message,
-        html: `<div style=\"font-family:Arial,sans-serif;white-space:pre-wrap\">${escapeHtml(item.message)}</div>`,
+        html: `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(item.message)}</div>`,
         dedupKey: item.id,
         tenantId: item.tenantId,
       });
