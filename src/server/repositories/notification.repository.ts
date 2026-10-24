@@ -52,20 +52,22 @@ export class NotificationRepository {
       timestamp: new Date().toISOString(),
       read: false,
     };
+    const dev = fullNotif.deviceId ? (this.db.data.devices || []).find((d: any) => d.id === fullNotif.deviceId) : null;
+    const isSimulated = dev?.isSimulated || false;
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
+
+    // PostgreSQL is authoritative in production: persist first and propagate failures
+    // so the API cannot report a notification as created when storage failed.
+    if ((!isSimulated || saveSimulatedDataToDb) && this.db.postgresRepo?.isReady()) {
+      await this.db.postgresRepo.saveNotification(fullNotif);
+    }
+
     this.db.data.notifications.unshift(fullNotif);
     if (this.db.data.notifications.length > 500) {
       this.db.data.notifications = this.db.data.notifications.slice(0, 500);
     }
     this.db.scheduleSave();
     this.db.notifyNotificationListeners('notification:new', fullNotif);
-
-    const dev = fullNotif.deviceId ? (this.db.data.devices || []).find((d: any) => d.id === fullNotif.deviceId) : null;
-    const isSimulated = dev?.isSimulated || false;
-    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
-
-    if (!isSimulated || saveSimulatedDataToDb) {
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveNotification(fullNotif).catch((e) => console.warn('[PG Error]', e.message)); }
-    }
     return fullNotif;
   }
 
