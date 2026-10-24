@@ -378,7 +378,7 @@ export class AlarmRepository {
   }
 
   public async deleteAlarm(alarmId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -414,7 +414,7 @@ export class AlarmRepository {
 
   public async bulkDeleteAlarms(alarmIds: string[], currentUser: any): Promise<number> {
     if (!alarmIds || !alarmIds.length) return 0;
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeletedCount = 0;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -569,7 +569,7 @@ export class AlarmRepository {
     const role = String(currentUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       currentUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
+      (role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
       currentUser.status !== 'suspended'
     );
     let pgDeleted = false;
@@ -608,7 +608,7 @@ export class AlarmRepository {
     const role = String(currentUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       currentUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
+      (role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
       currentUser.status !== 'suspended'
     );
     let pgDeletedCount = 0;
@@ -654,7 +654,7 @@ export class AlarmRepository {
     const role = String(reqUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       reqUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || reqUser.id === 'usr_admin') &&
+      (role === 'admin' || role === 'superadmin' || reqUser.id === 'usr_admin') &&
       reqUser.status !== 'suspended'
     );
 
@@ -697,7 +697,7 @@ export class AlarmRepository {
   }
 
   public async deleteDispatchLog(logId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -733,7 +733,7 @@ export class AlarmRepository {
 
   public async bulkDeleteDispatchLogs(logIds: string[], currentUser: any): Promise<number> {
     if (!logIds || !logIds.length) return 0;
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
 
     let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
