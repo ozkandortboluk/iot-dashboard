@@ -548,11 +548,23 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
-    // 11. Notification queue & dispatch logs (Strict Admin only / Tenant isolation)
-    if (event === 'notification-queue:updated' || event === 'dispatch-logs:updated' || event === 'system:events:updated' || event === 'system:event') {
+    // 11. Queue and delivery logs are tenant-scoped; system event logs remain admin-only.
+    if (event === 'notification-queue:updated' || event === 'dispatch-logs:updated') {
       if (isAdmin) {
         safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      } else {
+        const rows = Array.isArray(payload) ? payload : (Array.isArray((payload as any)?.data) ? (payload as any).data : null);
+        if (rows) {
+          const scopedRows = rows.filter((row: any) => row?.tenantId === clientUser.id);
+          const scopedPayload = Array.isArray(payload) ? scopedRows : { ...payload, data: scopedRows, total: scopedRows.length };
+          safeSend(client, JSON.stringify({ event, payload: scopedPayload, timestamp: new Date().toISOString() }));
+        }
       }
+      return;
+    }
+
+    if (event === 'system:events:updated' || event === 'system:event') {
+      if (isAdmin) safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
       return;
     }
 
