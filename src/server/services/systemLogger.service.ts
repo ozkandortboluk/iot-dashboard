@@ -169,12 +169,10 @@ class SystemLoggerService {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
+          // The JSON snapshot is written newest-first; retain its newest entries.
           this.inMemoryEvents = parsed
             .filter((ev): ev is SystemEvent => Boolean(ev && typeof ev.id === 'string'))
-            .slice(-this.maxInMemoryEvents)
-            .reverse();
-          // Normalize to newest-first in-memory ordering and track loaded IDs.
-          this.inMemoryEvents.reverse();
+            .slice(0, this.maxInMemoryEvents);
           for (const ev of this.inMemoryEvents) {
             if (ev?.id) existingIds.add(ev.id);
           }
