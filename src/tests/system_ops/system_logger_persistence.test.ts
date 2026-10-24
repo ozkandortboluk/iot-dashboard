@@ -21,6 +21,10 @@ describe('System logger persistence across restarts', () => {
       pendingFileWrites: loggerInternals.pendingFileWrites,
       flushTimeout: loggerInternals.flushTimeout,
       maxInMemoryEvents: loggerInternals.maxInMemoryEvents,
+      includedFields: loggerInternals.includedFields,
+      logToFile: loggerInternals.logToFile,
+      deduplication: loggerInternals.deduplication,
+      recentMessageSignatures: loggerInternals.recentMessageSignatures,
     };
     if (loggerInternals.flushTimeout) clearTimeout(loggerInternals.flushTimeout);
     loggerInternals.flushTimeout = null;
@@ -107,6 +111,62 @@ describe('System logger persistence across restarts', () => {
     systemLogger.simplifyExistingLogs();
 
     expect(fs.readFileSync(loggerInternals.logFilePath, 'utf-8')).toBe(originalLog);
+  });
+
+  it('honors includedFields settings instead of storing disabled metadata', () => {
+    loggerInternals.logToFile = false;
+    loggerInternals.deduplication = false;
+    loggerInternals.includedFields = {
+      stack: false,
+      ip: false,
+      user: false,
+      http: false,
+      device: false,
+      details: false,
+      source: false,
+      traceId: false,
+    };
+
+    const logged = systemLogger.log('error', 'server', 'field-selection-check', {
+      stack: 'stack should be omitted',
+      ip: '192.0.2.1',
+      userId: 'user-123',
+      method: 'POST',
+      path: '/sensitive?token=example',
+      statusCode: 500,
+      traceId: 'trace-123',
+      tenantId: 'tenant-123',
+      deviceId: 'device-123',
+      privatePayload: 'should be omitted',
+    }, 'field-selection-test');
+
+    expect(logged).not.toHaveProperty('stack');
+    expect(logged).not.toHaveProperty('ip');
+    expect(logged).not.toHaveProperty('userId');
+    expect(logged).not.toHaveProperty('method');
+    expect(logged).not.toHaveProperty('path');
+    expect(logged).not.toHaveProperty('statusCode');
+    expect(logged).not.toHaveProperty('traceId');
+    expect(logged).not.toHaveProperty('tenantId');
+    expect(logged).not.toHaveProperty('deviceId');
+    expect(logged).not.toHaveProperty('details');
+    expect(logged).not.toHaveProperty('source');
+  });
+
+  it('clears rotated history when the explicit clear operation is used', () => {
+    loggerInternals.logToFile = false;
+    const backup = path.join(tempDir, 'system_events_20261001.log.bak');
+    fs.writeFileSync(backup, JSON.stringify(event('old-backup', '2026-10-01T10:00:00.000Z', 'old history')), 'utf-8');
+    fs.writeFileSync(loggerInternals.logFilePath, 'old active history\\n', 'utf-8');
+    fs.writeFileSync(loggerInternals.jsonBackupPath, '[]', 'utf-8');
+
+    systemLogger.clearEvents();
+
+    expect(fs.existsSync(backup)).toBe(false);
+    expect(fs.readFileSync(loggerInternals.logFilePath, 'utf-8')).toBe('');
+    expect(loggerInternals.inMemoryEvents.map((item: SystemEvent) => item.message)).toContain(
+      'Sistem olay günlükleri yönetici tarafından temizlendi.',
+    );
   });
 
   it('retains queued log entries when appending to disk fails', () => {
