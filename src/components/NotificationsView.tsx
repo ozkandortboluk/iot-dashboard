@@ -74,6 +74,8 @@ export const NotificationsView: React.FC = () => {
   const [isQueueLoading, setIsQueueLoading] = useState(false);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isServicesLoading, setIsServicesLoading] = useState(false);
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
+  const [logsLoadError, setLogsLoadError] = useState<string | null>(null);
 
   // Wizard & Modal States
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -135,16 +137,19 @@ export const NotificationsView: React.FC = () => {
   // 2. Lazy Fetchers for Specific Tabs
   const fetchQueueData = useCallback(async () => {
     setIsQueueLoading(true);
+    setQueueLoadError(null);
     try {
       let queueUrl = '/api/notification-queue?limit=100';
       if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
         queueUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(queueUrl);
+      if (!res.ok) throw new Error(`Bildirim kuyruğu alınamadı (HTTP ${res.status}).`);
       const data = await safeJson<any>(res, []);
       const list = Array.isArray(data) ? data : (data?.data || []);
       setQueueItems(list);
     } catch (e) {
+      setQueueLoadError(e instanceof Error ? e.message : 'Bildirim kuyruğu yüklenemedi. Mevcut kayıtlar korunuyor.');
       console.error('Error fetching queue:', e);
     } finally {
       setIsQueueLoading(false);
@@ -153,16 +158,19 @@ export const NotificationsView: React.FC = () => {
 
   const fetchLogsData = useCallback(async () => {
     setIsLogsLoading(true);
+    setLogsLoadError(null);
     try {
       let logsUrl = '/api/dispatch-logs?limit=100';
       if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
         logsUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(logsUrl);
+      if (!res.ok) throw new Error(`İletim geçmişi alınamadı (HTTP ${res.status}).`);
       const data = await safeJson<any>(res, []);
       const list = Array.isArray(data) ? data : (data?.data || []);
       setDispatchLogs(list);
     } catch (e) {
+      setLogsLoadError(e instanceof Error ? e.message : 'İletim geçmişi yüklenemedi. Mevcut kayıtlar korunuyor.');
       console.error('Error fetching logs:', e);
     } finally {
       setIsLogsLoading(false);
@@ -170,7 +178,7 @@ export const NotificationsView: React.FC = () => {
   }, [user, selectedCustomerForAdmin]);
 
   const fetchServiceConfig = useCallback(async () => {
-    if (user?.role !== 'admin') return;
+    if (user?.role !== 'admin' && user?.role !== 'superadmin') return;
     setIsServicesLoading(true);
     try {
       const res = await fetch('/api/notification-services');
@@ -758,7 +766,7 @@ export const NotificationsView: React.FC = () => {
           <span>Teslimat Geçmişi</span>
         </button>
 
-        {user?.role === 'admin' && (
+        {(user?.role === 'admin' || user?.role === 'superadmin') && (
           <button
             onClick={() => setActiveTab('channels')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
@@ -832,6 +840,13 @@ export const NotificationsView: React.FC = () => {
         />
       )}
 
+      {activeTab === 'queue' && queueLoadError && (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+          {queueLoadError} Liste yenilenemedi; ekranda görünen kayıtlar son başarılı yüklemeden kalmış olabilir.
+          <button type="button" onClick={fetchQueueData} className="ml-2 font-bold underline">Tekrar dene</button>
+        </div>
+      )}
+
       {activeTab === 'queue' && (
         <DeliveryQueue
           queueItems={queueItems}
@@ -840,6 +855,13 @@ export const NotificationsView: React.FC = () => {
           onClearQueue={handleClearQueue}
           onRefresh={fetchQueueData}
         />
+      )}
+
+      {activeTab === 'history' && logsLoadError && (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+          {logsLoadError} Liste yenilenemedi; ekranda görünen kayıtlar son başarılı yüklemeden kalmış olabilir.
+          <button type="button" onClick={fetchLogsData} className="ml-2 font-bold underline">Tekrar dene</button>
+        </div>
       )}
 
       {activeTab === 'history' && (
@@ -852,7 +874,7 @@ export const NotificationsView: React.FC = () => {
         />
       )}
 
-      {activeTab === 'channels' && user?.role === 'admin' && (
+      {activeTab === 'channels' && (user?.role === 'admin' || user?.role === 'superadmin') && (
         <ChannelConfiguration
           serviceConfig={serviceConfig}
           loadingAction={loadingAction}

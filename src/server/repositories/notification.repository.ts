@@ -9,12 +9,19 @@ export class NotificationRepository {
   public getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationItem[] {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
-    if (reqUser && reqUser.role === 'customer') {
-      // Customer ONLY sees notifications addressed specifically to their account
-      return this.db.data.notifications.filter((n: any) => n.tenantId === requestingUserId);
+    const role = String(reqUser?.role || '').toLowerCase();
+    const isPrivileged = role === 'admin' || role === 'superadmin' || requestingUserId === 'usr_admin';
+
+    if (!isPrivileged) {
+      // Fail closed: unknown and non-admin identities may only read their own tenant/user notifications.
+      return this.db.data.notifications.filter((n: any) =>
+        n.tenantId === requestingUserId || n.userId === requestingUserId
+      );
     }
-    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.db.data.notifications.filter((n: any) => n.tenantId === targetCustomerId);
+    if (targetCustomerId && targetCustomerId !== 'all') {
+      return this.db.data.notifications.filter((n: any) =>
+        n.tenantId === targetCustomerId || n.userId === targetCustomerId
+      );
     }
     return this.db.data.notifications;
   }
@@ -45,52 +52,55 @@ export class NotificationRepository {
       timestamp: new Date().toISOString(),
       read: false,
     };
+    const dev = fullNotif.deviceId ? (this.db.data.devices || []).find((d: any) => d.id === fullNotif.deviceId) : null;
+    const isSimulated = dev?.isSimulated || false;
+    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
+
+    // PostgreSQL is authoritative in production: persist first and propagate failures
+    // so the API cannot report a notification as created when storage failed.
+    if ((!isSimulated || saveSimulatedDataToDb) && this.db.postgresRepo?.isReady()) {
+      const persisted = await this.db.postgresRepo.saveNotification(fullNotif);
+      if (!persisted && fullNotif.eventKey) {
+        const existing = await this.db.postgresRepo.getNotifications(fullNotif.tenantId);
+        const canonical = existing.find((item: any) => item.eventKey === fullNotif.eventKey);
+        if (canonical) return canonical;
+        throw new Error('Bildirim olay anahtarı zaten kayıtlı ancak kanonik kayıt okunamadı.');
+      }
+    }
+
     this.db.data.notifications.unshift(fullNotif);
     if (this.db.data.notifications.length > 500) {
       this.db.data.notifications = this.db.data.notifications.slice(0, 500);
     }
     this.db.scheduleSave();
     this.db.notifyNotificationListeners('notification:new', fullNotif);
-
-    const dev = fullNotif.deviceId ? (this.db.data.devices || []).find((d: any) => d.id === fullNotif.deviceId) : null;
-    const isSimulated = dev?.isSimulated || false;
-    const saveSimulatedDataToDb = dev?.saveSimulatedDataToDb || false;
-
-    if (!isSimulated || saveSimulatedDataToDb) {
-      if (this.db.postgresRepo?.isReady()) { await this.db.postgresRepo.saveNotification(fullNotif).catch((e) => console.warn('[PG Error]', e.message)); }
-    }
     return fullNotif;
   }
 
-  public async markNotificationRead(id: string, userId = 'usr_admin') {
+  public async markNotificationRead(id: string, userId = 'usr_admin'): Promise<boolean> {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
     const role = String(reqUser?.role || '').toLowerCase();
     const isAdmin = role === 'admin' || role === 'superadmin' || userId === 'usr_admin';
 
-    if (!this.db.data.notifications) this.db.data.notifications = [];
-    const notif = this.db.data.notifications.find((n: any) => n.id === id);
-    if (notif) {
-      if (!isAdmin && notif.tenantId !== userId && (notif as any).userId !== userId) {
-        return; // Forbidden: Customer cannot mark another user's private notification
-      }
-      notif.read = true;
-      try {
-        this.db.scheduleSave();
-      } catch {}
-    }
-
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.markNotificationRead(id, userId, isAdmin).catch((e: any) => console.warn('[PG Error markNotificationRead]', e.message));
+      const updated = await this.db.postgresRepo.markNotificationRead(id, userId, isAdmin);
+      if (!updated) return false;
+      const cached = (this.db.data.notifications || []).find((n: any) => n.id === id);
+      if (cached && (isAdmin || cached.tenantId === userId || cached.userId === userId)) cached.read = true;
+    } else {
+      if (!this.db.data.notifications) this.db.data.notifications = [];
+      const notif = this.db.data.notifications.find((n: any) => n.id === id);
+      if (!notif) return false;
+      if (!isAdmin && notif.tenantId !== userId && notif.userId !== userId) return false;
+      notif.read = true;
+      this.db.scheduleSave();
     }
 
-    try {
-      const remaining = await this.db.getNotifications(userId);
-      if (typeof this.db.notifyNotificationListeners === 'function') {
-        this.db.notifyNotificationListeners('notifications:updated', remaining);
-      }
-    } catch (broadcastErr: any) {
-      console.warn('[Broadcast Error markNotificationRead]', broadcastErr?.message);
+    const remaining = await this.db.getNotifications(userId);
+    if (typeof this.db.notifyNotificationListeners === 'function') {
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
     }
+    return true;
   }
 
   public async markAllNotificationsRead(userId = 'usr_admin') {
@@ -98,31 +108,27 @@ export class NotificationRepository {
     const role = String(reqUser?.role || '').toLowerCase();
     const isAdmin = role === 'admin' || role === 'superadmin' || userId === 'usr_admin';
 
-    if (!this.db.data.notifications) this.db.data.notifications = [];
-    let updated = false;
-    this.db.data.notifications.forEach((n: any) => {
-      if (!n.read && (isAdmin || n.tenantId === userId || (n as any).userId === userId)) {
-        n.read = true;
-        updated = true;
-      }
-    });
-    if (updated) {
-      try {
-        this.db.scheduleSave();
-      } catch {}
-    }
-
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.markAllNotificationsRead(isAdmin ? undefined : userId).catch((e: any) => console.warn('[PG Error markAllNotificationsRead]', e.message));
+      await this.db.postgresRepo.markAllNotificationsRead(isAdmin ? undefined : userId);
+      const cached = this.db.data.notifications || [];
+      cached.forEach((n: any) => {
+        if (isAdmin || n.tenantId === userId || n.userId === userId) n.read = true;
+      });
+    } else {
+      if (!this.db.data.notifications) this.db.data.notifications = [];
+      let updated = false;
+      this.db.data.notifications.forEach((n: any) => {
+        if (!n.read && (isAdmin || n.tenantId === userId || n.userId === userId)) {
+          n.read = true;
+          updated = true;
+        }
+      });
+      if (updated) this.db.scheduleSave();
     }
 
-    try {
-      const remaining = await this.db.getNotifications(userId);
-      if (typeof this.db.notifyNotificationListeners === 'function') {
-        this.db.notifyNotificationListeners('notifications:updated', remaining);
-      }
-    } catch (broadcastErr: any) {
-      console.warn('[Broadcast Error markAllNotificationsRead]', broadcastErr?.message);
+    const remaining = await this.db.getNotifications(userId);
+    if (typeof this.db.notifyNotificationListeners === 'function') {
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
     }
   }
 

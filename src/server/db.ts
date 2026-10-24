@@ -2001,7 +2001,7 @@ class LocalDatabase {
     if (!requestingUserId) return [];
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+       const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
@@ -2019,7 +2019,7 @@ class LocalDatabase {
     if (!requestingUserId) return { data: [], total: 0 };
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+       const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
@@ -2080,7 +2080,7 @@ class LocalDatabase {
     if (!requestingUserId) return [];
     
     const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+    const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
     const effectiveTenant = isAdmin 
         ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
         : requestingUserId;
@@ -2657,6 +2657,42 @@ class LocalDatabase {
       this.saveData(this.data);
     }
     const raw = this.data.serviceConfig;
+    let removedPlaceholderConfig = false;
+    if (raw.email?.fromEmail === 'alarms@iotplatform.com') {
+      raw.email.fromEmail = '';
+      raw.email.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.whatsapp?.phoneNumberId === '1029384756' || raw.whatsapp?.businessAccountId === 'act_987654321') {
+      raw.whatsapp.phoneNumberId = '';
+      raw.whatsapp.businessAccountId = '';
+      raw.whatsapp.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.telegram?.botUsername === '@IoTAlarmBot') {
+      raw.telegram.botUsername = '';
+      raw.telegram.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.sms?.senderTitle === 'IOT_ALARM') {
+      raw.sms.senderTitle = '';
+      raw.sms.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.webhook?.defaultEndpoint === 'https://api.example.com/webhooks/iot-alerts' || raw.webhook?.secretHeader === 'sec_key_iot_123') {
+      raw.webhook.defaultEndpoint = '';
+      raw.webhook.secretHeader = '';
+      raw.webhook.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (removedPlaceholderConfig) {
+      this.saveData(this.data);
+      if (this.postgresRepo?.isReady()) {
+        this.postgresRepo.saveSystemSetting('service_config', raw).catch((err: any) => {
+          console.warn('[PostgreSQL] Placeholder bildirim ayarları temizlenemedi:', err?.message || err);
+        });
+      }
+    }
 
     const decryptVal = (val?: string) => {
       if (!val) return '';
@@ -2790,7 +2826,18 @@ class LocalDatabase {
     return this.getServiceConfig(true);
   }
 
-  public async processQueue() {
+  private notificationQueueProcessing: Promise<void> | null = null;
+
+  public processQueue(): Promise<void> {
+    if (this.notificationQueueProcessing) return this.notificationQueueProcessing;
+    const processing = this.runNotificationQueue().finally(() => {
+      this.notificationQueueProcessing = null;
+    });
+    this.notificationQueueProcessing = processing;
+    return processing;
+  }
+
+  private async runNotificationQueue() {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
 
@@ -2816,7 +2863,7 @@ class LocalDatabase {
       const latencyMs = Date.now() - startMs;
 
       if (result.success) {
-        item.status = 'delivered';
+        item.status = 'sent';
         item.errorDetails = undefined;
 
         const logEntry: DispatchLogItem = {
@@ -2830,14 +2877,14 @@ class LocalDatabase {
           title: item.title,
           message: item.message,
           severity: item.severity,
-          status: 'delivered',
+          status: 'sent',
           attemptCount: item.attempts,
           providerResponse: result.providerResponse,
           latencyMs,
           sentAt: new Date().toISOString(),
         };
         this.data.dispatchLogs.unshift(logEntry);
-        this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+        this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
       } else {
         item.errorDetails = result.errorDetails;
 
@@ -2868,7 +2915,7 @@ class LocalDatabase {
           sentAt: new Date().toISOString(),
         };
         this.data.dispatchLogs.unshift(logEntry);
-        this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+        this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
       }
     }
 
@@ -2877,6 +2924,8 @@ class LocalDatabase {
     }
 
     this.saveData(this.data);
+    this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
+    this.notifyNotificationListeners('dispatch-logs:updated', this.data.dispatchLogs);
   }
 
   public getNotificationQueue(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
@@ -2884,7 +2933,7 @@ class LocalDatabase {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     let list = this.data.notificationQueue;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+    const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       list = list.filter((q) => q.tenantId === requestingUserId);
@@ -2942,8 +2991,9 @@ class LocalDatabase {
       throw new Error('Kuyruk öğesi bulunamadı.');
     }
 
+    const role = String(currentUser.role || '').toLowerCase();
     if (
-      currentUser.role !== 'admin' &&
+      !['admin', 'superadmin'].includes(role) &&
       item.tenantId !== currentUser.id
     ) {
       throw new Error('Bu bildirime erişim yetkiniz yok.');
@@ -2969,7 +3019,7 @@ class LocalDatabase {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     const reqUser = (this.data.users || []).find((u) => u.id === requestingUserId);
     const role = String(reqUser?.role || '').toLowerCase();
-    const isAdmin = Boolean(reqUser && (role === 'admin' || role === 'operator' || role === 'superadmin' || reqUser.id === 'usr_admin') && reqUser.status !== 'suspended');
+    const isAdmin = Boolean(reqUser && (role === 'admin' || role === 'superadmin' || reqUser.id === 'usr_admin') && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       this.data.notificationQueue = this.data.notificationQueue.filter((q) => q.tenantId !== requestingUserId);
@@ -2989,20 +3039,43 @@ class LocalDatabase {
     if (!requestingUserId) return options ? { data: [], total: 0, limit: options.limit || 50, hasMore: false } : { data: [], total: 0 };
     if (this.isPostgresProductionMode() && this.postgresRepo?.isReady()) {
        const reqUser = (this.data.users || []).find(u => u.id === requestingUserId);
-       const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+       const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
        const pgTenantId = isAdmin 
            ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
            : requestingUserId;
        let list = await this.postgresRepo.getDispatchLogs(pgTenantId);
        if (options?.status && options.status !== 'all') list = list.filter((l: any) => l.status === options.status);
        if (options?.channel && options.channel !== 'all') list = list.filter((l: any) => l.channel === options.channel);
-       return { data: list, total: list.length, limit: options?.limit || 50, hasMore: false };
+       if (options?.search?.trim()) {
+         const term = options.search.trim().toLowerCase();
+         list = list.filter((l: any) =>
+           l.title?.toLowerCase().includes(term) ||
+           l.message?.toLowerCase().includes(term) ||
+           l.recipient?.toLowerCase().includes(term)
+         );
+       }
+       const total = list.length;
+       const limit = Math.max(1, Math.min(200, Number(options?.limit) || 50));
+       let startIndex = 0;
+       if (options?.cursor) {
+         const cursorIndex = list.findIndex((l: any) => l.id === options.cursor);
+         if (cursorIndex >= 0) startIndex = cursorIndex + 1;
+       }
+       const data = list.slice(startIndex, startIndex + limit);
+       const hasMore = startIndex + limit < total;
+       return {
+         data,
+         total,
+         limit,
+         nextCursor: hasMore ? data[data.length - 1]?.id || null : null,
+         hasMore,
+       };
     }
 
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     let list = this.data.dispatchLogs;
     const reqUser = this.data.users.find((u) => u.id === requestingUserId);
-    const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
+    const isAdmin = Boolean(reqUser && (reqUser.role === 'admin' || reqUser.role === 'superadmin') && reqUser.status !== 'suspended');
 
     if (!isAdmin) {
       list = list.filter((l) => l.tenantId === requestingUserId);
@@ -3171,7 +3244,7 @@ class LocalDatabase {
       title,
       message,
       severity: 'info',
-      status: result.success ? 'delivered' : 'failed',
+      status: result.success ? 'sent' : 'failed',
       attemptCount: 1,
       providerResponse: result.providerResponse,
       errorDetails: result.errorDetails,
@@ -3181,7 +3254,7 @@ class LocalDatabase {
 
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     this.data.dispatchLogs.unshift(logEntry);
-    this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+    this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
     this.saveData(this.data);
 
     return { result, log: logEntry };

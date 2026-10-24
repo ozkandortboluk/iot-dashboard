@@ -35,38 +35,38 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
   onSendTestMessage,
 }) => {
   // Config Form State
-  const [whatsappEnabled, setWhatsappEnabled] = useState(serviceConfig?.whatsapp?.enabled ?? true);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(serviceConfig?.whatsapp?.enabled ?? false);
   const [whatsappPhoneId, setWhatsappPhoneId] = useState(serviceConfig?.whatsapp?.phoneNumberId || '');
   const [whatsappToken, setWhatsappToken] = useState(serviceConfig?.whatsapp?.apiToken || '');
 
-  const [telegramEnabled, setTelegramEnabled] = useState(serviceConfig?.telegram?.enabled ?? true);
+  const [telegramEnabled, setTelegramEnabled] = useState(serviceConfig?.telegram?.enabled ?? false);
   const [telegramBotToken, setTelegramBotToken] = useState(serviceConfig?.telegram?.botToken || '');
   const [telegramBotUser, setTelegramBotUser] = useState(serviceConfig?.telegram?.botUsername || '');
 
-  const [emailEnabled, setEmailEnabled] = useState(serviceConfig?.email?.enabled ?? true);
-  const [emailFrom, setEmailFrom] = useState(serviceConfig?.email?.fromEmail || 'alarms@iotplatform.com');
+  const [emailEnabled, setEmailEnabled] = useState(serviceConfig?.email?.enabled ?? false);
+  const [emailFrom, setEmailFrom] = useState(serviceConfig?.email?.fromEmail || '');
 
-  const [smsEnabled, setSmsEnabled] = useState(serviceConfig?.sms?.enabled ?? true);
-  const [smsTitle, setSmsTitle] = useState(serviceConfig?.sms?.senderTitle || 'IOT_ALARM');
+  const [smsEnabled, setSmsEnabled] = useState(serviceConfig?.sms?.enabled ?? false);
+  const [smsTitle, setSmsTitle] = useState(serviceConfig?.sms?.senderTitle || '');
 
-  const [webhookEnabled, setWebhookEnabled] = useState(serviceConfig?.webhook?.enabled ?? true);
+  const [webhookEnabled, setWebhookEnabled] = useState(serviceConfig?.webhook?.enabled ?? false);
   const [webhookEndpoint, setWebhookEndpoint] = useState(serviceConfig?.webhook?.defaultEndpoint || '');
   const [webhookSecretHeader, setWebhookSecretHeader] = useState(serviceConfig?.webhook?.secretHeader || '');
 
   // Synchronize when serviceConfig props update
   useEffect(() => {
     if (serviceConfig) {
-      setWhatsappEnabled(serviceConfig.whatsapp?.enabled ?? true);
+      setWhatsappEnabled(serviceConfig.whatsapp?.enabled ?? false);
       setWhatsappPhoneId(serviceConfig.whatsapp?.phoneNumberId || '');
       setWhatsappToken(serviceConfig.whatsapp?.apiToken || '');
-      setTelegramEnabled(serviceConfig.telegram?.enabled ?? true);
+      setTelegramEnabled(serviceConfig.telegram?.enabled ?? false);
       setTelegramBotToken(serviceConfig.telegram?.botToken || '');
       setTelegramBotUser(serviceConfig.telegram?.botUsername || '');
-      setEmailEnabled(serviceConfig.email?.enabled ?? true);
-      setEmailFrom(serviceConfig.email?.fromEmail || 'alarms@iotplatform.com');
-      setSmsEnabled(serviceConfig.sms?.enabled ?? true);
-      setSmsTitle(serviceConfig.sms?.senderTitle || 'IOT_ALARM');
-      setWebhookEnabled(serviceConfig.webhook?.enabled ?? true);
+      setEmailEnabled(serviceConfig.email?.enabled ?? false);
+      setEmailFrom(serviceConfig.email?.fromEmail || '');
+      setSmsEnabled(serviceConfig.sms?.enabled ?? false);
+      setSmsTitle(serviceConfig.sms?.senderTitle || '');
+      setWebhookEnabled(serviceConfig.webhook?.enabled ?? false);
       setWebhookEndpoint(serviceConfig.webhook?.defaultEndpoint || '');
       setWebhookSecretHeader(serviceConfig.webhook?.secretHeader || '');
     }
@@ -87,7 +87,7 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
         enabled: whatsappEnabled,
         phoneNumberId: whatsappPhoneId,
         apiToken: whatsappToken,
-        provider: whatsappToken ? 'cloud_api' : 'simulated',
+        provider: whatsappToken ? 'cloud_api' : (serviceConfig?.whatsapp?.provider || 'simulated'),
       },
       telegram: {
         enabled: telegramEnabled,
@@ -97,12 +97,12 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
       email: {
         enabled: emailEnabled,
         fromEmail: emailFrom,
-        provider: 'simulated',
+        provider: serviceConfig?.email?.provider || 'simulated',
       },
       sms: {
         enabled: smsEnabled,
         senderTitle: smsTitle,
-        provider: 'simulated',
+        provider: serviceConfig?.sms?.provider || 'simulated',
       },
       webhook: {
         enabled: webhookEnabled,

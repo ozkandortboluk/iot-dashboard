@@ -2086,7 +2086,7 @@ export class PostgresRepository {
   // ==========================================
   // NOTIFICATIONS
   // ==========================================
-  public async saveNotification(n: NotificationItem): Promise<void> {
+  public async saveNotification(n: NotificationItem): Promise<boolean> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
@@ -2136,16 +2136,17 @@ export class PostgresRepository {
         n.eventKey || null,
         n.timestamp || new Date().toISOString(),
       ]);
+      return true;
     } catch (err: any) {
       if (err?.code === '23505' && n.eventKey) {
-        // Unique constraint violation on event_key across cluster instances: safely ignore duplicate insert
-        return;
+        // Another worker already inserted this event; caller can load the canonical row.
+        return false;
       }
       throw err;
     }
   }
 
-  public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<void> {
+  public async markNotificationRead(id: string, userId?: string, isAdmin: boolean = true): Promise<boolean> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
@@ -2155,7 +2156,8 @@ export class PostgresRepository {
       sql += ` AND (tenant_id = $2 OR user_id = $2)`;
       params.push(userId);
     }
-    await this.query(sql, params);
+    const result = await this.query(sql, params);
+    return (result?.rowCount || 0) > 0;
   }
 
   public async markAllNotificationsRead(userId?: string): Promise<void> {
@@ -3202,12 +3204,13 @@ export class PostgresRepository {
     if (!this.pool) return;
     const sql = `
       INSERT INTO dispatch_logs (
-        id, user_id, user_name, channel, recipient, title, message, severity, status, latency_ms, error_details, sent_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        id, tenant_id, user_id, user_name, channel, recipient, title, message, severity, status, latency_ms, error_details, sent_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (id) DO NOTHING;
     `;
     await this.query(sql, [
       log.id,
+      log.tenantId || null,
       log.tenantId || null,
       log.userName || null,
       log.channel,
@@ -3215,7 +3218,7 @@ export class PostgresRepository {
       log.title || null,
       log.message,
       log.severity || 'info',
-      log.status || 'delivered',
+      log.status || 'sent',
       log.latencyMs || 0,
       log.errorDetails || null,
       log.sentAt || new Date().toISOString(),

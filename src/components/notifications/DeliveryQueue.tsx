@@ -89,11 +89,12 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'sent':
       case 'delivered':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
             <CheckCircle2 className="w-3 h-3" />
-            <span>İletildi</span>
+            <span>{status === 'sent' ? 'Sağlayıcıya gönderildi' : 'Eski teslimat kaydı'}</span>
           </span>
         );
       case 'processing':
@@ -235,7 +236,8 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
               <option value="pending">Beklemede Olanlar</option>
               <option value="retrying">Yeniden Denenenler</option>
               <option value="failed">Başarısız / Hata Alanlar</option>
-              <option value="delivered">Başarıyla İletilenler</option>
+              <option value="sent">Sağlayıcıya gönderilenler</option>
+              <option value="delivered">Eski teslimat kayıtları</option>
             </select>
           </div>
         </div>
@@ -247,9 +249,9 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center mb-3">
             <SendHorizontal className="w-6 h-6" />
           </div>
-          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Kuyrukta Bekleyen İleti Yok</h4>
+          <h4 className="text-sm font-bold text-slate-900 dark:text-white">Gösterilecek kuyruk kaydı yok</h4>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
-            Sistemdeki tüm alarmlar ilgili alıcılara iletildi veya gönderim kuyruğu temizlendi.
+            Seçili filtrelerle eşleşen kayıt bulunamadı. Bekleyen, yeniden denenen, başarısız ve gönderilmiş kayıtları görmek için filtreleri değiştirebilir veya listeyi yenileyebilirsiniz. Bu ekranın boş olması tek başına mesajların alıcıya teslim edildiğini göstermez.
           </p>
         </div>
       ) : (

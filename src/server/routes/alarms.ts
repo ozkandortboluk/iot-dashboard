@@ -257,6 +257,39 @@ export { rulesRouter };
 
 // Notifications Router
 const notificationsRouter = Router();
+const inAppTestRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+notificationsRouter.post('/test', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const now = Date.now();
+  let record = inAppTestRateLimits.get(currentUser.id);
+  if (!record || record.resetAt <= now) record = { count: 0, resetAt: now + 60_000 };
+  record.count += 1;
+  inAppTestRateLimits.set(currentUser.id, record);
+  if (record.count > 5) {
+    return res.status(429).json({ error: 'Dakikada en fazla 5 uygulama içi test bildirimi oluşturabilirsiniz.' });
+  }
+
+  try {
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 120) : 'NexusNode test bildirimi';
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim().slice(0, 1000) : 'Uygulama içi bildirim testi.';
+    const notification = await db.addNotification({
+      tenantId: currentUser.id,
+      title: title || 'NexusNode test bildirimi',
+      message: message || 'Uygulama içi bildirim testi.',
+      severity: 'info',
+      source: 'simulator',
+      isSimulation: true,
+      environment: 'sandbox',
+      eventKey: `in-app-test:${currentUser.id}:${now}`,
+    });
+    res.status(201).json({ success: true, notification, message: 'Test bildirimi oluşturuldu.' });
+  } catch (err: any) {
+    console.error('[POST /api/notifications/test error]', err?.message || err);
+    res.status(500).json({ error: 'Uygulama içi test bildirimi oluşturulamadı.' });
+  }
+});
 
 notificationsRouter.get('/', authenticateUser, async (req, res) => {
   try {
@@ -271,8 +304,8 @@ notificationsRouter.get('/', authenticateUser, async (req, res) => {
     const notifications = await db.getNotifications(targetUserId, isAdmin ? targetCustomerId : currentUser.id);
     res.json(notifications || []);
   } catch (err: any) {
-    console.warn('[GET /api/notifications error]', err?.message || err);
-    res.json([]);
+    console.error('[GET /api/notifications error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirimler yüklenemedi.' });
   }
 });
 
@@ -280,11 +313,12 @@ notificationsRouter.put('/:id/read', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    await db.markNotificationRead(req.params.id, currentUser.id);
+    const updated = await db.markNotificationRead(req.params.id, currentUser.id);
+    if (!updated) return res.status(404).json({ error: 'Bildirim bulunamadı veya bu işlem için yetkiniz yok.' });
     res.json({ success: true, message: 'Bildirim okundu olarak işaretlendi.' });
   } catch (err: any) {
-    console.warn('[PUT /api/notifications/:id/read error]', err?.message || err);
-    res.json({ success: true });
+    console.error('[PUT /api/notifications/:id/read error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirim okundu olarak işaretlenemedi.' });
   }
 });
 
@@ -292,11 +326,12 @@ notificationsRouter.delete('/:id', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    await db.alarmRepository.deleteNotification(req.params.id, currentUser);
+    const deleted = await db.alarmRepository.deleteNotification(req.params.id, currentUser);
+    if (!deleted) return res.status(404).json({ error: 'Bildirim bulunamadı veya bu işlem için yetkiniz yok.' });
     res.json({ success: true, message: 'Bildirim silindi.' });
   } catch (err: any) {
-    console.warn('[DELETE /api/notifications/:id error]', err?.message || err);
-    res.json({ success: true, message: 'Bildirim silindi.' });
+    console.error('[DELETE /api/notifications/:id error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirim silinemedi.' });
   }
 });
 
@@ -539,8 +574,12 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
   const currentUser = authReq.user!;
   const { channel, recipient, title, message } = req.body;
 
-  if (!channel || !recipient) {
-    return res.status(400).json({ error: 'Kanal ve alıcı adresi zorunludur.' });
+  const allowedChannels = new Set(['email', 'sms', 'whatsapp', 'telegram', 'webhook']);
+  if (typeof channel !== 'string' || !allowedChannels.has(channel) || typeof recipient !== 'string' || !recipient.trim()) {
+    return res.status(400).json({ error: 'Geçerli bir dış bildirim kanalı ve alıcı adresi zorunludur.' });
+  }
+  if (recipient.length > 512 || (title !== undefined && (typeof title !== 'string' || title.length > 160)) || (message !== undefined && (typeof message !== 'string' || message.length > 4000))) {
+    return res.status(400).json({ error: 'Test bildirimi alanları izin verilen uzunluk sınırlarını aşıyor.' });
   }
 
   // Rate Limiting (Max 3 requests per minute)
@@ -564,7 +603,7 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
   }
 
   // Role Based Recipient Restriction
-  if (currentUser.role !== 'admin') {
+  if (!['admin', 'superadmin'].includes(String(currentUser.role || '').toLowerCase())) {
     let allowed = false;
     const recStr = String(recipient).trim().toLowerCase();
 
@@ -605,7 +644,7 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
       message || 'Bu bir IoT platformu test iletisidir.',
       { id: currentUser.id, name: currentUser.name }
     );
-    res.json(dispatchResult);
+    res.status(dispatchResult?.result?.success === true ? 200 : 502).json(dispatchResult);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Test gönderimi yapılamadı.' });
   }

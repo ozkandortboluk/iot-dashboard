@@ -378,7 +378,7 @@ export class AlarmRepository {
   }
 
   public async deleteAlarm(alarmId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -414,7 +414,7 @@ export class AlarmRepository {
 
   public async bulkDeleteAlarms(alarmIds: string[], currentUser: any): Promise<number> {
     if (!alarmIds || !alarmIds.length) return 0;
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeletedCount = 0;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -444,7 +444,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remaining = await this.db.getAlarms(currentUser.id, currentUser.id);
     this.db.notifyNotificationListeners('alarms:updated', remaining);
     return totalDeleted > 0 ? totalDeleted : alarmIds.length;
@@ -569,17 +569,13 @@ export class AlarmRepository {
     const role = String(currentUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       currentUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || currentUser.id === 'usr_admin' || currentUser.email === 'nexusnodeiot@gmail.com') &&
+      (role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
       currentUser.status !== 'suspended'
     );
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
-      try {
-        pgDeleted = await this.db.postgresRepo.deleteNotification(notificationId, currentUser.id, isPrivileged);
-      } catch (e: any) {
-        console.warn('[PG Error deleteNotification]', e?.message || e);
-      }
+      pgDeleted = await this.db.postgresRepo.deleteNotification(notificationId, currentUser.id, isPrivileged);
     }
 
     let memDeleted = false;
@@ -604,7 +600,7 @@ export class AlarmRepository {
     } catch (e: any) {
       console.warn('[Broadcast Error deleteNotification]', e?.message || e);
     }
-    return true;
+    return pgDeleted || memDeleted;
   }
 
   public async bulkDeleteNotifications(notificationIds: string[], currentUser: any): Promise<number> {
@@ -612,17 +608,13 @@ export class AlarmRepository {
     const role = String(currentUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       currentUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || currentUser.id === 'usr_admin' || currentUser.email === 'nexusnodeiot@gmail.com') &&
+      (role === 'admin' || role === 'superadmin' || currentUser.id === 'usr_admin') &&
       currentUser.status !== 'suspended'
     );
     let pgDeletedCount = 0;
 
     if (this.db.postgresRepo?.isReady()) {
-      try {
-        pgDeletedCount = await this.db.postgresRepo.bulkDeleteNotifications(notificationIds, currentUser.id, isPrivileged);
-      } catch (e: any) {
-        console.warn('[PG Error bulkDeleteNotifications]', e?.message || e);
-      }
+      pgDeletedCount = await this.db.postgresRepo.bulkDeleteNotifications(notificationIds, currentUser.id, isPrivileged);
     }
 
     const idsSet = new Set(notificationIds);
@@ -645,7 +637,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     try {
       const remaining = await this.db.getNotifications(currentUser.id);
       if (typeof this.db.notifyNotificationListeners === 'function') {
@@ -654,7 +646,7 @@ export class AlarmRepository {
     } catch (e: any) {
       console.warn('[Broadcast Error bulkDeleteNotifications]', e?.message || e);
     }
-    return totalDeleted > 0 ? totalDeleted : notificationIds.length;
+    return totalDeleted;
   }
 
   public async deleteAllNotifications(requestingUserId: string, currentUser?: any): Promise<number> {
@@ -662,17 +654,13 @@ export class AlarmRepository {
     const role = String(reqUser?.role || '').toLowerCase();
     const isPrivileged = Boolean(
       reqUser &&
-      (role === 'admin' || role === 'operator' || role === 'superadmin' || reqUser.id === 'usr_admin' || reqUser.email === 'nexusnodeiot@gmail.com') &&
+      (role === 'admin' || role === 'superadmin' || reqUser.id === 'usr_admin') &&
       reqUser.status !== 'suspended'
     );
 
     let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
-      try {
-        pgDeletedCount = await this.db.postgresRepo.deleteAllNotifications(requestingUserId, isPrivileged);
-      } catch (e: any) {
-        console.warn('[PG Error deleteAllNotifications]', e?.message || e);
-      }
+      pgDeletedCount = await this.db.postgresRepo.deleteAllNotifications(requestingUserId, isPrivileged);
     }
 
     let memDeletedCount = 0;
@@ -696,7 +684,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     try {
       const remaining = await this.db.getNotifications(requestingUserId);
       if (typeof this.db.notifyNotificationListeners === 'function') {
@@ -709,7 +697,7 @@ export class AlarmRepository {
   }
 
   public async deleteDispatchLog(logId: string, currentUser: any): Promise<boolean> {
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
     let pgDeleted = false;
 
     if (this.db.postgresRepo?.isReady()) {
@@ -745,7 +733,7 @@ export class AlarmRepository {
 
   public async bulkDeleteDispatchLogs(logIds: string[], currentUser: any): Promise<number> {
     if (!logIds || !logIds.length) return 0;
-    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'operator') && currentUser.status !== 'suspended');
+    const isPrivileged = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin') && currentUser.status !== 'suspended');
 
     let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
@@ -775,21 +763,19 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remainingLogs = await this.db.getDispatchLogs(currentUser.id);
     this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
-    return totalDeleted > 0 ? totalDeleted : logIds.length;
+    return totalDeleted;
   }
 
   public async clearDispatchLogs(requestingUserId: string): Promise<number> {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
     const isAdmin = Boolean(reqUser && reqUser.role === 'admin' && reqUser.status !== 'suspended');
 
-    const pgDeletedCount = 0;
+    let pgDeletedCount = 0;
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo
-        .clearDispatchLogs(isAdmin ? undefined : requestingUserId)
-        .catch((e: any) => console.warn('[PG Error clearDispatchLogs]', e.message));
+      pgDeletedCount = await this.db.postgresRepo.clearDispatchLogs(isAdmin ? undefined : requestingUserId);
     }
 
     let memDeletedCount = 0;
@@ -809,7 +795,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remainingLogs = await this.db.getDispatchLogs(requestingUserId);
     this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
     return totalDeleted;
