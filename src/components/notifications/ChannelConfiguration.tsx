@@ -35,21 +35,21 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
   onSendTestMessage,
 }) => {
   // Config Form State
-  const [whatsappEnabled, setWhatsappEnabled] = useState(serviceConfig?.whatsapp?.enabled ?? true);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(serviceConfig?.whatsapp?.enabled ?? false);
   const [whatsappPhoneId, setWhatsappPhoneId] = useState(serviceConfig?.whatsapp?.phoneNumberId || '');
   const [whatsappToken, setWhatsappToken] = useState(serviceConfig?.whatsapp?.apiToken || '');
 
-  const [telegramEnabled, setTelegramEnabled] = useState(serviceConfig?.telegram?.enabled ?? true);
+  const [telegramEnabled, setTelegramEnabled] = useState(serviceConfig?.telegram?.enabled ?? false);
   const [telegramBotToken, setTelegramBotToken] = useState(serviceConfig?.telegram?.botToken || '');
   const [telegramBotUser, setTelegramBotUser] = useState(serviceConfig?.telegram?.botUsername || '');
 
-  const [emailEnabled, setEmailEnabled] = useState(serviceConfig?.email?.enabled ?? true);
-  const [emailFrom, setEmailFrom] = useState(serviceConfig?.email?.fromEmail || 'alarms@iotplatform.com');
+  const [emailEnabled, setEmailEnabled] = useState(serviceConfig?.email?.enabled ?? false);
+  const [emailFrom, setEmailFrom] = useState(serviceConfig?.email?.fromEmail || '');
 
-  const [smsEnabled, setSmsEnabled] = useState(serviceConfig?.sms?.enabled ?? true);
-  const [smsTitle, setSmsTitle] = useState(serviceConfig?.sms?.senderTitle || 'IOT_ALARM');
+  const [smsEnabled, setSmsEnabled] = useState(serviceConfig?.sms?.enabled ?? false);
+  const [smsTitle, setSmsTitle] = useState(serviceConfig?.sms?.senderTitle || '');
 
-  const [webhookEnabled, setWebhookEnabled] = useState(serviceConfig?.webhook?.enabled ?? true);
+  const [webhookEnabled, setWebhookEnabled] = useState(serviceConfig?.webhook?.enabled ?? false);
   const [webhookEndpoint, setWebhookEndpoint] = useState(serviceConfig?.webhook?.defaultEndpoint || '');
   const [webhookSecretHeader, setWebhookSecretHeader] = useState(serviceConfig?.webhook?.secretHeader || '');
 
