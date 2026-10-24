@@ -29,6 +29,46 @@ export interface TelemetryPacket {
   lastAttemptAt?: string;
 }
 
+function getQuietHoursResumeAt(user: any, now = new Date()): string | undefined {
+  const quietHours = user?.preferences?.quietHours;
+  if (!quietHours?.enabled) return undefined;
+
+  const parseTime = (value: unknown): number | null => {
+    if (typeof value !== 'string' || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+    const [hour, minute] = value.split(':').map(Number);
+    return hour * 60 + minute;
+  };
+
+  const start = parseTime(quietHours.start);
+  const end = parseTime(quietHours.end);
+  if (start === null || end === null || start === end) return undefined;
+
+  let localNow: number;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: user?.timezone || 'Europe/Istanbul',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return undefined;
+    localNow = hour * 60 + minute;
+  } catch {
+    return undefined;
+  }
+
+  const isQuiet = start < end
+    ? localNow >= start && localNow < end
+    : localNow >= start || localNow < end;
+  if (!isQuiet) return undefined;
+
+  let minutesUntilEnd = (end - localNow + 1440) % 1440;
+  if (minutesUntilEnd === 0) minutesUntilEnd = 1440;
+  return new Date(now.getTime() + minutesUntilEnd * 60_000).toISOString();
+}
+
 export class TelemetryRepository {
   private physicalQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'physical-telemetry.ndjson');
   private simulationQueueFilePath = path.join(process.cwd(), 'data', 'wal', 'simulation-telemetry.ndjson');
@@ -1870,9 +1910,14 @@ export class TelemetryRepository {
     }
 
     const user = (this.db.data.users || []).find((u: any) => u.id === alarm.tenantId);
+    const alertPreferences = user?.preferences?.alertThresholdLevels;
+    if (alarm.severity === 'critical' && alertPreferences?.critical === false) return;
+    if (alarm.severity === 'warning' && alertPreferences?.warning === false) return;
+    const quietHoursResumeAt = getQuietHoursResumeAt(user);
 
     for (const channel of rule.notificationChannels) {
       if (channel === 'app') continue; // In-panel feed handles app notifications
+      if (user?.notificationPreferences?.[channel] === false) continue;
 
       const recipientsSet = new Set<string>();
 
@@ -1923,6 +1968,7 @@ export class TelemetryRepository {
           status: 'pending',
           attempts: 0,
           maxAttempts: 3,
+          nextRetryAt: quietHoursResumeAt,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
