@@ -20,6 +20,7 @@ describe('System logger persistence across restarts', () => {
       inMemoryEvents: loggerInternals.inMemoryEvents,
       pendingFileWrites: loggerInternals.pendingFileWrites,
       flushTimeout: loggerInternals.flushTimeout,
+      maxInMemoryEvents: loggerInternals.maxInMemoryEvents,
     };
     if (loggerInternals.flushTimeout) clearTimeout(loggerInternals.flushTimeout);
     loggerInternals.flushTimeout = null;
@@ -69,6 +70,30 @@ describe('System logger persistence across restarts', () => {
       'newest',
       'middle',
       'oldest',
+    ]);
+  });
+
+  it('does not let a stale snapshot crowd out newer active-file records', () => {
+    const staleA = event('stale-a', '2026-10-01T10:00:00.000Z', 'stale snapshot A');
+    const staleB = event('stale-b', '2026-10-02T10:00:00.000Z', 'stale snapshot B');
+    const activeA = event('active-a', '2026-10-22T10:00:00.000Z', 'active A');
+    const activeB = event('active-b', '2026-10-23T10:00:00.000Z', 'active B');
+    const activeC = event('active-c', '2026-10-24T10:00:00.000Z', 'active C');
+
+    loggerInternals.maxInMemoryEvents = 3;
+    fs.writeFileSync(loggerInternals.jsonBackupPath, JSON.stringify([staleB, staleA]), 'utf-8');
+    fs.writeFileSync(
+      loggerInternals.logFilePath,
+      [activeA, activeB, activeC].map((item) => JSON.stringify(item)).join('\\n') + '\\n',
+      'utf-8',
+    );
+
+    loggerInternals.loadPersistedEvents();
+
+    expect(loggerInternals.inMemoryEvents.map((item: SystemEvent) => item.id)).toEqual([
+      'active-c',
+      'active-b',
+      'active-a',
     ]);
   });
 
