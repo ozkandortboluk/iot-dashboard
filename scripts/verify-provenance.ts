@@ -4,6 +4,9 @@ import child_process from 'node:child_process';
 import crypto from 'node:crypto';
 import esbuild from 'esbuild';
 import os from 'node:os';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 import {
   ALL_MIGRATIONS,
   CANONICAL_MIGRATION_MANIFEST,
