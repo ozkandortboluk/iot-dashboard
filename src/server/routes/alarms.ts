@@ -574,8 +574,12 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
   const currentUser = authReq.user!;
   const { channel, recipient, title, message } = req.body;
 
-  if (!channel || !recipient) {
-    return res.status(400).json({ error: 'Kanal ve alıcı adresi zorunludur.' });
+  const allowedChannels = new Set(['email', 'sms', 'whatsapp', 'telegram', 'webhook']);
+  if (typeof channel !== 'string' || !allowedChannels.has(channel) || typeof recipient !== 'string' || !recipient.trim()) {
+    return res.status(400).json({ error: 'Geçerli bir dış bildirim kanalı ve alıcı adresi zorunludur.' });
+  }
+  if (recipient.length > 512 || (title !== undefined && (typeof title !== 'string' || title.length > 160)) || (message !== undefined && (typeof message !== 'string' || message.length > 4000))) {
+    return res.status(400).json({ error: 'Test bildirimi alanları izin verilen uzunluk sınırlarını aşıyor.' });
   }
 
   // Rate Limiting (Max 3 requests per minute)
@@ -599,7 +603,7 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
   }
 
   // Role Based Recipient Restriction
-  if (currentUser.role !== 'admin') {
+  if (!['admin', 'superadmin'].includes(String(currentUser.role || '').toLowerCase())) {
     let allowed = false;
     const recStr = String(recipient).trim().toLowerCase();
 
@@ -640,7 +644,7 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
       message || 'Bu bir IoT platformu test iletisidir.',
       { id: currentUser.id, name: currentUser.name }
     );
-    res.json(dispatchResult);
+    res.status(dispatchResult?.result?.success === true ? 200 : 502).json(dispatchResult);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Test gönderimi yapılamadı.' });
   }
