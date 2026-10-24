@@ -2086,7 +2086,7 @@ export class PostgresRepository {
   // ==========================================
   // NOTIFICATIONS
   // ==========================================
-  public async saveNotification(n: NotificationItem): Promise<void> {
+  public async saveNotification(n: NotificationItem): Promise<boolean> {
     if (!this.pool || !this.isConnected) {
       throw new Error('[PostgreSQL] Veritabanı bağlantısı aktif veya hazır değil');
     }
@@ -2136,10 +2136,11 @@ export class PostgresRepository {
         n.eventKey || null,
         n.timestamp || new Date().toISOString(),
       ]);
+      return true;
     } catch (err: any) {
       if (err?.code === '23505' && n.eventKey) {
-        // Unique constraint violation on event_key across cluster instances: safely ignore duplicate insert
-        return;
+        // Another worker already inserted this event; caller can load the canonical row.
+        return false;
       }
       throw err;
     }
