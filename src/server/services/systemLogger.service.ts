@@ -589,6 +589,8 @@ class SystemLoggerService {
       this.pendingFileWrites.splice(0, queuedBatch.length);
     } catch (err) {
       console.warn('[SystemLogger] Dosyaya yazılamadı; kuyruk yeniden denemek üzere korundu:', err);
+      this.flushTimeout = setTimeout(() => this.flushPendingWrites(), 1000);
+      this.flushTimeout.unref?.();
       return;
     }
 
