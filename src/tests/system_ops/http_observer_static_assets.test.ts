@@ -45,7 +45,7 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
 
         const logDetails = {
           method: req.method,
-          url: req.originalUrl,
+          url: req.path,
           statusCode: res.statusCode,
           ip: clientIp,
           durationMs: duration,
@@ -57,22 +57,26 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
         if (res.statusCode >= 500) {
           systemLogger.error(
             'http',
-            `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+            `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
             logDetails,
             'express_http_observer'
           );
         } else if (res.statusCode >= 400) {
           systemLogger.warn(
             'http',
-            `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+            `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
             logDetails,
             'express_http_observer'
           );
         } else {
-          if (!isHealthProbe || duration > 500) {
+          const isStateChangingMethod = !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
+          const shouldLogSuccessfulRequest = isHealthProbe
+            ? duration > 500
+            : (isStateChangingMethod || duration > 1000);
+          if (shouldLogSuccessfulRequest) {
             systemLogger.info(
               'http',
-              `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
+              `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
               logDetails,
               'express_http_observer'
             );
@@ -154,24 +158,31 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
     );
   });
 
-  it('6. normal API 200 response: systemLogger.info IS called normally', async () => {
-    await request(app).get('/api/devices');
-    expect(infoSpy).toHaveBeenCalledWith(
-      'http',
-      expect.stringContaining('[HTTP 200] GET /api/devices'),
-      expect.objectContaining({ statusCode: 200 }),
-      'express_http_observer'
-    );
+  it('6. routine successful API GET is suppressed to reduce log volume', async () => {
+    await request(app).get('/api/devices?token=must-not-be-logged');
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 
-  it('7. root / 200 response: systemLogger is NOT called to keep logs clean and free of ping spam', async () => {
+  it('7. successful state-changing requests are logged without query strings', async () => {
+    app.post('/api/devices', (_req, res) => res.status(201).json({ ok: true }));
+    await request(app).post('/api/devices?token=must-not-be-logged');
+    expect(infoSpy).toHaveBeenCalledWith(
+      'http',
+      expect.stringContaining('[HTTP 201] POST /api/devices'),
+      expect.objectContaining({ statusCode: 201, url: '/api/devices' }),
+      'express_http_observer'
+    );
+    expect(infoSpy.mock.calls[0][1]).not.toContain('must-not-be-logged');
+  });
+
+  it('8. root / 200 response: systemLogger is NOT called to keep logs clean and free of ping spam', async () => {
     await request(app).get('/');
     expect(infoSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('8. vite client and source files: systemLogger is NOT called for 200 responses', async () => {
+  it('9. vite client and source files: systemLogger is NOT called for 200 responses', async () => {
     app.get('/@vite/client', (_req, res) => res.status(200).send('// vite'));
     app.get('/src/App.tsx', (_req, res) => res.status(200).send('export default () => null'));
 
