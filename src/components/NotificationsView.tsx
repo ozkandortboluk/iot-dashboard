@@ -178,7 +178,7 @@ export const NotificationsView: React.FC = () => {
   }, [user, selectedCustomerForAdmin]);
 
   const fetchServiceConfig = useCallback(async () => {
-    if (user?.role !== 'admin') return;
+    if (user?.role !== 'admin' && user?.role !== 'superadmin') return;
     setIsServicesLoading(true);
     try {
       const res = await fetch('/api/notification-services');
@@ -766,7 +766,7 @@ export const NotificationsView: React.FC = () => {
           <span>Teslimat Geçmişi</span>
         </button>
 
-        {user?.role === 'admin' && (
+        {(user?.role === 'admin' || user?.role === 'superadmin') && (
           <button
             onClick={() => setActiveTab('channels')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
@@ -874,7 +874,7 @@ export const NotificationsView: React.FC = () => {
         />
       )}
 
-      {activeTab === 'channels' && user?.role === 'admin' && (
+      {activeTab === 'channels' && (user?.role === 'admin' || user?.role === 'superadmin') && (
         <ChannelConfiguration
           serviceConfig={serviceConfig}
           loadingAction={loadingAction}
