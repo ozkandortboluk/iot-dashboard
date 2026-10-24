@@ -62,35 +62,30 @@ export class NotificationRepository {
     return fullNotif;
   }
 
-  public async markNotificationRead(id: string, userId = 'usr_admin') {
+  public async markNotificationRead(id: string, userId = 'usr_admin'): Promise<boolean> {
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === userId);
     const role = String(reqUser?.role || '').toLowerCase();
     const isAdmin = role === 'admin' || role === 'superadmin' || userId === 'usr_admin';
 
-    if (!this.db.data.notifications) this.db.data.notifications = [];
-    const notif = this.db.data.notifications.find((n: any) => n.id === id);
-    if (notif) {
-      if (!isAdmin && notif.tenantId !== userId && (notif as any).userId !== userId) {
-        return; // Forbidden: Customer cannot mark another user's private notification
-      }
-      notif.read = true;
-      try {
-        this.db.scheduleSave();
-      } catch {}
-    }
-
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.markNotificationRead(id, userId, isAdmin).catch((e: any) => console.warn('[PG Error markNotificationRead]', e.message));
+      const updated = await this.db.postgresRepo.markNotificationRead(id, userId, isAdmin);
+      if (!updated) return false;
+      const cached = (this.db.data.notifications || []).find((n: any) => n.id === id);
+      if (cached && (isAdmin || cached.tenantId === userId || cached.userId === userId)) cached.read = true;
+    } else {
+      if (!this.db.data.notifications) this.db.data.notifications = [];
+      const notif = this.db.data.notifications.find((n: any) => n.id === id);
+      if (!notif) return false;
+      if (!isAdmin && notif.tenantId !== userId && notif.userId !== userId) return false;
+      notif.read = true;
+      this.db.scheduleSave();
     }
 
-    try {
-      const remaining = await this.db.getNotifications(userId);
-      if (typeof this.db.notifyNotificationListeners === 'function') {
-        this.db.notifyNotificationListeners('notifications:updated', remaining);
-      }
-    } catch (broadcastErr: any) {
-      console.warn('[Broadcast Error markNotificationRead]', broadcastErr?.message);
+    const remaining = await this.db.getNotifications(userId);
+    if (typeof this.db.notifyNotificationListeners === 'function') {
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
     }
+    return true;
   }
 
   public async markAllNotificationsRead(userId = 'usr_admin') {
