@@ -556,7 +556,10 @@ export function broadcast(event: string, payload: unknown) {
         const rows = Array.isArray(payload) ? payload : (Array.isArray((payload as any)?.data) ? (payload as any).data : null);
         if (rows) {
           const scopedRows = rows.filter((row: any) => row?.tenantId === clientUser.id);
-          const scopedPayload = Array.isArray(payload) ? scopedRows : { ...payload, data: scopedRows, total: scopedRows.length };
+          const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? payload as Record<string, unknown>
+            : {};
+          const scopedPayload = Array.isArray(payload) ? scopedRows : { ...payloadRecord, data: scopedRows, total: scopedRows.length };
           safeSend(client, JSON.stringify({ event, payload: scopedPayload, timestamp: new Date().toISOString() }));
         }
       }

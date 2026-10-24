@@ -3,6 +3,20 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.22] - 2026-10-24
+
+### 🧾 System Log Persistence
+- Preserve persisted and rotated system log history across restarts; retry failed appends without dropping queued events.
+- Redact HTTP query strings, apply configured log field filters, and reduce routine successful request noise.
+- Keep administrative clear events in the simplified log view and cover recovery and filtering behavior with regression tests.
+
+### 🔔 Notification Reliability
+- Make notification queue and dispatch persistence errors visible and keep queue/history UI state on load failures.
+- Enforce tenant scope in dispatch history and prevent concurrent queue processing within one application instance.
+- Make repeated deletion of an already absent notification idempotent while rejecting deletion of an existing notification outside the caller's scope.
+- Add notification delivery, queue, persistence, and access-control regression coverage.
+
+---
 ## 🚀 [v1.49.21] - 2026-10-24
 
 ### 🖥️ Sidebar Çift Sürüm Kartı & Proje Haritası (`Sidebar.tsx`, `PROJECT_MAP.md`)

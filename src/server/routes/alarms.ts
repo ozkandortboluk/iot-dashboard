@@ -4,6 +4,7 @@ import { broadcast } from '../services/websocket.js';
 import { alarmEngine } from '../services/alarmEngine.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { maskSecret } from '../utils/crypto.js';
+import type { NotificationChannel } from '../../types.js';
 
 const router = Router();
 
@@ -574,8 +575,8 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
   const currentUser = authReq.user!;
   const { channel, recipient, title, message } = req.body;
 
-  const allowedChannels = new Set(['email', 'sms', 'whatsapp', 'telegram', 'webhook']);
-  if (typeof channel !== 'string' || !allowedChannels.has(channel) || typeof recipient !== 'string' || !recipient.trim()) {
+  const allowedChannels = new Set<NotificationChannel>(['email', 'sms', 'whatsapp', 'telegram', 'webhook']);
+  if (typeof channel !== 'string' || !allowedChannels.has(channel as NotificationChannel) || typeof recipient !== 'string' || !recipient.trim()) {
     return res.status(400).json({ error: 'Geçerli bir dış bildirim kanalı ve alıcı adresi zorunludur.' });
   }
   if (recipient.length > 512 || (title !== undefined && (typeof title !== 'string' || title.length > 160)) || (message !== undefined && (typeof message !== 'string' || message.length > 4000))) {
@@ -638,7 +639,7 @@ notificationServicesRouter.post('/test', authenticateUser, async (req, res) => {
 
   try {
     const dispatchResult = await db.testChannelDispatch(
-      channel,
+      channel as NotificationChannel,
       recipient,
       title || 'Test Bildirimi',
       message || 'Bu bir IoT platformu test iletisidir.',
