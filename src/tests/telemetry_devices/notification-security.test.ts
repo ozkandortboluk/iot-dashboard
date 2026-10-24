@@ -187,9 +187,7 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
     });
 
     it('should not let a customer mark or delete shared notifications', async () => {
-      const sharedId = `security_shared_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const shared = await db.addNotification({
-        id: sharedId,
         title: 'Genel sistem bildirimi',
         message: 'Bu bildirim müşteri tarafından değiştirilememeli.',
         severity: 'info',
@@ -207,9 +205,7 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
     });
 
     it('should not mark shared notifications read when a customer clears their notifications', async () => {
-      const sharedId = `security_shared_clear_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const shared = await db.addNotification({
-        id: sharedId,
         title: 'Genel sistem bildirimi',
         message: 'Okundu durumu ortak kalmalı.',
         severity: 'info',
@@ -221,9 +217,7 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
     });
 
     it('should preserve shared notifications when a customer clears all notifications', async () => {
-      const sharedId = `security_shared_delete_all_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const shared = await db.addNotification({
-        id: sharedId,
         title: 'Genel sistem bildirimi',
         message: 'Müşteri genel bildirimi topluca silememeli.',
         severity: 'info',
