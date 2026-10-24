@@ -499,8 +499,15 @@ app.use((req, res, next) => {
         'express_http_observer'
       );
     } else {
-      // 2xx and 3xx responses (Skip silent health probes unless slow > 500ms)
-      if (!isHealthProbe || duration > 500) {
+      // Routine successful GET/HEAD/OPTIONS traffic is high-volume and usually
+      // not actionable. Keep successful mutations and slow requests; health
+      // probes use a lower threshold so readiness regressions remain visible.
+      const isStateChangingMethod = !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
+      const shouldLogSuccessfulRequest = isHealthProbe
+        ? duration > 500
+        : (isStateChangingMethod || duration > 1000);
+
+      if (shouldLogSuccessfulRequest) {
         systemLogger.info(
           'http',
           `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
