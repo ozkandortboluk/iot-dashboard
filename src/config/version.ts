@@ -1,7 +1,7 @@
 export const APP_NAME = "NexusNode IoT Cloud";
-export const APP_VERSION = "1.49.15";
-export const APP_RELEASE_TAG = "v1.49.15";
-export const RELEASE_DATE = "2026-10-23";
+export const APP_VERSION = "1.49.16";
+export const APP_RELEASE_TAG = "v1.49.16";
+export const RELEASE_DATE = "2026-10-24";
 
 // GitHub Referans ve Yayın Takip Bilgileri
 export const GITHUB_REPO = "ozkandortboluk/iot-dashboard";
