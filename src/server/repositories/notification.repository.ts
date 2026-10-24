@@ -9,12 +9,19 @@ export class NotificationRepository {
   public getNotifications(requestingUserId = 'usr_admin', targetCustomerId?: string): NotificationItem[] {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const reqUser = (this.db.data.users || []).find((u: any) => u.id === requestingUserId);
-    if (reqUser && reqUser.role === 'customer') {
-      // Customer ONLY sees notifications addressed specifically to their account
-      return this.db.data.notifications.filter((n: any) => n.tenantId === requestingUserId);
+    const role = String(reqUser?.role || '').toLowerCase();
+    const isPrivileged = role === 'admin' || role === 'superadmin' || requestingUserId === 'usr_admin';
+
+    if (!isPrivileged) {
+      // Fail closed: unknown and non-admin identities may only read their own tenant/user notifications.
+      return this.db.data.notifications.filter((n: any) =>
+        n.tenantId === requestingUserId || n.userId === requestingUserId
+      );
     }
-    if (reqUser && reqUser.role === 'admin' && targetCustomerId && targetCustomerId !== 'all') {
-      return this.db.data.notifications.filter((n: any) => n.tenantId === targetCustomerId);
+    if (targetCustomerId && targetCustomerId !== 'all') {
+      return this.db.data.notifications.filter((n: any) =>
+        n.tenantId === targetCustomerId || n.userId === targetCustomerId
+      );
     }
     return this.db.data.notifications;
   }
@@ -93,31 +100,27 @@ export class NotificationRepository {
     const role = String(reqUser?.role || '').toLowerCase();
     const isAdmin = role === 'admin' || role === 'superadmin' || userId === 'usr_admin';
 
-    if (!this.db.data.notifications) this.db.data.notifications = [];
-    let updated = false;
-    this.db.data.notifications.forEach((n: any) => {
-      if (!n.read && (isAdmin || n.tenantId === userId || (n as any).userId === userId)) {
-        n.read = true;
-        updated = true;
-      }
-    });
-    if (updated) {
-      try {
-        this.db.scheduleSave();
-      } catch {}
-    }
-
     if (this.db.postgresRepo?.isReady()) {
-      await this.db.postgresRepo.markAllNotificationsRead(isAdmin ? undefined : userId).catch((e: any) => console.warn('[PG Error markAllNotificationsRead]', e.message));
+      await this.db.postgresRepo.markAllNotificationsRead(isAdmin ? undefined : userId);
+      const cached = this.db.data.notifications || [];
+      cached.forEach((n: any) => {
+        if (isAdmin || n.tenantId === userId || n.userId === userId) n.read = true;
+      });
+    } else {
+      if (!this.db.data.notifications) this.db.data.notifications = [];
+      let updated = false;
+      this.db.data.notifications.forEach((n: any) => {
+        if (!n.read && (isAdmin || n.tenantId === userId || n.userId === userId)) {
+          n.read = true;
+          updated = true;
+        }
+      });
+      if (updated) this.db.scheduleSave();
     }
 
-    try {
-      const remaining = await this.db.getNotifications(userId);
-      if (typeof this.db.notifyNotificationListeners === 'function') {
-        this.db.notifyNotificationListeners('notifications:updated', remaining);
-      }
-    } catch (broadcastErr: any) {
-      console.warn('[Broadcast Error markAllNotificationsRead]', broadcastErr?.message);
+    const remaining = await this.db.getNotifications(userId);
+    if (typeof this.db.notifyNotificationListeners === 'function') {
+      this.db.notifyNotificationListeners('notifications:updated', remaining);
     }
   }
 
