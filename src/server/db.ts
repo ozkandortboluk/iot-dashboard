@@ -2826,7 +2826,17 @@ class LocalDatabase {
     return this.getServiceConfig(true);
   }
 
-  public async processQueue() {
+  private notificationQueueProcessing: Promise<void> | null = null;
+
+  public processQueue(): Promise<void> {
+    if (this.notificationQueueProcessing) return this.notificationQueueProcessing;
+    this.notificationQueueProcessing = this.runNotificationQueue().finally(() => {
+      this.notificationQueueProcessing = null;
+    });
+    return this.notificationQueueProcessing;
+  }
+
+  private async runNotificationQueue() {
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
 
