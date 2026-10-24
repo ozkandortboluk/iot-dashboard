@@ -19,6 +19,8 @@ class SystemLoggerService {
   private configFilePath = path.join(process.cwd(), 'data', 'system_logger_config.json');
   private flushTimeout: NodeJS.Timeout | null = null;
   private pendingFileWrites: string[] = [];
+  private lastSnapshotWriteAt = 0;
+  private readonly snapshotWriteIntervalMs = 5000;
   private logListeners: Set<(event: SystemEvent) => void> = new Set();
 
   private getResolvedLogDir(): string {
@@ -57,7 +59,8 @@ class SystemLoggerService {
     this.ensureDirectories();
     this.loadConfiguration();
     this.loadPersistedEvents();
-    this.simplifyExistingLogs();
+    // Do not simplify/rewrite persisted logs during startup. Startup must be read-only
+    // with respect to log history so rebuilds/restarts cannot erase historical events.
   }
 
   private ensureDirectories(): void {
@@ -159,42 +162,93 @@ class SystemLoggerService {
   }
 
   private loadPersistedEvents(): void {
+    const eventsById = new Map<string, SystemEvent>();
+
+    const isPersistableEvent = (value: unknown): value is SystemEvent => {
+      if (!value || typeof value !== 'object') return false;
+      const event = value as Partial<SystemEvent>;
+      return typeof event.id === 'string'
+        && event.id.length > 0
+        && typeof event.timestamp === 'string'
+        && Number.isFinite(Date.parse(event.timestamp))
+        && typeof event.message === 'string';
+    };
+
+    // The JSON snapshot is a cache, not the source of truth. A malformed snapshot
+    // must never prevent recovery from the append-only log and rotation backups.
     try {
-      const existingIds = new Set<string>();
       if (fs.existsSync(this.jsonBackupPath)) {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
-        const parsed = JSON.parse(raw);
+        const parsed: unknown = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          this.inMemoryEvents = parsed.slice(-this.maxInMemoryEvents);
-          for (const ev of this.inMemoryEvents) {
-            if (ev?.id) existingIds.add(ev.id);
+          for (const candidate of parsed.slice(0, this.maxInMemoryEvents)) {
+            if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
+              eventsById.set(candidate.id, candidate);
+            }
+          }
+        } else {
+          console.warn('[SystemLogger] JSON log snapshot is not an array; recovering from persisted log files.');
+        }
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] JSON log snapshot could not be loaded; recovering from persisted log files:', err);
+    }
+
+    // The active log is newest. Rotated files are scanned newest-first as a
+    // fallback so the memory cache can be rebuilt even when the active file is
+    // missing, truncated, or contains fewer than maxInMemoryEvents records.
+    const logFiles: string[] = [];
+    try {
+      if (fs.existsSync(this.logFilePath)) {
+        logFiles.push(this.logFilePath);
+      }
+      if (fs.existsSync(this.logDir)) {
+        const backups = fs.readdirSync(this.logDir)
+          .filter((name) => name.startsWith('system_events_') && name.endsWith('.log.bak'))
+          .map((name) => {
+            const fullPath = path.join(this.logDir, name);
+            let mtimeMs = 0;
+            try { mtimeMs = fs.statSync(fullPath).mtimeMs; } catch {}
+            return { fullPath, mtimeMs };
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        logFiles.push(...backups.map((backup) => backup.fullPath));
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] Persisted log files could not be listed:', err);
+    }
+
+    for (const filePath of logFiles) {
+      // Keep up to max entries from each source, then sort globally. Counting
+      // snapshot entries against this cap would let a stale snapshot crowd out
+      // newer records that are still present in the append-only files.
+      let recoveredFromFile = 0;
+      try {
+        const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (recoveredFromFile >= this.maxInMemoryEvents) break;
+          if (!lines[i].trim()) continue;
+          try {
+            const candidate: unknown = JSON.parse(lines[i]);
+            if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
+              eventsById.set(candidate.id, candidate);
+              recoveredFromFile++;
+            }
+          } catch {
+            // A partial/corrupt line must not discard otherwise valid history.
           }
         }
+      } catch (err) {
+        // Keep valid snapshot/file entries and continue with other recovery sources.
+        console.warn('[SystemLogger] Persisted log file could not be loaded:', filePath, err);
       }
-      // If inMemoryEvents has room and system_events.log exists, read missing lines from log file
-      if (this.inMemoryEvents.length < this.maxInMemoryEvents && fs.existsSync(this.logFilePath)) {
-        const raw = fs.readFileSync(this.logFilePath, 'utf-8');
-        const lines = raw.split('\n').filter(Boolean);
-        const parsed: SystemEvent[] = [];
-        for (let i = lines.length - 1; i >= 0; i--) {
-          try {
-            const item = JSON.parse(lines[i]);
-            if (item && item.id && !existingIds.has(item.id)) {
-              parsed.push(item);
-              existingIds.add(item.id);
-              if (this.inMemoryEvents.length + parsed.length >= this.maxInMemoryEvents) {
-                break;
-              }
-            }
-          } catch {}
-        }
-        if (parsed.length > 0) {
-          this.inMemoryEvents = [...this.inMemoryEvents, ...parsed].slice(0, this.maxInMemoryEvents);
-        }
-      }
-    } catch {
-      this.inMemoryEvents = [];
     }
+
+    // Snapshot and file entries can overlap or arrive from different recovery
+    // sources; normalize to newest-first ordering before serving pagination.
+    this.inMemoryEvents = [...eventsById.values()]
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, this.maxInMemoryEvents);
   }
 
   public isLoggingEnabled(): boolean {
@@ -396,7 +450,33 @@ class SystemLoggerService {
         if (typeof details.statusCode === 'number') statusCode = details.statusCode;
 
         try {
-          detailsString = JSON.stringify(details, null, 2);
+          // Apply the same field-selection policy inside the serialized details
+          // object; otherwise disabled top-level fields could still leak through
+          // a duplicated copy nested in details.
+          const detailPayload = { ...details };
+          if (!this.includedFields.stack) delete detailPayload.stack;
+          if (!this.includedFields.ip) delete detailPayload.ip;
+          if (!this.includedFields.user) {
+            delete detailPayload.userId;
+            delete detailPayload.user;
+            delete detailPayload.email;
+            delete detailPayload.username;
+          }
+          if (!this.includedFields.http) {
+            delete detailPayload.method;
+            delete detailPayload.url;
+            delete detailPayload.path;
+            delete detailPayload.statusCode;
+            delete detailPayload.userAgent;
+            delete detailPayload.durationMs;
+          }
+          if (!this.includedFields.traceId) delete detailPayload.traceId;
+          if (!this.includedFields.device) {
+            delete detailPayload.tenantId;
+            delete detailPayload.deviceId;
+            delete detailPayload.serialNumber;
+          }
+          detailsString = JSON.stringify(detailPayload, null, 2);
         } catch {
           detailsString = String(details);
         }
@@ -422,7 +502,7 @@ class SystemLoggerService {
     let finalMessage = cleanMessage;
     if (this.deduplication) {
       const now = Date.now();
-      const dedupKey = `${level}:${category}:${cleanMessage}`;
+      const dedupKey = `${level}:${category}:${source || 'system'}:${cleanMessage}`;
       const existing = this.recentMessageSignatures.get(dedupKey);
 
       if (existing && now - existing.lastLoggedAt < this.deduplicateWindowMs) {
@@ -456,23 +536,28 @@ class SystemLoggerService {
       }
     }
 
+    const fields = this.includedFields;
     const event: SystemEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
       level,
       category,
       message: finalMessage,
-      details: cleanDetails,
-      source: source || 'system',
-      stack: cleanStack,
-      method,
-      path: cleanPath,
-      ip,
-      userId,
-      statusCode,
-      traceId,
-      tenantId,
-      deviceId,
+      ...(fields.details && cleanDetails ? { details: cleanDetails } : {}),
+      ...(fields.source ? { source: source || 'system' } : {}),
+      ...(fields.stack && cleanStack ? { stack: cleanStack } : {}),
+      ...(fields.http ? {
+        ...(method ? { method } : {}),
+        ...(cleanPath ? { path: cleanPath } : {}),
+        ...(typeof statusCode === 'number' ? { statusCode } : {}),
+      } : {}),
+      ...(fields.ip && ip ? { ip } : {}),
+      ...(fields.user && userId ? { userId } : {}),
+      ...(fields.traceId && traceId ? { traceId } : {}),
+      ...(fields.device ? {
+        ...(tenantId ? { tenantId } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      } : {}),
     };
 
     // Circular memory buffer
@@ -481,9 +566,13 @@ class SystemLoggerService {
       this.inMemoryEvents.length = this.maxInMemoryEvents;
     }
 
-    // Structured console output - Route safely to stdout (console.log) to avoid triggering container supervisor false-positive alerts
-    const logPrefix = `[SystemLog][${level.toUpperCase()}][${category.toUpperCase()}]`;
-    console.log(`${logPrefix} ${cleanMessage}${source ? ` (${source})` : ''}`);
+    // Keep the Docker stdout stream useful: routine info events already live in
+    // the structured log file. Emit warnings and errors to stdout as an emergency
+    // operational channel without duplicating every info event into Docker logs.
+    if (level === 'warn' || level === 'error' || level === 'critical') {
+      const logPrefix = `[SystemLog][${level.toUpperCase()}][${category.toUpperCase()}]`;
+      console.log(`${logPrefix} ${cleanMessage}${source ? ` (${source})` : ''}`);
+    }
 
     // Schedule async file persistence if enabled
     if (this.logToFile) {
@@ -530,16 +619,33 @@ class SystemLoggerService {
     this.flushTimeout = null;
     if (this.pendingFileWrites.length === 0) return;
 
-    const linesToWrite = this.pendingFileWrites.join('\n') + '\n';
-    this.pendingFileWrites = [];
+    // Do not clear the queue before append succeeds: an I/O/permission/volume
+    // error must leave the batch available for a later retry or graceful flush.
+    const queuedBatch = [...this.pendingFileWrites];
+    const linesToWrite = queuedBatch.join('\n') + '\n';
 
     try {
       this.rotateLogFileIfNeeded();
       fs.appendFileSync(this.logFilePath, linesToWrite, 'utf-8');
-      // Save recent 200 events to data/system_events.json for fast reload
-      fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
+      this.pendingFileWrites.splice(0, queuedBatch.length);
     } catch (err) {
-      console.warn('[SystemLogger] Dosyaya yazılamadı:', err);
+      console.warn('[SystemLogger] Dosyaya yazılamadı; kuyruk yeniden denemek üzere korundu:', err);
+      this.flushTimeout = setTimeout(() => this.flushPendingWrites(), 1000);
+      this.flushTimeout.unref?.();
+      return;
+    }
+
+    // The append-only log is authoritative. Refresh the convenience snapshot
+    // at most once every 5 seconds to avoid rewriting the same JSON cache for
+    // every small batch. Recovery always falls back to the log files.
+    const now = Date.now();
+    if (now - this.lastSnapshotWriteAt >= this.snapshotWriteIntervalMs) {
+      try {
+        fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
+        this.lastSnapshotWriteAt = now;
+      } catch (err) {
+        console.warn('[SystemLogger] JSON log snapshot yazılamadı; ana log dosyası korundu:', err);
+      }
     }
   }
 
@@ -656,8 +762,14 @@ class SystemLoggerService {
   }
 
   public clearEvents(): void {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
     this.inMemoryEvents = [];
     this.pendingFileWrites = [];
+    this.recentMessageSignatures.clear();
+
     try {
       if (fs.existsSync(this.jsonBackupPath)) {
         fs.writeFileSync(this.jsonBackupPath, '[]', 'utf-8');
@@ -665,15 +777,26 @@ class SystemLoggerService {
       if (fs.existsSync(this.logFilePath)) {
         fs.writeFileSync(this.logFilePath, '', 'utf-8');
       }
+      // Explicit admin clear means all retained history, including rotations.
+      // Otherwise old backups would be reloaded and appear to resurrect logs.
+      if (fs.existsSync(this.logDir)) {
+        for (const name of fs.readdirSync(this.logDir)) {
+          if (name.startsWith('system_events_') && name.endsWith('.log.bak')) {
+            fs.unlinkSync(path.join(this.logDir, name));
+          }
+        }
+      }
     } catch (err) {
       console.warn('[SystemLogger] Log temizlenirken hata oluştu:', err);
     }
+
     this.logDirect('info', 'server', 'Sistem olay günlükleri yönetici tarafından temizlendi.', undefined, 'admin_action');
   }
 
   /**
-   * Cleans up redundant, spammy, and fluttering entries from stored logs.
-   * Keeps critical milestones, real error messages, warnings, and unique notifications intact.
+   * Simplifies the bounded in-memory event list for the current runtime only.
+   * The append-only log and rotation backups are historical records and must never
+   * be rewritten from this bounded cache, otherwise older events would be lost.
    */
   public simplifyExistingLogs(): { removedCount: number; remainingCount: number } {
     const beforeCount = this.inMemoryEvents.length;
@@ -752,18 +875,9 @@ class SystemLoggerService {
     this.inMemoryEvents = [...simplified].reverse();
     const removedCount = beforeCount - this.inMemoryEvents.length;
 
-    // Write back simplified logs to file and json backup
-    try {
-      if (fs.existsSync(this.logFilePath)) {
-        const fileContent = simplified.map((e) => JSON.stringify(e)).join('\n') + (simplified.length > 0 ? '\n' : '');
-        fs.writeFileSync(this.logFilePath, fileContent, 'utf-8');
-      }
-      if (fs.existsSync(this.jsonBackupPath)) {
-        fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
-      }
-    } catch (err) {
-      console.warn('[SystemLogger] Log dosyaları sadeleştirilirken hata oluştu:', err);
-    }
+    // This is an in-memory presentation cleanup only. Never rewrite the
+    // append-only source log from a bounded RAM buffer: doing so would delete
+    // older history and rotated records. Explicit archival/retention is separate.
 
     return {
       removedCount,

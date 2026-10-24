@@ -337,6 +337,90 @@ app.use((req, res, next) => {
   next();
 });
 
+// Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    // Avoid circular logger loops, successful static asset noise, or excessive health probe noise unless error
+    const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
+    const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
+    const isStaticAsset =
+      req.path === '/' ||
+      req.path === '/index.html' ||
+      req.path === '/favicon.svg' ||
+      req.path === '/favicon.ico' ||
+      req.path === '/site.webmanifest' ||
+      req.path.startsWith('/assets/') ||
+      req.path.startsWith('/public/') ||
+      req.path.startsWith('/src/') ||
+      req.path.startsWith('/@') ||
+      req.path.startsWith('/node_modules/') ||
+      /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
+
+    if (isSystemLogPath) return;
+    if (isStaticAsset && res.statusCode < 400) return;
+
+    // Suppress external automated crawler/bot vulnerability scanner 404 noise (WordPress probes, PHP scripts, env dumps)
+    const isVulnerabilityScannerProbe =
+      res.statusCode === 404 &&
+      /(\b(wp-|wp\/|wlwmanifest|xmlrpc|\.php|phpmyadmin|pma|adminer|cgi-bin|setup\.cgi|\.env|\.git|actuator|telescope|solr|autodiscover|HNAP1|boaform)\b|\/\/(sito|cms|site|wp|media|shop|blog|news|web|website|wordpress|test|\d{4})\/)/i.test(
+        req.originalUrl || req.path
+      );
+    if (isVulnerabilityScannerProbe) return;
+
+    const duration = Date.now() - start;
+    const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
+    const traceId = (req as any).traceId;
+    const userId = (req as any).user?.id || (req as any).userId;
+
+    const logDetails = {
+      method: req.method,
+      // Query strings may contain credentials or tokens; path is sufficient for request logs.
+      url: req.path,
+      statusCode: res.statusCode,
+      ip: clientIp,
+      durationMs: duration,
+      traceId,
+      userId,
+      userAgent: req.headers['user-agent'],
+    };
+
+    if (res.statusCode >= 500) {
+      systemLogger.error(
+        'http',
+        `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
+        logDetails,
+        'express_http_observer'
+      );
+    } else if (res.statusCode >= 400) {
+      systemLogger.warn(
+        'http',
+        `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
+        logDetails,
+        'express_http_observer'
+      );
+    } else {
+      // Routine successful GET/HEAD/OPTIONS traffic is high-volume and usually
+      // not actionable. Keep successful mutations and slow requests; health
+      // probes use a lower threshold so readiness regressions remain visible.
+      const isStateChangingMethod = !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
+      const shouldLogSuccessfulRequest = isHealthProbe
+        ? duration > 500
+        : (isStateChangingMethod || duration > 1000);
+
+      if (shouldLogSuccessfulRequest) {
+        systemLogger.info(
+          'http',
+          `[HTTP ${res.statusCode}] ${req.method} ${req.path} (${duration}ms)`,
+          logDetails,
+          'express_http_observer'
+        );
+      }
+    }
+  });
+  next();
+});
+
 // Global Health Check Endpoints (/health/live, /health/ready, /health)
 app.use(systemRouter);
 
@@ -436,82 +520,6 @@ app.use('/api/system/logs', systemLogsRouter);
 app.use('/api/server', serverStatusRouter);
 app.use('/api/server-status', serverStatusRouter);
 app.use('/api/system/secrets', secretsRouter);
-
-// Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    // Avoid circular logger loops, successful static asset noise, or excessive health probe noise unless error
-    const isSystemLogPath = req.path.startsWith('/api/system-logs') || req.path.startsWith('/api/system/logs');
-    const isHealthProbe = req.path === '/api/health/live' || req.path === '/api/health/ready' || req.path === '/health';
-    const isStaticAsset =
-      req.path === '/' ||
-      req.path === '/index.html' ||
-      req.path === '/favicon.svg' ||
-      req.path === '/favicon.ico' ||
-      req.path === '/site.webmanifest' ||
-      req.path.startsWith('/assets/') ||
-      req.path.startsWith('/public/') ||
-      req.path.startsWith('/src/') ||
-      req.path.startsWith('/@') ||
-      req.path.startsWith('/node_modules/') ||
-      /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
-
-    if (isSystemLogPath) return;
-    if (isStaticAsset && res.statusCode < 400) return;
-
-    // Suppress external automated crawler/bot vulnerability scanner 404 noise (WordPress probes, PHP scripts, env dumps)
-    const isVulnerabilityScannerProbe =
-      res.statusCode === 404 &&
-      /(\b(wp-|wp\/|wlwmanifest|xmlrpc|\.php|phpmyadmin|pma|adminer|cgi-bin|setup\.cgi|\.env|\.git|actuator|telescope|solr|autodiscover|HNAP1|boaform)\b|\/\/(sito|cms|site|wp|media|shop|blog|news|web|website|wordpress|test|\d{4})\/)/i.test(
-        req.originalUrl || req.path
-      );
-    if (isVulnerabilityScannerProbe) return;
-
-    const duration = Date.now() - start;
-    const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
-    const traceId = (req as any).traceId;
-    const userId = (req as any).user?.id || (req as any).userId;
-
-    const logDetails = {
-      method: req.method,
-      url: req.originalUrl,
-      statusCode: res.statusCode,
-      ip: clientIp,
-      durationMs: duration,
-      traceId,
-      userId,
-      userAgent: req.headers['user-agent'],
-    };
-
-    if (res.statusCode >= 500) {
-      systemLogger.error(
-        'http',
-        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-        logDetails,
-        'express_http_observer'
-      );
-    } else if (res.statusCode >= 400) {
-      systemLogger.warn(
-        'http',
-        `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-        logDetails,
-        'express_http_observer'
-      );
-    } else {
-      // 2xx and 3xx responses (Skip silent health probes unless slow > 500ms)
-      if (!isHealthProbe || duration > 500) {
-        systemLogger.info(
-          'http',
-          `[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl} (${duration}ms)`,
-          logDetails,
-          'express_http_observer'
-        );
-      }
-    }
-  });
-  next();
-});
 
 // API 404 Handler: Ensure non-existent /api routes return JSON error, not SPA index.html
 app.all('/api/*', (req, res) => {
