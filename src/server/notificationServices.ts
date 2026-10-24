@@ -101,7 +101,7 @@ export async function dispatchMessageToChannel(
         if (!data.ok) throw new Error(data.description || 'Telegram Bot API Hatası');
         return {
           success: true,
-          providerResponse: `Telegram Bot Mesajı İletildi -> ChatID ${chatId} (Msg ID: ${data.result?.message_id})`,
+          providerResponse: `Telegram API mesajı kabul etti (Message ID: ${data.result?.message_id ?? 'bilinmiyor'}). Teslimat durumu sağlayıcı webhook'u ile doğrulanmalıdır.`,
         };
       } else {
         throw new Error('Telegram Bot Token yapılandırılmamış. Simülasyon teslimat olarak raporlanmaz.');
