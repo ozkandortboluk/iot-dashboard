@@ -3,6 +3,13 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.16] - 2026-10-24
+
+### 🛡️ Provenance Doğrulama ve Windows Uyumluluğu (`verify-provenance.ts`, `migrationRunner.ts`)
+- `git show` için migration yolları Windows'ta da çalışacak şekilde ileri eğik çizgiye dönüştürüldü.
+- Migration 010, 015 ve 018'in aynı Git commit'ine bağlanan tarihsel artifact hash kayıtları gerçek commit içeriğiyle eşitlendi; Git tabanlı provenance kapısı tüm doğrulanmış kayıtları kontrol edebilir hale getirildi.
+
+---
 ## 🚀 [v1.49.15] - 2026-10-23
 
 ### 🔔 Bildirim Temizleme & Silme İşlemleri Hata İyileştirmesi ve Dayanıklılık Güçlendirmesi (`alarms.ts`, `alarm.repository.ts`, `notification.repository.ts`, `NotificationHistoryList.tsx`, `DatabaseDataView.tsx`)
