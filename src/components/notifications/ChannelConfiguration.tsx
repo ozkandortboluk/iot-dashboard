@@ -87,7 +87,7 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
         enabled: whatsappEnabled,
         phoneNumberId: whatsappPhoneId,
         apiToken: whatsappToken,
-        provider: whatsappToken ? 'cloud_api' : 'simulated',
+        provider: whatsappToken ? 'cloud_api' : (serviceConfig?.whatsapp?.provider || 'simulated'),
       },
       telegram: {
         enabled: telegramEnabled,
@@ -97,12 +97,12 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
       email: {
         enabled: emailEnabled,
         fromEmail: emailFrom,
-        provider: 'simulated',
+        provider: serviceConfig?.email?.provider || 'simulated',
       },
       sms: {
         enabled: smsEnabled,
         senderTitle: smsTitle,
-        provider: 'simulated',
+        provider: serviceConfig?.sms?.provider || 'simulated',
       },
       webhook: {
         enabled: webhookEnabled,
