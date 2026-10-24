@@ -832,7 +832,7 @@ export interface NotificationItem {
 
 export type NotificationChannel = 'app' | 'email' | 'sms' | 'webhook' | 'whatsapp' | 'telegram';
 
-export type NotificationQueueStatus = 'pending' | 'processing' | 'delivered' | 'failed' | 'retrying';
+export type NotificationQueueStatus = 'pending' | 'processing' | 'sent' | 'delivered' | 'failed' | 'retrying';
 
 export interface NotificationQueueItem {
   id: string;
@@ -866,7 +866,7 @@ export interface DispatchLogItem {
   title: string;
   message: string;
   severity: NotificationSeverity;
-  status: 'delivered' | 'failed';
+  status: 'sent' | 'delivered' | 'failed';
   attemptCount: number;
   providerResponse?: string;
   errorDetails?: string;
