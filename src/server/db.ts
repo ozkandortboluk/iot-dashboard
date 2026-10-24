@@ -2991,8 +2991,9 @@ class LocalDatabase {
       throw new Error('Kuyruk öğesi bulunamadı.');
     }
 
+    const role = String(currentUser.role || '').toLowerCase();
     if (
-      currentUser.role !== 'admin' &&
+      !['admin', 'superadmin'].includes(role) &&
       item.tenantId !== currentUser.id
     ) {
       throw new Error('Bu bildirime erişim yetkiniz yok.');
