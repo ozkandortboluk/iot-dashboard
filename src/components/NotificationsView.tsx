@@ -141,6 +141,7 @@ export const NotificationsView: React.FC = () => {
         queueUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(queueUrl);
+      if (!res.ok) throw new Error(`Bildirim kuyruğu alınamadı (HTTP ${res.status}).`);
       const data = await safeJson<any>(res, []);
       const list = Array.isArray(data) ? data : (data?.data || []);
       setQueueItems(list);
@@ -159,6 +160,7 @@ export const NotificationsView: React.FC = () => {
         logsUrl += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
       }
       const res = await fetch(logsUrl);
+      if (!res.ok) throw new Error(`İletim geçmişi alınamadı (HTTP ${res.status}).`);
       const data = await safeJson<any>(res, []);
       const list = Array.isArray(data) ? data : (data?.data || []);
       setDispatchLogs(list);
