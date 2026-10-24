@@ -160,60 +160,89 @@ class SystemLoggerService {
   }
 
   private loadPersistedEvents(): void {
-    const existingIds = new Set<string>();
+    const eventsById = new Map<string, SystemEvent>();
 
-    // The JSON snapshot is a fast-recovery cache, not the source of truth.
-    // If it is missing/corrupt, continue loading from the append-only log file.
+    const isPersistableEvent = (value: unknown): value is SystemEvent => {
+      if (!value || typeof value !== 'object') return false;
+      const event = value as Partial<SystemEvent>;
+      return typeof event.id === 'string'
+        && event.id.length > 0
+        && typeof event.timestamp === 'string'
+        && Number.isFinite(Date.parse(event.timestamp))
+        && typeof event.message === 'string';
+    };
+
+    // The JSON snapshot is a cache, not the source of truth. A malformed snapshot
+    // must never prevent recovery from the append-only log and rotation backups.
     try {
       if (fs.existsSync(this.jsonBackupPath)) {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
-        const parsed = JSON.parse(raw);
+        const parsed: unknown = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          // The JSON snapshot is written newest-first; retain its newest entries.
-          this.inMemoryEvents = parsed
-            .filter((ev): ev is SystemEvent => Boolean(ev && typeof ev.id === 'string'))
-            .slice(0, this.maxInMemoryEvents);
-          for (const ev of this.inMemoryEvents) {
-            if (ev?.id) existingIds.add(ev.id);
+          for (const candidate of parsed) {
+            if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
+              eventsById.set(candidate.id, candidate);
+            }
           }
         } else {
-          console.warn('[SystemLogger] JSON log snapshot is not an array; recovering from log file if available.');
+          console.warn('[SystemLogger] JSON log snapshot is not an array; recovering from persisted log files.');
         }
       }
     } catch (err) {
-      console.warn('[SystemLogger] JSON log snapshot could not be loaded; recovering from log file if available:', err);
-      this.inMemoryEvents = [];
-      existingIds.clear();
+      console.warn('[SystemLogger] JSON log snapshot could not be loaded; recovering from persisted log files:', err);
     }
 
+    // The active log is newest. Rotated files are scanned newest-first as a
+    // fallback so the memory cache can be rebuilt even when the active file is
+    // missing, truncated, or contains fewer than maxInMemoryEvents records.
+    const logFiles: string[] = [];
     try {
-      if (this.inMemoryEvents.length < this.maxInMemoryEvents && fs.existsSync(this.logFilePath)) {
-        const raw = fs.readFileSync(this.logFilePath, 'utf-8');
-        const lines = raw.split('\n').filter(Boolean);
-        const recovered: SystemEvent[] = [];
+      if (fs.existsSync(this.logFilePath)) {
+        logFiles.push(this.logFilePath);
+      }
+      if (fs.existsSync(this.logDir)) {
+        const backups = fs.readdirSync(this.logDir)
+          .filter((name) => name.startsWith('system_events_') && name.endsWith('.log.bak'))
+          .map((name) => {
+            const fullPath = path.join(this.logDir, name);
+            let mtimeMs = 0;
+            try { mtimeMs = fs.statSync(fullPath).mtimeMs; } catch {}
+            return { fullPath, mtimeMs };
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        logFiles.push(...backups.map((backup) => backup.fullPath));
+      }
+    } catch (err) {
+      console.warn('[SystemLogger] Persisted log files could not be listed:', err);
+    }
 
-        // Log file is append-only/chronological. Recover newest entries first.
+    for (const filePath of logFiles) {
+      if (eventsById.size >= this.maxInMemoryEvents) break;
+      try {
+        const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
         for (let i = lines.length - 1; i >= 0; i--) {
+          if (eventsById.size >= this.maxInMemoryEvents) break;
+          if (!lines[i].trim()) continue;
           try {
-            const item = JSON.parse(lines[i]) as SystemEvent;
-            if (item && typeof item.id === 'string' && !existingIds.has(item.id)) {
-              recovered.push(item);
-              existingIds.add(item.id);
-              if (this.inMemoryEvents.length + recovered.length >= this.maxInMemoryEvents) break;
+            const candidate: unknown = JSON.parse(lines[i]);
+            if (isPersistableEvent(candidate) && !eventsById.has(candidate.id)) {
+              eventsById.set(candidate.id, candidate);
             }
           } catch {
-            // Ignore an incomplete/corrupt individual line without discarding other history.
+            // A partial/corrupt line must not discard otherwise valid history.
           }
         }
-
-        if (recovered.length > 0) {
-          this.inMemoryEvents = [...this.inMemoryEvents, ...recovered].slice(0, this.maxInMemoryEvents);
-        }
+      } catch (err) {
+        // Keep valid snapshot/file entries and continue with other recovery sources.
+        console.warn('[SystemLogger] Persisted log file could not be loaded:', filePath, err);
       }
-    } catch (err) {
-      // Keep any valid JSON snapshot entries if the file cannot be read.
-      console.warn('[SystemLogger] Persisted log file could not be loaded:', err);
     }
+
+    // Snapshot and file entries can overlap or arrive from different recovery
+    // sources; normalize to newest-first ordering before serving pagination.
+    this.inMemoryEvents = [...eventsById.values()]
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, this.maxInMemoryEvents);
   }
 
   public isLoggingEnabled(): boolean {
@@ -549,16 +578,26 @@ class SystemLoggerService {
     this.flushTimeout = null;
     if (this.pendingFileWrites.length === 0) return;
 
-    const linesToWrite = this.pendingFileWrites.join('\n') + '\n';
-    this.pendingFileWrites = [];
+    // Do not clear the queue before append succeeds: an I/O/permission/volume
+    // error must leave the batch available for a later retry or graceful flush.
+    const queuedBatch = [...this.pendingFileWrites];
+    const linesToWrite = queuedBatch.join('\n') + '\n';
 
     try {
       this.rotateLogFileIfNeeded();
       fs.appendFileSync(this.logFilePath, linesToWrite, 'utf-8');
-      // Save recent 200 events to data/system_events.json for fast reload
+      this.pendingFileWrites.splice(0, queuedBatch.length);
+    } catch (err) {
+      console.warn('[SystemLogger] Dosyaya yazılamadı; kuyruk yeniden denemek üzere korundu:', err);
+      return;
+    }
+
+    // The append-only log is authoritative. A snapshot write failure must not
+    // re-queue already-appended lines (which would create duplicate records).
+    try {
       fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
     } catch (err) {
-      console.warn('[SystemLogger] Dosyaya yazılamadı:', err);
+      console.warn('[SystemLogger] JSON log snapshot yazılamadı; ana log dosyası korundu:', err);
     }
   }
 
@@ -771,18 +810,9 @@ class SystemLoggerService {
     this.inMemoryEvents = [...simplified].reverse();
     const removedCount = beforeCount - this.inMemoryEvents.length;
 
-    // Write back simplified logs to file and json backup
-    try {
-      if (fs.existsSync(this.logFilePath)) {
-        const fileContent = simplified.map((e) => JSON.stringify(e)).join('\n') + (simplified.length > 0 ? '\n' : '');
-        fs.writeFileSync(this.logFilePath, fileContent, 'utf-8');
-      }
-      if (fs.existsSync(this.jsonBackupPath)) {
-        fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
-      }
-    } catch (err) {
-      console.warn('[SystemLogger] Log dosyaları sadeleştirilirken hata oluştu:', err);
-    }
+    // This is an in-memory presentation cleanup only. Never rewrite the
+    // append-only source log from a bounded RAM buffer: doing so would delete
+    // older history and rotated records. Explicit archival/retention is separate.
 
     return {
       removedCount,
