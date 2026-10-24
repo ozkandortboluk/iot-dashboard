@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.17] - 2026-10-24
+
+### 🛡️ Yedekleme Hedefi Kurulum Kılavuzu Güvenliği (`ScheduledBackupsPanel.tsx`)
+- Kopyalanabilir yedek kurulum yönergesinden zorla disk biçimlendirme komutu kaldırıldı; aygıt inceleme ve doğrulama adımları eklendi.
+- Harici disk yolu ve root sahipliği teslim betikleriyle eşitlendi; sembolik bağlantı varsayımı kaldırıldı.
+- Ayrı blok diskin sıfır veri kaybı garantisi verdiği yönündeki ifade düzeltildi.
+
+---
 ## 🚀 [v1.49.16] - 2026-10-24
 
 ### 🛡️ Provenance Doğrulama ve Windows Uyumluluğu (`verify-provenance.ts`, `migrationRunner.ts`)
