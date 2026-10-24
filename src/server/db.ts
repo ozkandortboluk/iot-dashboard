@@ -2657,6 +2657,42 @@ class LocalDatabase {
       this.saveData(this.data);
     }
     const raw = this.data.serviceConfig;
+    let removedPlaceholderConfig = false;
+    if (raw.email?.fromEmail === 'alarms@iotplatform.com') {
+      raw.email.fromEmail = '';
+      raw.email.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.whatsapp?.phoneNumberId === '1029384756' || raw.whatsapp?.businessAccountId === 'act_987654321') {
+      raw.whatsapp.phoneNumberId = '';
+      raw.whatsapp.businessAccountId = '';
+      raw.whatsapp.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.telegram?.botUsername === '@IoTAlarmBot') {
+      raw.telegram.botUsername = '';
+      raw.telegram.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.sms?.senderTitle === 'IOT_ALARM') {
+      raw.sms.senderTitle = '';
+      raw.sms.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (raw.webhook?.defaultEndpoint === 'https://api.example.com/webhooks/iot-alerts' || raw.webhook?.secretHeader === 'sec_key_iot_123') {
+      raw.webhook.defaultEndpoint = '';
+      raw.webhook.secretHeader = '';
+      raw.webhook.enabled = false;
+      removedPlaceholderConfig = true;
+    }
+    if (removedPlaceholderConfig) {
+      this.saveData(this.data);
+      if (this.postgresRepo?.isReady()) {
+        this.postgresRepo.saveSystemSetting('service_config', raw).catch((err: any) => {
+          console.warn('[PostgreSQL] Placeholder bildirim ayarları temizlenemedi:', err?.message || err);
+        });
+      }
+    }
 
     const decryptVal = (val?: string) => {
       if (!val) return '';
