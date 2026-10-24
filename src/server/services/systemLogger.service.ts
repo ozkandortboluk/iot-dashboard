@@ -450,7 +450,33 @@ class SystemLoggerService {
         if (typeof details.statusCode === 'number') statusCode = details.statusCode;
 
         try {
-          detailsString = JSON.stringify(details, null, 2);
+          // Apply the same field-selection policy inside the serialized details
+          // object; otherwise disabled top-level fields could still leak through
+          // a duplicated copy nested in details.
+          const detailPayload = { ...details };
+          if (!this.includedFields.stack) delete detailPayload.stack;
+          if (!this.includedFields.ip) delete detailPayload.ip;
+          if (!this.includedFields.user) {
+            delete detailPayload.userId;
+            delete detailPayload.user;
+            delete detailPayload.email;
+            delete detailPayload.username;
+          }
+          if (!this.includedFields.http) {
+            delete detailPayload.method;
+            delete detailPayload.url;
+            delete detailPayload.path;
+            delete detailPayload.statusCode;
+            delete detailPayload.userAgent;
+            delete detailPayload.durationMs;
+          }
+          if (!this.includedFields.traceId) delete detailPayload.traceId;
+          if (!this.includedFields.device) {
+            delete detailPayload.tenantId;
+            delete detailPayload.deviceId;
+            delete detailPayload.serialNumber;
+          }
+          detailsString = JSON.stringify(detailPayload, null, 2);
         } catch {
           detailsString = String(details);
         }
