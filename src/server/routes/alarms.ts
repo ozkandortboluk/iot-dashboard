@@ -271,8 +271,8 @@ notificationsRouter.get('/', authenticateUser, async (req, res) => {
     const notifications = await db.getNotifications(targetUserId, isAdmin ? targetCustomerId : currentUser.id);
     res.json(notifications || []);
   } catch (err: any) {
-    console.warn('[GET /api/notifications error]', err?.message || err);
-    res.json([]);
+    console.error('[GET /api/notifications error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirimler yüklenemedi.' });
   }
 });
 
@@ -280,11 +280,12 @@ notificationsRouter.put('/:id/read', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    await db.markNotificationRead(req.params.id, currentUser.id);
+    const updated = await db.markNotificationRead(req.params.id, currentUser.id);
+    if (!updated) return res.status(404).json({ error: 'Bildirim bulunamadı veya bu işlem için yetkiniz yok.' });
     res.json({ success: true, message: 'Bildirim okundu olarak işaretlendi.' });
   } catch (err: any) {
-    console.warn('[PUT /api/notifications/:id/read error]', err?.message || err);
-    res.json({ success: true });
+    console.error('[PUT /api/notifications/:id/read error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirim okundu olarak işaretlenemedi.' });
   }
 });
 
@@ -292,11 +293,12 @@ notificationsRouter.delete('/:id', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    await db.alarmRepository.deleteNotification(req.params.id, currentUser);
+    const deleted = await db.alarmRepository.deleteNotification(req.params.id, currentUser);
+    if (!deleted) return res.status(404).json({ error: 'Bildirim bulunamadı veya bu işlem için yetkiniz yok.' });
     res.json({ success: true, message: 'Bildirim silindi.' });
   } catch (err: any) {
-    console.warn('[DELETE /api/notifications/:id error]', err?.message || err);
-    res.json({ success: true, message: 'Bildirim silindi.' });
+    console.error('[DELETE /api/notifications/:id error]', err?.message || err);
+    res.status(500).json({ error: 'Bildirim silinemedi.' });
   }
 });
 
