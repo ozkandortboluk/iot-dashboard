@@ -2830,10 +2830,11 @@ class LocalDatabase {
 
   public processQueue(): Promise<void> {
     if (this.notificationQueueProcessing) return this.notificationQueueProcessing;
-    this.notificationQueueProcessing = this.runNotificationQueue().finally(() => {
+    const processing = this.runNotificationQueue().finally(() => {
       this.notificationQueueProcessing = null;
     });
-    return this.notificationQueueProcessing;
+    this.notificationQueueProcessing = processing;
+    return processing;
   }
 
   private async runNotificationQueue() {
@@ -2883,7 +2884,7 @@ class LocalDatabase {
           sentAt: new Date().toISOString(),
         };
         this.data.dispatchLogs.unshift(logEntry);
-        this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+        this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
       } else {
         item.errorDetails = result.errorDetails;
 
@@ -2914,7 +2915,7 @@ class LocalDatabase {
           sentAt: new Date().toISOString(),
         };
         this.data.dispatchLogs.unshift(logEntry);
-        this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+        this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
       }
     }
 
@@ -3252,7 +3253,7 @@ class LocalDatabase {
 
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
     this.data.dispatchLogs.unshift(logEntry);
-    this.postgresRepo.saveDispatchLog(logEntry).catch(() => {});
+    this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => console.error('[Notification Dispatch] Geçmiş kaydı PostgreSQL içine yazılamadı:', err?.message || err));
     this.saveData(this.data);
 
     return { result, log: logEntry };
