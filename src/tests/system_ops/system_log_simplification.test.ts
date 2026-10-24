@@ -88,12 +88,15 @@ describe('System Log Simplification & Deduplication Test Suite', () => {
 
     const result = systemLogger.simplifyExistingLogs();
     expect(result.removedCount).toBe(3);
-    expect(result.remainingCount).toBe(2);
+    // clearEvents() keeps its administrative audit event in the in-memory
+    // list, in addition to the two application events below.
+    expect(result.remainingCount).toBe(3);
 
     const remaining = systemLogger.getEvents().events;
     expect(remaining.some(e => e.message.includes('/@vite/client'))).toBe(false);
     expect(remaining.some(e => e.message.includes('/src/main.tsx'))).toBe(false);
     expect(remaining.some(e => e.message.includes('Yönetici oturum açtı'))).toBe(true);
     expect(remaining.some(e => e.message.includes('Veritabanı sağlık uyarısı'))).toBe(true);
+    expect(remaining.some(e => e.message.includes('yönetici tarafından temizlendi'))).toBe(true);
   });
 });
