@@ -1,33 +1,39 @@
 import type { NotificationChannel, NotificationQueueItem, DispatchLogItem, NotificationServiceConfig } from '../types.js';
+import { emailService } from './services/email.service.js';
+
+function escapeHtml(value: string): string {
+  const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return value.replace(/[&<>\"']/g, (char) => entities[char] || char);
+}
 
 export const defaultNotificationConfig: NotificationServiceConfig = {
   email: {
-    enabled: true,
+    enabled: false,
     provider: 'simulated',
-    fromEmail: 'alarms@iotplatform.com',
-    fromName: 'IoT Akıllı Alarm Servisi',
+    fromEmail: '',
+    fromName: 'NexusNode IoT',
   },
   whatsapp: {
-    enabled: true,
+    enabled: false,
     provider: 'simulated',
-    phoneNumberId: '1029384756',
+    phoneNumberId: '',
     apiToken: '',
-    businessAccountId: 'act_987654321',
+    businessAccountId: '',
   },
   telegram: {
-    enabled: true,
+    enabled: false,
     botToken: '',
-    botUsername: '@IoTAlarmBot',
+    botUsername: '',
   },
   sms: {
-    enabled: true,
+    enabled: false,
     provider: 'simulated',
-    senderTitle: 'IOT_ALARM',
+    senderTitle: '',
   },
   webhook: {
-    enabled: true,
-    defaultEndpoint: 'https://api.example.com/webhooks/iot-alerts',
-    secretHeader: 'sec_key_iot_123',
+    enabled: false,
+    defaultEndpoint: '',
+    secretHeader: '',
   },
 };
 
@@ -67,17 +73,7 @@ export async function dispatchMessageToChannel(
           providerResponse: `WhatsApp Mesajı İletildi (ID: ${data.messages?.[0]?.id || 'WAMID_OK'})`,
         };
       } else {
-        const cleanNumber = item.recipient.replace(/[^0-9+]/g, '');
-        const simMessageId = `wamid.HBgL${Date.now()}${Math.random().toString(36).substring(2, 6)}`;
-        
-        if (cleanNumber.startsWith('+900')) {
-          throw new Error('WhatsApp Gateway Hatası: Alıcı numarası geçici olarak kapsama alanı dışında (HTTP 503)');
-        }
-
-        return {
-          success: true,
-          providerResponse: `[WhatsApp Gateway Simulated OK] Numaraya iletildi: ${cleanNumber} (Ref ID: ${simMessageId})`,
-        };
+        throw new Error('WhatsApp gerçek gönderim sağlayıcısı yapılandırılmamış. Simülasyon teslimat olarak raporlanmaz.');
       }
     }
 
@@ -108,28 +104,29 @@ export async function dispatchMessageToChannel(
           providerResponse: `Telegram Bot Mesajı İletildi -> ChatID ${chatId} (Msg ID: ${data.result?.message_id})`,
         };
       } else {
-        if (chatId === 'invalid_chat') {
-          throw new Error('Telegram API: Chat not found (Kullanıcı bot ile sohbet başlatmamış)');
-        }
-        return {
-          success: true,
-          providerResponse: `[Telegram Bot Simulated OK] Chat ID ${chatId} hesabına iletildi (MsgID: ${Math.floor(Math.random() * 89999 + 10000)})`,
-        };
+        throw new Error('Telegram Bot Token yapılandırılmamış. Simülasyon teslimat olarak raporlanmaz.');
       }
     }
 
     if (channel === 'email') {
-      if (!config.email.enabled) {
-        throw new Error('E-posta servisi devre dışı bırakılmış.');
+      if (!config.email.enabled) throw new Error('E-posta servisi devre dışı bırakılmış.');
+      if (!item.recipient || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(item.recipient.trim())) {
+        throw new Error('Geçersiz e-posta adresi.');
       }
-      if (!item.recipient || !item.recipient.includes('@')) {
-        throw new Error(`Geçersiz e-posta adresi: "${item.recipient}"`);
+      const emailConfig = emailService.getEmailConfig();
+      if (!emailConfig.isConfigured || emailConfig.provider === 'simulated') {
+        throw new Error('Gerçek e-posta sağlayıcısı yapılandırılmamış. Resend veya SMTP ayarlarını tamamlayın.');
       }
-
-      return {
-        success: true,
-        providerResponse: `[SMTP/Email Gateway OK] E-Posta gönderildi: ${item.recipient} (250 OK - ID: MSG_${Date.now()})`,
-      };
+      const result = await emailService.sendEmail({
+        to: item.recipient.trim(),
+        subject: item.title,
+        text: item.message,
+        html: `<div style=\"font-family:Arial,sans-serif;white-space:pre-wrap\">${escapeHtml(item.message)}</div>`,
+        dedupKey: item.id,
+        tenantId: item.tenantId,
+      });
+      if (!result.success || result.simulated) throw new Error(result.error || 'E-posta sağlayıcısı teslimatı doğrulamadı.');
+      return { success: true, providerResponse: `E-posta sağlayıcısı kabul etti (${result.provider}, ID: ${result.messageId || 'bilinmiyor'}).` };
     }
 
     if (channel === 'sms') {
@@ -140,10 +137,7 @@ export async function dispatchMessageToChannel(
         throw new Error(`Geçersiz SMS telefon numarası: "${item.recipient}"`);
       }
 
-      return {
-        success: true,
-        providerResponse: `[SMS Gateway OK] Başlıkla SMS İletildi: [${config.sms.senderTitle || 'IOT'}] -> ${item.recipient}`,
-      };
+      throw new Error('SMS sağlayıcısı gerçek gönderim için entegre edilmemiş. Mesaj teslim edilmiş olarak işaretlenmedi.');
     }
 
     if (channel === 'webhook') {
@@ -155,10 +149,7 @@ export async function dispatchMessageToChannel(
         throw new Error('Geçersiz Webhook URL adresi.');
       }
 
-      return {
-        success: true,
-        providerResponse: `[Webhook Dispatched OK] HTTP 200 OK -> ${targetUrl}`,
-      };
+      throw new Error('Webhook gönderimi henüz uygulanmamış; sahte HTTP 200 sonucu üretilmedi.');
     }
 
     if (channel === 'app') {
