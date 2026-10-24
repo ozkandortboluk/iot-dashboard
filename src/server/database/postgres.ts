@@ -3204,12 +3204,13 @@ export class PostgresRepository {
     if (!this.pool) return;
     const sql = `
       INSERT INTO dispatch_logs (
-        id, user_id, user_name, channel, recipient, title, message, severity, status, latency_ms, error_details, sent_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        id, tenant_id, user_id, user_name, channel, recipient, title, message, severity, status, latency_ms, error_details, sent_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (id) DO NOTHING;
     `;
     await this.query(sql, [
       log.id,
+      log.tenantId || null,
       log.tenantId || null,
       log.userName || null,
       log.channel,
@@ -3217,7 +3218,7 @@ export class PostgresRepository {
       log.title || null,
       log.message,
       log.severity || 'info',
-      log.status || 'delivered',
+      log.status || 'sent',
       log.latencyMs || 0,
       log.errorDetails || null,
       log.sentAt || new Date().toISOString(),
