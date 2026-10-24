@@ -84,7 +84,7 @@ describe('System logger persistence across restarts', () => {
     fs.writeFileSync(loggerInternals.jsonBackupPath, JSON.stringify([staleB, staleA]), 'utf-8');
     fs.writeFileSync(
       loggerInternals.logFilePath,
-      [activeA, activeB, activeC].map((item) => JSON.stringify(item)).join('\\n') + '\\n',
+      [activeA, activeB, activeC].map((item) => JSON.stringify(item)).join('\n') + '\n',
       'utf-8',
     );
 
