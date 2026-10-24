@@ -337,68 +337,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global Health Check Endpoints (/health/live, /health/ready, /health)
-app.use(systemRouter);
-
-// PostgreSQL Availability Guard
-// Critical Requirement: PostgreSQL/TimescaleDB is the single source of truth.
-// If PostgreSQL is not connected or in READY state, block non-setup API calls with 503.
-import { db } from './src/server/db.js';
-import { DatabaseState } from './src/types.js';
-import { isRealAdminUser } from './src/server/database/postgres.js';
-import { setupService } from './src/server/services/setup.service.js';
-
-app.use('/api', (req, res, next) => {
-  // Allow OPTIONS preflight
-  if (req.method === 'OPTIONS') {
-    return next();
-  }
-
-  // Allowed endpoints even when DB is not ready or during configuration
-  if (
-    req.path.startsWith('/setup') ||
-    req.path.startsWith('/auth/setup-status') ||
-    req.path.startsWith('/auth/complete-setup') ||
-    req.path.startsWith('/auth/verify-setup-token') ||
-    req.path.startsWith('/system/ssh-tunnel') ||
-    req.path.startsWith('/ssh-tunnel') ||
-    req.path === '/runtime' ||
-    req.path === '/system/status' ||
-    req.path.startsWith('/server') ||
-    req.path.startsWith('/health') ||
-    req.path.startsWith('/database') ||
-    req.path.startsWith('/system-logs')
-  ) {
-    return next();
-  }
-
-  const isProduction = process.env.NODE_ENV === 'production';
-  const dbState = db.getDatabaseState();
-  const isPgReady = Boolean(db.postgresRepo?.isReady());
-  const isStrictMaintenance = process.env.STRICT_MAINTENANCE_LOCK === 'true';
-
-  // Strict Fail-Closed Enforcement in Production:
-  // In production (or when strict maintenance lock is active), the system strictly requires PostgreSQL to be READY.
-  // In development mode, if PostgreSQL is ready it is authoritative; otherwise local engine facilitates dev preview.
-  const isSystemReady = (isProduction || isStrictMaintenance)
-    ? (isPgReady && dbState === DatabaseState.READY)
-    : true;
-
-  if (!isSystemReady) {
-    const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
-    return res.status(503).json({
-      success: false,
-      code: isMaintenance ? 'DB_MAINTENANCE' : 'DB_UNAVAILABLE',
-      state: dbState,
-      error: isMaintenance
-        ? 'NexusNode IoT PostgreSQL veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
-        : 'NexusNode IoT PostgreSQL veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
-      message: 'PostgreSQL veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı bağlantınızı kontrol edin veya kurulum sihirbazını tamamlayın.',
-    });
-  }
-  next();
-});
-
 // Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
 app.use((req, res, next) => {
   const start = Date.now();
@@ -480,6 +418,68 @@ app.use((req, res, next) => {
       }
     }
   });
+  next();
+});
+
+// Global Health Check Endpoints (/health/live, /health/ready, /health)
+app.use(systemRouter);
+
+// PostgreSQL Availability Guard
+// Critical Requirement: PostgreSQL/TimescaleDB is the single source of truth.
+// If PostgreSQL is not connected or in READY state, block non-setup API calls with 503.
+import { db } from './src/server/db.js';
+import { DatabaseState } from './src/types.js';
+import { isRealAdminUser } from './src/server/database/postgres.js';
+import { setupService } from './src/server/services/setup.service.js';
+
+app.use('/api', (req, res, next) => {
+  // Allow OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
+  // Allowed endpoints even when DB is not ready or during configuration
+  if (
+    req.path.startsWith('/setup') ||
+    req.path.startsWith('/auth/setup-status') ||
+    req.path.startsWith('/auth/complete-setup') ||
+    req.path.startsWith('/auth/verify-setup-token') ||
+    req.path.startsWith('/system/ssh-tunnel') ||
+    req.path.startsWith('/ssh-tunnel') ||
+    req.path === '/runtime' ||
+    req.path === '/system/status' ||
+    req.path.startsWith('/server') ||
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/database') ||
+    req.path.startsWith('/system-logs')
+  ) {
+    return next();
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  const dbState = db.getDatabaseState();
+  const isPgReady = Boolean(db.postgresRepo?.isReady());
+  const isStrictMaintenance = process.env.STRICT_MAINTENANCE_LOCK === 'true';
+
+  // Strict Fail-Closed Enforcement in Production:
+  // In production (or when strict maintenance lock is active), the system strictly requires PostgreSQL to be READY.
+  // In development mode, if PostgreSQL is ready it is authoritative; otherwise local engine facilitates dev preview.
+  const isSystemReady = (isProduction || isStrictMaintenance)
+    ? (isPgReady && dbState === DatabaseState.READY)
+    : true;
+
+  if (!isSystemReady) {
+    const isMaintenance = dbState === DatabaseState.MAINTENANCE || dbState === DatabaseState.DB_UNAVAILABLE;
+    return res.status(503).json({
+      success: false,
+      code: isMaintenance ? 'DB_MAINTENANCE' : 'DB_UNAVAILABLE',
+      state: dbState,
+      error: isMaintenance
+        ? 'NexusNode IoT PostgreSQL veritabanı bağlantısı kurulamadı veya sistem bakım modunda.'
+        : 'NexusNode IoT PostgreSQL veritabanı bağlantısı henüz hazır değil veya kurulum tamamlanmadı.',
+      message: 'PostgreSQL veritabanı hazır olmadığı için bu işlem gerçekleştirilemiyor. Lütfen veritabanı bağlantınızı kontrol edin veya kurulum sihirbazını tamamlayın.',
+    });
+  }
   next();
 });
 
