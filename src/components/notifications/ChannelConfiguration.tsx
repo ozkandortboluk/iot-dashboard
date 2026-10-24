@@ -56,17 +56,17 @@ export const ChannelConfiguration: React.FC<ChannelConfigurationProps> = ({
   // Synchronize when serviceConfig props update
   useEffect(() => {
     if (serviceConfig) {
-      setWhatsappEnabled(serviceConfig.whatsapp?.enabled ?? true);
+      setWhatsappEnabled(serviceConfig.whatsapp?.enabled ?? false);
       setWhatsappPhoneId(serviceConfig.whatsapp?.phoneNumberId || '');
       setWhatsappToken(serviceConfig.whatsapp?.apiToken || '');
-      setTelegramEnabled(serviceConfig.telegram?.enabled ?? true);
+      setTelegramEnabled(serviceConfig.telegram?.enabled ?? false);
       setTelegramBotToken(serviceConfig.telegram?.botToken || '');
       setTelegramBotUser(serviceConfig.telegram?.botUsername || '');
-      setEmailEnabled(serviceConfig.email?.enabled ?? true);
-      setEmailFrom(serviceConfig.email?.fromEmail || 'alarms@iotplatform.com');
-      setSmsEnabled(serviceConfig.sms?.enabled ?? true);
-      setSmsTitle(serviceConfig.sms?.senderTitle || 'IOT_ALARM');
-      setWebhookEnabled(serviceConfig.webhook?.enabled ?? true);
+      setEmailEnabled(serviceConfig.email?.enabled ?? false);
+      setEmailFrom(serviceConfig.email?.fromEmail || '');
+      setSmsEnabled(serviceConfig.sms?.enabled ?? false);
+      setSmsTitle(serviceConfig.sms?.senderTitle || '');
+      setWebhookEnabled(serviceConfig.webhook?.enabled ?? false);
       setWebhookEndpoint(serviceConfig.webhook?.defaultEndpoint || '');
       setWebhookSecretHeader(serviceConfig.webhook?.secretHeader || '');
     }
