@@ -70,7 +70,7 @@ export async function dispatchMessageToChannel(
         if (!res.ok) throw new Error(data?.error?.message || 'WhatsApp Cloud API Hatası');
         return {
           success: true,
-          providerResponse: `WhatsApp Mesajı İletildi (ID: ${data.messages?.[0]?.id || 'WAMID_OK'})`,
+          providerResponse: `WhatsApp API mesajı kabul etti (ID: ${data.messages?.[0]?.id || 'bilinmiyor'}). Teslimat onayı sağlayıcı webhook'u gerektirir.`,
         };
       } else {
         throw new Error('WhatsApp gerçek gönderim sağlayıcısı yapılandırılmamış. Simülasyon teslimat olarak raporlanmaz.');
