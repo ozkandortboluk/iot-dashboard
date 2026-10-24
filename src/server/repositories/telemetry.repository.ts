@@ -1836,7 +1836,7 @@ export class TelemetryRepository {
 
     const tenantUser = (this.db.data.users || []).find((u: any) => u.id === alarm.tenantId);
     if (tenantUser?.notificationPreferences?.app !== false) {
-      this.db.addNotification({
+      void this.db.addNotification({
       tenantId: alarm.tenantId,
       title: formattedTitle,
       message: msg,
@@ -1857,11 +1857,11 @@ export class TelemetryRepository {
       source: alarm.source || (isSimulated ? 'simulator' : 'physical'),
       isSimulation: isSimulated,
       environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
-      });
+      }).catch((err: any) => console.error('[Notification Engine] Bildirim kaydı kalıcılaştırılamadı:', err?.message || err));
     }
 
     if (alarm.tenantId !== 'usr_admin') {
-      this.db.addNotification({
+      void this.db.addNotification({
         tenantId: 'usr_admin',
         title: isSimulated
           ? (title.startsWith('🧪') ? title : `🧪 [TEST ALARMI] [${alarm.deviceName}] ${title}`)
@@ -1884,7 +1884,7 @@ export class TelemetryRepository {
         source: alarm.source || (isSimulated ? 'simulator' : 'physical'),
         isSimulation: isSimulated,
         environment: alarm.environment || (isSimulated ? 'sandbox' : 'production'),
-      });
+      }).catch((err: any) => console.error('[Notification Engine] Bildirim kaydı kalıcılaştırılamadı:', err?.message || err));
     }
 
     // STRICT ISOLATION RULE:
