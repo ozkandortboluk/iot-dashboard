@@ -455,15 +455,33 @@ export const AccountSettingsView: React.FC = () => {
     setTestResult(null);
 
     if (channel === 'app') {
-      // In-App simulated trigger
-      setTimeout(() => {
+      try {
+        const res = await fetch('/api/notifications/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'NexusNode Test Bildirimi',
+            message: 'Uygulama içi bildirim kanalı başarıyla doğrulandı.',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success !== true) {
+          throw new Error(data.error || 'Uygulama içi test bildirimi oluşturulamadı.');
+        }
         setTestResult({
           channel: 'app',
           success: true,
-          message: 'Uygulama içi test bildirimi başarıyla oluşturuldu ve üst çubuk zil ikonuna iletildi.',
+          message: data.message || 'Gerçek test bildirimi bildirim listesine eklendi.',
         });
+      } catch (err: any) {
+        setTestResult({
+          channel: 'app',
+          success: false,
+          message: err?.message || 'Uygulama içi test bildirimi oluşturulamadı.',
+        });
+      } finally {
         setTestingChannel(null);
-      }, 600);
+      }
       return;
     }
 
