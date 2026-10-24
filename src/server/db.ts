@@ -2816,7 +2816,7 @@ class LocalDatabase {
       const latencyMs = Date.now() - startMs;
 
       if (result.success) {
-        item.status = 'delivered';
+        item.status = 'sent';
         item.errorDetails = undefined;
 
         const logEntry: DispatchLogItem = {
@@ -2830,7 +2830,7 @@ class LocalDatabase {
           title: item.title,
           message: item.message,
           severity: item.severity,
-          status: 'delivered',
+          status: 'sent',
           attemptCount: item.attempts,
           providerResponse: result.providerResponse,
           latencyMs,
@@ -3196,7 +3196,7 @@ class LocalDatabase {
       title,
       message,
       severity: 'info',
-      status: result.success ? 'delivered' : 'failed',
+      status: result.success ? 'sent' : 'failed',
       attemptCount: 1,
       providerResponse: result.providerResponse,
       errorDetails: result.errorDetails,
