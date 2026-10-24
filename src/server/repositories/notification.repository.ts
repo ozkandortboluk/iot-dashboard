@@ -70,7 +70,7 @@ export class NotificationRepository {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     const notif = this.db.data.notifications.find((n: any) => n.id === id);
     if (notif) {
-      if (!isAdmin && notif.tenantId !== userId && (notif as any).userId !== userId && notif.tenantId && notif.tenantId !== 'all') {
+      if (!isAdmin && notif.tenantId !== userId && (notif as any).userId !== userId) {
         return; // Forbidden: Customer cannot mark another user's private notification
       }
       notif.read = true;
@@ -101,7 +101,7 @@ export class NotificationRepository {
     if (!this.db.data.notifications) this.db.data.notifications = [];
     let updated = false;
     this.db.data.notifications.forEach((n: any) => {
-      if (!n.read && (isAdmin || n.tenantId === userId || (n as any).userId === userId || !n.tenantId || n.tenantId === 'all')) {
+      if (!n.read && (isAdmin || n.tenantId === userId || (n as any).userId === userId)) {
         n.read = true;
         updated = true;
       }

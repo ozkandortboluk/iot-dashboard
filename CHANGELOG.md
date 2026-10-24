@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.18] - 2026-10-24
+
+### 🔐 Bildirim Sahipliği Yetkilendirmesi (`alarm.repository.ts`, `notification.repository.ts`)
+- Bellek içi yedek depoda müşteri bildirim okuma ve silme işlemleri yalnızca kendi kayıtlarıyla sınırlandırıldı.
+- Müşterilerin ortak, sahipsiz veya tüm kiracılara ait bildirimleri tekil, toplu ve toplu-temizleme işlemleriyle değiştirmesi engellendi.
+- Bu yetki sınırları için regresyon testleri eklendi.
+
+---
 ## 🚀 [v1.49.17] - 2026-10-24
 
 ### 🛡️ Yedekleme Hedefi Kurulum Kılavuzu Güvenliği (`ScheduledBackupsPanel.tsx`)

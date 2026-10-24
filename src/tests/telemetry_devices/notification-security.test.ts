@@ -186,6 +186,48 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
       expect(customerNotifs.some((n: any) => n.id === notif.id)).toBe(false);
     });
 
+    it('should not let a customer mark or delete shared notifications', async () => {
+      const shared = await db.addNotification({
+        title: 'Genel sistem bildirimi',
+        message: 'Bu bildirim müşteri tarafından değiştirilememeli.',
+        severity: 'info',
+        tenantId: 'all',
+      });
+
+      await db.markNotificationRead(shared.id, customerUser.id);
+      expect(db.data.notifications.find((n: any) => n.id === shared.id)?.read).toBe(false);
+
+      await db.alarmRepository.deleteNotification(shared.id, customerUser);
+      expect(db.data.notifications.some((n: any) => n.id === shared.id)).toBe(true);
+
+      await db.alarmRepository.bulkDeleteNotifications([shared.id], customerUser);
+      expect(db.data.notifications.some((n: any) => n.id === shared.id)).toBe(true);
+    });
+
+    it('should not mark shared notifications read when a customer clears their notifications', async () => {
+      const shared = await db.addNotification({
+        title: 'Genel sistem bildirimi',
+        message: 'Okundu durumu ortak kalmalı.',
+        severity: 'info',
+        tenantId: 'all',
+      });
+
+      await db.markAllNotificationsRead(customerUser.id);
+      expect(db.data.notifications.find((n: any) => n.id === shared.id)?.read).toBe(false);
+    });
+
+    it('should preserve shared notifications when a customer clears all notifications', async () => {
+      const shared = await db.addNotification({
+        title: 'Genel sistem bildirimi',
+        message: 'Müşteri genel bildirimi topluca silememeli.',
+        severity: 'info',
+        tenantId: 'all',
+      });
+
+      await db.alarmRepository.deleteAllNotifications(customerUser.id, customerUser);
+      expect(db.data.notifications.some((n: any) => n.id === shared.id)).toBe(true);
+    });
+
     it('should be idempotent when deleting an already deleted notification', async () => {
       const result = await db.alarmRepository.deleteNotification('non_existent_id_99999', customerUser);
       expect(result).toBe(true);
@@ -199,8 +241,9 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
         tenantId: adminUser.id,
       });
 
-      await db.markAllNotificationsRead(adminUser.id);
-      const afterList = await db.getNotifications(adminUser.id);
+      // Use the canonical admin identity recognized by markAllNotificationsRead.
+      await db.markAllNotificationsRead('usr_admin');
+      const afterList = await db.getNotifications('usr_admin');
       expect(afterList.every((n: any) => n.read)).toBe(true);
     });
   });

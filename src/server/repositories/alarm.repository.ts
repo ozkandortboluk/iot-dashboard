@@ -587,7 +587,7 @@ export class AlarmRepository {
     const idx = this.db.data.notifications.findIndex((n: NotificationItem) => n.id === notificationId);
     if (idx >= 0) {
       const notif = this.db.data.notifications[idx];
-      if (isPrivileged || notif.tenantId === currentUser.id || (notif as any).userId === currentUser.id || !notif.tenantId || notif.tenantId === 'all') {
+      if (isPrivileged || notif.tenantId === currentUser.id || (notif as any).userId === currentUser.id) {
         this.db.data.notifications.splice(idx, 1);
         try {
           this.db.saveData(this.db.data);
@@ -631,7 +631,7 @@ export class AlarmRepository {
       const beforeLen = this.db.data.notifications.length;
       this.db.data.notifications = this.db.data.notifications.filter((n: NotificationItem) => {
         if (idsSet.has(n.id)) {
-          if (isPrivileged || n.tenantId === currentUser.id || (n as any).userId === currentUser.id || !n.tenantId || n.tenantId === 'all') {
+          if (isPrivileged || n.tenantId === currentUser.id || (n as any).userId === currentUser.id) {
             return false;
           }
         }
@@ -685,9 +685,7 @@ export class AlarmRepository {
         this.db.data.notifications = this.db.data.notifications.filter(
           (n: NotificationItem) =>
             n.tenantId !== requestingUserId &&
-            (n as any).userId !== requestingUserId &&
-            n.tenantId !== 'all' &&
-            Boolean(n.tenantId)
+            (n as any).userId !== requestingUserId
         );
         memDeletedCount = beforeLen - this.db.data.notifications.length;
       }
