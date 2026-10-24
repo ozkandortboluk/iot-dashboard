@@ -19,6 +19,8 @@ class SystemLoggerService {
   private configFilePath = path.join(process.cwd(), 'data', 'system_logger_config.json');
   private flushTimeout: NodeJS.Timeout | null = null;
   private pendingFileWrites: string[] = [];
+  private lastSnapshotWriteAt = 0;
+  private readonly snapshotWriteIntervalMs = 5000;
   private logListeners: Set<(event: SystemEvent) => void> = new Set();
 
   private getResolvedLogDir(): string {
@@ -474,7 +476,7 @@ class SystemLoggerService {
     let finalMessage = cleanMessage;
     if (this.deduplication) {
       const now = Date.now();
-      const dedupKey = `${level}:${category}:${cleanMessage}`;
+      const dedupKey = `${level}:${category}:${source || 'system'}:${cleanMessage}`;
       const existing = this.recentMessageSignatures.get(dedupKey);
 
       if (existing && now - existing.lastLoggedAt < this.deduplicateWindowMs) {
@@ -508,23 +510,28 @@ class SystemLoggerService {
       }
     }
 
+    const fields = this.includedFields;
     const event: SystemEvent = {
       id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
       level,
       category,
       message: finalMessage,
-      details: cleanDetails,
-      source: source || 'system',
-      stack: cleanStack,
-      method,
-      path: cleanPath,
-      ip,
-      userId,
-      statusCode,
-      traceId,
-      tenantId,
-      deviceId,
+      ...(fields.details && cleanDetails ? { details: cleanDetails } : {}),
+      ...(fields.source ? { source: source || 'system' } : {}),
+      ...(fields.stack && cleanStack ? { stack: cleanStack } : {}),
+      ...(fields.http ? {
+        ...(method ? { method } : {}),
+        ...(cleanPath ? { path: cleanPath } : {}),
+        ...(typeof statusCode === 'number' ? { statusCode } : {}),
+      } : {}),
+      ...(fields.ip && ip ? { ip } : {}),
+      ...(fields.user && userId ? { userId } : {}),
+      ...(fields.traceId && traceId ? { traceId } : {}),
+      ...(fields.device ? {
+        ...(tenantId ? { tenantId } : {}),
+        ...(deviceId ? { deviceId } : {}),
+      } : {}),
     };
 
     // Circular memory buffer
@@ -533,9 +540,13 @@ class SystemLoggerService {
       this.inMemoryEvents.length = this.maxInMemoryEvents;
     }
 
-    // Structured console output - Route safely to stdout (console.log) to avoid triggering container supervisor false-positive alerts
-    const logPrefix = `[SystemLog][${level.toUpperCase()}][${category.toUpperCase()}]`;
-    console.log(`${logPrefix} ${cleanMessage}${source ? ` (${source})` : ''}`);
+    // Keep the Docker stdout stream useful: routine info events already live in
+    // the structured log file. Emit warnings and errors to stdout as an emergency
+    // operational channel without duplicating every info event into Docker logs.
+    if (level === 'warn' || level === 'error' || level === 'critical') {
+      const logPrefix = `[SystemLog][${level.toUpperCase()}][${category.toUpperCase()}]`;
+      console.log(`${logPrefix} ${cleanMessage}${source ? ` (${source})` : ''}`);
+    }
 
     // Schedule async file persistence if enabled
     if (this.logToFile) {
@@ -598,12 +609,17 @@ class SystemLoggerService {
       return;
     }
 
-    // The append-only log is authoritative. A snapshot write failure must not
-    // re-queue already-appended lines (which would create duplicate records).
-    try {
-      fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
-    } catch (err) {
-      console.warn('[SystemLogger] JSON log snapshot yazılamadı; ana log dosyası korundu:', err);
+    // The append-only log is authoritative. Refresh the convenience snapshot
+    // at most once every 5 seconds to avoid rewriting the same JSON cache for
+    // every small batch. Recovery always falls back to the log files.
+    const now = Date.now();
+    if (now - this.lastSnapshotWriteAt >= this.snapshotWriteIntervalMs) {
+      try {
+        fs.writeFileSync(this.jsonBackupPath, JSON.stringify(this.inMemoryEvents.slice(0, 200), null, 2), 'utf-8');
+        this.lastSnapshotWriteAt = now;
+      } catch (err) {
+        console.warn('[SystemLogger] JSON log snapshot yazılamadı; ana log dosyası korundu:', err);
+      }
     }
   }
 
@@ -720,8 +736,14 @@ class SystemLoggerService {
   }
 
   public clearEvents(): void {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
     this.inMemoryEvents = [];
     this.pendingFileWrites = [];
+    this.recentMessageSignatures.clear();
+
     try {
       if (fs.existsSync(this.jsonBackupPath)) {
         fs.writeFileSync(this.jsonBackupPath, '[]', 'utf-8');
@@ -729,9 +751,19 @@ class SystemLoggerService {
       if (fs.existsSync(this.logFilePath)) {
         fs.writeFileSync(this.logFilePath, '', 'utf-8');
       }
+      // Explicit admin clear means all retained history, including rotations.
+      // Otherwise old backups would be reloaded and appear to resurrect logs.
+      if (fs.existsSync(this.logDir)) {
+        for (const name of fs.readdirSync(this.logDir)) {
+          if (name.startsWith('system_events_') && name.endsWith('.log.bak')) {
+            fs.unlinkSync(path.join(this.logDir, name));
+          }
+        }
+      }
     } catch (err) {
       console.warn('[SystemLogger] Log temizlenirken hata oluştu:', err);
     }
+
     this.logDirect('info', 'server', 'Sistem olay günlükleri yönetici tarafından temizlendi.', undefined, 'admin_action');
   }
 
