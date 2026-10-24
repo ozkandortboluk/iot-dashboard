@@ -78,13 +78,13 @@ systemLogsRouter.post('/settings', authenticateUser, requireAdmin, (req, res) =>
 
 /**
  * POST /api/system-logs/simplify
- * Cleans out redundant, repetitive and fluttering log events, keeping necessary errors and notifications.
+ * Simplifies the in-memory event cache only. The append-only disk history is intentionally preserved.
  */
 systemLogsRouter.post('/simplify', authenticateUser, requireAdmin, (req, res) => {
   const result = systemLogger.simplifyExistingLogs();
   res.json({
     success: true,
-    message: `${result.removedCount} adet gereksiz/yinelenen log kaydı temizlendi ve sadeleştirildi. Kalan aktif kayıt: ${result.remainingCount}.`,
+    message: `${result.removedCount} adet gereksiz/yinelenen kayıt etkin bellek listesinden kaldırıldı. Kalıcı ham log geçmişi korunmuştur. Etkin bellek listesinde kalan kayıt: ${result.remainingCount}.`,
     ...result,
   });
 });
