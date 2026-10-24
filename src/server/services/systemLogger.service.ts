@@ -57,7 +57,8 @@ class SystemLoggerService {
     this.ensureDirectories();
     this.loadConfiguration();
     this.loadPersistedEvents();
-    this.simplifyExistingLogs();
+    // Do not simplify/rewrite persisted logs during startup. Startup must be read-only
+    // with respect to log history so rebuilds/restarts cannot erase historical events.
   }
 
   private ensureDirectories(): void {
@@ -159,41 +160,61 @@ class SystemLoggerService {
   }
 
   private loadPersistedEvents(): void {
+    const existingIds = new Set<string>();
+
+    // The JSON snapshot is a fast-recovery cache, not the source of truth.
+    // If it is missing/corrupt, continue loading from the append-only log file.
     try {
-      const existingIds = new Set<string>();
       if (fs.existsSync(this.jsonBackupPath)) {
         const raw = fs.readFileSync(this.jsonBackupPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          this.inMemoryEvents = parsed.slice(-this.maxInMemoryEvents);
+          this.inMemoryEvents = parsed
+            .filter((ev): ev is SystemEvent => Boolean(ev && typeof ev.id === 'string'))
+            .slice(-this.maxInMemoryEvents)
+            .reverse();
+          // Normalize to newest-first in-memory ordering and track loaded IDs.
+          this.inMemoryEvents.reverse();
           for (const ev of this.inMemoryEvents) {
             if (ev?.id) existingIds.add(ev.id);
           }
+        } else {
+          console.warn('[SystemLogger] JSON log snapshot is not an array; recovering from log file if available.');
         }
       }
-      // If inMemoryEvents has room and system_events.log exists, read missing lines from log file
+    } catch (err) {
+      console.warn('[SystemLogger] JSON log snapshot could not be loaded; recovering from log file if available:', err);
+      this.inMemoryEvents = [];
+      existingIds.clear();
+    }
+
+    try {
       if (this.inMemoryEvents.length < this.maxInMemoryEvents && fs.existsSync(this.logFilePath)) {
         const raw = fs.readFileSync(this.logFilePath, 'utf-8');
         const lines = raw.split('\n').filter(Boolean);
-        const parsed: SystemEvent[] = [];
+        const recovered: SystemEvent[] = [];
+
+        // Log file is append-only/chronological. Recover newest entries first.
         for (let i = lines.length - 1; i >= 0; i--) {
           try {
-            const item = JSON.parse(lines[i]);
-            if (item && item.id && !existingIds.has(item.id)) {
-              parsed.push(item);
+            const item = JSON.parse(lines[i]) as SystemEvent;
+            if (item && typeof item.id === 'string' && !existingIds.has(item.id)) {
+              recovered.push(item);
               existingIds.add(item.id);
-              if (this.inMemoryEvents.length + parsed.length >= this.maxInMemoryEvents) {
-                break;
-              }
+              if (this.inMemoryEvents.length + recovered.length >= this.maxInMemoryEvents) break;
             }
-          } catch {}
+          } catch {
+            // Ignore an incomplete/corrupt individual line without discarding other history.
+          }
         }
-        if (parsed.length > 0) {
-          this.inMemoryEvents = [...this.inMemoryEvents, ...parsed].slice(0, this.maxInMemoryEvents);
+
+        if (recovered.length > 0) {
+          this.inMemoryEvents = [...this.inMemoryEvents, ...recovered].slice(0, this.maxInMemoryEvents);
         }
       }
-    } catch {
-      this.inMemoryEvents = [];
+    } catch (err) {
+      // Keep any valid JSON snapshot entries if the file cannot be read.
+      console.warn('[SystemLogger] Persisted log file could not be loaded:', err);
     }
   }
 
