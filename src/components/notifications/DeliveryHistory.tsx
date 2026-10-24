@@ -407,7 +407,7 @@ export const DeliveryHistory: React.FC<DeliveryHistoryProps> = ({
                           {log.status === 'sent' || log.status === 'delivered' ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
                               <CheckCircle2 className="w-3 h-3" />
-                              <span>İletildi</span>
+                              <span>{log.status === 'sent' ? 'Sağlayıcıya gönderildi' : 'Eski teslimat kaydı'}</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20">
