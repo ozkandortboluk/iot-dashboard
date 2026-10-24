@@ -74,6 +74,8 @@ export const NotificationsView: React.FC = () => {
   const [isQueueLoading, setIsQueueLoading] = useState(false);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isServicesLoading, setIsServicesLoading] = useState(false);
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
+  const [logsLoadError, setLogsLoadError] = useState<string | null>(null);
 
   // Wizard & Modal States
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -135,6 +137,7 @@ export const NotificationsView: React.FC = () => {
   // 2. Lazy Fetchers for Specific Tabs
   const fetchQueueData = useCallback(async () => {
     setIsQueueLoading(true);
+    setQueueLoadError(null);
     try {
       let queueUrl = '/api/notification-queue?limit=100';
       if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
@@ -146,6 +149,7 @@ export const NotificationsView: React.FC = () => {
       const list = Array.isArray(data) ? data : (data?.data || []);
       setQueueItems(list);
     } catch (e) {
+      setQueueLoadError(e instanceof Error ? e.message : 'Bildirim kuyruğu yüklenemedi. Mevcut kayıtlar korunuyor.');
       console.error('Error fetching queue:', e);
     } finally {
       setIsQueueLoading(false);
@@ -154,6 +158,7 @@ export const NotificationsView: React.FC = () => {
 
   const fetchLogsData = useCallback(async () => {
     setIsLogsLoading(true);
+    setLogsLoadError(null);
     try {
       let logsUrl = '/api/dispatch-logs?limit=100';
       if (user?.role === 'admin' && selectedCustomerForAdmin !== 'all') {
@@ -165,6 +170,7 @@ export const NotificationsView: React.FC = () => {
       const list = Array.isArray(data) ? data : (data?.data || []);
       setDispatchLogs(list);
     } catch (e) {
+      setLogsLoadError(e instanceof Error ? e.message : 'İletim geçmişi yüklenemedi. Mevcut kayıtlar korunuyor.');
       console.error('Error fetching logs:', e);
     } finally {
       setIsLogsLoading(false);
@@ -834,6 +840,13 @@ export const NotificationsView: React.FC = () => {
         />
       )}
 
+      {activeTab === 'queue' && queueLoadError && (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+          {queueLoadError} Liste yenilenemedi; ekranda görünen kayıtlar son başarılı yüklemeden kalmış olabilir.
+          <button type="button" onClick={fetchQueueData} className="ml-2 font-bold underline">Tekrar dene</button>
+        </div>
+      )}
+
       {activeTab === 'queue' && (
         <DeliveryQueue
           queueItems={queueItems}
@@ -842,6 +855,13 @@ export const NotificationsView: React.FC = () => {
           onClearQueue={handleClearQueue}
           onRefresh={fetchQueueData}
         />
+      )}
+
+      {activeTab === 'history' && logsLoadError && (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+          {logsLoadError} Liste yenilenemedi; ekranda görünen kayıtlar son başarılı yüklemeden kalmış olabilir.
+          <button type="button" onClick={fetchLogsData} className="ml-2 font-bold underline">Tekrar dene</button>
+        </div>
       )}
 
       {activeTab === 'history' && (
