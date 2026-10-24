@@ -399,44 +399,6 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Mount Modular API Routes
-app.use('/api/setup/ssh-tunnel', sshTunnelRouter);
-app.use('/api/system/ssh-tunnel', sshTunnelRouter);
-app.use('/api/setup', setupRouter);
-app.use('/api', systemRouter);
-app.use('/api/auth', authRouter);
-app.use('/api/profile', profileRouter);
-  app.use('/api/admin/tenants', adminTenantsRouter);
-app.use('/api/devices', devicesRouter);
-app.use('/api/network', networkRouter);
-app.use('/api', commandsRouter);
-app.use('/api/v1', commandsRouter);
-app.use('/api/v1', deviceCommandsRouter);
-app.use('/api/telemetry', telemetryRouter);
-app.use('/api/v1/telemetry', telemetryRouter);
-app.use('/api/alarms', alarmsRouter);
-app.use('/api/rules', rulesRouter);
-app.use('/api/automations', automationsRouter);
-app.use('/api/notifications', notificationsRouter);
-app.use('/api/notification-queue', notificationQueueRouter);
-app.use('/api/dispatch-logs', dispatchLogsRouter);
-app.use('/api/notification-services', notificationServicesRouter);
-app.use('/api/audit-logs', auditLogsRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/admin', adminRouter);
-app.use('/api/database', databaseRouter);
-app.use('/api/database/timescale', timescaleRouter);
-app.use('/api/timescale', timescaleRouter);
-app.use('/api/simulator', simulatorRouter);
-app.use('/api/firmwares', firmwareRouter);
-app.use('/api/ota', otaRouter);
-app.use('/api/compiler', compilerRouter);
-app.use('/api/system-logs', systemLogsRouter);
-app.use('/api/system/logs', systemLogsRouter);
-app.use('/api/server', serverStatusRouter);
-app.use('/api/server-status', serverStatusRouter);
-app.use('/api/system/secrets', secretsRouter);
-
 // Comprehensive HTTP Request Observer for System-Wide Audit & Performance Logging
 app.use((req, res, next) => {
   const start = Date.now();
@@ -519,6 +481,44 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Mount Modular API Routes
+app.use('/api/setup/ssh-tunnel', sshTunnelRouter);
+app.use('/api/system/ssh-tunnel', sshTunnelRouter);
+app.use('/api/setup', setupRouter);
+app.use('/api', systemRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/profile', profileRouter);
+  app.use('/api/admin/tenants', adminTenantsRouter);
+app.use('/api/devices', devicesRouter);
+app.use('/api/network', networkRouter);
+app.use('/api', commandsRouter);
+app.use('/api/v1', commandsRouter);
+app.use('/api/v1', deviceCommandsRouter);
+app.use('/api/telemetry', telemetryRouter);
+app.use('/api/v1/telemetry', telemetryRouter);
+app.use('/api/alarms', alarmsRouter);
+app.use('/api/rules', rulesRouter);
+app.use('/api/automations', automationsRouter);
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/notification-queue', notificationQueueRouter);
+app.use('/api/dispatch-logs', dispatchLogsRouter);
+app.use('/api/notification-services', notificationServicesRouter);
+app.use('/api/audit-logs', auditLogsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/database', databaseRouter);
+app.use('/api/database/timescale', timescaleRouter);
+app.use('/api/timescale', timescaleRouter);
+app.use('/api/simulator', simulatorRouter);
+app.use('/api/firmwares', firmwareRouter);
+app.use('/api/ota', otaRouter);
+app.use('/api/compiler', compilerRouter);
+app.use('/api/system-logs', systemLogsRouter);
+app.use('/api/system/logs', systemLogsRouter);
+app.use('/api/server', serverStatusRouter);
+app.use('/api/server-status', serverStatusRouter);
+app.use('/api/system/secrets', secretsRouter);
 
 // API 404 Handler: Ensure non-existent /api routes return JSON error, not SPA index.html
 app.all('/api/*', (req, res) => {
