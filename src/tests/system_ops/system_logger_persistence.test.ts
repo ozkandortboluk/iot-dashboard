@@ -21,10 +21,10 @@ describe('System logger persistence across restarts', () => {
       pendingFileWrites: loggerInternals.pendingFileWrites,
       flushTimeout: loggerInternals.flushTimeout,
       maxInMemoryEvents: loggerInternals.maxInMemoryEvents,
-      includedFields: loggerInternals.includedFields,
+      includedFields: { ...loggerInternals.includedFields },
       logToFile: loggerInternals.logToFile,
       deduplication: loggerInternals.deduplication,
-      recentMessageSignatures: loggerInternals.recentMessageSignatures,
+      recentMessageSignatures: new Map(loggerInternals.recentMessageSignatures),
     };
     if (loggerInternals.flushTimeout) clearTimeout(loggerInternals.flushTimeout);
     loggerInternals.flushTimeout = null;
