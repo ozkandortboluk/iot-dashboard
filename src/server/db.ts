@@ -2998,7 +2998,30 @@ class LocalDatabase {
        let list = await this.postgresRepo.getDispatchLogs(pgTenantId);
        if (options?.status && options.status !== 'all') list = list.filter((l: any) => l.status === options.status);
        if (options?.channel && options.channel !== 'all') list = list.filter((l: any) => l.channel === options.channel);
-       return { data: list, total: list.length, limit: options?.limit || 50, hasMore: false };
+       if (options?.search?.trim()) {
+         const term = options.search.trim().toLowerCase();
+         list = list.filter((l: any) =>
+           l.title?.toLowerCase().includes(term) ||
+           l.message?.toLowerCase().includes(term) ||
+           l.recipient?.toLowerCase().includes(term)
+         );
+       }
+       const total = list.length;
+       const limit = Math.max(1, Math.min(200, Number(options?.limit) || 50));
+       let startIndex = 0;
+       if (options?.cursor) {
+         const cursorIndex = list.findIndex((l: any) => l.id === options.cursor);
+         if (cursorIndex >= 0) startIndex = cursorIndex + 1;
+       }
+       const data = list.slice(startIndex, startIndex + limit);
+       const hasMore = startIndex + limit < total;
+       return {
+         data,
+         total,
+         limit,
+         nextCursor: hasMore ? data[data.length - 1]?.id || null : null,
+         hasMore,
+       };
     }
 
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
