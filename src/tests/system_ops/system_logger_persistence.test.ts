@@ -153,6 +153,41 @@ describe('System logger persistence across restarts', () => {
     expect(logged).not.toHaveProperty('source');
   });
 
+  it('filters disabled metadata from nested details as well as top-level fields', () => {
+    loggerInternals.logToFile = false;
+    loggerInternals.deduplication = false;
+    loggerInternals.includedFields = {
+      stack: false,
+      ip: false,
+      user: false,
+      http: false,
+      device: false,
+      details: true,
+      source: true,
+      traceId: false,
+    };
+
+    const logged = systemLogger.log('warn', 'server', 'nested-field-filter-check', {
+      ip: '192.0.2.2',
+      userId: 'private-user',
+      method: 'POST',
+      url: '/path?token=private-token',
+      statusCode: 401,
+      userAgent: 'private-agent',
+      traceId: 'private-trace',
+      deviceId: 'private-device',
+      harmlessDiagnostic: 'keep this detail',
+    }, 'field-selection-test');
+
+    expect(logged.details).toContain('keep this detail');
+    expect(logged.details).not.toContain('192.0.2.2');
+    expect(logged.details).not.toContain('private-user');
+    expect(logged.details).not.toContain('private-token');
+    expect(logged.details).not.toContain('private-agent');
+    expect(logged.details).not.toContain('private-trace');
+    expect(logged.details).not.toContain('private-device');
+  });
+
   it('clears rotated history when the explicit clear operation is used', () => {
     loggerInternals.logToFile = false;
     const backup = path.join(tempDir, 'system_events_20261001.log.bak');
