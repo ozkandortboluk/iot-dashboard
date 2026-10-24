@@ -732,8 +732,9 @@ class SystemLoggerService {
   }
 
   /**
-   * Cleans up redundant, spammy, and fluttering entries from stored logs.
-   * Keeps critical milestones, real error messages, warnings, and unique notifications intact.
+   * Simplifies the bounded in-memory event list for the current runtime only.
+   * The append-only log and rotation backups are historical records and must never
+   * be rewritten from this bounded cache, otherwise older events would be lost.
    */
   public simplifyExistingLogs(): { removedCount: number; remainingCount: number } {
     const beforeCount = this.inMemoryEvents.length;
