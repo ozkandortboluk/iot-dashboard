@@ -257,6 +257,39 @@ export { rulesRouter };
 
 // Notifications Router
 const notificationsRouter = Router();
+const inAppTestRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+notificationsRouter.post('/test', authenticateUser, async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+  const currentUser = authReq.user!;
+  const now = Date.now();
+  let record = inAppTestRateLimits.get(currentUser.id);
+  if (!record || record.resetAt <= now) record = { count: 0, resetAt: now + 60_000 };
+  record.count += 1;
+  inAppTestRateLimits.set(currentUser.id, record);
+  if (record.count > 5) {
+    return res.status(429).json({ error: 'Dakikada en fazla 5 uygulama içi test bildirimi oluşturabilirsiniz.' });
+  }
+
+  try {
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 120) : 'NexusNode test bildirimi';
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim().slice(0, 1000) : 'Uygulama içi bildirim testi.';
+    const notification = await db.addNotification({
+      tenantId: currentUser.id,
+      title: title || 'NexusNode test bildirimi',
+      message: message || 'Uygulama içi bildirim testi.',
+      severity: 'info',
+      source: 'simulator',
+      isSimulation: true,
+      environment: 'sandbox',
+      eventKey: `in-app-test:${currentUser.id}:${now}`,
+    });
+    res.status(201).json({ success: true, notification, message: 'Test bildirimi oluşturuldu.' });
+  } catch (err: any) {
+    console.error('[POST /api/notifications/test error]', err?.message || err);
+    res.status(500).json({ error: 'Uygulama içi test bildirimi oluşturulamadı.' });
+  }
+});
 
 notificationsRouter.get('/', authenticateUser, async (req, res) => {
   try {
