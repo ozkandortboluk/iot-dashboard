@@ -2877,6 +2877,8 @@ class LocalDatabase {
     }
 
     this.saveData(this.data);
+    this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
+    this.notifyNotificationListeners('dispatch-logs:updated', this.data.dispatchLogs);
   }
 
   public getNotificationQueue(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {
