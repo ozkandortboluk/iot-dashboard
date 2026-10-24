@@ -89,11 +89,12 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'sent':
       case 'delivered':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
             <CheckCircle2 className="w-3 h-3" />
-            <span>İletildi</span>
+            <span>{status === 'sent' ? 'Sağlayıcıya gönderildi' : 'Eski teslimat kaydı'}</span>
           </span>
         );
       case 'processing':
@@ -235,7 +236,8 @@ export const DeliveryQueue: React.FC<DeliveryQueueProps> = ({
               <option value="pending">Beklemede Olanlar</option>
               <option value="retrying">Yeniden Denenenler</option>
               <option value="failed">Başarısız / Hata Alanlar</option>
-              <option value="delivered">Başarıyla İletilenler</option>
+              <option value="sent">Sağlayıcıya gönderilenler</option>
+              <option value="delivered">Eski teslimat kayıtları</option>
             </select>
           </div>
         </div>
