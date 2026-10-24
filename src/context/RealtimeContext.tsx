@@ -59,6 +59,8 @@ interface RealtimeContextType {
   clearAllNotifications: () => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
   deleteAllNotifications: () => Promise<void>;
+  bulkDeleteNotifications: (ids: string[]) => Promise<number>;
+  fetchNotifications: () => Promise<void>;
   saveWidgets: (newWidgets: WidgetConfig[], title?: string) => Promise<void>;
   resetWidgetsToDefault: () => Promise<void>;
   toggleSimulator: () => Promise<void>;
@@ -344,7 +346,10 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const fetchNotifications = useCallback(async () => {
     if (!user) return;
     try {
-      const url = `/api/notifications?userId=${encodeURIComponent(user.id)}`;
+      let url = `/api/notifications?userId=${encodeURIComponent(user.id)}`;
+      if (user.role === 'admin' && selectedCustomerForAdmin && selectedCustomerForAdmin !== 'all') {
+        url += `&targetCustomerId=${encodeURIComponent(selectedCustomerForAdmin)}`;
+      }
       const res = await fetch(url);
       const data = await safeJson<NotificationItem[]>(res, []);
       if (Array.isArray(data)) {
@@ -354,7 +359,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       // ignore
     }
-  }, [user]);
+  }, [user, selectedCustomerForAdmin]);
 
   const refreshDevices = useCallback(async () => {
     await fetchDevices();
@@ -934,6 +939,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   }
                   return [item, ...prev].slice(0, 500);
                 });
+              } else if (data.event === 'notifications:updated' && Array.isArray(data.payload)) {
+                setRawNotifications(data.payload);
               }
               fetchNotifications();
             } else if (data.event === 'dashboard:layout') {
@@ -1187,6 +1194,33 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     } catch (e) {
       console.error('deleteAllNotifications error:', e);
+      throw e;
+    }
+  }, []);
+
+  const bulkDeleteNotifications = useCallback(async (ids: string[]) => {
+    if (!ids || ids.length === 0) return 0;
+    const idsSet = new Set(ids);
+    let previousList: NotificationItem[] = [];
+    setRawNotifications((prev) => {
+      previousList = prev;
+      return prev.filter((n) => !idsSet.has(n.id));
+    });
+    try {
+      const res = await fetch('/api/notifications/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationIds: ids }),
+      });
+      if (!res.ok) {
+        setRawNotifications(previousList);
+        const data = await safeJson<{ error?: string }>(res, {});
+        throw new Error(data.error || `Bildirimler silinemedi (${res.status})`);
+      }
+      const data = await safeJson<{ count?: number }>(res, {});
+      return data.count ?? ids.length;
+    } catch (e) {
+      console.error('bulkDeleteNotifications error:', e);
       throw e;
     }
   }, []);
@@ -1697,6 +1731,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       clearAllNotifications,
       deleteNotification,
       deleteAllNotifications,
+      bulkDeleteNotifications,
+      fetchNotifications,
       saveWidgets,
       resetWidgetsToDefault,
       toggleSimulator,
@@ -1749,6 +1785,8 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       clearAllNotifications,
       deleteNotification,
       deleteAllNotifications,
+      bulkDeleteNotifications,
+      fetchNotifications,
       saveWidgets,
       resetWidgetsToDefault,
       toggleSimulator,

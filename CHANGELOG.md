@@ -3,6 +3,43 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.21] - 2026-10-24
+
+### 🖥️ Sidebar Çift Sürüm Kartı & Proje Haritası (`Sidebar.tsx`, `PROJECT_MAP.md`)
+- **Sol Kenar Çubuğu Çift Sürüm Kartına Dönüştürüldü**:
+  - Tek birleşik kart, **iki ayrı** etkileşimli karta bölündü:
+    - **Üst Kart** (Monitor ikonu): O an çalışan sistem sürümü + ortam (Yerel/VPS/Cloud). Tıklanınca runtime bilgisini yeniler, yenileme sırasında animasyonlu RefreshCw ikonu gösterilir.
+    - **Alt Kart** (GitBranch ikonu): GitHub deposundaki son sürüm. Tıklanınca hem GitHub sürümünü yeniler hem de GitHub releases sayfasını açar. Renk teması sürüm karşılaştırmasına göre (Eşit/Yerel +1/Güncelleme) otomatik değişir.
+  - `fetchRuntimeInfo` ve `fetchGithubVersion` ayrı `useCallback` metodlarına taşındı; her kart bağımsız olarak yenilenebilir.
+  - `Github`, `Monitor`, `RefreshCw` icon'ları eklendi.
+- **`PROJECT_MAP.md` Proje Haritası Oluşturuldu**:
+  - Proje kök dizininde `PROJECT_MAP.md` dosyası oluşturuldu.
+  - Dizin yapısı, kritik dosyalar, tüm API endpoint'leri, bileşen envanteri, role sistemi, çalışma ortamları ve sürüm güncelleme adımları belgelendi.
+  - AI asistan oturumları arasında token tüketimini azaltmak ve işleri hızlandırmak amacıyla tasarlandı.
+- **Sürüm ve Paket Kilidi Senkronizasyonu**:
+  - `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` `v1.49.21` ile tam senkron güncellendi.
+
+---
+## 🚀 [v1.49.20] - 2026-10-24
+
+### 🔄 Sürüm Senkronizasyonu & Güncelleme
+- Sürüm numarası [package.json], [package-lock.json] ve [src/config/version.ts] ile tam senkron yükseltildi.
+
+---
+## 🚀 [v1.49.19] - 2026-10-24
+
+### 🔔 Toplu Bildirim Silme ve fetchNotifications Senkronizasyon Düzeltmesi (`RealtimeContext.tsx`, `NotificationHistoryList.tsx`, `alarms.ts`)
+- **Toplu Bildirim Silme ve İyimser Arayüz Güncellemesi**:
+  - `RealtimeContext` bünyesine `bulkDeleteNotifications` metodu eklendi. Seçilen bildirimler arayüzden anında (optimistic UI) temizlenerek sunucuya `/api/notifications/bulk-delete` isteği gönderilir. Sunucu hatası durumunda bildirimler otomatik olarak geri yüklenir.
+- **Eksik `fetchNotifications` İhracı Giderildi**:
+  - `RealtimeContext` içinde tanımlı olan ancak dışa aktarılmayan `fetchNotifications` metodu `RealtimeContextType` arayüzüne ve `contextValue` değerine eklendi.
+  - `NotificationHistoryList.tsx` bileşeninde bildirim silme, toplu silme ve temizleme sonrasında oluşan `TypeError: fetchNotifications is not a function` hatası ve buna bağlı çıkan "İşlem Başarısız" toast bildirimi tamamen çözüldü.
+- **WebSocket Gerçek Zamanlı Güncelleme**:
+  - `notifications:updated` WebSocket olayı geldiğinde gelen dizi doğrudan bildirim listesi durumuna atanarak istemciler arası anlık senkronizasyon sağlandı.
+- **Sürüm ve Paket Kilidi Senkronizasyonu**:
+  - `package-lock.json`, `package.json`, `src/config/version.ts` ve `CHANGELOG.md` tam senkronize edilerek `v1.49.19` sürümüne yükseltildi.
+
+---
 ## 🚀 [v1.49.18] - 2026-10-24
 
 ### 🔐 Bildirim Sahipliği Yetkilendirmesi (`alarm.repository.ts`, `notification.repository.ts`)

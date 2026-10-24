@@ -246,5 +246,49 @@ describe('Notification Service Credentials Security & RBAC Test Suite', () => {
       const afterList = await db.getNotifications('usr_admin');
       expect(afterList.every((n: any) => n.read)).toBe(true);
     });
+
+    it('should successfully bulk delete multiple notifications for admin', async () => {
+      const n1 = await db.addNotification({
+        title: 'Bulk Test 1',
+        message: 'Bulk delete test 1',
+        severity: 'info',
+        tenantId: adminUser.id,
+      });
+      const n2 = await db.addNotification({
+        title: 'Bulk Test 2',
+        message: 'Bulk delete test 2',
+        severity: 'warning',
+        tenantId: adminUser.id,
+      });
+
+      const count = await db.alarmRepository.bulkDeleteNotifications([n1.id, n2.id], adminUser);
+      expect(count).toBeGreaterThanOrEqual(2);
+
+      const after = await db.getNotifications(adminUser.id);
+      expect(after.some((n: any) => n.id === n1.id)).toBe(false);
+      expect(after.some((n: any) => n.id === n2.id)).toBe(false);
+    });
+
+    it('should successfully bulk delete owned notifications for customer', async () => {
+      const c1 = await db.addNotification({
+        title: 'Customer Bulk 1',
+        message: 'Customer bulk delete test 1',
+        severity: 'info',
+        tenantId: customerUser.id,
+      });
+      const c2 = await db.addNotification({
+        title: 'Customer Bulk 2',
+        message: 'Customer bulk delete test 2',
+        severity: 'info',
+        tenantId: customerUser.id,
+      });
+
+      const count = await db.alarmRepository.bulkDeleteNotifications([c1.id, c2.id], customerUser);
+      expect(count).toBeGreaterThanOrEqual(2);
+
+      const after = await db.getNotifications(customerUser.id);
+      expect(after.some((n: any) => n.id === c1.id)).toBe(false);
+      expect(after.some((n: any) => n.id === c2.id)).toBe(false);
+    });
   });
 });

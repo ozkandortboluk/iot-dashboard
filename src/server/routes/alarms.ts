@@ -262,7 +262,7 @@ notificationsRouter.get('/', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    const requestedUserId = (req.query.tenantId as string) || currentUser.id;
+    const requestedUserId = (req.query.tenantId as string) || (req.query.userId as string) || currentUser.id;
     const targetCustomerId = req.query.targetCustomerId as string | undefined;
 
     const role = String(currentUser.role || '').toLowerCase();

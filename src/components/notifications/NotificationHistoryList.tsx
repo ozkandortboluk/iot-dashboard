@@ -36,6 +36,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     clearAllNotifications,
     deleteNotification,
     deleteAllNotifications,
+    bulkDeleteNotifications,
     fetchNotifications,
   } = useRealtime();
 
@@ -132,7 +133,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
   const handleDeleteSingle = async (id: string) => {
     try {
       await deleteNotification(id);
-      fetchNotifications();
+      await fetchNotifications();
       onShowToast?.('Bildirim başarıyla silindi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirim silinirken hata oluştu.', true);
@@ -141,22 +142,14 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    const count = selectedIds.size;
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
     setIsProcessing(true);
     try {
-      const res = await fetch('/api/notifications/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notificationIds: Array.from(selectedIds) }),
-      });
-      if (res.ok) {
-        setSelectedIds(new Set());
-        fetchNotifications();
-        onShowToast?.(`${count} adet bildirim başarıyla silindi.`);
-      } else {
-        const data = await safeJson<{ error?: string }>(res, {});
-        throw new Error(data.error || 'Bildirimler silinirken hata oluştu.');
-      }
+      await bulkDeleteNotifications(ids);
+      setSelectedIds(new Set());
+      await fetchNotifications();
+      onShowToast?.(`${count} adet bildirim başarıyla silindi.`);
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler silinirken hata oluştu.', true);
     } finally {
@@ -169,7 +162,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     try {
       await clearAllNotifications();
       setSelectedIds(new Set());
-      fetchNotifications();
+      await fetchNotifications();
       onShowToast?.('Tüm okunmamış bildirimler okundu olarak işaretlendi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler güncellenirken hata oluştu.', true);
@@ -184,7 +177,7 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     try {
       await deleteAllNotifications();
       setSelectedIds(new Set());
-      fetchNotifications();
+      await fetchNotifications();
       onShowToast?.('Tüm bildirim geçmişi başarıyla temizlendi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler silinirken hata oluştu.', true);
