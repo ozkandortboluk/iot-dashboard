@@ -444,7 +444,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remaining = await this.db.getAlarms(currentUser.id, currentUser.id);
     this.db.notifyNotificationListeners('alarms:updated', remaining);
     return totalDeleted > 0 ? totalDeleted : alarmIds.length;
@@ -637,7 +637,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     try {
       const remaining = await this.db.getNotifications(currentUser.id);
       if (typeof this.db.notifyNotificationListeners === 'function') {
@@ -684,7 +684,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     try {
       const remaining = await this.db.getNotifications(requestingUserId);
       if (typeof this.db.notifyNotificationListeners === 'function') {
@@ -763,7 +763,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remainingLogs = await this.db.getDispatchLogs(currentUser.id);
     this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
     return totalDeleted;
@@ -795,7 +795,7 @@ export class AlarmRepository {
       }
     }
 
-    const totalDeleted = Math.max(pgDeletedCount, memDeletedCount);
+    const totalDeleted = this.db.postgresRepo?.isReady() ? pgDeletedCount : memDeletedCount;
     const remainingLogs = await this.db.getDispatchLogs(requestingUserId);
     this.db.notifyNotificationListeners('dispatch-logs:updated', remainingLogs);
     return totalDeleted;
