@@ -3,6 +3,60 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.33] - 2026-10-25
+
+### 🌐 Ağ, Konum ve Hiyerarşik Yapı Alanlarının Temel Bilgiler Altına Alınması & Başlık Sadeleştirmesi
+- **Temel Bilgiler İçine Konsolidasyon (`DevicesView.tsx`):**
+  - Hem "Yeni Saha Cihazı Kaydı" (Add Modal) hem de "Cihaz Yapılandırma & Güvenlik Ayarları" (Edit Modal) formlarında ayrı bir kart olarak duran **"Ağ, Konum & Hiyerarşik Yapı"** bölümü kaldırıldı; doğrudan **"Temel Bilgiler"** bölümünün altına şık bir ayırıcı çizgi (`border-t border-slate-200/60 dark:border-slate-800`) ile entegre edildi.
+- **Tesis, Bölge ve Grup Seçimlerinde Başlıklar Kaldırıldı (Kompakt 3 Sütun):**
+  - Tesis, Bölge ve Grup seçimlerinin üzerindeki statik `<label>` etiketleri kaldırıldı.
+  - Açılır menülerin varsayılan seçenekleri (`🏢 Tesis Seçilmedi`, `📍 Bölge Seçilmedi`, `🏷️ Grup Seçilmedi`) ve `title` etiketleri ile işlevsellikten ödün verilmeden tek satırda 3 sütunlu ultra kompakt bir hiyerarşi seçici oluşturuldu.
+  - Ayrı kart başlığı ve etiketlerin kalkması sayesinde dikey yükseklikte ~150px tasarruf sağlandı ve gereksiz kaydırma çubukları önlendi.
+
+---
+## 🚀 [v1.49.32] - 2026-10-25
+
+### 📐 Temel Bilgiler 2x2 Grid Düzeni & Sıklık/Watchdog Taşma Düzeltmesi (Modal Form Restructuring)
+- **Temel Bilgiler 2x2 Grid Düzeni (`DevicesView.tsx`):**
+  - Hem "Cihaz Yapılandırma & Güvenlik Ayarları" (Edit Modal) hem de "Yeni Saha Cihazı Kaydı" (Add Modal) ekranlarında **"Temel Bilgiler"** bölümü dengeli bir **2x2 ızgara (grid)** yapısına geçirildi:
+    - **(1,1):** Cihaz / İstasyon Adı
+    - **(1,2):** Cihaz Türü (Sensör, Sunucu, Sayaç, İnvertör, Gateway)
+    - **(2,1):** Çalışma Durumu / Başlangıç Durumu
+    - **(2,2):** Sorumlu Müşteri / Firma (Sayfanın altındaki ayrı kutucuk kaldırılıp doğrudan temel bilgiler içine alındı).
+- **Sıklık ve Watchdog Taşma Sorunu Giderildi (`DevicesView.tsx`):**
+  - "Güvenlik & İstek Sınırları" kartı içindeki "Sıklık & Watchdog" alanı, tek satıra zorlandığında dar ekranlarda meydana gelen taşma ve öğe sıkışmasını önleyecek şekilde **2 sütunlu dengeli ızgara (`grid-cols-1 sm:grid-cols-2`)** düzenine kavuşturuldu.
+  - Sütun 1'de Sıklık giriş kutusu, hızlı şablon menüsü ve "Oto Yap" butonu; Sütun 2'de Çevrimdışı (Timeout) toleransı giriş kutusu, zaman aşımı şablon menüsü ve "2x Eşitle" butonu geniş ve rahat bir alanda konumlandırıldı. Üst başlıkta durum rozeti ve bilgi ikonu korunarak sıfır taşma sağlandı.
+
+---
+## 🚀 [v1.49.31] - 2026-10-25
+
+### 🎛️ Güvenlik ve İstek Sınırları Bölümüne Sıklık & Watchdog Entegrasyonu (Security & Limits Consolidation)
+- **Güvenlik Kartı İçine Entegrasyon (`DevicesView.tsx`):**
+  - "Cihaz Yapılandırma & Güvenlik Ayarları" ve "Yeni Saha Cihazı Kaydı" pencerelerinde harici ayrı bir blok olarak duran "Sıklık ve Watchdog" bölümü doğrudan **"Güvenlik & İstek Sınırları"** kartının içine taşındı.
+  - Kart içi alt bileşen yapısı (`bg-white/70 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-700/80 shadow-sm`) modernize edildi.
+  - Geniş ekranlarda tek satırda, daha dar ekranlarda ise akıllı esnek (`flex-col sm:flex-row`) 2 satırda kusursuz uyum sağlayacak şekilde optimize edildi; dikey boşluklar ve modaldaki gereksiz kaydırma çubuğu tamamen ortadan kaldırıldı.
+
+---
+## 🚀 [v1.49.30] - 2026-10-25
+
+### 🩹 SSH Tüneli Sayfası Başlık Katmanı & Logo Çakışması Düzeltmesi (SSH Tunnel Header Overlap Fix)
+- **Logo ve Başlık Metin Çakışması Giderildi (`SSHTunnelDrawer.tsx`):**
+  - AI Studio ön giriş / güvenlik doğrulama ekranında (`isPreLoginScreen`), üst başlıkta yer alan `<NexusNodeLogo>` bileşeni `variant="mark"` belirtilmediği için varsayılan `variant="full"` moduyla hem ikonu hem de metin katmanını (`Nexus Node IoT`) 40x40px kapsayıcı içinde üretiyordu. Bu durum bileşen metninin sağa taşarak hemen yanındaki `<h1>NexusNode IoT Dashboard</h1>` ve `AI Studio Ortamı` rozetinin üzerine doğrudan binmesine (çift katmanlı görsel kirliliğe) neden oluyordu.
+  - Logo çağrısı `<NexusNodeLogo variant="mark" size="md" className="shrink-0" />` olarak güncellenerek yalnızca zarif animasyonlu altıgen rozet ikonunun çizilmesi sağlandı.
+  - Başlık başlığı ve ortam rozetine `flex-wrap` ve `whitespace-nowrap` sınıfları eklenerek ekran boyutuna göre esnek, temiz ve hizalı görünüm garanti altına alındı.
+
+---
+## 🚀 [v1.49.29] - 2026-10-25
+
+### ⚡ Cihaz Ekleme & Ayarlar Modallarında Sıklık ve Watchdog Alanı Kompakt Tasarımı (Single-Line Compact Layout)
+- **Tek Satırlık Yatay Düzen (`DevicesView.tsx`):**
+  - "Yeni Saha Cihazı Kaydı" ve "Cihaz Yapılandırma & Güvenlik Ayarları" modallarında yer alan, daha önce çok sayıda alt kutucuk, 8 adet büyük şablon butonu ve açıklama metinleriyle yaklaşık 380px dikey alan kaplayan "Akıllı Veri Gönderim Sıklığı & Watchdog Zaman Aşımı" bölümü tek bir zarif, kompakt yatay çubuğa dönüştürüldü.
+  - **Sıklık (Telemetry Interval) Girişi:** Sayısal saniye girişi (`sn` birimiyle), kompakt hızlı şablon açılır menüsü (5s, 10s, 30s, 60s, 300s, 900s, 3600s), tek tıkla otomatik ölçüme dönme ("Oto") butonu ve sistem otomatik mod rozeti tek hizada toplandı.
+  - **Watchdog (Çevrimdışı Toleransı) Girişi:** Sayısal saniye girişi, hızlı zaman aşımı seçici açılır menüsü (30s, 60s, 120s, 300s) ve tek tıkla 2 katına eşitleyen "2x" butonu tek satırda entegre edildi.
+  - **Hover Tooltip / Bilgi İkonu:** Kullanıcıyı yönlendiren kapsamlı açıklama ve sahte offline önleme tavsiyesi, dikey alanı işgal etmeden hover tooltip (`Info`) ikonuna taşındı.
+  - Modal içeriğinde gereksiz kaydırma çubuğu oluşması engellendi, tüm form tek bakışta görülebilir hale getirildi.
+
+---
 ## 🚀 [v1.49.28] - 2026-10-25
 
 ### 🎨 Cihaz Keşfi ve Eşleştirme Sayfası Tasarım Yenilemesi & Ekran Kullanımı Optimizasyonu (Network Discovery UI Redesign & Space Optimization)

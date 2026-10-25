@@ -1014,15 +1014,15 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         {/* Header */}
         <header className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-4 pb-6 border-b border-slate-800/80">
           <div className="flex items-center gap-3">
-            <NexusNodeLogo className="w-10 h-10" />
+            <NexusNodeLogo variant="mark" size="md" className="shrink-0" />
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white">NexusNode IoT Dashboard</h1>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 whitespace-nowrap">
                   AI Studio Ortamı
                 </span>
               </div>
-              <p className="text-xs text-slate-400">PostgreSQL SSH Tüneli & Güvenli Bağlantı Doğrulaması</p>
+              <p className="text-xs text-slate-400 mt-0.5">PostgreSQL SSH Tüneli & Güvenli Bağlantı Doğrulaması</p>
             </div>
           </div>
 

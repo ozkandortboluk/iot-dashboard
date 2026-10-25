@@ -1,6 +1,6 @@
 export const APP_NAME = "NexusNode IoT Cloud";
-export const APP_VERSION = "1.49.28";
-export const APP_RELEASE_TAG = "v1.49.28";
+export const APP_VERSION = "1.49.33";
+export const APP_RELEASE_TAG = "v1.49.33";
 export const RELEASE_DATE = "2026-10-25";
 
 // GitHub Referans ve Yayın Takip Bilgileri

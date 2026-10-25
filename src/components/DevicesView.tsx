@@ -43,6 +43,7 @@ import {
   ChevronDown,
   ChevronUp,
   HelpCircle,
+  Info,
   ArrowRight,
   Power,
   Database,
@@ -1122,207 +1123,173 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
     const effectiveTimeout = heartbeatTimeout || Math.max(expectedInterval * 2, 10);
 
     return (
-      <div className="p-4 bg-indigo-50/40 dark:bg-slate-800/40 rounded-2xl border border-indigo-200/70 dark:border-slate-700/80 space-y-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <h4 className="font-bold text-indigo-700 dark:text-indigo-300 text-xs uppercase tracking-wider">
-              Akıllı Veri Gönderim Sıklığı & Watchdog Zaman Aşımı
-            </h4>
+      <div className="p-3 bg-white/70 dark:bg-slate-900/70 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm space-y-2.5">
+        {/* Üst Başlık ve Durum Rozeti */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <Radio className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+              Sıklık & Watchdog Zaman Aşımı
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
             {intervalMode === 'auto' ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 whitespace-nowrap" title="Sistem otomatik tespit ediyor">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                Otomatik Tespit Edildi (Sistem)
+                Otomatik Mod
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap" title="Kullanıcı tarafından sabitlendi">
                 <span>🔒</span>
-                Kullanıcı Tarafından Sabitlendi (Manuel)
+                Manuel Sabitlendi
               </span>
             )}
+            <div
+              className="p-0.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-help shrink-0"
+              title={`Her ${expectedInterval} sn'de bir veri beklenir. ${effectiveTimeout} sn boyunca sinyal gelmezse Çevrimdışı (Offline) alarmı verilir. Dalgalanmalarda sahte alarmı önlemek için sıklığın en az 2 katı veya 60sn önerilir.`}
+            >
+              <Info className="w-3.5 h-3.5" />
+            </div>
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
-          Cihazınızın veri gönderme periyodunu ve bağlantı koptuğunda ne kadar süre sonra <strong>Çevrimdışı (Offline)</strong> alarmı verileceğini belirleyin. Cihaz 5 saniyede bir gönderiyorsa dahi çevrimdışı süresini <strong>60 sn (1 dakika)</strong> gibi güvenli bir eşiğe ayarlayarak Wi-Fi dalgalanmalarındaki gereksiz sahte çevrimdışı alarmlarını engelleyebilirsiniz.
-        </p>
-
-        {/* Ayar Kutucuğu - Sıklık ve Çevrimdışı Süresi */}
-        <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* 1. Veri Gönderim Sıklığı */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
-                ⏱️ Veri Gönderim Sıklığı (Saniye):
+        {/* 2 Sütunlu Dengeli Kontrol Alanı (Taşma Yapmaz) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-200/60 dark:border-slate-800">
+          {/* Sütun 1: Sıklık */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                ⏱️ Veri Gönderim Sıklığı:
               </label>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                Cihazın normalde ne sıklıkla paket attığı.
-              </p>
-              <div className="flex items-center gap-2 pt-1">
-                <div className="relative flex-1">
-                  <input
-                    type="number"
-                    min={1}
-                    max={86400}
-                    value={expectedInterval}
-                    onChange={(e) => {
-                      const val = Math.max(1, Number(e.target.value));
-                      setExpectedInterval(val);
-                      setIntervalMode('manual');
-                      if (setHeartbeatTimeout && (!heartbeatTimeout || heartbeatTimeout < val)) {
-                        setHeartbeatTimeout(Math.max(val * 2, 10));
-                      }
-                    }}
-                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-indigo-500/60 dark:border-indigo-500/60 rounded-xl font-mono text-sm font-bold text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
-                </div>
-
-                {intervalMode === 'manual' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIntervalMode('auto');
-                      if (autoDetectedInterval && autoDetectedInterval > 0) {
-                        setExpectedInterval(autoDetectedInterval);
-                      }
-                    }}
-                    className="px-2.5 py-2 text-[10px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 cursor-pointer"
-                    title="Sistemin cihaz sinyallerinden otomatik ölçmesine izin ver"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Oto</span>
-                  </button>
-                ) : (
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/30 px-2 py-2 rounded-xl border border-emerald-500/20 whitespace-nowrap">
-                    {autoDetectedInterval ? `${autoDetectedInterval} sn` : 'Ölçülüyor'}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* 2. Çevrimdışı Kalma Tolerans Süresi */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-rose-700 dark:text-rose-300">
-                🚨 Çevrimdışı (Timeout) Eşiği:
-              </label>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                Kaç saniye veri gelmezse ÇEVRİMDİŞİ alarmı verilsin.
-              </p>
-              <div className="flex items-center gap-2 pt-1">
-                <div className="relative flex-1">
-                  <input
-                    type="number"
-                    min={5}
-                    max={604800}
-                    value={effectiveTimeout}
-                    onChange={(e) => {
-                      const val = Math.max(5, Number(e.target.value));
-                      if (setHeartbeatTimeout) setHeartbeatTimeout(val);
-                    }}
-                    className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-2 border-rose-500/60 dark:border-rose-500/60 rounded-xl font-mono text-sm font-bold text-rose-700 dark:text-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                  />
-                  <span className="absolute right-3 top-2.5 text-[11px] text-slate-400 font-mono">sn</span>
-                </div>
-
-                {setHeartbeatTimeout && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setHeartbeatTimeout(Math.max(expectedInterval * 2, 10));
-                    }}
-                    className="px-2.5 py-2 text-[10px] font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 transition cursor-pointer whitespace-nowrap"
-                    title="Sıklığın 2 katına eşitle"
-                  >
-                    2x Yap
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Çevrimdışı Hızlı Seçim Butonları */}
-          {setHeartbeatTimeout && (
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
-              <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Hızlı Çevrimdışı (Timeout) Şablonları:
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                {[
-                  { label: '30 Saniye', val: 30, desc: 'Hızlı Alarm' },
-                  { label: '60 Saniye (1 Dk)', val: 60, desc: 'Önerilen Tolerans' },
-                  { label: '120 Saniye (2 Dk)', val: 120, desc: 'Wi-Fi Jitter Güvenli' },
-                  { label: '300 Saniye (5 Dk)', val: 300, desc: 'Geniş Ağ Toleransı' },
-                ].map((item) => (
-                  <button
-                    key={item.val}
-                    type="button"
-                    onClick={() => setHeartbeatTimeout(item.val)}
-                    className={`px-2.5 py-1.5 rounded-lg text-left border transition cursor-pointer text-xs ${
-                      effectiveTimeout === item.val
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-rose-400'
-                    }`}
-                  >
-                    <div className="font-bold">{item.label}</div>
-                    <div className={`text-[9px] ${effectiveTimeout === item.val ? 'text-rose-100' : 'text-slate-400'}`}>
-                      {item.desc}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Watchdog Durum Özeti */}
-          <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 text-[11px] flex flex-wrap items-center justify-between gap-2">
-            <span className="text-slate-600 dark:text-slate-300">
-              💡 Özet Durum: Her <strong>{expectedInterval} sn</strong>'de bir veri beklenir. <strong>{effectiveTimeout} sn</strong> boyunca sinyal gelmezse Çevrimdışı uyarısı tetiklenir.
-            </span>
-          </div>
-        </div>
-
-        {/* Hızlı Sıklık Seçim Şablonları */}
-        <div className="space-y-1.5">
-          <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Hızlı Veri Gönderim Şablonları:
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {[
-              { label: '⚡ 5 Saniye', sub: 'Hızlı Canlı Akış', val: 5 },
-              { label: '⏱️ 10 Saniye', sub: 'Standart Sensör', val: 10 },
-              { label: '🛡️ 30 Saniye', sub: 'Dengeli IoT', val: 30 },
-              { label: '📡 60 Saniye', sub: '1 Dakika Periyot', val: 60 },
-              { label: '☀️ 300 Saniye', sub: '5 Dk (Sayaç/İklim)', val: 300 },
-              { label: '🔋 900 Saniye', sub: '15 Dk (Düşük Güç)', val: 900 },
-              { label: '⏳ 3600 Saniye', sub: '1 Saat (Pilli Düğüm)', val: 3600 },
-              { label: '📅 86400 Saniye', sub: 'Günde 1 Kez', val: 86400 },
-            ].map((p) => {
-              const isSelected = expectedInterval === p.val;
-              return (
+              {intervalMode === 'manual' ? (
                 <button
-                  key={p.val}
                   type="button"
                   onClick={() => {
-                    setExpectedInterval(p.val);
-                    setIntervalMode('manual');
+                    setIntervalMode('auto');
+                    if (autoDetectedInterval && autoDetectedInterval > 0) {
+                      setExpectedInterval(autoDetectedInterval);
+                    }
                   }}
-                  className={`p-2 rounded-xl text-left border transition cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm ring-2 ring-indigo-500/30'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
-                  }`}
+                  className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                  title="Otomatik ölçüme dön"
                 >
-                  <div className="text-xs font-bold">{p.label}</div>
-                  <div className={`text-[10px] ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
-                    {p.sub}
-                  </div>
+                  <RefreshCw className="w-2.5 h-2.5" />
+                  <span>Oto Yap</span>
                 </button>
-              );
-            })}
+              ) : (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                  {autoDetectedInterval ? `${autoDetectedInterval} sn (Ölçüldü)` : 'Ölçülüyor'}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={86400}
+                  value={expectedInterval}
+                  onChange={(e) => {
+                    const val = Math.max(1, Number(e.target.value));
+                    setExpectedInterval(val);
+                    setIntervalMode('manual');
+                    if (setHeartbeatTimeout && (!heartbeatTimeout || heartbeatTimeout < val)) {
+                      setHeartbeatTimeout(Math.max(val * 2, 10));
+                    }
+                  }}
+                  className="w-full pl-3 pr-7 py-1.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  title="Veri gönderim sıklığı (saniye)"
+                />
+                <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-mono pointer-events-none">sn</span>
+              </div>
+
+              <select
+                value={[5, 10, 30, 60, 300, 900, 3600].includes(expectedInterval) ? expectedInterval : 'custom'}
+                onChange={(e) => {
+                  if (e.target.value !== 'custom') {
+                    const val = Number(e.target.value);
+                    setExpectedInterval(val);
+                    setIntervalMode('manual');
+                    if (setHeartbeatTimeout && (!heartbeatTimeout || heartbeatTimeout < val)) {
+                      setHeartbeatTimeout(Math.max(val * 2, 10));
+                    }
+                  }
+                }}
+                className="py-1.5 px-2 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                title="Hızlı sıklık şablonu"
+              >
+                <option value="custom" disabled={![5, 10, 30, 60, 300, 900, 3600].includes(expectedInterval)}>Özel ({expectedInterval}s)</option>
+                <option value="5">5 sn (Canlı)</option>
+                <option value="10">10 sn (Sensör)</option>
+                <option value="30">30 sn (Dengeli)</option>
+                <option value="60">60 sn (1 Dk)</option>
+                <option value="300">300 sn (5 Dk)</option>
+                <option value="900">900 sn (15 Dk)</option>
+                <option value="3600">3600 sn (1 Sa)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Sütun 2: Watchdog Timeout */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                🚨 Çevrimdışı (Timeout) Toleransı:
+              </label>
+              {setHeartbeatTimeout && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeartbeatTimeout(Math.max(expectedInterval * 2, 10));
+                  }}
+                  className="text-[10px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  title="Sıklığın 2 katına eşitle (2x)"
+                >
+                  2x Eşitle
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  min={5}
+                  max={604800}
+                  value={effectiveTimeout}
+                  onChange={(e) => {
+                    const val = Math.max(5, Number(e.target.value));
+                    if (setHeartbeatTimeout) setHeartbeatTimeout(val);
+                  }}
+                  className="w-full pl-3 pr-7 py-1.5 bg-white dark:bg-slate-950 border border-rose-300 dark:border-rose-600 rounded-lg font-mono text-xs font-bold text-rose-700 dark:text-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  title="Kaç saniye veri gelmezse ÇEVRİMDİŞİ alarmı verilsin"
+                />
+                <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-mono pointer-events-none">sn</span>
+              </div>
+
+              {setHeartbeatTimeout && (
+                <select
+                  value={[30, 60, 120, 300].includes(effectiveTimeout) ? effectiveTimeout : 'custom'}
+                  onChange={(e) => {
+                    if (e.target.value !== 'custom') {
+                      setHeartbeatTimeout(Number(e.target.value));
+                    }
+                  }}
+                  className="py-1.5 px-2 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-rose-500 cursor-pointer"
+                  title="Hızlı zaman aşımı şablonu"
+                >
+                  <option value="custom" disabled={![30, 60, 120, 300].includes(effectiveTimeout)}>
+                    Özel ({effectiveTimeout}s)
+                  </option>
+                  <option value="30">30s (Hızlı)</option>
+                  <option value="60">60s (Önerilen)</option>
+                  <option value="120">120s (2 Dk)</option>
+                  <option value="300">300s (5 Dk)</option>
+                </select>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -2579,118 +2546,155 @@ void sendHeartbeat() {
                   <span>Temel Cihaz Tanımı</span>
                 </div>
 
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    Cihaz / İstasyon Adı <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="ör. Ankara Rüzgar Santrali #2"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white font-medium transition"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Cihaz Türü</label>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value as Device['type'])}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white font-medium cursor-pointer"
-                  >
-                    <option value="sensor">🌱 Çevre & İklim Sensörü</option>
-                    <option value="server">🖥️ Sunucu / Düğüm</option>
-                    <option value="meter">⚡ Akıllı Sayaç</option>
-                    <option value="inverter">☀️ Enerji İnvertörü</option>
-                    <option value="gateway">📡 Ağ Geçidi / Gateway</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Section 3: Network & Location */}
-              <div className="p-4 bg-sky-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
-                <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400 font-bold text-xs uppercase tracking-wider">
-                  <Globe className="w-4 h-4" />
-                  <span>Ağ, Konum & Hiyerarşik Yapı</span>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* (1,1) Cihaz Adı */}
                   <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Fiziksel Lokasyon</label>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      Cihaz / İstasyon Adı <span className="text-rose-500">*</span>
+                    </label>
                     <input
                       type="text"
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      placeholder="ör. Ankara / Polatlı GES"
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-medium transition"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="ör. Ankara Rüzgar Santrali #2"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white font-medium transition"
                     />
                   </div>
 
+                  {/* (1,2) Cihaz Türü */}
                   <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">IP Adresi</label>
-                    <input
-                      type="text"
-                      value={ipAddress}
-                      onChange={(e) => setIpAddress(e.target.value)}
-                      placeholder="192.168.1.100"
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
-                    />
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Cihaz Türü</label>
+                    <select
+                      value={type}
+                      onChange={(e) => setType(e.target.value as Device['type'])}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white font-medium cursor-pointer"
+                    >
+                      <option value="sensor">🌱 Çevre & İklim Sensörü</option>
+                      <option value="server">🖥️ Sunucu / Düğüm</option>
+                      <option value="meter">⚡ Akıllı Sayaç</option>
+                      <option value="inverter">☀️ Enerji İnvertörü</option>
+                      <option value="gateway">📡 Ağ Geçidi / Gateway</option>
+                    </select>
+                  </div>
+
+                  {/* (2,1) Başlangıç Durumu */}
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Başlangıç Durumu</label>
+                    <div className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>🟢 Aktif (Yeni Cihaz Kaydı)</span>
+                    </div>
+                  </div>
+
+                  {/* (2,2) Sorumlu Müşteri / Firma */}
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                      <span>Sorumlu Müşteri / Firma</span>
+                    </label>
+                    {user?.role === 'admin' ? (
+                      <select
+                        value={targetOwnerId}
+                        onChange={(e) => setTargetOwnerId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
+                      >
+                        <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
+                        {customersList
+                          .filter((c) => c.role === 'customer' || c.companyName)
+                          .map((cust) => (
+                            <option key={cust.id} value={cust.id}>
+                              🏢 {cust.companyName || cust.name} ({cust.name})
+                            </option>
+                          ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{customersList.find((c) => c.id === targetOwnerId)?.name || '🏛️ Merkez Yönetim'}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Hierarchy Assignment */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Tesis (Site)</label>
-                    <select
-                      value={addSiteId}
-                      onChange={(e) => setAddSiteId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Tesis Seçilmedi)</option>
-                      {sites.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
+                {/* Ağ, Konum & Hiyerarşi (Başlıkları Sadeleştirilmiş) */}
+                <div className="pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Fiziksel Lokasyon</label>
+                      <input
+                        type="text"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="ör. Ankara / Polatlı GES"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-medium transition"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">IP Adresi</label>
+                      <input
+                        type="text"
+                        value={ipAddress}
+                        onChange={(e) => setIpAddress(e.target.value)}
+                        placeholder="192.168.1.100"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Bölge (Zone)</label>
-                    <select
-                      value={addZoneId}
-                      onChange={(e) => setAddZoneId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Bölge Seçilmedi)</option>
-                      {zones
-                        .filter((z) => !addSiteId || z.siteId === addSiteId)
-                        .map((z) => (
-                          <option key={z.id} value={z.id}>{z.name}</option>
+
+                  {/* Tesis, Bölge, Grup (Başlıksız) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <select
+                        value={addSiteId}
+                        onChange={(e) => setAddSiteId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Tesis Seçimi"
+                      >
+                        <option value="">🏢 Tesis Seçilmedi</option>
+                        {sites.map((s) => (
+                          <option key={s.id} value={s.id}>🏢 {s.name}</option>
                         ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Grup</label>
-                    <select
-                      value={addGroupId}
-                      onChange={(e) => setAddGroupId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Grup Seçilmedi)</option>
-                      {groups.map((g) => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        value={addZoneId}
+                        onChange={(e) => setAddZoneId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Bölge Seçimi"
+                      >
+                        <option value="">📍 Bölge Seçilmedi</option>
+                        {zones
+                          .filter((z) => !addSiteId || z.siteId === addSiteId)
+                          .map((z) => (
+                            <option key={z.id} value={z.id}>📍 {z.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        value={addGroupId}
+                        onChange={(e) => setAddGroupId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Grup Seçimi"
+                      >
+                        <option value="">🏷️ Grup Seçilmedi</option>
+                        {groups.map((g) => (
+                          <option key={g.id} value={g.id}>🏷️ {g.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Section 4: Token & Security */}
+              {/* Section 4: Token, Güvenlik & İstek Sınırları */}
               <div className="p-4 bg-emerald-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-wider">
                   <Shield className="w-4 h-4" />
-                  <span>Güvenlik & X-API-Key</span>
+                  <span>Güvenlik & İstek Sınırları</span>
                 </div>
 
                 <div>
@@ -2709,42 +2713,20 @@ void sendHeartbeat() {
                     💡 Cihaza uzaktan ulaşılamıyorsa, cihaz yazılımındaki sabit token'ı buraya manuel tanımlayabilirsiniz.
                   </p>
                 </div>
-              </div>
 
-              {/* Section 5: Akıllı Veri Gönderim Sıklığı & Watchdog */}
-              {renderIntervalAndHeartbeatSelector(
-                addExpectedInterval,
-                setAddExpectedInterval,
-                addIntervalMode,
-                setAddIntervalMode,
-                undefined,
-                addHeartbeatTimeout,
-                setAddHeartbeatTimeout
-              )}
-
-              {/* Section 6: Admin Customer Assignment */}
-              {user?.role === 'admin' && (
-                <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-200/60 dark:border-purple-800/40 space-y-2">
-                  <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-bold text-xs uppercase tracking-wider">
-                    <Building2 className="w-4 h-4" />
-                    <span>Atanacak Müşteri / Firma</span>
-                  </div>
-                  <select
-                    value={targetOwnerId}
-                    onChange={(e) => setTargetOwnerId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
-                  >
-                    <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
-                    {customersList
-                      .filter((c) => c.role === 'customer' || c.companyName)
-                      .map((cust) => (
-                        <option key={cust.id} value={cust.id}>
-                          🏢 {cust.companyName || cust.name} ({cust.name})
-                        </option>
-                      ))}
-                  </select>
+                {/* Sıklık & Watchdog Zaman Aşımı */}
+                <div className="pt-1">
+                  {renderIntervalAndHeartbeatSelector(
+                    addExpectedInterval,
+                    setAddExpectedInterval,
+                    addIntervalMode,
+                    setAddIntervalMode,
+                    undefined,
+                    addHeartbeatTimeout,
+                    setAddHeartbeatTimeout
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Actions */}
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
@@ -2802,28 +2784,30 @@ void sendHeartbeat() {
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-5 text-xs text-slate-800 dark:text-slate-200">
-              {/* Section 1: Temel Bilgiler */}
+              {/* Section 1: Temel Bilgiler (2x2 Grid) */}
               <div className="p-4 bg-indigo-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider">
                   <Cpu className="w-4 h-4" />
                   <span>Temel Bilgiler</span>
                 </div>
 
-                <div>
-                  <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
-                    Cihaz Adı <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="ör. NodeMCU-ESP8266-Saha-01"
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white transition font-medium text-slate-900"
-                  />
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* (1,1) Cihaz Adı */}
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      Cihaz Adı <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="ör. NodeMCU-ESP8266-Saha-01"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:text-white transition font-medium text-slate-900"
+                    />
+                  </div>
+
+                  {/* (1,2) Cihaz Türü */}
                   <div>
                     <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Cihaz Türü</label>
                     <select
@@ -2839,6 +2823,7 @@ void sendHeartbeat() {
                     </select>
                   </div>
 
+                  {/* (2,1) Çalışma Durumu */}
                   <div>
                     <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Çalışma Durumu</label>
                     <select
@@ -2851,6 +2836,107 @@ void sendHeartbeat() {
                       <option value="warning">🟡 Uyarı (Eşik Aşıldı)</option>
                       <option value="critical">🔴 Kritik (Arıza / Aşırı Yük)</option>
                     </select>
+                  </div>
+
+                  {/* (2,2) Sorumlu Müşteri / Firma */}
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                      <span>Sorumlu Müşteri / Firma</span>
+                    </label>
+                    {user?.role === 'admin' ? (
+                      <select
+                        value={editOwnerId}
+                        onChange={(e) => setEditOwnerId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
+                      >
+                        <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
+                        {customersList
+                          .filter((c) => c.role === 'customer' || c.companyName)
+                          .map((cust) => (
+                            <option key={cust.id} value={cust.id}>
+                              🏢 {cust.companyName || cust.name} ({cust.email})
+                            </option>
+                          ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{customersList.find((c) => c.id === editOwnerId)?.name || '🏛️ Merkez Yönetim'}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Ağ, Konum & Hiyerarşi (Başlıkları Sadeleştirilmiş) */}
+                <div className="pt-3 border-t border-slate-200/60 dark:border-slate-800 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Fiziksel Lokasyon</label>
+                      <input
+                        type="text"
+                        value={editLocation}
+                        onChange={(e) => setEditLocation(e.target.value)}
+                        placeholder="ör. İstanbul / Fabrika-1 Blok B"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white transition font-medium"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">IP Adresi</label>
+                      <input
+                        type="text"
+                        value={editIpAddress}
+                        onChange={(e) => setEditIpAddress(e.target.value)}
+                        placeholder="192.168.1.100"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tesis, Bölge, Grup (Başlıksız) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <select
+                        value={editSiteId}
+                        onChange={(e) => setEditSiteId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Tesis Seçimi"
+                      >
+                        <option value="">🏢 Tesis Seçilmedi</option>
+                        {sites.map((s) => (
+                          <option key={s.id} value={s.id}>🏢 {s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        value={editZoneId}
+                        onChange={(e) => setEditZoneId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Bölge Seçimi"
+                      >
+                        <option value="">📍 Bölge Seçilmedi</option>
+                        {zones
+                          .filter((z) => !editSiteId || z.siteId === editSiteId)
+                          .map((z) => (
+                            <option key={z.id} value={z.id}>📍 {z.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        value={editGroupId}
+                        onChange={(e) => setEditGroupId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium cursor-pointer"
+                        title="Grup Seçimi"
+                      >
+                        <option value="">🏷️ Grup Seçilmedi</option>
+                        {groups.map((g) => (
+                          <option key={g.id} value={g.id}>🏷️ {g.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2939,84 +3025,7 @@ void sendHeartbeat() {
                 </div>
               )}
 
-              {/* Section 2: Ağ & Konum Yapılandırması & Hiyerarşi */}
-              <div className="p-4 bg-sky-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
-                <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400 font-bold text-xs uppercase tracking-wider">
-                  <Globe className="w-4 h-4" />
-                  <span>Ağ, Konum & Hiyerarşik Yapı</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Fiziksel Lokasyon</label>
-                    <input
-                      type="text"
-                      value={editLocation}
-                      onChange={(e) => setEditLocation(e.target.value)}
-                      placeholder="ör. İstanbul / Fabrika-1 Blok B"
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white transition font-medium"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">IP Adresi</label>
-                    <input
-                      type="text"
-                      value={editIpAddress}
-                      onChange={(e) => setEditIpAddress(e.target.value)}
-                      placeholder="192.168.1.100"
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 dark:text-white font-mono font-medium transition"
-                    />
-                  </div>
-                </div>
-
-                {/* Edit Hierarchy Assignment */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800">
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Tesis (Site)</label>
-                    <select
-                      value={editSiteId}
-                      onChange={(e) => setEditSiteId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Tesis Seçilmedi)</option>
-                      {sites.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Bölge (Zone)</label>
-                    <select
-                      value={editZoneId}
-                      onChange={(e) => setEditZoneId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Bölge Seçilmedi)</option>
-                      {zones
-                        .filter((z) => !editSiteId || z.siteId === editSiteId)
-                        .map((z) => (
-                          <option key={z.id} value={z.id}>{z.name}</option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">Grup</label>
-                    <select
-                      value={editGroupId}
-                      onChange={(e) => setEditGroupId(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                    >
-                      <option value="">(Grup Seçilmedi)</option>
-                      {groups.map((g) => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section 3: Güvenlik & Performans */}
+              {/* Section 2: Güvenlik & Performans */}
               <div className="p-4 bg-emerald-50/30 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-wider">
                   <Shield className="w-4 h-4" />
@@ -3076,42 +3085,20 @@ void sendHeartbeat() {
                     </select>
                   </div>
                 </div>
-              </div>
 
-              {/* Section 4: Akıllı Veri Gönderim Sıklığı & Watchdog */}
-              {renderIntervalAndHeartbeatSelector(
-                editExpectedInterval,
-                setEditExpectedInterval,
-                editIntervalMode,
-                setEditIntervalMode,
-                editAutoDetectedInterval,
-                editHeartbeatTimeout,
-                setEditHeartbeatTimeout
-              )}
-
-              {/* Section 5: Müşteri / Firma Sorumlusu (Admin Only) */}
-              {user?.role === 'admin' && (
-                <div className="p-4 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-200/60 dark:border-purple-800/40 space-y-2">
-                  <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-bold text-xs uppercase tracking-wider">
-                    <Building2 className="w-4 h-4" />
-                    <span>Sorumlu Müşteri / Firma Atama</span>
-                  </div>
-                  <select
-                    value={editOwnerId}
-                    onChange={(e) => setEditOwnerId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700/60 rounded-xl focus:ring-2 focus:ring-purple-500 font-medium text-slate-800 dark:text-purple-200 cursor-pointer"
-                  >
-                    <option value="usr_admin">🏛️ Merkez Yönetim (Yönetici)</option>
-                    {customersList
-                      .filter((c) => c.role === 'customer' || c.companyName)
-                      .map((cust) => (
-                        <option key={cust.id} value={cust.id}>
-                          🏢 {cust.companyName || cust.name} ({cust.email})
-                        </option>
-                      ))}
-                  </select>
+                {/* Sıklık & Watchdog Zaman Aşımı (Güvenlik ve İstek Sınırları İçinde) */}
+                <div className="pt-1">
+                  {renderIntervalAndHeartbeatSelector(
+                    editExpectedInterval,
+                    setEditExpectedInterval,
+                    editIntervalMode,
+                    setEditIntervalMode,
+                    editAutoDetectedInterval,
+                    editHeartbeatTimeout,
+                    setEditHeartbeatTimeout
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Modal Actions */}
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
