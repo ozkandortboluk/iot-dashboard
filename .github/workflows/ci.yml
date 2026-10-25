@@ -115,12 +115,13 @@ jobs:
       - name: Run UID/GID and ACL integration tests in isolated root container
         run: |
           docker run --rm --user 0:0 \
+            -e NEXUS_ISOLATED_OWNERSHIP_TEST=1 \
             -v "$PWD:/source:ro" \
             -w /tmp/project \
             node:22-bookworm-slim \
             bash -ec '
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends acl openssl ca-certificates >/dev/null
+              apt-get install -y -qq --no-install-recommends acl openssl ca-certificates sudo >/dev/null
               cp -a /source/. /tmp/project/
               cd /tmp/project
               test -f package-lock.json || { echo "Missing package-lock.json in integration workspace"; exit 1; }
