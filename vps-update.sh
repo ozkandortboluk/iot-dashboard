@@ -122,8 +122,9 @@ ANA MODLAR:
 
 SEÇENEKLER & BAYRAKLAR:
   -y, --yes
-      Tum interaktif onay sorularini (disk temizligi, reboot vb.) otomatik 'evet' kabul eder.
-      Cron gorevleri, CI/CD hatlari ve otomatik komutlar icin uygundur.
+      Rutin onay sorularini (ornegin guvenli disk temizligi) otomatik 'evet' kabul eder.
+      VPS reboot islemi bu bayraktan bagimsizdir ve her zaman etkileşimli acik onay ister.
+      Uretim guncellemelerinde otomatik/cron kullanimi onerilmez.
 
   --allow-compose
       Uzak GitHub deposunda docker-compose.yml degisikligi varsa, farki gostererek
@@ -530,6 +531,23 @@ confirm() {
   fi
   if [[ ! -r /dev/tty ]]; then
     note 'Onay terminali yok; varsayilan HAYIR.'
+    return 1
+  fi
+  if [[ -t 1 ]]; then
+    printf '%b%s [evet/HAYIR]: %b' "$CLR_BOLD$CLR_YELLOW" "$prompt" "$CLR_RESET" > /dev/tty
+  else
+    printf '%s [evet/HAYIR]: ' "$prompt" > /dev/tty
+  fi
+  IFS= read -r answer < /dev/tty || return 1
+  [[ "$answer" == evet || "$answer" == y || "$answer" == yes || "$answer" == EVET ]]
+}
+
+# Critical reboot confirmation is deliberately independent from FORCE_YES/CLEAN_YES.
+# In unattended runs there is no interactive approval, so reboot must be deferred.
+confirm_reboot() {
+  local prompt="$1" answer
+  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+    note 'Reboot onayi icin etkileşimli terminal yok; reboot ertelendi (--yes bu korumayi gecemez).'
     return 1
   fi
   if [[ -t 1 ]]; then
@@ -1061,7 +1079,7 @@ final_checks() {
   note 'Reboot gereksinimi kontrol ediliyor.'
   if [[ -e /run/reboot-required ]]; then
     note 'REBOOT GEREKLI: yeniden baslatma onaysiz yapilmayacak.'
-    if confirm 'VPS simdi yeniden baslatilsin mi? SSH baglantisi kopacak'; then
+    if confirm_reboot 'VPS simdi yeniden baslatilsin mi? SSH baglantisi kopacak'; then
       note 'VPS yeniden baslatma onaylandi. Boot sonrasi yeniden vps-update --check calistirin.'
       systemctl reboot || fail 'Reboot komutu basarisiz'
     else
