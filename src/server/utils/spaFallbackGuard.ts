@@ -60,6 +60,12 @@ export const SCANNER_PROBE_PATTERNS: RegExp[] = [
   /(?:^|\/)(?:mudur|yonetici|yonetim|administrator|kontrol|cp|enhancecp|cpanel|whm|webmin|uyegirisi)(?:$|\/)/i,
   // Generic CMS/blog honeypots
   /(?:^|\/)(?:wordpress|wp)(?:$|\/)/i,
+  // Cloud metadata SSRF probes (AWS/GCP/Azure instance metadata)
+  /(?:^|\/)(?:latest\/meta-data|computeMetadata|metadata\.google|169\.254\.169\.254)(?:$|\/)/i,
+  // Sensitive build, log, and lockfile leak probes
+  /(?:^|\/)(?:debug\.log|server\.log|access\.log|error\.log|npm-debug\.log|yarn-error\.log|yarn\.lock|pnpm-lock\.yaml|tsconfig\.json|vite\.config)(?:$|\/)/i,
+  // VCS and tool configuration leak probes
+  /(?:^|\/)(?:gitignore|gitattributes|gitlab-ci\.yml|dockerignore|editorconfig|eslintrc|prettierrc)(?:$|\/|\.)/i,
 ];
 
 /**
@@ -109,13 +115,21 @@ export function isScannerOrProbingPath(rawPath: string): boolean {
     return false;
   }
 
-  // 0. Check for directory traversal or escape characters in raw input
+  // 0. Check for directory traversal, null bytes, CRLF injection, or escape characters in raw input
   if (
     rawPath.includes("..") ||
     rawPath.includes("%2e%2e") ||
     rawPath.includes("%2E%2E") ||
     rawPath.includes("%5c") ||
-    rawPath.includes("%5C")
+    rawPath.includes("%5C") ||
+    rawPath.includes("\0") ||
+    rawPath.includes("%00") ||
+    rawPath.includes("\r") ||
+    rawPath.includes("\n") ||
+    rawPath.includes("%0d") ||
+    rawPath.includes("%0D") ||
+    rawPath.includes("%0a") ||
+    rawPath.includes("%0A")
   ) {
     return true;
   }

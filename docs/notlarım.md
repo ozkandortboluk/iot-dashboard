@@ -13,3 +13,6 @@ bir saha cihazı mybattery adında bir metrik gönderiyorsa o cihaz pile baglı 
 
 
 Zamanlanmış Snapshot & Saklama İlkesi Yapılandırması ayarları çalışıyor mu kontrol eder misin çalışmıyorsa çalışacak hale getir ve kontrolunu yap
+
+
+

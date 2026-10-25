@@ -182,6 +182,19 @@ process.on('unhandledRejection', (reason: any) => {
 });
 
 const app = express();
+
+// Security: Disable X-Powered-By header to prevent server fingerprinting
+app.disable('x-powered-by');
+
+// Security: Block dangerous/tampered HTTP verbs (TRACE, TRACK, CONNECT)
+app.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (['TRACE', 'TRACK', 'CONNECT'].includes(method)) {
+    return res.status(405).type('text/plain').send('Method Not Allowed');
+  }
+  next();
+});
+
 // Configure Trust Proxy: Trust container reverse proxy (1 hop / loopback + private docker subnets)
 const parsedTrustProxy = resolveTrustProxy(process.env.TRUST_PROXY, isProductionVpsEnvironment());
 app.set('trust proxy', parsedTrustProxy);
@@ -205,6 +218,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
 
   const isVpsProd = isProductionVpsEnvironment();
 
@@ -660,7 +674,7 @@ async function setupViteOrStatic() {
   app.use(spaRouteGuardMiddleware);
 
   // Serve static assets from public/ (robots.txt, sitemap.xml, favicon.ico, logos, etc.)
-  app.use(express.static(path.join(process.cwd(), 'public')));
+  app.use(express.static(path.join(process.cwd(), 'public'), { dotfiles: 'deny', index: false }));
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -673,7 +687,7 @@ async function setupViteOrStatic() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { dotfiles: 'deny', index: false }));
     app.get('*', createSpaFallbackHandler(distPath));
   }
 

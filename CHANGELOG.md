@@ -3,6 +3,17 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.25] - 2026-10-25
+
+### 🔒 Kapsamlı Zafiyet Taraması & Güvenlik Sıkılaştırması (Vulnerability Hardening)
+- **Sunucu Parmak İzi Gizleme:** Express sunucusunda `app.disable('x-powered-by')` etkinleştirilerek `X-Powered-By: Express` başlığı gizlendi; botların altyapı parmak izi çıkarması engellendi.
+- **Tehlikeli HTTP Metotlarının Engellenmesi:** Cross-Site Tracing (XST) ve vekil tünel suiistimallerini engellemek için `TRACE`, `TRACK` ve `CONNECT` HTTP metotları global düzeyde `405 Method Not Allowed` ile reddedildi.
+- **Statik Dosya ve Dizin Güvenliği:** `express.static` yapılandırmalarına `dotfiles: 'deny'` ve `index: false` kuralları eklenerek gizli dosyalara veya dizin listelemelerine yönelik taramalar engellendi.
+- **Enjeksiyon ve SSRF Koruması:** `spaFallbackGuard.ts` içerisine Null Byte (`\0`, `%00`), CRLF Response Splitting (`\r\n`, `%0d%0a`), Cloud Metadata SSRF (`/latest/meta-data`, `/computeMetadata`), debug günlükleri (`/debug.log`, `/server.log`) ve VCS sızıntı kalıpları (`.gitignore`, `.gitlab-ci.yml`) eklenerek zafiyet tarama filtreleri tahkim edildi.
+- **Nginx Ters Vekil Güvenlik Kalkanı:** `docker/nginx/nginx.conf` güncellenerek dış dünyadan gelen bulut anahtarları, veritabanı yedekleri (`.sql`, `.gz`, `.tar`, `.zip`, `.properties`), kimlik dosyaları ve kontrol paneli tarayıcıları doğrudan Nginx katmanında 404 ile karşılanarak Node.js sunucusuna gereksiz yük binmesi önlendi.
+- **Ek Güvenlik Başlıkları:** `X-Permitted-Cross-Domain-Policies: none` eklenerek çapraz alan politika suiistimalleri sınırlandırıldı.
+
+---
 ## 🚀 [v1.49.24] - 2026-10-25
 
 ### 📡 Telemetri Günlükleme İyileştirmesi (Telemetry Log Noise Reduction)

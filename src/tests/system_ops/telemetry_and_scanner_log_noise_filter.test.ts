@@ -169,6 +169,13 @@ describe('Telemetry & Scanner HTTP Log Noise Suppression Test Suite', () => {
         '/Dockerfile',
         '/mcp.json',
         '/enhancecp',
+        '/latest/meta-data',
+        '/computeMetadata/v1/',
+        '/debug.log',
+        '/server.log',
+        '/.gitignore',
+        '/page%00.php',
+        '/page%0a.html',
       ];
 
       for (const p of probes) {
