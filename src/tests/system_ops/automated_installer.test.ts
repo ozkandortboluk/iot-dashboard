@@ -190,12 +190,18 @@ exit 1
     expect(composeContent).toMatch(/encryption_key:/);
     expect(composeContent).toMatch(/\/api\/health\/live/);
 
-    // Docker secret mapping for app service must configure UID 1000, GID 1000, mode 0400
-    // so that unprivileged node user (UID 1000) can securely read /run/secrets/encryption_key
+    // File-backed Compose secrets are bind mounts; uid/gid/mode options are ignored outside Swarm.
+    // The installer must grant the non-root runtime user read access without making secrets world-readable.
     expect(composeContent).toMatch(/source:\s*encryption_key/);
-    expect(composeContent).toMatch(/uid:\s*["']?1000["']?/);
-    expect(composeContent).toMatch(/gid:\s*["']?1000["']?/);
-    expect(composeContent).toMatch(/mode:\s*["']?0400["']?/);
+    expect(composeContent).toMatch(/target:\s*encryption_key/);
+    expect(composeContent).not.toContain('uid: "1000"');
+    expect(composeContent).not.toContain('gid: "1000"');
+    expect(composeContent).not.toContain('mode: "0400"');
+
+    const secretsLibContent = fs.readFileSync(path.join(rootDir, 'scripts/setup/lib/secrets.sh'), 'utf-8');
+    expect(secretsLibContent).toContain('align_secrets_ownership_and_permissions()');
+    expect(secretsLibContent).toContain('chown 1000:1000');
+    expect(secretsLibContent).toContain('chmod 640');
 
     // Dockerfile must maintain non-root USER node and initialize /run/secrets ownership
     const dockerfilePath = path.join(rootDir, 'Dockerfile');
