@@ -1,4 +1,4 @@
-# NexusNode VPS Update & Disk Temizleme — v0.4
+# NexusNode VPS Update & Disk Temizleme — v0.5 (Smart Edition)
 
 Bu betik NexusNode Git deposunun **ana dizininde** (`/opt/iot-dashboard/iot-dashboard/vps-update.sh`) bulunacak şekilde düzenlenmiştir. Ek bir `/tmp` aktarımı veya `/usr/local/sbin` kurulumu **gerekmez**. Bütün komutları sunucuda **proje ana dizininden** çalıştırın.
 
@@ -16,9 +16,9 @@ Aşağıdaki dosyaları proje ana dizinine yerleştirin:
 └── ...
 ```
 
-**Not:** Betik gerçek çalışmada proje dizinini kendi bulunduğu konumdan otomatik bulur. `--run` sırasında çalışmakta olan betiğin Git güncellemesiyle değişmesini önlemek için `/var/lib/nexusnode-update` altında root'a özel bir *çalıştırma kopyası* oluşturur. Ana dosya yine proje dizininde kalır. `--check` hiçbir kopya veya log oluşturmaz.
+**Not:** Betik gerçek çalışmada proje dizinini kendi bulunduğu konumdan otomatik bulur. `--run` sırasında çalışmakta olan betiğin Git güncellemesiyle değişmesini önlemek için `/var/lib/nexusnode-update` altında root'a özel bir *çalıştırma kopyası* oluşturur. Ana dosya yine proje dizininde kalır. `--check` ve `--status` hiçbir kopya veya log oluşturmaz.
 
-## 2. Yardım ve Salt Okunur Ön Kontrol
+## 2. Hızlı Durum, Yardım ve Salt Okunur Ön Kontrol
 
 Tüm komut seçeneklerini ve detaylı yardım kılavuzunu görüntülemek için:
 
@@ -27,13 +27,19 @@ cd /opt/iot-dashboard/iot-dashboard
 sudo bash ./vps-update.sh --help
 ```
 
-Hiçbir değişiklik yapmadan sistemi denetlemek için:
+Anlık konteyner, servis, disk ve son yedek özetini 2 saniyede görmek için:
+
+```bash
+sudo bash ./vps-update.sh --status
+```
+
+Hiçbir değişiklik yapmadan sistemi denetlemek ve GitHub'daki yeni güncellemeleri analiz etmek için:
 
 ```bash
 sudo bash ./vps-update.sh --check
 ```
 
-`--check`, mevcut APT paket listesini, disk durumunu, Docker/Compose, Git çalışma ağacı, yedekleme servisi, HTTPS ve API sağlığını **salt okunur** kontrol eder. Ne yeni yedek oluşturur ne paket/image indirir ne de dosya siler. Güncel uzak paket veya GitHub sürümlerini sorgulamaz.
+`--check`, mevcut APT paket listesini, disk durumunu, Docker/Compose, Git çalışma ağacı, yedekleme servisi, HTTPS ve API sağlığını, SSL sertifika kalan süresini **salt okunur** kontrol eder. Ayrıca GitHub `origin/main` dalındaki yeni commit sayısını, sürüm farkını, gelen commit başlıklarını ve güncellemenin veritabanı şema göçü (migration) içerip içermediğini tespit ederek detaylı bir durum kartı ile raporlar. Ne yeni yedek oluşturur ne de dosya siler. (İnternetsiz ortamlar için `--offline` seçeneği mevcuttur).
 
 ## 3. Güvenli Disk Temizliği ve Alan Kazanımı (--clean)
 
@@ -86,18 +92,23 @@ cd /opt/iot-dashboard/iot-dashboard
 sudo bash ./vps-update.sh --run
 ```
 
+### Ek Seçenekler:
+- `sudo bash ./vps-update.sh --run -y` : Cron / Otomatik komutlar için kullanıcı onaylarını (`evet`) otomatik kabul eder.
+- `sudo bash ./vps-update.sh --run --allow-compose` : `docker-compose.yml` dosyasında güncelleme varsa farkı göstererek onaylı geçiş sağlar.
+
 `--run` sırası:
 
 1. Git'in `main` dalında olduğunu ve yerel takip edilen dosyalarda değişiklik olmadığını kontrol eder. Yalnızca `vps-update.sh` ve `VPS-UPDATE-KULLANIM.md` dosyalarının **Git tarafından takip edilmeyen** kopyalarına izin verir; diğer tüm takip edilmeyen dosyalar engeldir.
-2. Servis ve secrets izin kontrolleri yapar.
-3. `nexusnode-local-backup.service` ile **yeni bir yerel yedek** oluşturur; SHA256, gerekli yedek dosyaları ve PostgreSQL arşivinin okunabilirliğini kontrol eder. Gerekirse burada durur.
-4. Boş alan 6 GiB altında kalırsa **önce onay alarak sadece Docker build cache'i** temizleyebilir. Yedekleri, volume'ları ve eski imajları otomatik silmez.
-5. Debian APT paketlerini günceller. İşlem sonunda Docker/Nginx ve uygulama sağlığını denetler.
-6. GitHub `origin/main` dalını güvenli **fast-forward** ile günceller. Uzak dalda `docker-compose.yml`/Compose yapılandırması değişmişse otomatik dağıtım yerine manuel inceleme için durur.
-7. NexusNode yeni sürümünü önce ayrı bir Docker imajında derler, sonra yalnızca uygulama servisini yeniden oluşturur. Sağlık kontrolü başarısızsa yalnızca kısıtlı ve teknik olarak doğrulanmış koşullarda eski uygulama imajına dönmeye çalışır. DB migration değişiklikleri için otomatik rollback yapılmaz.
-8. Compose'taki sabit sürüm etiketiyle Adminer imajını kontrol eder. **Yeni sürüm etiketini kendi kendine seçmez.**
-9. Dağıtım ve sağlık kontrolleri başarılı olduğunda geçici aday derleme imajını siler, güvenlik payı olarak **son 3 yüklemenin rollback imajını koruyarak** daha eski olanları otomatik temizler.
-10. HTTPS/API/veritabanı ve temel sistem servislerini kontrol eder. `/run/reboot-required` varsa yeniden başlatmak için terminalden **`evet`** yanıtını bekler.
+2. Uzak GitHub deposuyla sürüm/commit farkını ve veritabanı şema göçü (migration) durumunu analiz eder.
+3. Servis ve secrets izin kontrolleri yapar (geçici container başlatma gecikmelerine karşı toleranslı kontrol uygular).
+4. `nexusnode-local-backup.service` ile **yeni bir yerel yedek** oluşturur; systemd servisi bulunamazsa doğrudan entegre container yedeğine (`pg_dump` + secrets + SHA256) otomatik geçer.
+5. Boş alan 6 GiB altında kalırsa **önce onay alarak sadece Docker build cache'i** temizleyebilir. Yedekleri, volume'ları ve eski imajları otomatik silmez.
+6. Debian APT paketlerini günceller (`NEXUS_SYSTEM_UPDATE=1` aktifse). İşlem sonunda Docker/Nginx ve uygulama sağlığını denetler.
+7. GitHub `origin/main` dalını güvenli **fast-forward** ile günceller. Uzak dalda `docker-compose.yml`/Compose yapılandırması değişmişse farkı ekrana basar, volume silme riski yoksa kullanıcı onayını veya `--allow-compose` bayrağını denetler.
+8. NexusNode yeni sürümünü önce ayrı bir Docker imajında derler, sonra yalnızca uygulama servisini yeniden oluşturur. Sağlık kontrolü başarısızsa yalnızca kısıtlı ve teknik olarak doğrulanmış koşullarda eski uygulama imajına dönmeye çalışır. DB migration değişiklikleri için otomatik rollback yapılmaz.
+9. Compose'taki sabit sürüm etiketiyle Adminer imajını kontrol eder. **Yeni sürüm etiketini kendi kendine seçmez.**
+10. Dağıtım ve sağlık kontrolleri başarılı olduğunda geçici aday derleme imajını siler, güvenlik payı olarak **son 3 yüklemenin rollback imajını koruyarak** daha eski olanları otomatik temizler.
+11. HTTPS/API/veritabanı ve temel sistem servislerini kontrol eder. `/run/reboot-required` varsa yeniden başlatmak için onay sorar (`-y` ile otomatik geçilebilir). İşlem sonunda özet durum kartı basar.
 
 **TimescaleDB/PostgreSQL imajını güncellemez.** Bunun için ayrıca kullanıcı onaylı, ayrı bir işlem tasarlanacaktır. PostgreSQL ve uygulama Docker volume'ları korunur.
 

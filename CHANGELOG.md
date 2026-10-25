@@ -3,6 +3,20 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.28] - 2026-10-25
+
+### 🧠 VPS Güncelleme & Bakım Betiği Akıllı Sürüm Yükseltmesi (`vps-update.sh` v0.5)
+- **Uzak Depo & Sürüm Farkı Analizi (`check_remote_updates`):** `--check` ve `--run` öncesinde GitHub `origin/main` dalı güvenle taranarak yerel ve uzak commit farkı (`behind_count`), sürüm numarası (`vX.Y.Z -> vA.B.C`), gelen commit başlıkları ve güncellemenin veritabanı şema göçü (`migration`) içerip içermediği otomatik tespit edilip operatöre sunuldu.
+- **Esnek Parametre Yönetimi & Otomatik Mod Desteği:** `--run` moduna `-y` / `--yes` desteği eklenerek cron görevleri ve uzaktan otomasyonlar için onay beklemeden çalışma kabiliyeti sağlandı. Ek olarak argümanların sıralamadan bağımsız okunması sağlandı.
+- **Hızlı Sistem & Servis Özeti Modu (`--status`):** Yalnızca 2 saniyede çalışan konteynerleri, Nginx, Fail2ban, API sağlık kodunu, disk kullanımını, aktif sürümü ve son yedek boyutunu listeleyen hızlı durum sorgulama modu eklendi.
+- **Dirençli Servis Sağlık Denetimi (`check_container_health` & `verify_endpoints`):** Konteynerlerin geçici başlama gecikmelerine karşı 15-20 saniyelik tolerans döngüsü ve API uç noktaları için 3 adımlı yeniden deneme mekanizması eklendi; anlık ağ/DNS gecikmelerinden dolayı gereksiz hata kesintileri önlendi.
+- **Entegre Bağımsız Yedekleme Mekanizması (`create_standalone_backup`):** `nexusnode-local-backup.service` systemd biriminin bulunamadığı veya başarısız olduğu ortamlarda doğrudan Docker container üzerinden `pg_dump -Fc`, secret anahtarları ve SHA256 manifesti çıkaran otomatik yedekleme kurtarma mekanizması devreye alındı.
+- **Akıllı Compose Fark Analizi (`--allow-compose`):** `docker-compose.yml` üzerinde yapılan değişiklikler anında ekranda diff olarak gösterildi; kritik volume silinmesi riski kontrol edildi ve kullanıcı onayıyla ya da `--allow-compose` parametresiyle kontrollü geçişe olanak tanındı.
+- **SSL / TLS Sertifika Takibi (`check_ssl_cert`):** Let's Encrypt / Nginx SSL sertifikasının bitiş tarihi otomatik hesaplanarak 14 günden az kaldığında operatörü uyaran erken ikaz mekanizması eklendi.
+- **Renkli Terminal Arayüzü & Özet Rapor Kartı (`print_summary_card`):** Terminal çıktılarında ANSI renkleri ve işlem sonunda sistem, disk, servis ve log durumunu toplu gösteren özet durum kartı eklendi.
+- **Kullanım Kılavuzu Senkronizasyonu (`VPS-UPDATE-KULLANIM.md`):** Dokümantasyon v0.5 akıllı sürüm yetenekleri, yeni parametreler ve komut örnekleriyle güncellendi.
+
+---
 ## 🚀 [v1.49.27] - 2026-10-25
 
 ### 🛑 Terminal Log Akışını Dondurma & Yetkisiz Polling Döngüsünü Engelleme (Prevent Runaway HTTP Log Flooding)

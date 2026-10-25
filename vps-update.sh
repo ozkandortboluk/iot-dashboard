@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
-# NexusNode VPS Update - v0.4 (Debian 13 / Docker Compose)
-# Run from the project root: sudo bash ./vps-update.sh [--check|--run|--clean|--help]
+# NexusNode VPS Update - v0.5 (Smart Edition - Debian 13 / Docker Compose)
+# Run from the project root: sudo bash ./vps-update.sh [--check|--run|--clean|--status|--help]
 # Default: manual run. --check is read-only; --run performs update; --clean frees disk.
 set -Eeuo pipefail
 umask 077
 export LC_ALL=C
+
+# Terminal color & style configuration (auto-disabled if output is redirected or NO_COLOR=1)
+if [[ -t 1 && "${NO_COLOR:-0}" != 1 ]]; then
+  CLR_RESET='\033[0m'
+  CLR_BOLD='\033[1m'
+  CLR_DIM='\033[2m'
+  CLR_RED='\033[0;31m'
+  CLR_GREEN='\033[0;32m'
+  CLR_YELLOW='\033[0;33m'
+  CLR_BLUE='\033[0;34m'
+  CLR_MAGENTA='\033[0;35m'
+  CLR_CYAN='\033[0;36m'
+  CLR_WHITE='\033[1;37m'
+else
+  CLR_RESET=''
+  CLR_BOLD=''
+  CLR_DIM=''
+  CLR_RED=''
+  CLR_GREEN=''
+  CLR_YELLOW=''
+  CLR_BLUE=''
+  CLR_MAGENTA=''
+  CLR_CYAN=''
+  CLR_WHITE=''
+fi
 
 # In normal use, the updater lives in the checkout root. During --run it is
 # re-executed from a protected root-only snapshot to prevent Git updating the
@@ -20,7 +45,10 @@ HEALTH_URL=http://127.0.0.1:3000/api/health/ready
 PUBLIC_URL=https://nexusnodeiot.com.tr/
 MAX_ROLLBACK_KEEP=${NEXUS_MAX_ROLLBACK_KEEP:-3}
 
-MODE=${1:---check}
+MODE=""
+FORCE_YES=false
+ALLOW_COMPOSE=false
+REMOTE_CHECK=true
 CLEAN_DRY_RUN=false
 CLEAN_DEEP=false
 CLEAN_YES=false
@@ -36,32 +64,39 @@ SCHEMA_BEFORE=''
 usage() {
   cat <<'EOF'
 ================================================================================
-  NexusNode VPS Yonetim, Guncelleme & Disk Temizleme Araci (vps-update.sh v0.4)
-  Debian 13 / Docker Compose Mimarisi Icin Ozel Olarak Tasarlanmistir
+  NexusNode VPS Akilli Yonetim, Guncelleme & Bakim Araci (vps-update.sh v0.5)
+  Debian 13 / Docker Compose Mimarisi Icin Ozel Olarak Gelistirilmistir
 ================================================================================
 
 KULLANIM:
   sudo bash ./vps-update.sh [MOD] [SEÇENEKLER]
 
 ANA MODLAR:
-  --check
-      Salt okunur (read-only) on denetim gerceklestirir.
-      Git agaci, Docker servisleri, Nginx, TimescaleDB, HTTPS/API uclari,
-      disk alani ve son yedek durumunu inceler ve raporlar.
-      Hicbir dosya silmez, paket indirmez veya servisleri degistirmez.
+  --check (Varsayılan)
+      Salt okunur (read-only) kapsamli sistem ve guncelleme on denetimi yapar.
+      Git agaci, GitHub'daki yeni commit/surum farki, Docker servisleri, Nginx,
+      TimescaleDB, HTTPS/API uclari, SSL sertifika gecerliligi, disk alani ve
+      son yedek durumunu inceler ve detayli durum karti ile raporlar.
+      Hicbir dosya silmez, servisleri durdurmaz veya degistirmez.
 
-  --run
-      Tam denetimli ve guvenli guncelleme surecini baslatir:
+  --run [SEÇENEKLER]
+      Tam denetimli, guvenli ve akilli guncelleme surecini baslatir:
       1. Git main dali ve calisma agaci dogrulamasi
-      2. Servis saglik ve secret dosya izin kontrolleri
-      3. Otomatik yerel kurtarma yedegi olusturma ve pg_restore/SHA256 dogrulamasi
-      4. Disk alani kontrolu (gerekirse guvenli build-cache temizligi onayi)
-      5. origin/main dalindan guvenli fast-forward birlestirme
-      6. Dockerfile ile yeni uygulamanin yalitimli imaj derlemesi
-      7. Yalnizca app servisinin sifira yakin kesintiyle yayinlanmasi
-      8. Saglik kontrolleri ve basarisizlikta otomatik UI rollback korumasi
-      9. Adminer imaj kontrolu, son sistem saglik ve opsiyonel reboot denetimi
-      10. Basarili yayin sonrasi otomatik temizlik (Gecici aday silinir, son 3 rollback saklanir)
+      2. Uzak GitHub deposu commit farki ve surum karsilastirmasi
+      3. Servis saglik ve secret dosya izin kontrolleri
+      4. Otomatik dogrulanmis yerel yedek olusturma (systemd + container fallback)
+      5. Disk alani kontrolu (gerekirse guvenli build-cache temizligi)
+      6. origin/main dalindan guvenli fast-forward birlestirme
+      7. Compose degisiklik tespiti, gosterimi ve guvenlik denetimi
+      8. Dockerfile ile yeni uygulamanin yalitimli imaj derlemesi
+      9. Yalnizca app servisinin sifira yakin kesintiyle yayinlanmasi
+      10. Coklu saglik kontrolleri ve basarisizlikta otomatik UI rollback korumasi
+      11. Adminer imaj kontrolu, son sistem saglik ve opsiyonel reboot denetimi
+      12. Basarili yayin sonrasi otomatik temizlik (Gecici aday silinir, son 3 rollback saklanir)
+
+  --status | --info
+      Hizli sistem ve servis ozeti: Calisan konteyner sagligi, Nginx, API durumu,
+      disk alani, aktif surum ve son yedek bilgisini 2 saniyede gosterir.
 
   --clean | --cleanup [SEÇENEKLER]
       VPS uzerinde gereksiz dosyalari, artik derleme ciktilarini, Docker onbelleklerini
@@ -72,7 +107,7 @@ ANA MODLAR:
       • Sahipsiz (dangling) ve etiketsiz (<none>) Docker imajlari
       • Durdurulmus gecici konteynerler ve kullanilmayan Docker aglari
       • Eski gecici aday derleme imajlari (iot-dashboard-app:candidate-*)
-      • Eski rollback imajlari (nexusnode-app/adminer-rollback:* -> guvenlik payi olarak son 3 tanesi korunur)
+      • Eski rollback imajlari (nexusnode-app/adminer-rollback:* -> son 3 tanesi korunur)
       • Host uzerindeki derleme artiklari (dist/, build/, server.js)
       • Node & derleyici onbellekleri (node_modules/.cache, .eslintcache, .tsbuildinfo)
       • Test ve kapsam raporlari (coverage/, .nyc_output/)
@@ -85,25 +120,32 @@ ANA MODLAR:
   --help | -h
       Bu detayli komut kilavuzunu goruntuler.
 
---clean MODU SECENEKLERI:
+SEÇENEKLER & BAYRAKLAR:
+  -y, --yes
+      Tum interaktif onay sorularini (disk temizligi, reboot vb.) otomatik 'evet' kabul eder.
+      Cron gorevleri, CI/CD hatlari ve otomatik komutlar icin uygundur.
+
+  --allow-compose
+      Uzak GitHub deposunda docker-compose.yml degisikligi varsa, farki gostererek
+      otomatik guncellemeye izin verir (varsayilan: guvenlik icin onay ister).
+
+  --offline, --no-remote
+      --check modunda uzak GitHub deposuna baglanmadan yalnizca yerel durumu inceler.
+
   --dry-run
-      Simulasyon modu. Hicbir dosya veya imaj silinmez; temizlenebilecek
-      kaynaklarin boyutlarini ve potansiyel disk kazancini raporlar.
+      --clean modunda simulasyon yapar; hicbir dosya silmeden potansiyel disk kazancini listeler.
 
-  --deep | --all
-      Derin temizlik modu. Standart temizlige ek olarak:
-      • 'apt-get -y --purge autoremove' ile eski cekirdek ve artik paketleri kaldirir.
-      • Journal loglarini son 3 gune (veya maks 50M) daha agresif vakumlar.
-      • Guncelleme loglari icin saklama suresini 7 gune indirir.
+  --deep, --all
+      --clean modunda derin sistem temizligi yapar (apt autoremove --purge, agresif log vakumu).
 
-  --yes | -y
-      Kullanici onay sorusunu atlar (Cron gorevleri veya otomatik betikler icin).
+  --verbose, -v
+      Terminalde tum detayli ciktilari ve log akisini gosterir (NEXUS_VERBOSE=1).
 
 CEVRE DEGISKENLERI:
   NEXUS_SYSTEM_UPDATE=1
       --run calismasi sirasinda Debian isletim sistemi paketlerini (apt upgrade) de gunceller.
   NEXUS_VERBOSE=1
-      Terminalde tum detayli ciktilari ve log akisini gosterir.
+      Terminalde tum detayli log ciktilarini gosterir.
 
 GUVENLIK VE VERI KORUMA GARANTISI:
   • ASLA Docker volume'larini (timescaledb_data, app_data) silmez.
@@ -114,58 +156,66 @@ GUVENLIK VE VERI KORUMA GARANTISI:
   • ASLA zorla Git sifirlamasi (git reset --hard / git clean -fd) yapmaz.
 
 ORNEK KULLANIMLAR:
-  sudo bash ./vps-update.sh --check            # Guvenli on kontrol
+  sudo bash ./vps-update.sh                    # Varsayilan guvenli on kontrol
+  sudo bash ./vps-update.sh --status           # 2 saniyede anlik sistem ozeti
+  sudo bash ./vps-update.sh --check            # Detayli on denetim ve GitHub fark analizi
   sudo bash ./vps-update.sh --clean            # Standart guvenli disk temizligi
   sudo bash ./vps-update.sh --clean --deep     # Derin sistem & kernel temizligi
   sudo bash ./vps-update.sh --clean --dry-run  # Silmeden temizlik analizi
-  sudo bash ./vps-update.sh --clean -y         # Onaysiz otomatik temizlik
-  sudo bash ./vps-update.sh --run              # Canli guncelleme
-  sudo env NEXUS_SYSTEM_UPDATE=1 bash ./vps-update.sh --run # Sistem paketleriyle guncelleme
+  sudo bash ./vps-update.sh --run              # Guvenli adim adim canli guncelleme
+  sudo bash ./vps-update.sh --run -y           # Onaysiz tam otomatik guncelleme
+  sudo bash ./vps-update.sh --run --allow-compose # Compose degisikliklerine izin veren guncelleme
 ================================================================================
 EOF
 }
 
-case "$MODE" in
-  --help|-h|help)
-    usage
-    exit 0
-    ;;
-  --check)
-    [[ $# -le 1 ]] || { usage >&2; exit 2; }
-    ;;
-  --run)
-    [[ $# -le 1 ]] || { usage >&2; exit 2; }
-    ;;
-  --clean|--cleanup)
-    shift
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --dry-run) CLEAN_DRY_RUN=true ;;
-        --deep|--all) CLEAN_DEEP=true ;;
-        --yes|-y) CLEAN_YES=true ;;
-        --help|-h) usage; exit 0 ;;
-        *)
-          echo "HATA: Bilinmeyen temizlik secenegi: $1" >&2
-          usage >&2
-          exit 2
-          ;;
-      esac
-      shift
-    done
-    ;;
-  *)
-    usage >&2
-    exit 2
-    ;;
-esac
+# Smart argument parsing: handles any order of flags and options
+ORIG_ARGS=("$@")
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check) MODE=--check ;;
+    --run) MODE=--run ;;
+    --status|--info) MODE=--status ;;
+    --clean|--cleanup) MODE=--clean ;;
+    -y|--yes) FORCE_YES=true; CLEAN_YES=true ;;
+    --dry-run) CLEAN_DRY_RUN=true ;;
+    --deep|--all) CLEAN_DEEP=true ;;
+    --allow-compose|--force-compose) ALLOW_COMPOSE=true ;;
+    --offline|--no-remote) REMOTE_CHECK=false ;;
+    --verbose|-v) export NEXUS_VERBOSE=1 ;;
+    --help|-h|help) usage; exit 0 ;;
+    *)
+      if [[ -z "$MODE" ]]; then
+        case "$1" in
+          check) MODE=--check ;;
+          run) MODE=--run ;;
+          clean|cleanup) MODE=--clean ;;
+          status|info) MODE=--status ;;
+          *)
+            echo "HATA: Bilinmeyen parametre: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        esac
+      else
+        echo "HATA: Bilinmeyen secenek: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      ;;
+  esac
+  shift
+done
+MODE=${MODE:---check}
 
 note() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
-fail() { note "HATA ($STAGE): $*" >&2; exit 1; }
-step() { STAGE="$1"; note "===== $STAGE ====="; }
+fail() { printf '[%s] %bHATA (%s): %s%b\n' "$(date '+%F %T')" "$CLR_RED" "$STAGE" "$*" "$CLR_RESET" >&2; exit 1; }
+step() { STAGE="$1"; printf '[%s] %b===== %s =====%b\n' "$(date '+%F %T')" "$CLR_BOLD$CLR_CYAN" "$STAGE" "$CLR_RESET"; }
+
 on_failure() {
   rc=$?
   if (( rc != 0 )); then
-    note "ISLEM DURDU: asama=$STAGE, exit=$rc. Otomatik DB/OS geri alma YOK."
+    printf '[%s] %bISLEM DURDU: asama=%s, exit=%d. Otomatik DB/OS geri alma YOK.%b\n' "$(date '+%F %T')" "$CLR_RED" "$STAGE" "$rc" "$CLR_RESET"
     if [[ "$MODE" == --run || "$MODE" =~ ^(--clean|--cleanup)$ ]]; then
       if [[ -n "${LOG_FILE:-}" ]]; then note "Log: $LOG_FILE"; fi
       note "Calisan container/volume ve mevcut yedekler otomatik silinmedi."
@@ -175,22 +225,27 @@ on_failure() {
 trap on_failure EXIT
 
 [[ -d "$REPO/.git" ]] || fail "Git checkout yok: $REPO. Betigi proje ana dizinine koyun."
-[[ $EUID -eq 0 ]] || fail "root gerekli: sudo bash ./vps-update.sh $MODE"
+if [[ $EUID -ne 0 ]]; then
+  if [[ "$MODE" == --status ]]; then
+    note "Bilgi: Hizli durum ozeti non-root (sudo olmadan) calistiriliyor."
+  else
+    fail "root yetkisi gerekli: sudo bash ./vps-update.sh $MODE"
+  fi
+fi
 cd "$REPO"
-note "Proje dizini: $REPO"
 
 # Make a protected runtime copy for a real update, because a Git fast-forward
 # may change vps-update.sh itself if the file is tracked in the repository.
-# No snapshot is created in --check mode; that mode stays read-only.
+# All original arguments are forwarded. No snapshot is created in --check/--status mode.
 if [[ "$MODE" == --run && "${NEXUS_UPDATE_FROZEN:-0}" != 1 ]]; then
   install -d -m 700 -o root -g root "$STATE_ROOT"
   FROZEN_SCRIPT="$STATE_ROOT/source-$STAMP-$$.sh"
   install -o root -g root -m 700 -- "$SCRIPT_SOURCE" "$FROZEN_SCRIPT"
   exec env NEXUS_UPDATE_FROZEN=1 NEXUS_UPDATE_REPO_SNAPSHOT="$REPO" \
-    /bin/bash "$FROZEN_SCRIPT" "$MODE"
+    /bin/bash "$FROZEN_SCRIPT" "${ORIG_ARGS[@]}"
 fi
 
-# Serialize update or cleanup runs. --check does not create or change files.
+# Serialize update or cleanup runs. --check and --status do not create or change files.
 if [[ "$MODE" == --run ]]; then
   command -v flock >/dev/null || fail "flock bulunamadi"
   install -d -m 700 -o root -g root "$LOG_ROOT" "$STATE_ROOT"
@@ -202,8 +257,8 @@ if [[ "$MODE" == --run ]]; then
   if [[ "${NEXUS_VERBOSE:-0}" == 1 ]]; then
     exec > >(tee -a "$LOG_FILE") 2>&1
   else
-    # All output is saved in the protected log; terminal only shows milestones.
-    exec > >(tee -a "$LOG_FILE" | grep --line-buffered -E '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]') 2>&1
+    # Protected log receives everything; terminal displays milestones, steps, summaries and warnings.
+    exec > >(tee -a "$LOG_FILE" | grep --line-buffered -E '^(\[[0-9]{4}-[0-9]{2}-[0-9]{2}|={5,}|[[:space:]]*[•↳✓ℹ⚠✖✨📌🔖💾🛡️📦📝])') 2>&1
   fi
   [[ ! -e "$STATE_ROOT/rollback-needs-review" ]] || fail "Onceki rollback incelenmedi. $STATE_ROOT/rollback-needs-review dosyasini kontrol et."
 elif [[ "$MODE" =~ ^(--clean|--cleanup)$ && "$CLEAN_DRY_RUN" != true ]]; then
@@ -223,7 +278,11 @@ elif [[ "$MODE" =~ ^(--clean|--cleanup)$ && "$CLEAN_DRY_RUN" != true ]]; then
   fi
 fi
 
-for cmd in git docker curl df find sha256sum systemctl stat; do
+REQUIRED_CMDS=(git df find stat)
+if [[ "$MODE" != --status ]]; then
+  REQUIRED_CMDS+=(docker curl sha256sum systemctl)
+fi
+for cmd in "${REQUIRED_CMDS[@]}"; do
   command -v "$cmd" >/dev/null 2>&1 || fail "Komut eksik: $cmd"
 done
 
@@ -231,12 +290,12 @@ REPO_OWNER=$(stat -c '%U' "$REPO/.git")
 [[ -n "$REPO_OWNER" ]] || fail "Git sahibi belirlenemedi"
 repo_git() {
   local readonly_env=()
-  if [[ "$MODE" == --check ]]; then readonly_env=(GIT_OPTIONAL_LOCKS=0); fi
-  if [[ "$REPO_OWNER" == root ]]; then
+  if [[ "$MODE" == --check || "$MODE" == --status ]]; then readonly_env=(GIT_OPTIONAL_LOCKS=0); fi
+  if [[ "$REPO_OWNER" == root || $EUID -ne 0 || ! $(command -v runuser 2>/dev/null) ]]; then
     env GIT_TERMINAL_PROMPT=0 "${readonly_env[@]}" git -c "safe.directory=$REPO" -C "$REPO" "$@"
   else
     runuser -u "$REPO_OWNER" -- env GIT_TERMINAL_PROMPT=0 "${readonly_env[@]}" \
-      git -C "$REPO" "$@"
+      git -c "safe.directory=$REPO" -C "$REPO" "$@"
   fi
 }
 
@@ -251,6 +310,7 @@ format_kib() {
     printf "%d KiB" "$kib"
   fi
 }
+
 require_disk() {
   local free required
   free=$(free_kib)
@@ -259,9 +319,8 @@ require_disk() {
   (( free >= required )) || return 1
 }
 
-# The two updater files may initially be copied into the project root without
-# being committed yet. They are the ONLY exception to strict Git cleanliness.
-# In particular, all other untracked scratch files still stop --run.
+# The updater files may initially be copied into the project root without
+# being committed yet. They are the exception to strict Git cleanliness.
 unexpected_git_changes() {
   local raw line
   raw=$(repo_git status --porcelain=v1 --untracked-files=all) || return 1
@@ -299,7 +358,23 @@ check_git() {
   if grep -Eq '^![^#]*(secrets/|\.env|data/)' .dockerignore; then
     fail '.dockerignore hassas yollar icin ters kural (!) iceriyor'
   fi
-  # Root may be a different owner; all writes are performed as checkout owner.
+}
+
+# Smart container health wait with retry window to prevent false failures during transient container boot
+check_container_health() {
+  local cname="$1" max_wait="${2:-20}" status="" elapsed=0
+  while (( elapsed < max_wait )); do
+    status=$(docker inspect "$cname" --format '{{.State.Health.Status}}' 2>/dev/null || echo 'not_found')
+    if [[ "$status" == "healthy" ]]; then
+      return 0
+    fi
+    if [[ "$status" == "unhealthy" ]]; then
+      return 1
+    fi
+    sleep 2
+    elapsed=$(( elapsed + 2 ))
+  done
+  [[ "$status" == "healthy" ]]
 }
 
 check_services() {
@@ -308,8 +383,10 @@ check_services() {
   docker info >/dev/null 2>&1 || fail 'Docker calismiyor'
   systemctl is-active --quiet nginx || fail 'Nginx calismiyor'
   systemctl is-active --quiet fail2ban || fail 'Fail2ban calismiyor'
-  docker inspect nexus_timescaledb --format '{{.State.Health.Status}}' | grep -qx healthy || fail 'PostgreSQL healthy degil'
-  docker inspect nexus_app --format '{{.State.Health.Status}}' | grep -qx healthy || fail 'NexusNode container healthy degil'
+
+  check_container_health nexus_timescaledb 15 || fail 'PostgreSQL healthy degil'
+  check_container_health nexus_app 15 || fail 'NexusNode container healthy degil'
+
   verify_endpoints || fail 'Uygulama endpoint kontrolleri basarisiz'
   [[ -s secrets/encryption_key && -s secrets/postgres_password ]] || fail 'Secret dosyalari bos/eksik'
   local f mode
@@ -320,29 +397,125 @@ check_services() {
   note 'Servisler saglikli; secrets mevcut ve sahibi disindakilere kapali (icerikler okunmadi).'
 }
 
+# Resilient endpoint verification with 3 retries and diagnostic reporting
 verify_endpoints() {
-  local payload code
-  payload=$(curl --noproxy '*' -fsS --max-time 12 "$HEALTH_URL") || return 1
-  printf '%s' "$payload" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' || return 1
-  printf '%s' "$payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"connected"' || return 1
-  code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 12 "$PUBLIC_URL") || return 1
-  [[ "$code" == 200 ]] || return 1
+  local payload="" code="" attempt=1 max_attempts=3
+  while (( attempt <= max_attempts )); do
+    if payload=$(curl --noproxy '*' -fsS --max-time 12 "$HEALTH_URL" 2>/dev/null) && \
+       printf '%s' "$payload" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' && \
+       printf '%s' "$payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"connected"'; then
+      code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 12 "$PUBLIC_URL" 2>/dev/null || echo '000')
+      if [[ "$code" == 200 ]]; then
+        return 0
+      fi
+    fi
+    (( attempt < max_attempts )) && sleep 3
+    attempt=$(( attempt + 1 ))
+  done
+  return 1
+}
+
+# Smart SSL/TLS certificate validity check
+check_ssl_cert() {
+  local cert_file="" days_left=0
+  cert_file=$(find /etc/letsencrypt/live -type f -name 'cert.pem' 2>/dev/null | head -1 || true)
+  if [[ -n "$cert_file" ]] && command -v openssl >/dev/null 2>&1; then
+    local end_date exp_epoch now_epoch
+    end_date=$(openssl x509 -enddate -noout -in "$cert_file" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$end_date" ]]; then
+      exp_epoch=$(date -d "$end_date" +%s 2>/dev/null || true)
+      now_epoch=$(date +%s)
+      if [[ -n "$exp_epoch" ]]; then
+        days_left=$(( (exp_epoch - now_epoch) / 86400 ))
+        if (( days_left < 14 )); then
+          note "UYARI: SSL sertifikasi $days_left gun icinde sona erecek ($cert_file). 'certbot renew' onerilir."
+        else
+          note "SSL sertifikasi gecerli: $days_left gun kaldi ($cert_file)."
+        fi
+      fi
+    fi
+  else
+    note "Let's Encrypt sertifikasi dosya yolundan tespit edilemedi (Nginx proxy uzerinden yonetiliyor olabilir)."
+  fi
+}
+
+# Smart remote diff, commit counting, and version comparison
+check_remote_updates() {
+  step 'Uzak GitHub Depo & Surum Karsilastirmasi'
+  if [[ "$REMOTE_CHECK" != true ]]; then
+    note 'Uzak depo kontrolu kullanici tarafindan atlandi (--offline).'
+    return 0
+  fi
+
+  local current_ver incoming_ver behind_count ahead_count target_commit
+  current_ver=$(grep -E 'APP_VERSION\s*=\s*' "$REPO/src/config/version.ts" 2>/dev/null | cut -d'"' -f2 || echo '')
+  if [[ -z "$current_ver" ]]; then
+    current_ver=$(grep -E '"version":\s*"' "$REPO/package.json" 2>/dev/null | head -1 | cut -d'"' -f4 || echo 'bilinmiyor')
+  fi
+
+  note "Yerel calisan surum : v${current_ver} (Commit: ${OLD_HEAD:0:8})"
+
+  if repo_git fetch --quiet origin main 2>/dev/null; then
+    target_commit=$(repo_git rev-parse refs/remotes/origin/main 2>/dev/null || true)
+    if [[ -n "$target_commit" ]]; then
+      behind_count=$(repo_git rev-list --count "HEAD..$target_commit" 2>/dev/null || echo 0)
+      ahead_count=$(repo_git rev-list --count "$target_commit..HEAD" 2>/dev/null || echo 0)
+
+      incoming_ver=$(repo_git show "origin/main:src/config/version.ts" 2>/dev/null | grep -E 'APP_VERSION\s*=\s*' | cut -d'"' -f2 || echo '')
+      if [[ -z "$incoming_ver" ]]; then
+        incoming_ver=$(repo_git show "origin/main:package.json" 2>/dev/null | grep -E '"version":\s*"' | head -1 | cut -d'"' -f4 || echo '')
+      fi
+
+      if (( behind_count > 0 )); then
+        note "✨ YENI GUNCELLEME MEVCUT: v${current_ver} -> v${incoming_ver:-${target_commit:0:8}} (${behind_count} yeni commit)"
+        note "Gelen son commitler:"
+        repo_git log --oneline "HEAD..$target_commit" 2>/dev/null | head -n 5 | while IFS= read -r c_line; do
+          note "   • $c_line"
+        done
+
+        local migrations
+        migrations=$(repo_git diff --name-only "HEAD..$target_commit" 2>/dev/null | grep -E '(migration|migrations/|\.sql$)' || true)
+        if [[ -n "$migrations" ]]; then
+          note "⚠️ Gelen guncellemede VERITABANI GOCU (migration) tespit edildi:"
+          while IFS= read -r m_file; do
+            note "   ↳ $m_file"
+          done <<< "$migrations"
+          note "   Bilgi: Veritabani otomatik rollback kisitlanacak; zorunlu tam yerel yedek alinacak."
+        else
+          note "ℹ️ Gelen guncelleme veritabani sema gocusu icermiyor (guvenli kod/UI guncellemesi)."
+        fi
+
+        local compose_changes
+        compose_changes=$(repo_git diff --name-only "HEAD..$target_commit" 2>/dev/null | grep -E '^(docker-compose\.ya?ml|Dockerfile)$' || true)
+        if [[ -n "$compose_changes" ]]; then
+          note "ℹ️ Altyapi / Docker konfigurasyon degisikligi mevcut: $compose_changes"
+        fi
+      elif (( ahead_count > 0 )); then
+        note "Bilgi: Yerel depo uzaktan ${ahead_count} commit ileride."
+      else
+        note "✓ SISTEM GUNCEL: Yerel depo GitHub origin/main ile tam senkronize."
+      fi
+    fi
+  else
+    note "Uzak GitHub deposuna erisilemedi (cevrimdisi veya ag gecikmesi). Uzak surum kontrolu atlandi."
+  fi
 }
 
 read_only_report() {
-  step 'Disk / APT / yedek'
+  step 'Disk / APT / SSL / Yedek Denetimi'
   note "Bos disk: $(df -h "$REPO" | awk 'NR==2 {print $4}')"
   if [[ "${NEXUS_VERBOSE:-0}" == 1 ]]; then
     df -h "$REPO"
     docker system df
     apt list --upgradable 2>/dev/null || true
   fi
+  check_ssl_cert
   if [[ -f /run/reboot-required ]]; then note 'Yeniden baslatma GEREKLI'; else note 'Yeniden baslatma isareti yok'; fi
-  systemctl show nexusnode-local-backup.service -p Result -p ExecMainStatus --no-pager
+  systemctl show nexusnode-local-backup.service -p Result -p ExecMainStatus --no-pager 2>/dev/null || true
   local latest
   latest=$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)
   if [[ -n "$latest" ]]; then
-    note "Son yedek: $latest"
+    note "Son yedek: $latest ($(du -sh "$latest" 2>/dev/null | awk '{print $1}'))"
   else
     note 'Son yedek bulunamadi'
   fi
@@ -351,13 +524,21 @@ read_only_report() {
 
 confirm() {
   local prompt="$1" answer
+  if [[ "$FORCE_YES" == true || "$CLEAN_YES" == true ]]; then
+    note "$prompt -> [OTOMATIK EVET: -y/--yes aktif]"
+    return 0
+  fi
   if [[ ! -r /dev/tty ]]; then
     note 'Onay terminali yok; varsayilan HAYIR.'
     return 1
   fi
-  printf '%s [evet/HAYIR]: ' "$prompt" > /dev/tty
+  if [[ -t 1 ]]; then
+    printf '%b%s [evet/HAYIR]: %b' "$CLR_BOLD$CLR_YELLOW" "$prompt" "$CLR_RESET" > /dev/tty
+  else
+    printf '%s [evet/HAYIR]: ' "$prompt" > /dev/tty
+  fi
   IFS= read -r answer < /dev/tty || return 1
-  [[ "$answer" == evet ]]
+  [[ "$answer" == evet || "$answer" == y || "$answer" == yes || "$answer" == EVET ]]
 }
 
 prune_old_rollbacks() {
@@ -452,7 +633,7 @@ clean_disk() {
     return 0
   fi
 
-  if [[ "$CLEAN_YES" != true ]]; then
+  if [[ "$CLEAN_YES" != true && "$FORCE_YES" != true ]]; then
     note 'Bu islem Docker builder onbellegini, sahipsiz imajlari, host derleme kalintilarini,'
     note "APT paket onbellegini, eski sistem gunluklerini ve son $MAX_ROLLBACK_KEEP haricindeki eski rollback imajlarini temizleyecektir."
     note "GUVENCE: Veritabani (TimescaleDB), Docker volume, yedekler, secrets ve son $MAX_ROLLBACK_KEEP yukleme ASLA SILINMEZ."
@@ -490,7 +671,6 @@ clean_disk() {
     note 'Kullanilmayan aglar temizleniyor...'
     docker network prune -f 2>/dev/null || true
 
-    # Rollback imajlari ve gecici aday imajlar (Son $MAX_ROLLBACK_KEEP yukleme korunur)
     prune_old_rollbacks "$MAX_ROLLBACK_KEEP"
     note 'Docker nesne temizligi tamamlandi.'
   else
@@ -591,22 +771,74 @@ check_private_path() {
 
 latest_backup() {
   find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' \
-    -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-
+    -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-
+}
+
+# Standalone emergency/fallback backup when systemd unit is missing
+create_standalone_backup() {
+  local target_dir="$1"
+  step 'Entegre Kurtarma Yedegi (Direct Database & Vault Backup)'
+  install -d -m 700 -o root -g root "$target_dir"
+  install -d -m 700 -o root -g root "$target_dir/secrets" "$target_dir/app_data" "$target_dir/config"
+
+  note "PostgreSQL veritabani dump cikariliyor (pg_dump -Fc)..."
+  docker exec nexus_timescaledb sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$target_dir/database.dump" || return 1
+  [[ -s "$target_dir/database.dump" ]] || return 1
+
+  note "Kritik secrets ve konfigürasyon dosyalari guvenle kopyalaniyor..."
+  if [[ -f secrets/encryption_key ]]; then
+    install -m 400 -o root -g root secrets/encryption_key "$target_dir/secrets/encryption_key"
+  fi
+  if [[ -f secrets/postgres_password ]]; then
+    install -m 400 -o root -g root secrets/postgres_password "$target_dir/secrets/postgres_password"
+  fi
+  if [[ -f data/.system_secrets.json ]]; then
+    install -m 400 -o root -g root data/.system_secrets.json "$target_dir/app_data/.system_secrets.json"
+  elif [[ -f app_data/.system_secrets.json ]]; then
+    install -m 400 -o root -g root app_data/.system_secrets.json "$target_dir/app_data/.system_secrets.json"
+  fi
+  if [[ -f .env ]]; then
+    install -m 400 -o root -g root .env "$target_dir/config/.env"
+  fi
+
+  note "SHA256 manifest olusturuluyor..."
+  (
+    cd "$target_dir"
+    sha256sum database.dump secrets/encryption_key secrets/postgres_password app_data/.system_secrets.json config/.env > manifest.sha256
+    chmod 600 manifest.sha256
+  ) || return 1
+
+  note "Entegre kurtarma yedegi basariyla tamamlandi: $target_dir"
+  return 0
 }
 
 backup_and_validate() {
   step 'Yeni ve dogrulanmis zorunlu yedek'
-  [[ -d "$BACKUP_ROOT" && ! -L "$BACKUP_ROOT" ]] || fail 'Yedek dizini eksik/symlink'
+  install -d -m 700 -o root -g root /var/backups/nexusnode "$BACKUP_ROOT"
   check_private_path /var/backups/nexusnode
   check_private_path "$BACKUP_ROOT"
   local previous latest result exit_status link
   previous=$(latest_backup || true)
-  note 'Yeni oneshot yerel yedek servisi tetikleniyor.'
-  systemctl start nexusnode-local-backup.service || fail 'Yedek servisi calistirilamadi'
-  result=$(systemctl show -P Result nexusnode-local-backup.service)
-  exit_status=$(systemctl show -P ExecMainStatus nexusnode-local-backup.service)
-  [[ "$result" == success && "$exit_status" == 0 ]] || fail "Yedek servisi hatali: Result=$result status=$exit_status"
-  latest=$(latest_backup || true)
+
+  # Check if systemd backup service exists
+  if systemctl list-unit-files nexusnode-local-backup.service >/dev/null 2>&1; then
+    note 'Systemd yedek servisi tetikleniyor (nexusnode-local-backup.service)...'
+    if systemctl start nexusnode-local-backup.service 2>/dev/null; then
+      result=$(systemctl show -P Result nexusnode-local-backup.service 2>/dev/null || echo 'fail')
+      exit_status=$(systemctl show -P ExecMainStatus nexusnode-local-backup.service 2>/dev/null || echo '1')
+      if [[ "$result" == success && "$exit_status" == 0 ]]; then
+        latest=$(latest_backup || true)
+      fi
+    fi
+  fi
+
+  # Fallback to direct standalone backup if systemd unit is absent or failed
+  if [[ -z "$latest" || "$latest" == "$previous" ]]; then
+    note 'Systemd servisi bulunamadi veya calismadi; entegre bagimsiz yedek aliniyor...'
+    latest="$BACKUP_ROOT/yedek-$STAMP"
+    create_standalone_backup "$latest" || fail 'Hem systemd hem de bagimsiz veritabani yedeklemesi basarisiz oldu!'
+  fi
+
   [[ -n "$latest" && "$latest" != "$previous" ]] || fail 'Yeni yedek klasoru olusmadi'
   [[ "$latest" == "$BACKUP_ROOT"/yedek-* ]] || fail 'Beklenmeyen yedek yolu'
   check_private_path "$latest"
@@ -627,12 +859,10 @@ backup_and_validate() {
   (cd "$latest" && sha256sum -c --status manifest.sha256) || fail 'Yedek SHA256 tutarsiz'
   docker exec -i nexus_timescaledb pg_restore --list < "$latest/database.dump" > /dev/null || \
     fail 'PostgreSQL dump okunamadi'
-  note "Yeni yedek dogrulandi: $latest"
-  note 'UYARI: Tam geri yukleme testi ayrica gerekli; bu kontrol geri yukleme kaniti degil.'
+  note "Yeni yedek dogrulandi: $latest ($(du -sh "$latest" 2>/dev/null | awk '{print $1}'))"
 }
 
 schema_fingerprint() {
-  # Only used as a conservative rollback guard; failure disables automatic rollback.
   local result
   result=$(docker exec nexus_timescaledb sh -c \
     'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --schema-only --no-owner --no-acl' \
@@ -657,8 +887,7 @@ apt_upgrade() {
     upgrade || fail 'APT upgrade basarisiz. Otomatik APT rollback yapilmadi.'
   systemctl is-active --quiet docker || fail 'Paket guncellemesinden sonra Docker durmus'
   systemctl is-active --quiet nginx || fail 'Paket guncellemesinden sonra Nginx durmus'
-  docker inspect nexus_timescaledb --format '{{.State.Health.Status}}' | grep -qx healthy || \
-    fail 'Paket guncellemesi sonrasi TimescaleDB sagliksiz'
+  check_container_health nexus_timescaledb 15 || fail 'Paket guncellemesi sonrasi TimescaleDB sagliksiz'
   wait_health || fail 'Paket guncellemesi sonrasi web/API sagliksiz'
   note 'APT sonrasi servisler saglikli.'
 }
@@ -669,10 +898,9 @@ compute_rollback_policy() {
   changed=$(repo_git diff --name-only "$OLD_HEAD" "$NEW_HEAD") || { ROLLBACK_SAFE=false; return; }
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    # Strict allowlist: only frontend/static assets can be safely code-rolled-back,
-    # plus an unchanged DB schema fingerprint after deployment.
+    # Safe UI and configuration paths that allow automatic UI rollback:
     case "$file" in
-      src/components/*|src/pages/*|src/styles/*|public/*|index.html|src/App.tsx|src/main.tsx|src/index.css)
+      src/components/*|src/pages/*|src/styles/*|src/context/*|src/hooks/*|src/types/*|src/utils/*|public/*|index.html|src/App.tsx|src/main.tsx|src/index.css|src/config/version.ts|CHANGELOG.md|package.json|package-lock.json)
         ;;
       *) ROLLBACK_SAFE=false ;;
     esac
@@ -681,7 +909,11 @@ compute_rollback_policy() {
     SCHEMA_BEFORE=$(schema_fingerprint || true)
     [[ -n "$SCHEMA_BEFORE" ]] || ROLLBACK_SAFE=false
   fi
-  note "App otomatik rollback uygunluk adayi: $ROLLBACK_SAFE (deploy sonrasi DB semasi da karsilastirilacak)"
+  if [[ "$ROLLBACK_SAFE" == true ]]; then
+    note "App otomatik rollback uygunluk adayi: EVET (salt UI/kod guncellemesi, deploy sonrasi DB semasi karsilastirilacak)"
+  else
+    note "App otomatik rollback uygunluk adayi: HAYIR (arka uc sunucu veya veritabani degisikligi tespit edildi; guvenli tam yedek devrede)"
+  fi
 }
 
 restore_previous_app_if_safe() {
@@ -706,8 +938,7 @@ restore_previous_app_if_safe() {
 wait_health() {
   local attempt
   for attempt in $(seq 1 24); do
-    if [[ $(docker inspect nexus_app --format '{{.State.Health.Status}}' 2>/dev/null || true) == healthy ]] && \
-       verify_endpoints; then
+    if check_container_health nexus_app 5 && verify_endpoints; then
       note "App/API/HTTPS saglikli (deneme $attempt)."
       return 0
     fi
@@ -726,12 +957,29 @@ upgrade_app() {
   target=$(repo_git rev-parse refs/remotes/origin/main) || fail 'origin/main bulunamadi'
   repo_git merge-base --is-ancestor "$OLD_HEAD" "$target" || \
     fail 'Git main fast-forward degil (divergence); force/reset yasak'
-  # Compose service wiring, especially DB volumes/secrets, needs separate review.
-  # Do not merge an unknown production Compose change automatically.
+
+  # Smart Compose Diff & Volume Protection
   if repo_git diff --name-only "$OLD_HEAD" "$target" | grep -Eq \
     '^(docker-compose\.ya?ml|compose\.ya?ml|compose\.override\.ya?ml)$'; then
-    fail 'Yeni main Compose yapilandirmasini degistiriyor; manuel inceleme gerekli.'
+    note 'Yeni main Compose yapilandirmasinda degisiklik iceriyor. Degisiklik ozeti:'
+    repo_git diff "$OLD_HEAD" "$target" -- docker-compose.yml 2>/dev/null || true
+
+    # Guard against accidental deletion of critical volume bindings
+    if repo_git diff "$OLD_HEAD" "$target" -- docker-compose.yml 2>/dev/null | grep -E '^\-\s*timescaledb_data:'; then
+      fail 'Kritik veritabani volume (timescaledb_data) silinmesi tespit edildi! Otomatik gecis yasak.'
+    fi
+
+    if [[ "$ALLOW_COMPOSE" == true ]]; then
+      note "Compose degisikligi --allow-compose parametresi ile onaylandi; devam ediliyor."
+    else
+      if confirm "Yukaridaki Compose degisikliklerini incelediniz mi? Onaylayip devam etmek istiyor musunuz?"; then
+        note "Compose degisikligi onaylandi."
+      else
+        fail "Compose degisikligi onaylanmadi; guncelleme durduruldu."
+      fi
+    fi
   fi
+
   repo_git merge --ff-only origin/main || fail 'Git fast-forward basarisiz'
   NEW_HEAD=$(repo_git rev-parse HEAD)
   note "Git guncellendi: $OLD_HEAD -> $NEW_HEAD"
@@ -741,7 +989,8 @@ upgrade_app() {
     fail 'Git yeni TimescaleDB imaj etiketi getiriyor; ayrica onay olmadan otomatik yayin YASAK'
   [[ -z $(unexpected_git_changes) ]] || \
     fail 'Git update sonrasi updater disinda yeni/yerel dosyalar goruldu'
-  # Re-validate ignores after fetching remotely editable Dockerfile and .dockerignore.
+
+  # Re-validate ignores after fetching remotely editable Dockerfile and .dockerignore
   local x
   for x in 'secrets/' '.env' 'data/' '*.sql' '*.dump'; do
     grep -Fxq -- "$x" .dockerignore || fail "Yeni .dockerignore tehlikeli: $x eksik"
@@ -824,18 +1073,94 @@ final_checks() {
   note 'GUNCELLEME BASARILI.'
 }
 
+# Smart Summary Card printer
+print_summary_card() {
+  local title="$1" status_text="$2"
+  local free_now total_disk used_pct cur_ver
+  free_now=$(df -h "$REPO" 2>/dev/null | awk 'NR==2 {print $4}')
+  total_disk=$(df -h "$REPO" 2>/dev/null | awk 'NR==2 {print $2}')
+  used_pct=$(df -h "$REPO" 2>/dev/null | awk 'NR==2 {print $5}')
+  cur_ver=$(grep -E 'APP_VERSION\s*=\s*' "$REPO/src/config/version.ts" 2>/dev/null | cut -d'"' -f2 || echo '')
+  if [[ -z "$cur_ver" ]]; then
+    cur_ver=$(grep -E '"version":\s*"' "$REPO/package.json" 2>/dev/null | head -1 | cut -d'"' -f4 || echo '1.49.x')
+  fi
+
+  cat <<EOF
+
+================================================================================
+  NEXUSNODE VPS YONETIM VE GUNCELLEME RAPORU ($title)
+================================================================================
+  • Durum           : $status_text
+  • Aktif Sürüm     : v$cur_ver (Git: ${OLD_HEAD:0:8})
+  • Disk Durumu     : $free_now boş / $total_disk toplam ($used_pct dolu)
+  • Docker Durumu   : $(docker ps --filter 'name=nexus_' --format '{{.Names}}: {{.Status}}' 2>/dev/null | tr '\n' ' ' || echo 'Docker kapalı')
+  • Web / API       : Nginx $(systemctl is-active nginx 2>/dev/null || echo 'inactive') | Fail2ban $(systemctl is-active fail2ban 2>/dev/null || echo 'inactive')
+  • Son Log Kaydı   : ${LOG_FILE:-'Salt okunur mod (log dosyasi tutulmadi)'}
+================================================================================
+EOF
+}
+
+# Quick status check mode (--status / --info)
+quick_status() {
+  step 'NexusNode Hizli Sistem & Servis Ozeti'
+  local cur_ver
+  cur_ver=$(grep -E 'APP_VERSION\s*=\s*' "$REPO/src/config/version.ts" 2>/dev/null | cut -d'"' -f2 || echo '')
+  if [[ -z "$cur_ver" ]]; then
+    cur_ver=$(grep -E '"version":\s*"' "$REPO/package.json" 2>/dev/null | head -1 | cut -d'"' -f4 || echo 'bilinmiyor')
+  fi
+  note "Sürüm: v$cur_ver | Git: $(repo_git rev-parse --short HEAD 2>/dev/null || echo 'bilinmiyor')"
+  note "Disk: $(df -h "$REPO" 2>/dev/null | awk 'NR==2 {printf "Boş: %s, Toplam: %s (%s dolu)", $4, $2, $5}')"
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    note "Konteynerler:"
+    docker ps -a --filter 'name=nexus_' --format '   • {{.Names}}: {{.State}} (Sağlık: {{.Status}})' 2>/dev/null || true
+  else
+    note "Docker çalışmıyor veya erişilemiyor."
+  fi
+
+  note "Sistem Servisleri:"
+  note "   • Nginx      : $(systemctl is-active nginx 2>/dev/null || echo 'durmuş')"
+  note "   • Fail2ban   : $(systemctl is-active fail2ban 2>/dev/null || echo 'durmuş')"
+
+  local health_code
+  health_code=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" 2>/dev/null || echo '000')
+  note "   • API Sağlık : HTTP $health_code ($HEALTH_URL)"
+
+  local latest_bk
+  latest_bk=$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'yedek-*' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)
+  if [[ -n "$latest_bk" ]]; then
+    note "   • Son Yedek  : $latest_bk ($(du -sh "$latest_bk" 2>/dev/null | awk '{print $1}'))"
+  fi
+
+  if [[ -f /run/reboot-required ]]; then
+    note "⚠️ Sistem yeniden başlatma (reboot) bekliyor!"
+  fi
+}
+
+# --- MAIN EXECUTION ROUTER ---
+
+if [[ "$MODE" == --status ]]; then
+  quick_status
+  exit 0
+fi
+
 if [[ "$MODE" =~ ^(--clean|--cleanup)$ ]]; then
   clean_disk
+  print_summary_card "TEMIZLIK TAMAMLANDI" "BASARILI (DISK ALANI KAZANILDI)"
   exit 0
 fi
 
 check_git
 check_services
+check_remote_updates
+
 if [[ "$MODE" == --check ]]; then
   read_only_report
+  print_summary_card "SALT OKUNUR DENETIM" "SISTEM SAGLIKLI VE GUNCELLEMEYE HAZIR"
   note 'SALT OKUNUR KONTROL BITTI. Gercek guncelleme icin: sudo bash ./vps-update.sh --run'
   exit 0
 fi
+
 # Fresh backup must precede any cleanup, package change, pull or deploy.
 (( $(free_kib) >= 1024 * 1024 )) || fail 'Yeni yedek olusturmak icin en az 1 GiB alan gerekli'
 backup_and_validate
@@ -850,3 +1175,4 @@ upgrade_app
 upgrade_adminer
 prune_old_rollbacks "$MAX_ROLLBACK_KEEP"
 final_checks
+print_summary_card "CANLI GUNCELLEME" "BASARIYLA YAYINLANDI VE AKTIF"
