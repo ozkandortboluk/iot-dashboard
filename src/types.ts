@@ -894,11 +894,16 @@ export interface NotificationServiceConfig {
     phoneNumberId?: string;
     apiToken?: string;
     businessAccountId?: string;
+    hasApiToken?: boolean;
+    clearApiToken?: boolean;
   };
   telegram: {
     enabled: boolean;
     botToken?: string;
     botUsername?: string;
+    chatId?: string;
+    hasBotToken?: boolean;
+    clearBotToken?: boolean;
   };
   sms: {
     enabled: boolean;
@@ -910,6 +915,8 @@ export interface NotificationServiceConfig {
     enabled: boolean;
     defaultEndpoint?: string;
     secretHeader?: string;
+    hasSecretHeader?: boolean;
+    clearSecretHeader?: boolean;
   };
 }
 

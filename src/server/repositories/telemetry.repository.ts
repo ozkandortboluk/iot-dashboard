@@ -1945,8 +1945,15 @@ export class TelemetryRepository {
         if (channel === 'whatsapp' && (user.whatsappNumber || user.phone)) {
           recipientsSet.add((user.whatsappNumber || user.phone).trim());
         }
-        if (channel === 'telegram' && user.telegramChatId) {
-          recipientsSet.add(user.telegramChatId.trim());
+        if (channel === 'telegram') {
+          if (user.telegramChatId) {
+            recipientsSet.add(user.telegramChatId.trim());
+          } else {
+            const defaultTg = this.db.getServiceConfig?.()?.telegram?.chatId;
+            if (defaultTg && defaultTg.trim()) {
+              recipientsSet.add(defaultTg.trim());
+            }
+          }
         }
         if (channel === 'sms' && user.phone) {
           recipientsSet.add(user.phone.trim());

@@ -2669,11 +2669,6 @@ class LocalDatabase {
       raw.whatsapp.enabled = false;
       removedPlaceholderConfig = true;
     }
-    if (raw.telegram?.botUsername === '@IoTAlarmBot') {
-      raw.telegram.botUsername = '';
-      raw.telegram.enabled = false;
-      removedPlaceholderConfig = true;
-    }
     if (raw.sms?.senderTitle === 'IOT_ALARM') {
       raw.sms.senderTitle = '';
       raw.sms.enabled = false;
@@ -2701,9 +2696,10 @@ class LocalDatabase {
       return val;
     };
 
-    const whatsappToken = process.env.WHATSAPP_API_TOKEN || decryptVal(raw.whatsapp?.apiToken) || '';
-    const telegramToken = process.env.TELEGRAM_BOT_TOKEN || decryptVal(raw.telegram?.botToken) || '';
-    const webhookSecret = process.env.WEBHOOK_SECRET_HEADER || decryptVal(raw.webhook?.secretHeader) || '';
+    const whatsappToken = decryptVal(raw.whatsapp?.apiToken) || process.env.WHATSAPP_API_TOKEN || '';
+    const telegramToken = decryptVal(raw.telegram?.botToken) || process.env.TELEGRAM_BOT_TOKEN || '';
+    const telegramChatId = raw.telegram?.chatId || process.env.TELEGRAM_CHAT_ID || '';
+    const webhookSecret = decryptVal(raw.webhook?.secretHeader) || process.env.WEBHOOK_SECRET_HEADER || '';
     const dbResendKey = decryptVal((raw.email as any)?.resendApiKey);
     const resendApiKey = (dbResendKey && dbResendKey.trim().length > 0)
       ? dbResendKey
@@ -2727,6 +2723,7 @@ class LocalDatabase {
       telegram: {
         ...raw.telegram,
         botToken: telegramToken,
+        chatId: telegramChatId,
       },
       sms: { ...raw.sms },
       webhook: {
@@ -2739,79 +2736,130 @@ class LocalDatabase {
   public updateServiceConfig(newConfig: Partial<NotificationServiceConfig>): NotificationServiceConfig {
     const current = this.getServiceConfig(true);
 
+    // 1. Email credentials handling (Preserve unless explicitly replaced with non-masked or cleared)
+    // 1. Email credentials handling (Preserve unless explicitly replaced with non-masked or cleared)
     let emailResendApiKey = (current.email as any)?.resendApiKey || '';
-    if (newConfig.email?.resendApiKey !== undefined) {
+    if ((newConfig.email as any)?.clearResendApiKey === true) {
+      emailResendApiKey = '';
+    } else if (newConfig.email?.resendApiKey !== undefined) {
       const incoming = (newConfig.email.resendApiKey || '').trim().replace(/^["']|["']$/g, '');
-      if (incoming && !isMaskedSecret(incoming)) {
-        emailResendApiKey = incoming;
-      } else if (!incoming) {
+      if (incoming === '__CLEAR__') {
         emailResendApiKey = '';
+      } else if (incoming && !isMaskedSecret(incoming)) {
+        emailResendApiKey = incoming;
       }
     }
 
     let emailSmtpPass = (current.email as any)?.smtpPass || '';
-    if (newConfig.email?.smtpPass !== undefined) {
+    if ((newConfig.email as any)?.clearSmtpPass === true) {
+      emailSmtpPass = '';
+    } else if (newConfig.email?.smtpPass !== undefined) {
       const incoming = (newConfig.email.smtpPass || '').trim();
-      if (incoming && !isMaskedSecret(incoming)) {
-        emailSmtpPass = incoming;
-      } else if (!incoming) {
+      if (incoming === '__CLEAR__') {
         emailSmtpPass = '';
+      } else if (incoming && !isMaskedSecret(incoming)) {
+        emailSmtpPass = incoming;
       }
     }
 
+    // 2. WhatsApp credentials handling
     let whatsappApiToken = current.whatsapp?.apiToken || '';
-    if (newConfig.whatsapp?.apiToken !== undefined) {
+    if (newConfig.whatsapp?.clearApiToken === true) {
+      whatsappApiToken = '';
+    } else if (newConfig.whatsapp?.apiToken !== undefined) {
       const incoming = (newConfig.whatsapp.apiToken || '').trim();
-      if (incoming && !isMaskedSecret(incoming)) {
-        whatsappApiToken = incoming;
-      } else if (!incoming) {
+      if (incoming === '__CLEAR__') {
         whatsappApiToken = '';
+      } else if (incoming && !isMaskedSecret(incoming)) {
+        whatsappApiToken = incoming;
       }
     }
 
+    // 3. Telegram credentials handling (Protect existing bot token from being wiped by empty input or masked view)
     let telegramBotToken = current.telegram?.botToken || '';
-    if (newConfig.telegram?.botToken !== undefined) {
+    if (newConfig.telegram?.clearBotToken === true) {
+      telegramBotToken = '';
+    } else if (newConfig.telegram?.botToken !== undefined) {
       const incoming = (newConfig.telegram.botToken || '').trim();
-      if (incoming && !isMaskedSecret(incoming)) {
-        telegramBotToken = incoming;
-      } else if (!incoming) {
+      if (incoming === '__CLEAR__') {
         telegramBotToken = '';
+      } else if (incoming && !isMaskedSecret(incoming)) {
+        telegramBotToken = incoming.replace(/^bot/i, '');
       }
     }
 
+    // 4. Webhook credentials handling
     let webhookSecretHeader = current.webhook?.secretHeader || '';
-    if (newConfig.webhook?.secretHeader !== undefined) {
+    if (newConfig.webhook?.clearSecretHeader === true) {
+      webhookSecretHeader = '';
+    } else if (newConfig.webhook?.secretHeader !== undefined) {
       const incoming = (newConfig.webhook.secretHeader || '').trim();
-      if (incoming && !isMaskedSecret(incoming)) {
-        webhookSecretHeader = incoming;
-      } else if (!incoming) {
+      if (incoming === '__CLEAR__') {
         webhookSecretHeader = '';
+      } else if (incoming && !isMaskedSecret(incoming)) {
+        webhookSecretHeader = incoming;
       }
     }
+
+    // Deep merge per channel: if a channel is omitted in newConfig, keep existing channel completely untouched!
+    const updatedEmail = newConfig.email !== undefined
+      ? {
+          ...current.email,
+          ...newConfig.email,
+          resendApiKey: encryptSecret(emailResendApiKey),
+          smtpPass: encryptSecret(emailSmtpPass),
+        }
+      : {
+          ...current.email,
+          resendApiKey: encryptSecret(emailResendApiKey),
+          smtpPass: encryptSecret(emailSmtpPass),
+        };
+
+    const updatedWhatsapp = newConfig.whatsapp !== undefined
+      ? {
+          ...current.whatsapp,
+          ...newConfig.whatsapp,
+          apiToken: encryptSecret(whatsappApiToken),
+          provider: (whatsappApiToken || newConfig.whatsapp.apiToken) ? 'cloud_api' : (newConfig.whatsapp.provider || current.whatsapp?.provider || 'simulated'),
+        }
+      : {
+          ...current.whatsapp,
+          apiToken: encryptSecret(whatsappApiToken),
+        };
+
+    const updatedTelegram = newConfig.telegram !== undefined
+      ? {
+          ...current.telegram,
+          ...newConfig.telegram,
+          botToken: encryptSecret(telegramBotToken),
+          chatId: newConfig.telegram.chatId !== undefined ? newConfig.telegram.chatId : (current.telegram?.chatId || ''),
+        }
+      : {
+          ...current.telegram,
+          botToken: encryptSecret(telegramBotToken),
+        };
+
+    const updatedSms = newConfig.sms !== undefined
+      ? { ...current.sms, ...newConfig.sms }
+      : { ...current.sms };
+
+    const updatedWebhook = newConfig.webhook !== undefined
+      ? {
+          ...current.webhook,
+          ...newConfig.webhook,
+          secretHeader: encryptSecret(webhookSecretHeader),
+        }
+      : {
+          ...current.webhook,
+          secretHeader: encryptSecret(webhookSecretHeader),
+        };
 
     this.data.serviceConfig = {
-      email: {
-        ...current.email,
-        ...newConfig.email,
-        resendApiKey: encryptSecret(emailResendApiKey),
-        smtpPass: encryptSecret(emailSmtpPass),
-      },
-      whatsapp: {
-        ...current.whatsapp,
-        ...newConfig.whatsapp,
-        apiToken: encryptSecret(whatsappApiToken),
-      },
-      telegram: {
-        ...current.telegram,
-        ...newConfig.telegram,
-        botToken: encryptSecret(telegramBotToken),
-      },
-      sms: { ...current.sms, ...newConfig.sms },
-      webhook: {
-        ...current.webhook,
-        ...newConfig.webhook,
-        secretHeader: encryptSecret(webhookSecretHeader),
-      },
+      email: updatedEmail,
+      whatsapp: updatedWhatsapp,
+      telegram: updatedTelegram,
+      sms: updatedSms,
+      webhook: updatedWebhook,
     };
 
     this.saveData(this.data);
@@ -2822,6 +2870,31 @@ class LocalDatabase {
         console.warn('[PostgreSQL] Service config save error:', err?.message || err);
       });
     }
+
+    // Bi-directional sync with SystemSecretsService vault
+    try {
+      import('./services/systemSecrets.service.js').then(({ systemSecretsService }) => {
+        if (systemSecretsService && typeof systemSecretsService.updateNotificationSecrets === 'function') {
+          systemSecretsService.updateNotificationSecrets({
+            telegram: newConfig.telegram ? {
+              enabled: updatedTelegram.enabled,
+              chatId: updatedTelegram.chatId,
+              botToken: telegramBotToken || undefined,
+            } : undefined,
+            whatsapp: newConfig.whatsapp ? {
+              enabled: updatedWhatsapp.enabled,
+              phoneNumberId: updatedWhatsapp.phoneNumberId,
+              apiToken: whatsappApiToken || undefined,
+            } : undefined,
+            webhook: newConfig.webhook ? {
+              enabled: updatedWebhook.enabled,
+              defaultEndpoint: updatedWebhook.defaultEndpoint,
+              secretHeader: webhookSecretHeader || undefined,
+            } : undefined,
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch {}
 
     return this.getServiceConfig(true);
   }

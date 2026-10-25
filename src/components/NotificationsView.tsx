@@ -571,7 +571,11 @@ export const NotificationsView: React.FC = () => {
         body: JSON.stringify(configPayload),
       });
       await ensureSuccess(res);
-      showNotificationMsg('Bildirim servis ayarları ve API anahtarları kaydedildi.');
+      const data = await safeJson<{ config?: NotificationServiceConfig; message?: string }>(res, {});
+      if (data?.config) {
+        setServiceConfig(data.config);
+      }
+      showNotificationMsg(data?.message || 'Bildirim servis ayarları ve API anahtarları kaydedildi.');
       fetchServiceConfig();
     } catch (err: any) {
       showNotificationMsg(err.message || 'Ayarlar kaydedilirken hata oluştu.', true);

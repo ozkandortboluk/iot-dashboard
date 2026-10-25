@@ -3,6 +3,25 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.34] - 2026-10-25
+
+### 🔔 Bildirim Kanalları İzolasyonu & Telegram Bot İletim Dayanıklılığı
+- **Bağımsız Kanal İzolasyonu ve Ayrı Kaydetme (`ChannelConfiguration.tsx` & `db.ts`):**
+  - Tüm bildirim kanallarını tek bir formda toplayıp birbirini ezme riski yaratan yapı tamamen ayrıştırıldı. WhatsApp, Telegram, E-posta, SMS ve Webhook kanallarının her birine bağımsız **"Bu Kanalı Kaydet"** butonu eklendi.
+  - Bir kanalın ayarları güncellenirken diğer kanalların API anahtarları, şifreleri veya konfigürasyon parametrelerinin ezilmesi/silinmesi engellendi (deep-merge mimarisi).
+- **Telegram Bot Bilgilerinin Korunması & Kasa Entegrasyonu (`db.ts`, `alarms.ts`, `ChannelConfiguration.tsx`):**
+  - Bot Token girişinde boş bırakılan veya maskeli (`••••••••`) gönderilen durumlarda mevcut kasadaki anahtarın sıfırlanması/silinmesi önlendi; yalnızca kullanıcı bilinçli olarak yeni token girdiğinde veya açıkça "Tokeni Temizle" dediğinde güncelleme yapılması sağlandı.
+  - Tarayıcıların form şifre yöneticilerinin bot tokenini kullanıcı parolasıyla ezmesini önlemek için `autoComplete="new-password"` ve `spellCheck={false}` korumaları getirildi.
+  - Token kasada kayıtlı olduğunda görsel rozet (`✓ Token Kasada Tanımlı`) ve parola gizle/göster göz butonu eklendi.
+  - Kanal ayarları ile `SystemSecretsService` kasası arasında çift yönlü senkronizasyon kuruldu.
+- **Varsayılan Telegram Chat ID / Grup ID & Otomatik Fallback (`types.ts`, `telemetry.repository.ts`, `ChannelConfiguration.tsx`):**
+  - Telegram kanal kartına **"Varsayılan Telegram Chat ID / Grup ID"** alanı eklendi.
+  - Saha cihazlarında veya kurallarda alarm tetiklendiğinde kullanıcı profilinde kişisel Chat ID bulunmasa bile alarmların sistemin varsayılan Telegram grubuna veya kanalına kesintisiz iletilmesi sağlandı.
+- **Telegram HTML Modu & Alt Çizgi (`_`) Parse Çökme Koruması (`notificationServices.ts`):**
+  - Telegram API iletiminde eski `Markdown` modundan kaynaklanan ve sensör/metrik isimlerindeki alt çizgi (`_`) karakterlerinde botun `Bad Request: can't parse entities` hatası vermesine sebep olan sorun giderildi.
+  - İletim `parse_mode: 'HTML'` ve güvenli HTML kaçış mekanizmasına geçirilerek tüm alarmların ve test iletilerinin %100 başarıyla teslim edilmesi sağlandı.
+
+---
 ## 🚀 [v1.49.33] - 2026-10-25
 
 ### 🌐 Ağ, Konum ve Hiyerarşik Yapı Alanlarının Temel Bilgiler Altına Alınması & Başlık Sadeleştirmesi

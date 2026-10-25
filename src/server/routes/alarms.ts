@@ -501,14 +501,18 @@ notificationServicesRouter.get('/', authenticateUser, requireAdmin, (_req, res) 
     whatsapp: {
       ...config.whatsapp,
       apiToken: config.whatsapp?.apiToken ? maskSecret(config.whatsapp.apiToken) : '',
+      hasApiToken: Boolean(config.whatsapp?.apiToken),
     },
     telegram: {
       ...config.telegram,
       botToken: config.telegram?.botToken ? maskSecret(config.telegram.botToken) : '',
+      hasBotToken: Boolean(config.telegram?.botToken),
+      chatId: config.telegram?.chatId || '',
     },
     webhook: {
       ...config.webhook,
       secretHeader: config.webhook?.secretHeader ? maskSecret(config.webhook.secretHeader) : '',
+      hasSecretHeader: Boolean(config.webhook?.secretHeader),
     },
   });
 });
@@ -521,19 +525,57 @@ notificationServicesRouter.put('/', authenticateUser, requireAdmin, (req, res) =
       whatsapp: {
         ...updatedConfig.whatsapp,
         apiToken: updatedConfig.whatsapp?.apiToken ? maskSecret(updatedConfig.whatsapp.apiToken) : '',
+        hasApiToken: Boolean(updatedConfig.whatsapp?.apiToken),
       },
       telegram: {
         ...updatedConfig.telegram,
         botToken: updatedConfig.telegram?.botToken ? maskSecret(updatedConfig.telegram.botToken) : '',
+        hasBotToken: Boolean(updatedConfig.telegram?.botToken),
+        chatId: updatedConfig.telegram?.chatId || '',
       },
       webhook: {
         ...updatedConfig.webhook,
         secretHeader: updatedConfig.webhook?.secretHeader ? maskSecret(updatedConfig.webhook.secretHeader) : '',
+        hasSecretHeader: Boolean(updatedConfig.webhook?.secretHeader),
       },
     };
     res.json({ config: maskedConfig, message: 'Bildirim servis ayarları kaydedildi.' });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Ayarlar kaydedilemedi.' });
+  }
+});
+
+notificationServicesRouter.put('/channel/:channel', authenticateUser, requireAdmin, (req, res) => {
+  const channel = req.params.channel;
+  const allowed = ['whatsapp', 'telegram', 'email', 'sms', 'webhook'];
+  if (!allowed.includes(channel)) {
+    return res.status(400).json({ error: `Geçersiz bildirim kanalı: ${channel}` });
+  }
+  try {
+    const payload = { [channel]: req.body };
+    const updatedConfig = db.updateServiceConfig(payload);
+    const maskedConfig = {
+      ...updatedConfig,
+      whatsapp: {
+        ...updatedConfig.whatsapp,
+        apiToken: updatedConfig.whatsapp?.apiToken ? maskSecret(updatedConfig.whatsapp.apiToken) : '',
+        hasApiToken: Boolean(updatedConfig.whatsapp?.apiToken),
+      },
+      telegram: {
+        ...updatedConfig.telegram,
+        botToken: updatedConfig.telegram?.botToken ? maskSecret(updatedConfig.telegram.botToken) : '',
+        hasBotToken: Boolean(updatedConfig.telegram?.botToken),
+        chatId: updatedConfig.telegram?.chatId || '',
+      },
+      webhook: {
+        ...updatedConfig.webhook,
+        secretHeader: updatedConfig.webhook?.secretHeader ? maskSecret(updatedConfig.webhook.secretHeader) : '',
+        hasSecretHeader: Boolean(updatedConfig.webhook?.secretHeader),
+      },
+    };
+    res.json({ config: maskedConfig, message: `${channel.toUpperCase()} kanal ayarları başarıyla kaydedildi.` });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Kanal ayarları kaydedilemedi.' });
   }
 });
 

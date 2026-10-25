@@ -24,6 +24,7 @@ export const defaultNotificationConfig: NotificationServiceConfig = {
     enabled: false,
     botToken: '',
     botUsername: '',
+    chatId: '',
   },
   sms: {
     enabled: false,
@@ -81,20 +82,23 @@ export async function dispatchMessageToChannel(
       if (!config.telegram.enabled) {
         throw new Error('Telegram servisi devre dışı bırakılmış.');
       }
-      if (!item.recipient || item.recipient.trim().length === 0) {
+      const rawRecipient = (item.recipient || config.telegram.chatId || '').trim();
+      if (!rawRecipient) {
         throw new Error('Geçersiz Telegram Chat ID. Lütfen kullanıcı profilinize Telegram Chat ID ekleyin.');
       }
 
-      const chatId = item.recipient.trim();
+      const chatId = rawRecipient;
+      const cleanToken = (config.telegram.botToken || '').trim().replace(/^bot/i, '');
 
-      if (config.telegram.botToken) {
-        const res = await fetch(`https://api.telegram.org/bot${config.telegram.botToken}/sendMessage`, {
+      if (cleanToken) {
+        const textContent = `🚨 <b>${escapeHtml(item.title)}</b>\n\n${escapeHtml(item.message)}`;
+        const res = await fetch(`https://api.telegram.org/bot${cleanToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: chatId,
-            text: `🚨 *${item.title}*\n\n${item.message}`,
-            parse_mode: 'Markdown',
+            text: textContent,
+            parse_mode: 'HTML',
           }),
         });
         const data = await res.json();
