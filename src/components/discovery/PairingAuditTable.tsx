@@ -96,26 +96,31 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
   };
 
   return (
-    <div className="bg-slate-900/70 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
       {/* Table Toolbar */}
-      <div className="p-4 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-cyan-400" />
-          <h3 className="font-semibold text-slate-100 text-sm">Eşleştirme ve Provizyon Denetim Günlüğü</h3>
-          <span className="text-xs text-slate-400 font-mono bg-slate-800 px-2 py-0.5 rounded">
+      <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 rounded-xl">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm">Eşleştirme ve Provizyon Denetim Günlüğü</h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Tüm cihaz provizyon, QR/PIN ve donanım değişim işlem kayıtları</p>
+          </div>
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
             {filtered.length} Kayıt
           </span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Cihaz, MAC, IP, aktör ara..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-xs text-slate-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:border-cyan-500 w-48 sm:w-60"
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 rounded-xl pl-8 pr-3 py-2 focus:outline-none focus:border-cyan-500 w-48 sm:w-60 font-sans"
             />
           </div>
 
@@ -123,7 +128,7 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
             aria-label="Eşleştirme Durumu Filtresi"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
+            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 rounded-xl px-3 py-2 focus:outline-none focus:border-cyan-500 font-sans cursor-pointer"
           >
             <option value="all">Tüm Durumlar</option>
             <option value="SUCCESS">Başarılı</option>
@@ -135,7 +140,7 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
             type="button"
             onClick={onRefresh}
             disabled={isLoading}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 transition-colors disabled:opacity-50"
+            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700/60 transition-colors disabled:opacity-50 cursor-pointer"
             title="Günlüğü Yenile"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -146,7 +151,7 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
       {/* Table Content */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-950/70 text-slate-400 font-medium border-b border-slate-800/80 uppercase tracking-wider text-[10px]">
+          <thead className="bg-slate-50 dark:bg-slate-950/70 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[10px]">
             <tr>
               <th className="py-3 px-4">Tarih / Saat</th>
               <th className="py-3 px-4">Hedef Cihaz</th>
@@ -157,17 +162,17 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
               <th className="py-3 px-4">Detay & Çözüm</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-500 font-sans">
+                <td colSpan={7} className="py-12 text-center text-slate-400 dark:text-slate-500">
                   Kayıtlı eşleştirme denetim verisi bulunamadı.
                 </td>
               </tr>
             ) : (
               filtered.map((record) => (
-                <tr key={record.id} className="hover:bg-slate-800/30 transition-colors font-sans">
-                  <td className="py-3 px-4 text-slate-400 whitespace-nowrap text-xs font-mono">
+                <tr key={record.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                  <td className="py-3 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap text-xs font-mono">
                     {new Date(record.timestamp).toLocaleString('tr-TR', {
                       month: 'short',
                       day: 'numeric',
@@ -177,24 +182,24 @@ export const PairingAuditTable: React.FC<PairingAuditTableProps> = ({
                     })}
                   </td>
                   <td className="py-3 px-4">
-                    <div className="font-medium text-slate-100">{record.deviceName}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">
+                    <div className="font-bold text-slate-900 dark:text-slate-100">{record.deviceName}</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                       {record.macAddress || '—'} {record.ipAddress ? `• ${record.ipAddress}` : ''}
                     </div>
                   </td>
                   <td className="py-3 px-4 whitespace-nowrap">
                     {getMethodBadge(record.method)}
                   </td>
-                  <td className="py-3 px-4 text-slate-200">
+                  <td className="py-3 px-4 text-slate-800 dark:text-slate-200">
                     <span className="font-medium">{record.actorName}</span>
                   </td>
-                  <td className="py-3 px-4 text-slate-300">
+                  <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
                     {record.tenantName || record.tenantId}
                   </td>
                   <td className="py-3 px-4 whitespace-nowrap">
                     {getStatusBadge(record.status, record.resolutionAction)}
                   </td>
-                  <td className="py-3 px-4 text-xs text-slate-400 max-w-xs truncate" title={record.details}>
+                  <td className="py-3 px-4 text-xs text-slate-500 dark:text-slate-400 max-w-xs truncate" title={record.details}>
                     {record.details}
                   </td>
                 </tr>

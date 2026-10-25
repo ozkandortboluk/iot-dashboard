@@ -5,16 +5,16 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 ---
 ## 🚀 [v1.49.28] - 2026-10-25
 
-### 🧠 VPS Güncelleme & Bakım Betiği Akıllı Sürüm Yükseltmesi (`vps-update.sh` v0.5)
-- **Uzak Depo & Sürüm Farkı Analizi (`check_remote_updates`):** `--check` ve `--run` öncesinde GitHub `origin/main` dalı güvenle taranarak yerel ve uzak commit farkı (`behind_count`), sürüm numarası (`vX.Y.Z -> vA.B.C`), gelen commit başlıkları ve güncellemenin veritabanı şema göçü (`migration`) içerip içermediği otomatik tespit edilip operatöre sunuldu.
-- **Esnek Parametre Yönetimi & Otomatik Mod Desteği:** `--run` moduna `-y` / `--yes` desteği eklenerek cron görevleri ve uzaktan otomasyonlar için onay beklemeden çalışma kabiliyeti sağlandı. Ek olarak argümanların sıralamadan bağımsız okunması sağlandı.
-- **Hızlı Sistem & Servis Özeti Modu (`--status`):** Yalnızca 2 saniyede çalışan konteynerleri, Nginx, Fail2ban, API sağlık kodunu, disk kullanımını, aktif sürümü ve son yedek boyutunu listeleyen hızlı durum sorgulama modu eklendi.
-- **Dirençli Servis Sağlık Denetimi (`check_container_health` & `verify_endpoints`):** Konteynerlerin geçici başlama gecikmelerine karşı 15-20 saniyelik tolerans döngüsü ve API uç noktaları için 3 adımlı yeniden deneme mekanizması eklendi; anlık ağ/DNS gecikmelerinden dolayı gereksiz hata kesintileri önlendi.
-- **Entegre Bağımsız Yedekleme Mekanizması (`create_standalone_backup`):** `nexusnode-local-backup.service` systemd biriminin bulunamadığı veya başarısız olduğu ortamlarda doğrudan Docker container üzerinden `pg_dump -Fc`, secret anahtarları ve SHA256 manifesti çıkaran otomatik yedekleme kurtarma mekanizması devreye alındı.
-- **Akıllı Compose Fark Analizi (`--allow-compose`):** `docker-compose.yml` üzerinde yapılan değişiklikler anında ekranda diff olarak gösterildi; kritik volume silinmesi riski kontrol edildi ve kullanıcı onayıyla ya da `--allow-compose` parametresiyle kontrollü geçişe olanak tanındı.
-- **SSL / TLS Sertifika Takibi (`check_ssl_cert`):** Let's Encrypt / Nginx SSL sertifikasının bitiş tarihi otomatik hesaplanarak 14 günden az kaldığında operatörü uyaran erken ikaz mekanizması eklendi.
-- **Renkli Terminal Arayüzü & Özet Rapor Kartı (`print_summary_card`):** Terminal çıktılarında ANSI renkleri ve işlem sonunda sistem, disk, servis ve log durumunu toplu gösteren özet durum kartı eklendi.
-- **Kullanım Kılavuzu Senkronizasyonu (`VPS-UPDATE-KULLANIM.md`):** Dokümantasyon v0.5 akıllı sürüm yetenekleri, yeni parametreler ve komut örnekleriyle güncellendi.
+### 🎨 Cihaz Keşfi ve Eşleştirme Sayfası Tasarım Yenilemesi & Ekran Kullanımı Optimizasyonu (Network Discovery UI Redesign & Space Optimization)
+- **Tasarım Bütünlüğü & Temiz Sayfa Yapısı (`NetworkDiscoveryView.tsx`):**
+  - Diğer sayfalarla (`DevicesView`, `AnalyticsView`, `DeviceHealthView`) görsel tutarsızlık yaratan ve çift kenar boşluğuna (padding) yol açan dış kapsayıcı sınıfları temizlenerek standart `space-y-6 animate-fadeIn` yapısına geçirildi.
+  - Üst başlık alanı; yuvarlatılmış kart (`bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800`), gradient ikon kutusu, "Zero-Touch Provisioning" durum rozeti ve tek satırlık eylem butonları (Yenile, Havuzu Temizle, Hızlı Ağ Tara, Provizyon Sihirbazı) ile modernize edildi.
+- **Dörtlü KPI Özet Kartları:**
+  - Keşif Havuzu, Eşleşme Bekleyen Düğüm, Canlı & Yetkili Cihaz ve Aktif Subnet Ağ Durumu metrikleri kartlar halinde ekranın üstüne yerleştirildi.
+- **Ekran Alanı Kullanımı & Canlı Ağ Tarama Tezgahı (Dual-Panel Workbench):**
+  - **Keşfedilen Cihazlar Sekmesi:** Arama çubuğu, yaşam döngüsü seçici, donanım türü filtresi (ESP32, Modbus, Raspberry Pi), hızlı filtre butonları ve subnet hızlı tetikleyicisi tek bir modern araç çubuğunda birleştirildi; gereksiz boşluklar ortadan kaldırıldı.
+  - **Canlı Ağ & Subnet Taraması Sekmesi:** Boş ve seyrek görünüm yerine tam teşekküllü bir ağ keşif tezgahına dönüştürüldü. CIDR ön tanımlı butonlar (`192.168.1.0/24`, `192.168.0.0/24`, `10.0.0.0/24`, `172.16.0.0/24`), taranacak IoT portları (HTTP, Web 8080, MQTT, Modbus, HTTPS), çift sütunlu düzende taranan aktif düğümler listesi (doğrudan eşleştirme butonuyla) ve canlı renkli terminal konsolu eklendi.
+  - **Alt Bileşenler (`DiscoveredDeviceCard.tsx` & `PairingAuditTable.tsx`):** Açık ve koyu tema uyumluluğu sağlandı, yazı tipi hiyerarşisi netleştirildi, sinyal ve donanım kartları iyileştirildi.
 
 ---
 ## 🚀 [v1.49.27] - 2026-10-25
