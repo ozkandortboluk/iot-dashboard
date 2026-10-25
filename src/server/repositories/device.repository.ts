@@ -21,6 +21,7 @@ import type {
 } from '../../types.js';
 import { smartIntervalService } from '../services/smartInterval.service.js';
 import { tenantSecurityService } from '../services/tenantSecurity.service.js';
+import { systemLogger } from '../services/systemLogger.service.js';
 
 export function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key.trim()).digest('hex');
@@ -128,6 +129,12 @@ export class DeviceRepository {
           deviceName: dev.name,
           eventKey: `device_online:${dev.id}:${incidentId}`,
         });
+        systemLogger.info(
+          'telemetry',
+          `Saha telemetri akışı yeniden sağlandı: ${dev.name} (${dev.id}) bağlantı kuruldu ve veri akışı normale döndü.`,
+          { deviceId: dev.id, tenantId: dev.tenantId, ipAddress: dev.ipAddress },
+          'device_watchdog'
+        );
         dev.lastOfflineNotifiedAt = undefined;
         hasChanges = true;
         devChanged = true;
@@ -169,6 +176,13 @@ export class DeviceRepository {
             deviceName: dev.name,
             eventKey: `device_offline:${dev.id}:${dev.lastOfflineNotifiedAt}`,
           });
+
+          systemLogger.warn(
+            'telemetry',
+            `Saha telemetri akışı kesildi: ${dev.name} (${dev.id}) veri gönderimini durdurdu (${timeFormatted} boyunca sinyal alınamadı).`,
+            { deviceId: dev.id, tenantId: dev.tenantId, timeoutSeconds: evalResult.timeoutSeconds, ipAddress: dev.ipAddress },
+            'device_watchdog'
+          );
         }
       }
 

@@ -181,6 +181,9 @@ describe('SPA Fallback & Scanner Probe Guard Test Suite', () => {
     it('blocks sensitive dotfile and scanner probes with HTTP 404', async () => {
       const paths = [
         '/.env',
+        '/env',
+        '/env.txt',
+        '/env.js',
         '/.git/config',
         '/.htaccess',
         '/phpmyadmin',
@@ -188,6 +191,15 @@ describe('SPA Fallback & Scanner Probe Guard Test Suite', () => {
         '/test.php',
         '/shell.cgi',
         '/dump.sql',
+        '/dump.sql.gz',
+        '/firebase-key.json',
+        '/firebase-adminsdk.json',
+        '/application_default_credentials.json',
+        '/service-account.json',
+        '/settings.json',
+        '/secrets.json',
+        '/enhancecp',
+        '/mcp.json',
       ];
 
       for (const p of paths) {

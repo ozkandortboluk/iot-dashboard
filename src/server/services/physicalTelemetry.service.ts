@@ -107,6 +107,7 @@ export class PhysicalTelemetryService {
     }
 
     // 5. Update Physical Device Status & Metrics via Intelligent Arrival Processor
+    const wasOfflineOrUnseen = device.status === 'offline' || !device.lastSeen || !device.lastTelemetryAt;
     const processedDev = await db.processDeviceTelemetryArrival(device.id);
     if (processedDev) {
       device.status = processedDev.status;
@@ -150,12 +151,23 @@ export class PhysicalTelemetryService {
         : 'LOCAL_BUFFER',
     };
 
-    systemLogger.info(
-      'telemetry',
-      `Saha telemetri paketi alındı: ${device.name} (${device.id}) - ${metricsToProcess.length} metrik kayıt edildi.`,
-      { deviceId: device.id, tenantId: device.tenantId, metricsCount: metricsToProcess.length, status: writeAck.status },
-      'physical_telemetry_service'
-    );
+    // Telemetri Akış Bildirimi:
+    // Her rutin pakette gereksiz log oluşturmak yerine yalnızca telemetri akışı ilk kez başladığında
+    // veya cihaz çevrimdışından (kesinti sonrası) tekrar veri göndermeye başladığında sistem logu üretilir.
+    if (wasOfflineOrUnseen) {
+      systemLogger.info(
+        'telemetry',
+        `Saha telemetri akışı başladı: ${device.name} (${device.id}) veri göndermeye başladı.`,
+        {
+          deviceId: device.id,
+          tenantId: device.tenantId,
+          metricsCount: metricsToProcess.length,
+          status: writeAck.status,
+          firstTelemetry: !device.lastTelemetryAt,
+        },
+        'physical_telemetry_service'
+      );
+    }
 
     return {
       addedReadings,

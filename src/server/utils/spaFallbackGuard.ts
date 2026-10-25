@@ -15,10 +15,11 @@ export const FORBIDDEN_EXTENSIONS = new Set<string>([
   ".jsp", ".jspx", ".do", ".action",
   // Scripts / Executables
   ".cgi", ".pl", ".py", ".sh", ".bash", ".rb", ".exe", ".bat", ".cmd", ".dll",
-  // Config / Sensitive / Backups / Dumps
-  ".env", ".ini", ".conf", ".config", ".yml", ".yaml",
+  // Config / Sensitive / Backups / Dumps / Archives
+  ".env", ".ini", ".conf", ".config", ".yml", ".yaml", ".properties",
   ".sql", ".db", ".sqlite", ".sqlite3",
   ".bak", ".old", ".swp", ".orig", ".save", ".tmp", ".dist",
+  ".gz", ".tar", ".tgz", ".zip", ".7z", ".rar",
   // XML probes (unless a specific static xml file exists on disk)
   ".xml",
 ]);
@@ -38,15 +39,25 @@ export const SCANNER_PROBE_PATTERNS: RegExp[] = [
   // System paths, /etc/passwd, /proc, /sys, /windows, traversal
   /(?:^|\/)(?:etc|proc|sys|root|windows|winnt|system32)(?:$|\/)/i,
   // Container, cluster & server infrastructure files
-  /(?:^|\/)(?:dockerfile|docker-compose|kubeconfig|web\.xml)(?:$|\/)/i,
+  /(?:^|\/)(?:dockerfile|docker-compose|kubeconfig|web\.xml)(?:$|\/|[-_.])/i,
   // Server diagnostics, profilers & mod_status probes
   /(?:^|\/)(?:phpinfo|_profiler|server-status|server-info|_cat|_ignition|awstats)(?:$|\/)/i,
-  // Scanner targets without extension
-  /(?:^|\/)(?:credentials|secrets|v2\/_catalog)(?:$|\/)/i,
+  // Environment targets without extension and credential endpoints (e.g. /env, /credentials)
+  /(?:^|\/)(?:env|environment|credentials|secrets?|v2\/_catalog)(?:$|\/)/i,
+  // Cloud & GCP/Firebase/AWS key, service-account, and credentials probes
+  /(?:^|\/)(?:firebase|google|gcp|aws|service-account|application_default_credentials|sa\.json|key(?:file)?\.json)(?:[-_.]|$)/i,
+  // Application config, secrets, and auth leak probes
+  /(?:^|\/)(?:appsettings|settings|secrets?|credentials?|config|auth|swagger|mcp)\.(?:json|ini|yml|yaml|properties|txt)$/i,
+  // Root level script, code leak, or config probes
+  /^\/(?:app(?:\.config)?|index|runtime-config|env-config|env|aws-exports)\.(?:js|txt|properties)$/i,
+  // Composer / vendor probes
+  /(?:^|\/)vendor\/(?:composer|phpunit)/i,
+  // Database backups and SQL dumps (e.g. /dump.sql.gz, /backup.sql, /database.sql, /db.sql)
+  /(?:^|\/)(?:dump|backup|database|db)(?:\.sql|\.sql\.gz|\.db|\.sqlite|\.tar|\.gz)?$/i,
   // Honeypot CMS / common web shell prefixes
   /(?:^|\/)(?:wbm|cfide|xwiki|phpunit|laravel-filemanager)(?:$|\/)/i,
   // External administrative scan wordlists (Turkish & generic bot probes not used in NexusNode IoT)
-  /(?:^|\/)(?:mudur|yonetici|yonetim|administrator|kontrol|cp|uyegirisi)(?:$|\/)/i,
+  /(?:^|\/)(?:mudur|yonetici|yonetim|administrator|kontrol|cp|enhancecp|cpanel|whm|webmin|uyegirisi)(?:$|\/)/i,
   // Generic CMS/blog honeypots
   /(?:^|\/)(?:wordpress|wp)(?:$|\/)/i,
 ];

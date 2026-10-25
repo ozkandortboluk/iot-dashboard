@@ -24,7 +24,7 @@ services:
     secrets:
       - postgres_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_user} -d ${POSTGRES_DB:-iot_dashboard}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_user} -d ${POSTGRES_DB:-iot_dashboard}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -82,9 +82,9 @@ services:
         target: encryption_key
         uid: "1000"
         gid: "1000"
-        mode: 0400
+        mode: 400
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: [ "CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -93,7 +93,7 @@ services:
       - nexus_net
 
   proxy:
-    profiles: ["docker-proxy"]
+    profiles: [ "docker-proxy" ]
     image: nginx:alpine
     container_name: nexus_proxy
     security_opt:
@@ -123,7 +123,7 @@ services:
       - ./docker/certs:/etc/nginx/certs:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/healthz"]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost/healthz" ]
       interval: 15s
       timeout: 5s
       retries: 3

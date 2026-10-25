@@ -23,7 +23,7 @@ import { validateProductionSecurityPolicy, ensureRuntimeSecuritySecrets } from '
 import { isProductionVpsEnvironment } from './src/server/config/runtimeEnvironment.js';
 import { resolveTrustProxy } from './src/server/config/trustProxyPolicy.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
-import { spaRouteGuardMiddleware, createSpaFallbackHandler } from './src/server/utils/spaFallbackGuard.js';
+import { spaRouteGuardMiddleware, createSpaFallbackHandler, isScannerOrProbingPath } from './src/server/utils/spaFallbackGuard.js';
 import { clusterSyncService } from './src/server/services/clusterSync.service.js';
 
 // Bootstrap runtime security secrets early in dev/test only
@@ -349,23 +349,27 @@ app.use((req, res, next) => {
       req.path === '/index.html' ||
       req.path === '/favicon.svg' ||
       req.path === '/favicon.ico' ||
+      req.path === '/robots.txt' ||
+      req.path === '/sitemap.xml' ||
       req.path === '/site.webmanifest' ||
       req.path.startsWith('/assets/') ||
       req.path.startsWith('/public/') ||
       req.path.startsWith('/src/') ||
       req.path.startsWith('/@') ||
       req.path.startsWith('/node_modules/') ||
-      /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
+      /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html|txt)$/i.test(req.path);
 
     if (isSystemLogPath) return;
     if (isStaticAsset && res.statusCode < 400) return;
 
-    // Suppress external automated crawler/bot vulnerability scanner 404 noise (WordPress probes, PHP scripts, env dumps)
+    // Suppress external automated crawler/bot vulnerability scanner 404 noise (WordPress probes, PHP scripts, env dumps, cloud keys, etc.)
     const isVulnerabilityScannerProbe =
       res.statusCode === 404 &&
-      /(\b(wp-|wp\/|wlwmanifest|xmlrpc|\.php|phpmyadmin|pma|adminer|cgi-bin|setup\.cgi|\.env|\.git|actuator|telescope|solr|autodiscover|HNAP1|boaform)\b|\/\/(sito|cms|site|wp|media|shop|blog|news|web|website|wordpress|test|\d{4})\/)/i.test(
-        req.originalUrl || req.path
-      );
+      (isScannerOrProbingPath(req.originalUrl || req.path) ||
+       (req.method === 'POST' && (req.path === '/' || req.path === '')) ||
+       /(\b(wp-|wp\/|wlwmanifest|xmlrpc|\.php|phpmyadmin|pma|adminer|cgi-bin|setup\.cgi|\.env|\.git|actuator|telescope|solr|autodiscover|HNAP1|boaform)\b|\/\/(sito|cms|site|wp|media|shop|blog|news|web|website|wordpress|test|\d{4})\/)/i.test(
+         req.originalUrl || req.path
+       ));
     if (isVulnerabilityScannerProbe) return;
 
     const duration = Date.now() - start;

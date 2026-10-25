@@ -3,6 +3,21 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.24] - 2026-10-25
+
+### 📡 Telemetri Günlükleme İyileştirmesi (Telemetry Log Noise Reduction)
+- Saha telemetri servisinde (`physicalTelemetry.service.ts`) her rutin telemetri paketinde bilgi logu yazılması sonlandırıldı; sistem loglarının telemetri paketleriyle dolması engellendi.
+- Yalnızca cihazın telemetri akışı ilk kez başladığında veya kesinti/çevrimdışı durumundan kurtulduğunda (`wasOfflineOrUnseen`) telemetri başlangıç bilgi logu (`Saha telemetri akışı başladı`) üretilmesi sağlandı.
+- Cihaz bekçisinde (`device.repository.ts` / `checkDeviceStatuses`), sinyal kesintisi teyit edildiğinde `systemLogger.warn('telemetry', ...)` ile akışın kesildiği, cihaz bağlantıyı yeniden sağladığında ise `systemLogger.info('telemetry', ...)` ile akışın normale döndüğü bildirildi.
+
+### 🛡️ Dış Kaynaklı HTTP Tarayıcı Filtrelemesi & SPA Fallback Koruması
+- Sunucunun genel IP adresini hedef alan harici bot ve zafiyet tarayıcısı istekleri (`/firebase-key.json`, `/service-account.json`, `/env`, `/enhancecp`, `/dump.sql.gz`, `POST /` vb.) analiz edildi.
+- `spaFallbackGuard.ts` içerisindeki `FORBIDDEN_EXTENSIONS` kümesine `.properties`, `.gz`, `.tar`, `.zip` gibi sıkıştırılmış yedek ve yapılandırma uzantıları eklendi.
+- `SCANNER_PROBE_PATTERNS` genişletilerek uzantısız `/env` ve `/enhancecp` gibi taramaların SPA istemci yönlendirmesine takılarak yanlışlıkla HTTP 200 `index.html` döndürmesi engellendi; 404 ile karşılanması sağlandı.
+- `server.ts` içerisindeki `express_http_observer` ara yazılımına `isScannerOrProbingPath` entegre edilerek harici tarayıcı 404 uyarılarının ve kök dizin `POST /` bot yoklamalarının sistem loglarını kirletmesi önlendi.
+- `/robots.txt` ve `/sitemap.xml` gibi arama motoru crawler istekleri `isStaticAsset` filtrelemesine dahil edilerek rutin başarılı istek günlükleri temizlendi.
+
+---
 ## 🚀 [v1.49.23] - 2026-10-24
 
 ### 🔔 Telegram Delivery Status & Privacy

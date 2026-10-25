@@ -27,13 +27,15 @@ describe('Express HTTP Observer Static Asset Filter Test Suite', () => {
           req.path === '/index.html' ||
           req.path === '/favicon.svg' ||
           req.path === '/favicon.ico' ||
+          req.path === '/robots.txt' ||
+          req.path === '/sitemap.xml' ||
           req.path === '/site.webmanifest' ||
           req.path.startsWith('/assets/') ||
           req.path.startsWith('/public/') ||
           req.path.startsWith('/src/') ||
           req.path.startsWith('/@') ||
           req.path.startsWith('/node_modules/') ||
-          /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html)$/i.test(req.path);
+          /\.(js|jsx|ts|tsx|css|scss|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map|json|html|txt)$/i.test(req.path);
 
         if (isSystemLogPath) return;
         if (isStaticAsset && res.statusCode < 400) return;
