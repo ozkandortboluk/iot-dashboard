@@ -389,13 +389,15 @@ export function broadcast(event: string, payload: unknown) {
 
     // 4. Notifications update broadcast
     if (event === 'notifications:updated') {
-      if (isAdmin) {
-        db.getNotifications().then(n => safeSend(client, JSON.stringify({ event, payload: n, timestamp: new Date().toISOString() }))).catch((err: any) => console.error("[WebSocket DB Error]:", err.message || err));
-      } else {
-        db.getNotifications(clientUser.id, clientUser.id).then(userNotifs => {
-          safeSend(client, JSON.stringify({ event, payload: userNotifs, timestamp: new Date().toISOString() }));
-        });
-      }
+      const targetUserId = clientUser.id || 'usr_admin';
+      const fetchPromise = isAdmin
+        ? (Array.isArray(payload) ? Promise.resolve(payload) : db.getNotifications(targetUserId))
+        : (Array.isArray(payload)
+            ? Promise.resolve((payload as any[]).filter((n: any) => !n.tenantId || n.tenantId === clientUser.id || n.userId === clientUser.id))
+            : db.getNotifications(targetUserId, targetUserId));
+      fetchPromise
+        .then((items) => safeSend(client, JSON.stringify({ event, payload: items, timestamp: new Date().toISOString() })))
+        .catch((err: any) => console.error("[WebSocket DB Error]:", err?.message || err));
       return;
     }
 
@@ -721,8 +723,8 @@ export function initWebSocketServer(server: http.Server) {
       const statusChanged = await db.checkDeviceStatuses();
       if (statusChanged) {
         broadcast('devices:updated', db.getDevices());
-        broadcast('network:updated', db.getDiscoveredDevices());
-        const n = await db.getNotifications();
+        broadcast('network:updated', db.getDiscoveredDevices('usr_admin'));
+        const n = await db.getNotifications('usr_admin');
         broadcast('notifications:updated', n);
       }
     } catch (err: any) {

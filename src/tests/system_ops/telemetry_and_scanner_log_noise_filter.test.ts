@@ -26,7 +26,7 @@ describe('Telemetry & Scanner HTTP Log Noise Suppression Test Suite', () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         tenantId: 'usr_admin',
-      };
+      } as any;
 
       // Mock DB methods
       vi.spyOn(db, 'addTelemetryBatchAsync').mockResolvedValueOnce({
@@ -52,11 +52,11 @@ describe('Telemetry & Scanner HTTP Log Noise Suppression Test Suite', () => {
         heartbeatTimeoutSeconds: 60,
       } as any);
 
-      vi.spyOn(db, 'updateDevice').mockReturnValueOnce(mockDevice);
+      vi.spyOn(db, 'updateDevice').mockResolvedValueOnce(mockDevice as any);
 
       await physicalTelemetryService.ingestPhysicalTelemetry(
         mockDevice,
-        [{ metric: 'temperature', value: 24.5 }],
+        [{ metric: 'temperature', value: 24.5, unit: '°C' }],
         'temperature:24.5'
       );
 
@@ -86,7 +86,7 @@ describe('Telemetry & Scanner HTTP Log Noise Suppression Test Suite', () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         tenantId: 'usr_admin',
-      };
+      } as any;
 
       vi.spyOn(db, 'addTelemetryBatchAsync').mockResolvedValueOnce({
         persisted: true,
@@ -108,11 +108,11 @@ describe('Telemetry & Scanner HTTP Log Noise Suppression Test Suite', () => {
         lastSeen: new Date().toISOString(),
       } as any);
 
-      vi.spyOn(db, 'updateDevice').mockReturnValueOnce(mockDevice);
+      vi.spyOn(db, 'updateDevice').mockResolvedValueOnce(mockDevice as any);
 
       await physicalTelemetryService.ingestPhysicalTelemetry(
         mockDevice,
-        [{ metric: 'temperature', value: 24.8 }],
+        [{ metric: 'temperature', value: 24.8, unit: '°C' }],
         'temperature:24.8'
       );
 

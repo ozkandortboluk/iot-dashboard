@@ -133,7 +133,6 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
   const handleDeleteSingle = async (id: string) => {
     try {
       await deleteNotification(id);
-      await fetchNotifications();
       onShowToast?.('Bildirim başarıyla silindi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirim silinirken hata oluştu.', true);
@@ -148,7 +147,6 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     try {
       await bulkDeleteNotifications(ids);
       setSelectedIds(new Set());
-      await fetchNotifications();
       onShowToast?.(`${count} adet bildirim başarıyla silindi.`);
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler silinirken hata oluştu.', true);
@@ -162,7 +160,6 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     try {
       await clearAllNotifications();
       setSelectedIds(new Set());
-      await fetchNotifications();
       onShowToast?.('Tüm okunmamış bildirimler okundu olarak işaretlendi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler güncellenirken hata oluştu.', true);
@@ -177,7 +174,6 @@ export const NotificationHistoryList: React.FC<NotificationHistoryListProps> = (
     try {
       await deleteAllNotifications();
       setSelectedIds(new Set());
-      await fetchNotifications();
       onShowToast?.('Tüm bildirim geçmişi başarıyla temizlendi.');
     } catch (err: any) {
       onShowToast?.(err.message || 'Bildirimler silinirken hata oluştu.', true);

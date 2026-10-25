@@ -3,6 +3,25 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.27] - 2026-10-25
+
+### 🛑 Terminal Log Akışını Dondurma & Yetkisiz Polling Döngüsünü Engelleme (Prevent Runaway HTTP Log Flooding)
+- **SSHTunnelDrawer Yetkisiz Polling Döngüsü Giderildi (`SSHTunnelDrawer.tsx`):** Kullanıcı oturum açmamışken ve henüz kurulum/kurtarma anahtarı girilmemişken `ensureBootstrapToken()` fonksiyonunun boş başlıklarla sunucuya durmaksızın `POST /api/system/ssh-tunnel/bootstrap-token` ve `GET /api/system/ssh-tunnel/status` göndermesi (ve 401 yanıtında kendini yinelenen şekilde çağırması) engellendi. Kimlik bilgisi bulunmadığında gereksiz ağ istekleri tamamen durduruldu.
+- **Ön Giriş Ekranı Akıllı Polling Koruması (`SSHTunnelDrawer.tsx`):** Ön giriş ekranında (`isPreLoginScreen`) kullanıcı anahtar girmeden veya bağlantı başlatmadan arka planda 1-3 saniyelik agresif durum sorgulama döngüsü çalıştırılması engellendi; yalnızca kullanıcı anahtar girdiğinde veya bağlantı tetiklendiğinde durum sorgulamasının başlaması sağlandı.
+- **App Başlangıç SSH Kapı Doğrulaması (`App.tsx`):** `verifySshGate` fonksiyonunda `setupToken` yokken sunucuya boş POST gönderilmesi engellendi ve kimlik bilgisi yoksa kapı kontrolünün sunucuya 401 isteği atmadan doğrudan `false` dönmesi sağlandı.
+- **Express HTTP Observer Rutin 401 Uyarısı Bastırma (`server.ts`):** Oturum açılmamışken istemcinin yaptığı rutin oturum/ön yetki kontrol isteklerinin (`/api/auth/me`, `/me`, `/bootstrap-token`, `/status`) 401 döndüğünde konsolu ve WebSocket olaylarını `[SystemLog][WARN][HTTP]` ile doldurması engellendi.
+- **Veritabanı Bekleme Uyarısı Zaman Aşımı Koruması (`databaseAutoHealer.service.ts`):** `PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil` uyarısına 15 dakikalık zaman aralığı (throttling) uygulanarak gereksiz tekrarlar önlendi.
+
+---
+## 🚀 [v1.49.26] - 2026-10-25
+
+### 🔔 Bildirim Silme & Senkronizasyon İyileştirmesi (Notification Deletion & WebSocket Broadcast Sync)
+- **WebSocket Bildirim Yayını Düzeltmesi (`websocket.ts`):** `notifications:updated` olayında admin istemcisine parametresiz `db.getNotifications()` çağrılması nedeniyle boş dizi dönmesi ve arayüzün anlık boşalıp yarış durumuna girmesi sorunu giderildi; payload doğrudan istemcinin yetki/tenant kapsamına göre (`clientUser.id`) filtrelenerek doğru bildirim listesi iletildi.
+- **Yarış Durumu ve Çift Yenileme Engellendi (`RealtimeContext.tsx` & `NotificationHistoryList.tsx`):** Bildirim silme, toplu silme ve tümünü temizleme işlemlerinden hemen sonra yapılan mükerrer `fetchNotifications()` çağrısı kaldırılarak sunucu yazma işlemi tamamlanmadan eski listenin geri gelmesi engellendi; WebSocket `notifications:updated` olayında gelen payload doğrudan reaktif state'e işlendi.
+- **İdempotent Silme ve Durum Senkronizasyonu (`alarm.repository.ts`):** Önceden silinmiş veya bulunamayan bildirimlerde idempotent dönüş yapılırken güncel liste WebSocket dinleyicilerine yayınlanarak istemcilerdeki bayat durumların kalıcı kalması önlendi.
+- **Watchdog ve NoDataWorker Bildirim Sorguları:** `noDataWorker.ts` ve `websocket.ts` periyodik bekçi rutinlerinde `db.getNotifications('usr_admin')` ve `db.getAlarms('usr_admin')` parametreleri netleştirilerek arka planda boş veri yayınlanması engellendi.
+
+---
 ## 🚀 [v1.49.25] - 2026-10-25
 
 ### 🔒 Kapsamlı Zafiyet Taraması & Güvenlik Sıkılaştırması (Vulnerability Hardening)

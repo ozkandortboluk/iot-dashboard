@@ -941,10 +941,13 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   }
                   return [item, ...prev].slice(0, 500);
                 });
-              } else if (data.event === 'notifications:updated' && Array.isArray(data.payload)) {
-                setRawNotifications(data.payload);
+              } else if (data.event === 'notifications:updated') {
+                if (Array.isArray(data.payload)) {
+                  setRawNotifications(data.payload);
+                } else {
+                  fetchNotifications();
+                }
               }
-              fetchNotifications();
             } else if (data.event === 'dashboard:layout') {
               if (data.payload && Array.isArray(data.payload.widgets) && data.payload.widgets.length > 0) {
                 const currentSelectedCust = selectedCustomerForAdminRef.current;

@@ -447,8 +447,11 @@ export class DatabaseAutoHealer {
         const sshRequired = isSshTunnelRequired();
         if (sshRequired) {
           this.dbInstance.setDatabaseState(DatabaseState.DB_UNAVAILABLE);
-          if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL') {
+          const nowMs = Date.now();
+          const isTimeThrottled = nowMs - this.lastAutoHealerWarningTime < 15 * 60 * 1000;
+          if (this.lastAutoHealerWarning !== 'WAITING_SSH_TUNNEL' || !isTimeThrottled) {
             this.lastAutoHealerWarning = 'WAITING_SSH_TUNNEL';
+            this.lastAutoHealerWarningTime = nowMs;
             systemLogger.warn('database', 'PostgreSQL bağlantısı bekleniyor: SSH tüneli bağlı değil.');
           }
         } else if (process.env.NODE_ENV === 'production') {

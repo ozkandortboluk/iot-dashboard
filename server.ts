@@ -386,6 +386,18 @@ app.use((req, res, next) => {
        ));
     if (isVulnerabilityScannerProbe) return;
 
+    // Routine unauthenticated check probes (e.g. initial /api/auth/me, /bootstrap-token, /status)
+    // are expected when unauthenticated and must not spam warnings or trigger alert events.
+    const isRoutineAuthProbe =
+      res.statusCode === 401 &&
+      (req.path === '/me' ||
+       req.path === '/bootstrap-token' ||
+       req.path === '/status' ||
+       req.originalUrl?.includes('/api/auth/me') ||
+       req.originalUrl?.includes('/api/system/ssh-tunnel/bootstrap-token') ||
+       req.originalUrl?.includes('/api/system/ssh-tunnel/status'));
+    if (isRoutineAuthProbe) return;
+
     const duration = Date.now() - start;
     const clientIp = String(req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
     const traceId = (req as any).traceId;

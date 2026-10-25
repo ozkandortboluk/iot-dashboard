@@ -343,26 +343,33 @@ function SystemStateGuard() {
             localStorage.getItem('setup_token') ||
             sessionStorage.getItem('x-setup-token') ||
             localStorage.getItem('x-setup-token');
-          const bootRes = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
-            method: 'POST',
-            credentials: 'include',
-            headers: setupToken ? { 'X-Setup-Token': setupToken } : {},
-          });
-          if (bootRes.ok) {
-            const bootData = await bootRes.json();
-            if (bootData.bootstrapToken) {
-              token = bootData.bootstrapToken;
-              sessionStorage.setItem('nexus_ssh_bootstrap_token', token);
+          if (setupToken) {
+            const bootRes = await fetch('/api/system/ssh-tunnel/bootstrap-token', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'X-Setup-Token': setupToken },
+            });
+            if (bootRes.ok) {
+              const bootData = await bootRes.json();
+              if (bootData.bootstrapToken) {
+                token = bootData.bootstrapToken;
+                sessionStorage.setItem('nexus_ssh_bootstrap_token', token);
+              }
             }
           }
         } catch {}
+      }
+
+      const userToken = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
+      if (!token && !userToken) {
+        setSshGatePassed(false);
+        return false;
       }
 
       const headers: Record<string, string> = {};
       if (token) {
         headers['X-SSH-Bootstrap-Token'] = token;
       }
-      const userToken = sessionStorage.getItem('nexus_session_token') || localStorage.getItem('nexus_session_token');
       if (userToken) {
         headers['Authorization'] = `Bearer ${userToken}`;
       }

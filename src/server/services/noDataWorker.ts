@@ -20,10 +20,10 @@ function checkNoData() {
   if (db.telemetryRepository && typeof db.telemetryRepository.evaluateNoDataRules === 'function') {
     const hasChanges = db.telemetryRepository.evaluateNoDataRules();
     if (hasChanges) {
-      db.getAlarms()
+      db.getAlarms('usr_admin')
         .then((a) => broadcast('alarms:updated', a))
         .catch((err) => console.warn('[NoDataWorker] Alarms fetch notice:', err?.message));
-      db.getNotifications()
+      db.getNotifications('usr_admin')
         .then((n) => broadcast('notifications:updated', n))
         .catch((err) => console.warn('[NoDataWorker] Notifications fetch notice:', err?.message));
     }

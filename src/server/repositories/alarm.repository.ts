@@ -594,9 +594,18 @@ export class AlarmRepository {
     }
 
     // DELETE is idempotent: a notification that is already absent from the
-    // caller's visible data has reached the requested state. Existing records
-    // outside the caller's scope still return false above.
-    if (!pgDeleted && !memDeleted && idx < 0) return true;
+    // caller's visible data has reached the requested state.
+    if (!pgDeleted && !memDeleted && idx < 0) {
+      try {
+        const remaining = await this.db.getNotifications(currentUser.id);
+        if (typeof this.db.notifyNotificationListeners === 'function') {
+          this.db.notifyNotificationListeners('notifications:updated', remaining);
+        }
+      } catch (e: any) {
+        console.warn('[Broadcast Error deleteNotification idempotent]', e?.message || e);
+      }
+      return true;
+    }
 
     try {
       const remaining = await this.db.getNotifications(currentUser.id);

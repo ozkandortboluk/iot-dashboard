@@ -130,6 +130,10 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       sessionStorage.getItem('nexus_session_token') ||
       localStorage.getItem('nexus_session_token');
 
+    if (!setupToken && !userToken) {
+      return null;
+    }
+
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -217,25 +221,22 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   // Poll status from server
   const fetchStatus = useCallback(async () => {
     try {
-      await ensureBootstrapToken();
+      const bootstrapToken = await ensureBootstrapToken();
+      const userToken =
+        sessionStorage.getItem('nexus_session_token') ||
+        localStorage.getItem('nexus_session_token');
+
+      // Do not make unauthenticated requests to /status when there are no credentials
+      if (!bootstrapToken && !userToken) {
+        return;
+      }
+
       const res = await fetch('/api/system/ssh-tunnel/status', {
         headers: getAuthHeaders(),
         credentials: 'include',
       });
       if (res.status === 401) {
         sessionStorage.removeItem('nexus_ssh_bootstrap_token');
-        const newToken = await ensureBootstrapToken();
-        if (newToken) {
-          const retryRes = await fetch('/api/system/ssh-tunnel/status', {
-            headers: getAuthHeaders(),
-            credentials: 'include',
-          });
-          if (retryRes.ok) {
-            const retryData = await retryRes.json();
-            handleStatusData(retryData);
-            return;
-          }
-        }
         setLastError('SSH Tüneli yönetimi için yetkilendirme doğrulanıyor. Lütfen tüneli başlatın.');
         return;
       }
@@ -252,13 +253,27 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
 
   useEffect(() => {
     if (isOpen || isPreLoginScreen) {
+      const hasCredentials = Boolean(
+        sessionStorage.getItem('nexus_ssh_bootstrap_token') ||
+        sessionStorage.getItem('nexus_setup_token') ||
+        localStorage.getItem('nexus_setup_token') ||
+        sessionStorage.getItem('nexus_session_token') ||
+        localStorage.getItem('nexus_session_token') ||
+        setupTokenInput.trim()
+      );
+
+      // In pre-login screen, do not start automatic polling if there are no credentials and no connection in progress
+      if (isPreLoginScreen && !hasCredentials && !sshConnected && !connecting) {
+        return;
+      }
+
       fetchStatus();
       // Fast polling (1s) when connecting or waiting for database readiness, 3s once fully ready
       const pollRate = (!databaseReady && sshConnected) || connecting ? 1000 : 3000;
       const interval = setInterval(fetchStatus, pollRate);
       return () => clearInterval(interval);
     }
-  }, [isOpen, isPreLoginScreen, fetchStatus, databaseReady, sshConnected, connecting]);
+  }, [isOpen, isPreLoginScreen, fetchStatus, databaseReady, sshConnected, connecting, setupTokenInput]);
 
   useEffect(() => {
     if (logContainerRef.current) {
