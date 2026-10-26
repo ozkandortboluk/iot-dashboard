@@ -11,7 +11,7 @@ import {
 } from '../../server/database/migrations/migrationRunner.js';
 import { migration002 } from '../../server/database/migrations/002_timescale_hypertables.js';
 import { migration022 } from '../../server/database/migrations/022_add_system_settings_and_device_activity_columns.js';
-import { CANONICAL_SCHEMA_METADATA } from '../../server/database/canonicalSchema.js';
+import { CANONICAL_SCHEMA_METADATA, generateCanonicalSchemaDDL } from '../../server/database/canonicalSchema.js';
 
 describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift Gate', () => {
   describe('1. Content-Bound Checksum & Dynamic Mutation Sensitivity', () => {
@@ -118,6 +118,15 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
       expect(CANONICAL_SCHEMA_METADATA.tables.system_settings.primaryKey).toEqual(['key']);
       expect(CANONICAL_SCHEMA_METADATA.tables.system_settings.columns.some((c) => c.name === 'key')).toBe(true);
       expect(CANONICAL_SCHEMA_METADATA.tables.system_settings.columns.some((c) => c.name === 'value')).toBe(true);
+    });
+
+    it('should add the users preferences column before enforcing canonical NOT NULL constraints', () => {
+      const ddl = generateCanonicalSchemaDDL();
+      const addPreferences = ddl.indexOf('ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences');
+      const enforcePreferences = ddl.indexOf('ALTER TABLE users ALTER COLUMN preferences SET NOT NULL');
+
+      expect(addPreferences).toBeGreaterThan(-1);
+      expect(enforcePreferences).toBeGreaterThan(addPreferences);
     });
   });
 

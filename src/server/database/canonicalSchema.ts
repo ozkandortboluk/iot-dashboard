@@ -1348,6 +1348,9 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add columns introduced after the initial users table existed before enforcing them below.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- Keep legacy user tables aligned with the canonical role/status contract.
 -- Validated constraints intentionally fail if existing rows violate the policy.
 ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_users_role;
