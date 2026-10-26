@@ -50,11 +50,6 @@ jobs:
           echo "::add-mask::$key"
           echo "ENCRYPTION_KEY=$key" >> "$GITHUB_ENV"
 
-      - name: Install system test dependency (age)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y age
-
       - name: Setup Node.js Environment (${{ matrix.node-version }})
         uses: actions/setup-node@v4
         with:

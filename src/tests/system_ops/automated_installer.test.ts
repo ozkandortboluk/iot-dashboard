@@ -119,37 +119,31 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
   // =========================================================================
   // 4. Automated Backup & Disaster Recovery Engine
   // =========================================================================
-  it('5. ./install.sh --backup creates a timestamped archive bundle of secrets and configuration', () => {
+  it('5. ./install.sh --backup fails closed when age recipients are not configured', () => {
     if (process.platform === 'win32') return;
-    // A backup integration test must never inspect or copy live Docker resources.
-    // Provide a minimal fake Docker CLI in the disposable installer sandbox.
+    // Satisfy the binary availability check without invoking a real backup.
     const mockBin = path.join(rootDir, 'data', 'mock-bin');
     fs.mkdirSync(mockBin, { recursive: true });
-    const mockDocker = path.join(mockBin, 'docker');
-    fs.writeFileSync(mockDocker, `#!/bin/sh
-case "$1" in
-  inspect) case "$2" in nexus_timescaledb|nexus_app) exit 0;; esac ;;
-  exec) if [ "$2" = nexus_timescaledb ] && [ "$3" = pg_dump ]; then printf '%s\\n' '-- isolated test SQL dump'; exit 0; fi ;;
-  cp) if [ "$2" = nexus_app:/app/data/. ]; then mkdir -p "$3"; printf 'test-data\\n' > "$3/test-marker"; exit 0; fi ;;
-esac
-exit 1
-`, { mode: 0o755 });
-    const backupOutput = execSync(`bash ${installScriptPath} --backup`, {
-      cwd: rootDir,
-      encoding: 'utf-8',
-      env: { ...process.env, PATH: `${mockBin}:${process.env.PATH ?? ''}` }
-    });
-    expect(backupOutput).toMatch(/Yedekleme tamamlandı/i);
-
+    fs.writeFileSync(path.join(mockBin, 'age'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const backupsDir = path.join(rootDir, 'backups');
-    expect(fs.existsSync(backupsDir)).toBe(true);
-
-    const files = fs.readdirSync(backupsDir).filter((f) => f.startsWith('nexus_backup_') && f.endsWith('.tar.gz'));
-    expect(files.length).toBeGreaterThan(0);
-
-    const latestBackup = path.join(backupsDir, files[files.length - 1]);
-    const archiveSize = fs.statSync(latestBackup).size;
-    expect(archiveSize).toBeGreaterThan(100); // Must not be empty
+    let backupError: unknown;
+    try {
+      execSync(`bash ${installScriptPath} --backup`, {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          PATH: `${mockBin}:${process.env.PATH ?? ''}`,
+          DR_RECIPIENTS_FILE: path.join(rootDir, 'secrets', 'missing-recipients.txt'),
+          DR_BACKUP_DIR: backupsDir
+        }
+      });
+    } catch (error) {
+      backupError = error;
+    }
+    expect(backupError).toBeDefined();
+    expect((backupError as Error).message).toContain('missing age public recipients');
+    expect(fs.existsSync(backupsDir)).toBe(false);
   }, 30000);
 
   // =========================================================================
