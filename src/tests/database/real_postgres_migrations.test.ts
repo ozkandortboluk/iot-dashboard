@@ -121,7 +121,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
           const completed = await workerB.completeNotificationQueueItem(recoveryItem.id, 'replacement-process', { success: true });
           expect(completed?.status).toBe('sent');
         } finally {
-          await pool.query(`DELETE FROM notification_queue WHERE id LIKE $1;`, [`${queuePrefix}%`]);
+          await migrationPool.query(`DELETE FROM notification_queue WHERE id LIKE $1;`, [`${queuePrefix}%`]);
         }
       } finally {
         await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
