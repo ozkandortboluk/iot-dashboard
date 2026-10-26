@@ -7,12 +7,13 @@
 - [x] Migration 023 ve çoklu worker/lease recovery entegrasyon testleri eklendi.
 - [x] Sürüm PR sonunda tek artışla `1.49.35` yapıldı; package, lockfile, version config ve changelog eşitlendi.
 - [x] Yerel tam Vitest suite geçti: 85 dosya, 691 test başarılı; provenance, parity, lint, type-check ve production build geçti.
-- [x] İlk GitHub Actions sonucu incelendi; PostgreSQL entegrasyon fixture’ındaki hatalar giderilip `80f4ba9` commit’i gönderildi.
+- [x] GitHub Actions run #1384 yeşil: Node 20/22 lint ve type-check, 86 dosya/701 test, PostgreSQL, production smoke, E2E (15 test) ve privileged secret ownership geçti.
+- [x] İlk GitHub Actions denemelerindeki PostgreSQL fixture hataları giderildi ve son commit `5c7625b` doğrulandı.
 - [x] PR açıklaması kalıcı kuyruk garantileri ve at-least-once teslimat davranışıyla güncellendi.
 
 ## Yapılıyor
 
-- [ ] GitHub Actions run #1378’in Node 20/22 test, PostgreSQL smoke ve E2E sonuçları izleniyor; varsa yeni CI hataları düzeltilecek.
+- [ ] Yeşil PR #26 kontrollerinden sonra PR ready durumuna alınıp main’e birleştirilecek.
 
 ## Yapılacak
 
