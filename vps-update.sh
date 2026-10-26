@@ -820,9 +820,12 @@ create_standalone_backup() {
   fi
 
   note "SHA256 manifest olusturuluyor..."
+  local manifest_files=(database.dump secrets/encryption_key secrets/postgres_password app_data/.system_secrets.json)
+  # .env is optional: production may use Docker secrets and have no plaintext env file.
+  [[ -f .env ]] && manifest_files+=(config/.env)
   (
     cd "$target_dir"
-    sha256sum database.dump secrets/encryption_key secrets/postgres_password app_data/.system_secrets.json config/.env > manifest.sha256
+    sha256sum "${manifest_files[@]}" > manifest.sha256
     chmod 600 manifest.sha256
   ) || return 1
 
@@ -861,19 +864,25 @@ backup_and_validate() {
   [[ "$latest" == "$BACKUP_ROOT"/yedek-* ]] || fail 'Beklenmeyen yedek yolu'
   check_private_path "$latest"
   for link in "$latest"/secrets/encryption_key "$latest"/secrets/postgres_password \
-    "$latest"/app_data/.system_secrets.json "$latest"/config/.env \
-    "$latest"/database.dump "$latest"/manifest.sha256; do
+    "$latest"/app_data/.system_secrets.json "$latest"/database.dump "$latest"/manifest.sha256; do
     [[ -s "$link" ]] || fail "Yedek bileseni eksik/bos: ${link#"$latest"/}"
     check_private_path "$link"
   done
+  # Validate .env only when it was actually present and backed up.
+  if [[ -e "$latest/config/.env" ]]; then
+    [[ -f "$latest/config/.env" ]] || fail 'Yedek .env girdisi normal bir dosya degil'
+    check_private_path "$latest/config/.env"
+  fi
   if find "$latest" -type l -print -quit | grep -q .; then
     fail 'Yedekte symlink var; beklenmedik hedeflere guvenilemez'
   fi
   local required
-  for required in database.dump secrets/encryption_key secrets/postgres_password \
-    app_data/.system_secrets.json config/.env; do
+  for required in database.dump secrets/encryption_key secrets/postgres_password app_data/.system_secrets.json; do
     grep -Fq -- "$required" "$latest/manifest.sha256" || fail "Manifest dosyayi kapsamiyor: $required"
   done
+  if [[ -f "$latest/config/.env" ]]; then
+    grep -Fq -- 'config/.env' "$latest/manifest.sha256" || fail 'Manifest mevcut .env dosyasini kapsamiyor'
+  fi
   (cd "$latest" && sha256sum -c --status manifest.sha256) || fail 'Yedek SHA256 tutarsiz'
   docker exec -i nexus_timescaledb pg_restore --list < "$latest/database.dump" > /dev/null || \
     fail 'PostgreSQL dump okunamadi'
