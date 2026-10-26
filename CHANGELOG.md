@@ -3,6 +3,12 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.39] - 2026-10-26
+
+### Host grupu izolasyonu testi
+- GID 1000 erişim regresyon testinde dosyanın sahibi olan UID yerine dosya sahibi olmayan UID 1002 kullanılır.
+
+---
 ## 🚀 [v1.49.38] - 2026-10-26
 
 ### Secret ACL geçişinde eski grup izinlerinin kaldırılması

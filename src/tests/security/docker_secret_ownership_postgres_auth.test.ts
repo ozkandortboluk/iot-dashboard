@@ -362,8 +362,8 @@ echo "OFFLINE_CODE=$code"
     expect(stat.mode & 0o020).toBe(0); // No group write access
     expect(stat.mode & 0o004).toBe(0);     // Others forbidden
 
-    // A different host UID sharing GID 1000 must still be denied.
-    expect(() => execSync(`sudo -n setpriv --reuid 1001 --regid 1000 --clear-groups cat '${encKeyPath}'`, { stdio: 'pipe' })).toThrow();
+    // A different host UID sharing GID 1000 (and not owning the file) must still be denied.
+    expect(() => execSync(`sudo -n setpriv --reuid 1002 --regid 1000 --clear-groups cat '${encKeyPath}'`, { stdio: 'pipe' })).toThrow();
 
     // Execute real read command AS unprivileged user 'node' (UID 1000, GID 1000)
     const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();
