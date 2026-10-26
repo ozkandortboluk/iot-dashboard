@@ -3,6 +3,12 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.38] - 2026-10-26
+
+### Secret ACL geçişinde eski grup izinlerinin kaldırılması
+- Secret dosya ve dizinlerinde UID 1000 ACL’i eklemeden önce mevcut ACL girdileri temizlenir; eski grup ACL maskesinin tekrar etkinleşmesi engellenir.
+
+---
 ## 🚀 [v1.49.37] - 2026-10-26
 
 ### ACL entegrasyon testi depo kökü düzeltmesi

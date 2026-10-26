@@ -675,7 +675,7 @@ align_secrets_ownership_and_permissions() {
         echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' sahipliği korunamadı!" >&2
         return 1
       fi
-      if ! chmod 700 "$SECRETS_DIR"; then
+      if ! setfacl -b "$SECRETS_DIR" || ! chmod 700 "$SECRETS_DIR"; then
         echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0700 izni ayarlanamadı!" >&2
         return 1
       fi
@@ -690,7 +690,7 @@ align_secrets_ownership_and_permissions() {
             echo "❌ [KRİTİK HATA] '${sfile}' sahipliği korunamadı!" >&2
             return 1
           fi
-          if ! chmod 600 "$sfile" || ! setfacl -m u:1000:r-- "$sfile"; then
+          if ! setfacl -b "$sfile" || ! chmod 600 "$sfile" || ! setfacl -m u:1000:r-- "$sfile"; then
             echo "❌ [KRİTİK HATA] '${sfile}' için yalnızca UID 1000'e ACL verilemedi!" >&2
             return 1
           fi
@@ -747,12 +747,12 @@ align_secrets_ownership_and_permissions() {
       # could include unrelated accounts.
       if command -v setfacl >/dev/null 2>&1; then
         local acl_err=""
-        if ! chmod 700 "$SECRETS_DIR" 2>/dev/null; then
+        if ! setfacl -b "$SECRETS_DIR" 2>/dev/null || ! chmod 700 "$SECRETS_DIR" 2>/dev/null; then
           method_errors+=("chmod 700 $SECRETS_DIR: BaÅŸarÄ±sÄ±z")
         elif acl_err=$(setfacl -m u:1000:rx "$SECRETS_DIR" 2>&1); then
           for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
             if [ -f "$sfile" ]; then
-              if ! chmod 600 "$sfile" 2>/dev/null; then
+              if ! setfacl -b "$sfile" 2>/dev/null || ! chmod 600 "$sfile" 2>/dev/null; then
                 method_errors+=("chmod 600 ($sfile): BaÅŸarÄ±sÄ±z")
                 continue
               fi
@@ -789,9 +789,10 @@ align_secrets_ownership_and_permissions() {
       if [ "$can_read_now" = false ]; then
         if [ "$sudo_available" = true ]; then
           local sudo_err=""
-          if sudo_err=$($sudo_cmd chmod 700 "$SECRETS_DIR" 2>&1) && $sudo_cmd setfacl -m u:1000:rx "$SECRETS_DIR" 2>&1; then
+          if sudo_err=$($sudo_cmd setfacl -b "$SECRETS_DIR" 2>&1) && $sudo_cmd chmod 700 "$SECRETS_DIR" 2>&1 && $sudo_cmd setfacl -m u:1000:rx "$SECRETS_DIR" 2>&1; then
             for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
               if [ -f "$sfile" ]; then
+                $sudo_cmd setfacl -b "$sfile" 2>/dev/null || true
                 $sudo_cmd chmod 600 "$sfile" 2>/dev/null || true
                 $sudo_cmd setfacl -m u:1000:r-- "$sfile" 2>/dev/null || true
               fi
