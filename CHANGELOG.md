@@ -3,6 +3,12 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.36] - 2026-10-26
+
+### CI secret-ownership entegrasyon test yolu
+- Linux root container’ındaki CI komutunu `src/tests/security/docker_secret_ownership_postgres_auth.test.ts` dosyasının gerçek konumuna yönlendir; testin sessizce bulunamaması düzeltildi.
+
+---
 ## 🚀 [v1.49.35] - 2026-10-26
 
 ### Güvenli secret erişimi ve kurulum doğrulaması

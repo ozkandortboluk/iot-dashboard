@@ -127,5 +127,5 @@ jobs:
               test -f package-lock.json || { echo "Missing package-lock.json in integration workspace"; exit 1; }
               useradd -u 1001 -m deploy
               npm ci --ignore-scripts
-              npx vitest run src/tests/docker_secret_ownership_postgres_auth.test.ts
+              npx vitest run src/tests/security/docker_secret_ownership_postgres_auth.test.ts
             '
