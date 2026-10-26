@@ -128,6 +128,13 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
       expect(addPreferences).toBeGreaterThan(-1);
       expect(enforcePreferences).toBeGreaterThan(addPreferences);
     });
+
+    it('should widen legacy device encryption methods and default automatic intervals', () => {
+      const ddl = generateCanonicalSchemaDDL();
+
+      expect(ddl).toContain('ALTER TABLE devices ALTER COLUMN encryption_method TYPE VARCHAR(64)');
+      expect(ddl).toContain('ALTER TABLE devices ALTER COLUMN auto_detected_interval_seconds SET DEFAULT 30');
+    });
   });
 
   describe('2. Migration Name Contract & Fail-Closed Enforcement', () => {

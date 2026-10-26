@@ -1453,6 +1453,7 @@ ALTER TABLE devices ALTER COLUMN ota_progress SET DEFAULT 0;
 ALTER TABLE devices ALTER COLUMN ota_progress SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET DEFAULT 120;
 ALTER TABLE devices ALTER COLUMN rate_limit_per_min SET NOT NULL;
+ALTER TABLE devices ALTER COLUMN encryption_method TYPE VARCHAR(64);
 ALTER TABLE devices ALTER COLUMN encryption_method SET DEFAULT 'AES-256-GCM';
 ALTER TABLE devices ALTER COLUMN encryption_method SET NOT NULL;
 
@@ -1462,6 +1463,7 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS power_source VARCHAR(32) DEFAULT 'm
 ALTER TABLE devices ALTER COLUMN power_source SET DEFAULT 'mains';
 ALTER TABLE devices ALTER COLUMN power_source SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN expected_interval_seconds SET DEFAULT 30;
+ALTER TABLE devices ALTER COLUMN auto_detected_interval_seconds SET DEFAULT 30;
 ALTER TABLE devices ALTER COLUMN save_simulated_data_to_db SET DEFAULT FALSE;
 ALTER TABLE devices ALTER COLUMN metrics SET NOT NULL;
 ALTER TABLE devices ALTER COLUMN data_flow_active SET NOT NULL;
