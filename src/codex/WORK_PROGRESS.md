@@ -8,9 +8,9 @@
 - **Prompt sürümü:** 1
 - **Durum:** NOT_STARTED
 - **Aktif faz:** Faz 0 — Keşif
-- **Branch:** docs/codex-vps-implementation-prompt (başlangıç talimatı PR dalı; uygulama çalışması ayrı feature branch üzerinde yapılmalı)
-- **Son bilinen commit:** 5af609ec6973bc8882050e1cf12f6190121d3adc
-- **Son güncelleme:** PR oluşturulurken başlatıldı; uygulama Codex'i gerçek zamanı kaydetmeli.
+- **Branch:** docs/codex-vps-implementation-prompt (başlangıç talimatı PR dalı; uygulama aynı PR üzerinde devam eder)
+- **Son bilinen commit:** e6a269307eec37757b017c722e917903649d2dd5
+- **Son güncelleme:** 2026-10-26; uygulama Codex'i her checkpoint'te gerçek zamanı güncellemeli.
 
 ## Keşif özeti
 
