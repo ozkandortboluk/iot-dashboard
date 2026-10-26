@@ -22,7 +22,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       isDbReachable = false;
       pool = null;
     }
-  });
+  }, 120_000);
 
   afterAll(async () => {
     if (pool) {
@@ -42,25 +42,24 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
     const schemaName = 'test_clean_migration_install';
     const client = await pool.connect();
+    let migrationPool: pg.Pool | null = null;
     try {
       // 1. Setup isolated clean schema sandbox
       await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`);
       await client.query(`CREATE SCHEMA ${schemaName};`);
 
-      // Set user search path to direct all pool client checkouts to our clean schema
-      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
+      // Apply an isolated search_path to every migration pool connection.
       client.release();
+      migrationPool = new pg.Pool({ connectionString: dbUrl, options: `-c search_path=${schemaName},public` });
 
       // 2. Perform fresh clean install via migrationRunner
-      const res = await runAllMigrations(pool);
+      const res = await runAllMigrations(migrationPool);
       expect(res.success).toBe(true);
       expect(res.appliedCount).toBe(23);
 
       // Re-connect to verify
-      const client2 = await pool.connect();
+      const client2 = await migrationPool.connect();
       try {
-        await client2.query(`SET search_path TO ${schemaName};`);
-
         // 3. Verify all canonical tables are present
         const tableCheck = await client2.query(`
           SELECT table_name FROM information_schema.tables 
@@ -125,17 +124,17 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
           await pool.query(`DELETE FROM notification_queue WHERE id LIKE $1;`, [`${queuePrefix}%`]);
         }
       } finally {
-        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
         await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
         client2.release();
       }
     } catch (err: any) {
       // Cleanup user search_path on failure
       const cleanupClient = await pool.connect();
-      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
       await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
       cleanupClient.release();
       throw err;
+    } finally {
+      await migrationPool?.end().catch(() => {});
     }
   });
 
@@ -151,6 +150,7 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
 
     const schemaName = 'test_historical_upgrade';
     const client = await pool.connect();
+    let migrationPool: pg.Pool | null = null;
     try {
       // 1. Setup isolated schema sandbox
       await client.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`);
@@ -197,25 +197,22 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
       `);
 
       await client.query(`
-        INSERT INTO devices (id, name, type, api_key, status)
+        INSERT INTO devices (id, name, device_type, api_key, status)
         VALUES ('dev_test_historical', 'Historical Device', 'meter', 'some_key', 'offline');
       `);
 
-      // Set default search path of user to this historical sandbox schema
-      await client.query(`ALTER ROLE CURRENT_USER SET search_path TO ${schemaName}, public;`);
       client.release();
+      migrationPool = new pg.Pool({ connectionString: dbUrl, options: `-c search_path=${schemaName},public` });
 
       // 3. Perform live upgrade to latest using the official runAllMigrations.
       // Only the pending 022 and 023 should be detected and applied!
-      const res = await runAllMigrations(pool);
+      const res = await runAllMigrations(migrationPool);
       expect(res.success).toBe(true);
       expect(res.appliedCount).toBe(2); // Exactly 022 and 023 applied.
 
       // Connect to verify state after upgrade
-      const client2 = await pool.connect();
+      const client2 = await migrationPool.connect();
       try {
-        await client2.query(`SET search_path TO ${schemaName};`);
-
         // 4. Verify entity preservation (data/schema is preserved!)
         const userRes = await client2.query(`SELECT id, email, name FROM users WHERE id = 'usr_test_historical';`);
         expect(userRes.rows).toHaveLength(1);
@@ -231,17 +228,17 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         const queueTable = await client2.query(`SELECT to_regclass('notification_queue') AS relation;`);
         expect(queueTable.rows[0].relation).toBe('notification_queue');
       } finally {
-        await client2.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
         await client2.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
         client2.release();
       }
     } catch (err: any) {
       // Cleanup user search_path on failure
       const cleanupClient = await pool.connect();
-      await cleanupClient.query(`ALTER ROLE CURRENT_USER RESET search_path;`).catch(() => {});
       await cleanupClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE;`).catch(() => {});
       cleanupClient.release();
       throw err;
+    } finally {
+      await migrationPool?.end().catch(() => {});
     }
   });
 });
