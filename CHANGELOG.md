@@ -1022,7 +1022,7 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 ## 🚀 [v1.38.2] - 2026-09-20
 
 ### 🗄️ TimescaleDB / PostgreSQL Bağlantı Adresi Yapılandırması
-- **Kalıcı Bağlantı Dizesi Tanımlandı**: Kullanıcının belirlediği `postgresql://iot_user:kastamonuaraccalalibeyli.37@timescaledb:5432/iot_dashboard?sslmode=disable` adresi veritabanı ayarlarına, `.env.example` ve sistem runtime yapılandırmasına kaydedildi.
+- **Kalıcı Bağlantı Dizesi Tanımlandı**: Kullanıcının belirlediği `postgresql://iot_user:[REDACTED_CREDENTIAL]@timescaledb:5432/iot_dashboard?sslmode=disable` adresi veritabanı ayarlarına, `.env.example` ve sistem runtime yapılandırmasına kaydedildi.
 - **Arayüz & Form Ön Değeri**: `DatabaseDataView` bileşeninde `inputPostgresUrl` ve form yer tutucusu kullanıcının TimescaleDB bağlantı adresiyle önceden doldurulacak şekilde güncellendi.
 - **Docker Konteyner Adı Teşhisi (HOST_NOT_RESOLVED)**: `timescaledb` servis adı test edildiğinde, Docker Compose dahili ağı ile dış IP/alan adı ayrımı hakkında rehberlik sağlayan akıllı teşhis eklendi.
 
@@ -1528,7 +1528,7 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
   - Kurulum tamamlandıktan sonra veritabanı şifresi hiçbir API yanıtında, frontend state'inde veya log dosyalarında asla dışa aktarılmaz.
   - Kurulum tamamlandığında `isCompleted` bayrağı aktif hale gelir ve `/api/setup` uç noktaları `HTTP 403 Forbidden` ile kalıcı olarak kilitlenir.
 - **Docker Compose ve Ağ Güvenliği Sertleştirmesi (Docker Hardening)**:
-  - `docker-compose.yml` dosyasındaki sabitlenmiş `POSTGRES_PASSWORD: kastamonuaraccalalibeyli.37` ve `DATABASE_URL` tanımları tamamen kaldırılmıştır; `${POSTGRES_PASSWORD:-}` esnek ortam değişkenine ve sihirbaz akışına bağlanmıştır.
+  - `docker-compose.yml` dosyasındaki sabitlenmiş veritabanı kimlik bilgileri ve `DATABASE_URL` tanımları tamamen kaldırılmıştır; `${POSTGRES_PASSWORD:-}` esnek ortam değişkenine ve sihirbaz akışına bağlanmıştır.
   - `timescaledb` ve `adminer` servislerinin açık İnternet port bağlamaları sınırlandırılarak (`${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}` ve `${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}`) yerel köprü ağı (`nexus_net`) içine izole edilmiştir.
   - `.dockerignore` dosyasına `data`, `.db_config.json` ve runtime secret kalıpları eklenerek container imajlarına sızması engellenmiştir.
 - **Yardım & Bilgi Merkezi (HelpView) Entegrasyonu**:
