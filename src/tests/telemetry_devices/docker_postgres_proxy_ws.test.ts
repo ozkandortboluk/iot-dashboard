@@ -454,4 +454,68 @@ describe('Docker + PostgreSQL/TimescaleDB + Reverse Proxy + WebSocket Production
     uiWs.close();
     uiWs.terminate();
   });
+
+  it('redacts sensitive service_config from WebSocket bootstrap and live settings updates', async () => {
+    const originalSystemSettings = { ...(db.data.systemSettings || {}) };
+    db.data.systemSettings = {
+      ...originalSystemSettings,
+      panel_theme: { color: 'blue' },
+      service_config: { emailUser: 'test@example.invalid', smtpPass: 'websocket-test-secret' },
+    };
+
+    const receivedEvents: any[] = [];
+    const uiWs = new WebSocket(wsUrl, {
+      headers: {
+        cookie: `nexus_session_token=${sessionToken}`,
+      },
+    });
+    uiWs.on('message', (data) => {
+      try {
+        receivedEvents.push(JSON.parse(data.toString()));
+      } catch {
+        // Ignore non-JSON frames.
+      }
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        uiWs.once('open', resolve);
+        uiWs.once('error', reject);
+      });
+
+      for (let i = 0; i < 20 && !receivedEvents.some((event) => event.event === 'system:settings:bootstrap'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+
+      const bootstrap = receivedEvents.find((event) => event.event === 'system:settings:bootstrap');
+      expect(bootstrap).toBeDefined();
+      expect(bootstrap.payload.panel_theme).toEqual({ color: 'blue' });
+      expect(bootstrap.payload.service_config).toBeUndefined();
+
+      broadcast('system:settings:updated', {
+        key: 'service_config',
+        value: { emailUser: 'test@example.invalid', smtpPass: 'websocket-test-secret' },
+        updatedAt: new Date().toISOString(),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(
+        receivedEvents.some((event) => event.event === 'system:settings:updated' && event.payload?.key === 'service_config')
+      ).toBe(false);
+
+      broadcast('system:settings:updated', {
+        key: 'panel_theme',
+        value: { color: 'purple' },
+        updatedAt: new Date().toISOString(),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(
+        receivedEvents.some((event) => event.event === 'system:settings:updated' && event.payload?.key === 'panel_theme')
+      ).toBe(true);
+    } finally {
+      uiWs.close();
+      uiWs.terminate();
+      db.data.systemSettings = originalSystemSettings;
+    }
+  });
+
 });
