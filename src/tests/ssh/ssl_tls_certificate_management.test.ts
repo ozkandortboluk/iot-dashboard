@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 
-const sourceRoot = path.resolve(__dirname, '../..');
+const sourceRoot = path.resolve(__dirname, '../../..');
 const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-tls-test-'));
 fs.chmodSync(sandboxRoot, 0o755);
 const rootDir = path.join(sandboxRoot, 'project');

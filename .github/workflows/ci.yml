@@ -50,6 +50,11 @@ jobs:
           echo "::add-mask::$key"
           echo "ENCRYPTION_KEY=$key" >> "$GITHUB_ENV"
 
+      - name: Install system test dependency (age)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+
       - name: Setup Node.js Environment (${{ matrix.node-version }})
         uses: actions/setup-node@v4
         with:
@@ -66,7 +71,7 @@ jobs:
         run: npm run lint
 
       - name: Run Automated Test Suite (Vitest)
-        run: npm test -- --exclude src/tests/docker_secret_ownership_postgres_auth.test.ts
+        run: npm test -- --exclude src/tests/security/docker_secret_ownership_postgres_auth.test.ts
 
       - name: Build Production Bundle
         run: npm run build
