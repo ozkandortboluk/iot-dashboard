@@ -11,12 +11,13 @@ import {
 } from '../../server/database/migrations/migrationRunner.js';
 import { migration002 } from '../../server/database/migrations/002_timescale_hypertables.js';
 import { migration022 } from '../../server/database/migrations/022_add_system_settings_and_device_activity_columns.js';
+import { migration023 } from '../../server/database/migrations/023_persistent_notification_queue.js';
 import { CANONICAL_SCHEMA_METADATA, generateCanonicalSchemaDDL } from '../../server/database/canonicalSchema.js';
 
 describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift Gate', () => {
   describe('1. Content-Bound Checksum & Dynamic Mutation Sensitivity', () => {
-    it('should have all migrations from 001 to 022 in ALL_MIGRATIONS in strict sequential order', () => {
-      expect(ALL_MIGRATIONS.length).toBe(22);
+    it('should have all migrations from 001 to 023 in ALL_MIGRATIONS in strict sequential order', () => {
+      expect(ALL_MIGRATIONS.length).toBe(23);
       for (let i = 0; i < ALL_MIGRATIONS.length; i++) {
         const expectedVer = String(i + 1).padStart(3, '0');
         expect(ALL_MIGRATIONS[i].version).toBe(expectedVer);
@@ -55,8 +56,8 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
       expect(isMigrationChecksumValid('001', 'tampered_non_historical_hash_99999', mutatedChecksum)).toBe(false);
     });
 
-    it('should verify 100% parity between computed migration checksums and manifest canonical hashes for all 22 migrations', () => {
-      expect(ALL_MIGRATIONS.length).toBe(22);
+    it('should verify 100% parity between computed migration checksums and manifest canonical hashes for all 23 migrations', () => {
+      expect(ALL_MIGRATIONS.length).toBe(23);
       for (const m of ALL_MIGRATIONS) {
         const computedHash = computeMigrationChecksum(m);
         const manifestEntry = CANONICAL_MIGRATION_MANIFEST[m.version];
@@ -333,6 +334,24 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
       expect(sqlList.some((s) => s.includes('CREATE TABLE IF NOT EXISTS system_settings'))).toBe(true);
       expect(sqlList.some((s) => s.includes('ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_telemetry_at'))).toBe(true);
       expect(sqlList.some((s) => s.includes('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS event_key'))).toBe(true);
+    });
+  });
+
+  describe('6. Migration 023 Durable Notification Queue', () => {
+    it('creates the persistent queue and lease-recovery indexes', async () => {
+      const sqlList: string[] = [];
+      const mockClient = {
+        query: vi.fn(async (sql: string) => {
+          sqlList.push(sql);
+          return { rows: [] };
+        }),
+      };
+
+      await migration023.up(mockClient as any);
+      expect(sqlList.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS notification_queue'))).toBe(true);
+      expect(sqlList.some((sql) => sql.includes('idx_notification_queue_ready'))).toBe(true);
+      expect(sqlList.some((sql) => sql.includes('idx_notification_queue_expired_lease'))).toBe(true);
+      expect(sqlList.some((sql) => sql.includes('idx_notification_queue_tenant_created'))).toBe(true);
     });
   });
 });

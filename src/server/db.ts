@@ -702,6 +702,7 @@ class LocalDatabase {
     try {
       await this.postgresRepo.ensureTelemetrySchema(true);
       this.postgresRepo.setConnected(true, true);
+      await this.importLegacyNotificationQueue();
     } catch (tErr: any) {
       systemLogger.error('database', 'PostgreSQL Şema Doğrulama/Onarım Hatası:', tErr?.message || tErr);
       this.setDatabaseState(DatabaseState.MAINTENANCE);
@@ -2911,6 +2912,12 @@ class LocalDatabase {
   }
 
   private async runNotificationQueue() {
+    if (this.isPostgresProductionMode()) {
+      if (!this.postgresRepo?.isReady()) return;
+      await this.runPostgresNotificationQueue();
+      return;
+    }
+
     if (!this.data.notificationQueue) this.data.notificationQueue = [];
     if (!this.data.dispatchLogs) this.data.dispatchLogs = [];
 
@@ -2999,6 +3006,155 @@ class LocalDatabase {
     this.saveData(this.data);
     this.notifyNotificationListeners('notification-queue:updated', this.data.notificationQueue);
     this.notifyNotificationListeners('dispatch-logs:updated', this.data.dispatchLogs);
+  }
+
+  private async runPostgresNotificationQueue(): Promise<void> {
+    const workerId = `notification-worker:${process.pid}:${crypto.randomUUID()}`;
+    const leaseMs = 120_000;
+    const items = await this.postgresRepo.claimNotificationQueueItems(workerId, 1, leaseMs);
+    if (items.length === 0) return;
+    const config = this.getServiceConfig();
+
+    for (const item of items) {
+      const heartbeat = setInterval(() => {
+        this.postgresRepo.extendNotificationQueueLease(item.id, workerId, leaseMs)
+          .catch((err: any) => console.error('[Notification Queue] Lease renewal failed:', err?.message || err));
+      }, 30_000);
+      heartbeat.unref?.();
+
+      const startMs = Date.now();
+      let result: { success: boolean; providerResponse: string; errorDetails?: string };
+      try {
+        result = await dispatchMessageToChannel(item, config);
+      } catch (err: any) {
+        result = { success: false, providerResponse: '', errorDetails: err?.message || String(err) };
+      } finally {
+        clearInterval(heartbeat);
+      }
+
+      const completed = await this.postgresRepo.completeNotificationQueueItem(item.id, workerId, {
+        success: result.success,
+        errorDetails: result.errorDetails,
+      });
+      if (!completed) {
+        console.warn(`[Notification Queue] Lease lost before completion for ${item.id}; item remains eligible for recovery.`);
+        continue;
+      }
+
+      const logEntry: DispatchLogItem = {
+        id: `log_${crypto.randomUUID()}`,
+        queueItemId: completed.id,
+        notificationId: completed.notificationId,
+        tenantId: completed.tenantId,
+        userName: completed.userName,
+        channel: completed.channel,
+        recipient: completed.recipient,
+        title: completed.title,
+        message: completed.message,
+        severity: completed.severity,
+        status: result.success ? 'sent' : 'failed',
+        attemptCount: completed.attempts,
+        providerResponse: result.providerResponse,
+        errorDetails: result.errorDetails,
+        latencyMs: Date.now() - startMs,
+        sentAt: new Date().toISOString(),
+      };
+      await this.postgresRepo.saveDispatchLog(logEntry).catch((err: any) => {
+        console.error('[Notification Dispatch] PostgreSQL history write failed:', err?.message || err);
+      });
+
+      if (!this.data.notificationQueue) this.data.notificationQueue = [];
+      const index = this.data.notificationQueue.findIndex((entry) => entry.id === completed.id);
+      if (index >= 0) this.data.notificationQueue[index] = completed;
+      else this.data.notificationQueue.unshift(completed);
+      this.data.dispatchLogs = [logEntry, ...(this.data.dispatchLogs || [])].slice(0, 500);
+      this.notifyNotificationListeners('notification-queue:updated', { refresh: true });
+      this.notifyNotificationListeners('dispatch-logs:updated', this.data.dispatchLogs);
+    }
+  }
+
+  public async enqueueNotificationQueueItem(item: NotificationQueueItem): Promise<void> {
+    if (this.isPostgresProductionMode()) {
+      if (!this.postgresRepo?.isReady()) {
+        throw new Error('PostgreSQL notification queue is not ready; RAM fallback is disabled.');
+      }
+      await this.postgresRepo.enqueueNotificationQueueItem(item);
+    }
+    if (!this.data.notificationQueue) this.data.notificationQueue = [];
+    const existingIndex = this.data.notificationQueue.findIndex((entry) => entry.id === item.id);
+    if (existingIndex >= 0) this.data.notificationQueue[existingIndex] = item;
+    else this.data.notificationQueue.unshift(item);
+    this.saveData(this.data);
+    this.notifyNotificationListeners(
+      'notification-queue:updated',
+      this.isPostgresProductionMode() ? { refresh: true } : this.data.notificationQueue
+    );
+  }
+
+  private async importLegacyNotificationQueue(): Promise<void> {
+    if (!this.postgresRepo?.isReady() || typeof this.postgresRepo.enqueueNotificationQueueItem !== 'function' || !this.data.notificationQueue?.length) return;
+    let imported = 0;
+    for (const legacyItem of this.data.notificationQueue) {
+      const item = { ...legacyItem };
+      if (item.status === 'processing') {
+        item.status = item.attempts < item.maxAttempts ? 'retrying' : 'failed';
+        item.nextRetryAt = item.status === 'retrying' ? new Date().toISOString() : undefined;
+      } else if ((item.status === 'pending' || item.status === 'retrying') && item.attempts >= item.maxAttempts) {
+        item.status = 'failed';
+        item.nextRetryAt = undefined;
+      }
+      await this.postgresRepo.enqueueNotificationQueueItem(item);
+      imported++;
+    }
+    if (imported > 0) console.log(`[Notification Queue] Imported ${imported} legacy local queue row(s) into PostgreSQL.`);
+  }
+
+  public async getNotificationQueueAsync(
+    requestingUserId: string,
+    targetCustomerId?: string,
+    options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }
+  ): Promise<any> {
+    if (!this.isPostgresProductionMode()) {
+      return this.getNotificationQueue(requestingUserId, targetCustomerId, options);
+    }
+    if (!this.postgresRepo?.isReady()) throw new Error('PostgreSQL notification queue is not ready.');
+    const reqUser = this.data.users.find((user) => user.id === requestingUserId);
+    const isAdmin = Boolean(reqUser && ['admin', 'superadmin'].includes(String(reqUser.role).toLowerCase()) && reqUser.status !== 'suspended');
+    const tenantId = isAdmin
+      ? (targetCustomerId && targetCustomerId !== 'all' ? targetCustomerId : undefined)
+      : requestingUserId;
+    const result = await this.postgresRepo.getNotificationQueueRows({ tenantId, ...options });
+    return options ? result : result.data;
+  }
+
+  public async retryNotificationQueueItem(queueItemId: string, currentUser: any): Promise<NotificationQueueItem> {
+    if (!this.isPostgresProductionMode() || !this.postgresRepo?.isReady()) {
+      throw new Error('PostgreSQL notification queue is not ready.');
+    }
+    const role = String(currentUser.role || '').toLowerCase();
+    const isAdmin = ['admin', 'superadmin'].includes(role);
+    const item = await this.postgresRepo.retryNotificationQueueItem(queueItemId, currentUser.id, isAdmin);
+    if (!this.data.notificationQueue) this.data.notificationQueue = [];
+    const index = this.data.notificationQueue.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) this.data.notificationQueue[index] = item;
+    else this.data.notificationQueue.unshift(item);
+    setTimeout(() => { void this.processQueue(); }, 50);
+    return item;
+  }
+
+  public async clearNotificationQueue(requestingUserId: string): Promise<void> {
+    if (!this.isPostgresProductionMode() || !this.postgresRepo?.isReady()) {
+      throw new Error('PostgreSQL notification queue is not ready.');
+    }
+    const reqUser = this.data.users.find((user) => user.id === requestingUserId);
+    const role = String(reqUser?.role || '').toLowerCase();
+    const isAdmin = Boolean(reqUser && (role === 'admin' || role === 'superadmin' || reqUser.id === 'usr_admin') && reqUser.status !== 'suspended');
+    await this.postgresRepo.clearNotificationQueue(requestingUserId, isAdmin);
+    if (!this.data.notificationQueue) this.data.notificationQueue = [];
+    this.data.notificationQueue = this.data.notificationQueue.filter((item) =>
+      item.status === 'processing' || (!isAdmin && item.tenantId !== requestingUserId)
+    );
+    this.saveData(this.data);
   }
 
   public getNotificationQueue(requestingUserId?: string, targetCustomerId?: string, options?: { limit?: number; cursor?: string; status?: string; channel?: string; search?: string }): any {

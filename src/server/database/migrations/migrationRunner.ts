@@ -22,6 +22,7 @@ import { migration019 } from './019_restore_canonical_test_entities.js';
 import { migration020 } from './020_add_service_tokens_table.js';
 import { migration021 } from './021_hash_device_and_session_tokens.js';
 import { migration022 } from './022_add_system_settings_and_device_activity_columns.js';
+import { migration023 } from './023_persistent_notification_queue.js';
 import type { Migration, MigrationStatus } from './types.js';
 
 const MIGRATION_ADVISORY_LOCK_ID = 13374242;
@@ -99,7 +100,7 @@ export interface CanonicalMigrationManifestEntry {
 
 /**
  * Authoritative Canonical Migration Manifest & Provenance Dictionary
- * Maps every frozen applied migration (001–022) to its expected immutable canonical source hash,
+ * Maps every frozen applied migration (001–022) and the current forward migration to its canonical source hash,
  * alongside machine-readable historical database checksum records from verified releases.
  */
 export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationManifestEntry> = {
@@ -1057,14 +1058,20 @@ export const CANONICAL_MIGRATION_MANIFEST: Record<string, CanonicalMigrationMani
       },
     ],
   },
+  '023': {
+    version: '023',
+    name: 'persistent_notification_queue',
+    canonicalSourceHash: 'b505907c11bb12176170e696f1234df1',
+    historicalChecksums: [],
+  },
 };
 
 /**
- * Validates manifest provenance integrity across all canonical migrations 001–022.
+ * Validates manifest provenance integrity across every registered migration.
  */
 export function validateManifestProvenance(): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  const expectedVersions = Array.from({ length: 22 }, (_, i) => String(i + 1).padStart(3, '0'));
+  const expectedVersions = Array.from({ length: 23 }, (_, i) => String(i + 1).padStart(3, '0'));
 
   for (const ver of expectedVersions) {
     const entry = CANONICAL_MIGRATION_MANIFEST[ver];
@@ -1154,7 +1161,7 @@ export function isDatabaseChecksumValid(
     return true;
   }
 
-  // Safe Auto-Reconciliation Gate for Pristine Canonical Migrations (001-022):
+  // Safe Auto-Reconciliation Gate for migrations whose current source matches the manifest:
   // If the codebase source code is untampered (matches canonicalSourceHash) AND the DB
   // contains a valid 32-character hex checksum from an earlier deployment build/release,
   // accept it and allow the runner to reconcile schema_migrations to the canonical hash.
@@ -1209,6 +1216,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration020,
   migration021,
   migration022,
+  migration023,
 ];
 
 let lastMigrationStatus: {

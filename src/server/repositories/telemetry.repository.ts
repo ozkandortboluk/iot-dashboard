@@ -1902,7 +1902,6 @@ export class TelemetryRepository {
     title: string,
     msg: string
   ) {
-    if (!this.db.data.notificationQueue) this.db.data.notificationQueue = [];
     const rule = (this.db.data.rules || []).find((r: ThresholdRule) => r.id === alarm.ruleId);
     if (!rule || !rule.notificationChannels || rule.notificationChannels.length === 0) return;
 
@@ -1983,11 +1982,12 @@ export class TelemetryRepository {
           updatedAt: new Date().toISOString(),
         };
 
-        this.db.data.notificationQueue.unshift(queueItem);
+        this.db.enqueueNotificationQueueItem(queueItem).catch((err: any) => {
+          console.error('[Notification Engine] Durable queue write failed:', err?.message || err);
+        });
       }
     }
 
-    this.db.saveData(this.db.data);
     setTimeout(() => {
       this.db.processQueue?.();
     }, 50);

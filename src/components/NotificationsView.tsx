@@ -246,6 +246,8 @@ export const NotificationsView: React.FC = () => {
         } else {
           setQueueItems(payload);
         }
+      } else {
+        void fetchQueueData();
       }
     });
 
@@ -267,7 +269,7 @@ export const NotificationsView: React.FC = () => {
       unsubQueue();
       unsubLogs();
     };
-  }, [subscribeWsEvent, user, selectedCustomerForAdmin, fetchPrimaryData]);
+  }, [subscribeWsEvent, user, selectedCustomerForAdmin, fetchPrimaryData, fetchQueueData]);
 
   // 4. Fallback Polling (ONLY when WebSocket is disconnected, 20s interval)
   useEffect(() => {

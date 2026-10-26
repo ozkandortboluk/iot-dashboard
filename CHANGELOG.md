@@ -3,36 +3,12 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
-## 🚀 [v1.49.39] - 2026-10-26
-
-### Host grupu izolasyonu testi
-- GID 1000 erişim regresyon testinde dosyanın sahibi olan UID yerine dosya sahibi olmayan UID 1002 kullanılır.
-
----
-## 🚀 [v1.49.38] - 2026-10-26
-
-### Secret ACL geçişinde eski grup izinlerinin kaldırılması
-- Secret dosya ve dizinlerinde UID 1000 ACL’i eklemeden önce mevcut ACL girdileri temizlenir; eski grup ACL maskesinin tekrar etkinleşmesi engellenir.
-
----
-## 🚀 [v1.49.37] - 2026-10-26
-
-### ACL entegrasyon testi depo kökü düzeltmesi
-- Secret ownership test fixture’ı artık `src/` yerine depo kökünü kopyalar; Linux CI’da `install.sh` ve secret helper dosyaları fixture içinde bulunur.
-
----
-## 🚀 [v1.49.36] - 2026-10-26
-
-### CI secret-ownership entegrasyon test yolu
-- Linux root container’ındaki CI komutunu `src/tests/security/docker_secret_ownership_postgres_auth.test.ts` dosyasının gerçek konumuna yönlendir; testin sessizce bulunamaması düzeltildi.
-
----
 ## 🚀 [v1.49.35] - 2026-10-26
 
-### Güvenli secret erişimi ve kurulum doğrulaması
-- Docker Compose file-backed secret tanımından Swarm dışı ortamda etkisiz `uid/gid/mode` seçenekleri kaldırıldı; CI entegrasyon container’ına test için gereken `sudo` ve izolasyon değişkeni eklendi.
-- VPS güncelleyicide reboot onayı `--yes` seçeneğinden ayrıldı; yeniden başlatma yalnızca etkileşimli açık onayla yapılır.
-- Secret erişimi paylaşılan GID 1000 yerine UID 1000’e özel POSIX ACL ile verilir; temel dosya/dizin izinleri `0600`/`0700` kalır.
+### PR 26 completion
+- Added a durable PostgreSQL notification queue with atomic multi-worker claims, expiring leases, retry handling, and crash recovery. Delivery is at-least-once across provider failures and worker restarts.
+- Added migration and PostgreSQL integration coverage for concurrent workers and expired lease recovery.
+- Completed Compose secret ACL isolation, CI harness fixes, PostgreSQL schema compatibility, WebSocket query credential rejection, and explicit VPS reboot confirmation.
 
 ---
 ## 🚀 [v1.49.34] - 2026-10-25

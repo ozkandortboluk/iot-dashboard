@@ -563,6 +563,8 @@ export function broadcast(event: string, payload: unknown) {
             : {};
           const scopedPayload = Array.isArray(payload) ? scopedRows : { ...payloadRecord, data: scopedRows, total: scopedRows.length };
           safeSend(client, JSON.stringify({ event, payload: scopedPayload, timestamp: new Date().toISOString() }));
+        } else if (event === 'notification-queue:updated') {
+          safeSend(client, JSON.stringify({ event, payload: { refresh: true }, timestamp: new Date().toISOString() }));
         }
       }
       return;
