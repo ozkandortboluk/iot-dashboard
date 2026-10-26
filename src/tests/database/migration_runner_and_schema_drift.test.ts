@@ -134,6 +134,8 @@ describe('DB-01 / USR-03: Deterministic Content-Bound Migrations & Schema Drift 
 
       expect(ddl).toContain('ALTER TABLE devices ALTER COLUMN encryption_method TYPE VARCHAR(64)');
       expect(ddl).toContain('ALTER TABLE devices ALTER COLUMN auto_detected_interval_seconds SET DEFAULT 30');
+      expect(ddl).toContain('ALTER TABLE devices ALTER COLUMN location TYPE VARCHAR(256)');
+      expect(ddl).toContain("ALTER TABLE devices ALTER COLUMN simulated_metrics SET DEFAULT '[]'::jsonb");
     });
   });
 
