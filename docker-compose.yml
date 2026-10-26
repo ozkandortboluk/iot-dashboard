@@ -77,12 +77,11 @@ services:
       # or PostgreSQL system_settings). Root ENCRYPTION_KEY unlocks the vault. No plaintext secrets in app container env.
     volumes:
       - app_data:/app/data
+    # File-backed Compose secrets are bind mounts; uid/gid/mode are ignored outside Swarm.
+    # Host-side access is configured by align_secrets_ownership_and_permissions().
     secrets:
       - source: encryption_key
         target: encryption_key
-        uid: "1000"
-        gid: "1000"
-        mode: "0400"
     healthcheck:
       test: [ "CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" ]
       interval: 10s

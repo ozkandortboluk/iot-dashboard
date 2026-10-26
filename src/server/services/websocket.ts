@@ -563,6 +563,8 @@ export function broadcast(event: string, payload: unknown) {
             : {};
           const scopedPayload = Array.isArray(payload) ? scopedRows : { ...payloadRecord, data: scopedRows, total: scopedRows.length };
           safeSend(client, JSON.stringify({ event, payload: scopedPayload, timestamp: new Date().toISOString() }));
+        } else if (event === 'notification-queue:updated') {
+          safeSend(client, JSON.stringify({ event, payload: { refresh: true }, timestamp: new Date().toISOString() }));
         }
       }
       return;
@@ -756,7 +758,7 @@ export function initWebSocketServer(server: http.Server) {
       if (urlObj) {
         let connectionToken: string | null = null;
 
-        // 1. Extract Token from Cookie, Authorization header, X-API-KEY, Sec-WebSocket-Protocol, or Query string
+        // 1. Extract credentials only from headers or the secure session cookie.
         if (request.headers?.cookie) {
           const match = request.headers.cookie.match(/nexus_session_token=([^;]+)/);
           if (match && match[1]) {
@@ -782,15 +784,6 @@ export function initWebSocketServer(server: http.Server) {
             connectionToken = rawProtocols[0];
           }
         }
-        // Resilient fallback: Support query token (?token=... or ?apiKey=...) for IoT hardware devices
-        // and browser iframe environments where headers and third-party cookies are restricted
-        if (!connectionToken) {
-          const queryToken = urlObj.searchParams.get('token') || urlObj.searchParams.get('apiKey');
-          if (queryToken && queryToken.trim()) {
-            connectionToken = queryToken.trim();
-          }
-        }
-
         // 2. Validate Token
         let user = null;
         let device = null;

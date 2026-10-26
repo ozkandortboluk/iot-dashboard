@@ -605,7 +605,7 @@ align_secrets_ownership_and_permissions() {
 
   [ ! -d "$SECRETS_DIR" ] && return 0
 
-  # Container node user requires UID 1000 / GID 1000 read access.
+  # Container node user runs as UID 1000; grant access to that UID only.
   # Security requirements:
   # 1. Never make secrets world-readable (0644, 0777 or any 'other' bits are strictly forbidden).
   # 2. Host operator retains necessary owner access.
@@ -614,16 +614,14 @@ align_secrets_ownership_and_permissions() {
   #    Node process (UID 1000) inside container reads the secret as owner.
   #    Root retains full read/write via kernel DAC override.
   # 4. ROOT with SUDO_USER (e.g. sudo ./install.sh by UID 1001):
-  #    Assign owner $SUDO_USER, group 1000.
-  #    Mode 0640 (owner rw-, group r--, others 0) and dir 0750.
-  #    Node process reads via group 1000.
+  #    Keep the host operator as owner, use 0600/0700 base permissions, and
+  #    grant only UID 1000 access through named ACL entries (never GID 1000).
   # 5. Non-root user:
   #    - If UID == 1000: mode 0600, dir 0700.
-  #    - If UID != 1000:
-  #      * Try group 1000 (if operator is in group 1000) or setfacl (POSIX ACL).
+  #    - If UID != 1000: use a named UID 1000 ACL (POSIX ACL).
   #      * If unprivileged access fails, evaluate controlled sudo for permissions adjustment:
   #        Only use sudo if passwordless (sudo -n) and non-interactive; never hang on password prompt.
-  #        Set group 1000 (mode 0640 / dir 0750), retaining non-root operator as owner.
+  #        Apply a named UID 1000 ACL while retaining owner-only base permissions.
   # 6. FAIL-CLOSED: No '|| true' silently masking errors. Explicit verification that UID 1000 can read the secrets and traverse directory.
 
   local current_uid current_gid
@@ -673,52 +671,31 @@ align_secrets_ownership_and_permissions() {
         chown_target=""
       fi
 
-      if [ -n "$chown_target" ]; then
-        if ! chown "$chown_target:1000" "$SECRETS_DIR" 2>&1; then
-          if ! chown :1000 "$SECRETS_DIR" 2>&1; then
-            echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için GID 1000 atanamadı!" >&2
-            return 1
-          fi
-        fi
-      else
-        if ! chown :1000 "$SECRETS_DIR" 2>&1; then
-          echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için GID 1000 atanamadı!" >&2
-          return 1
-        fi
+      if [ -n "$chown_target" ] && ! chown "$chown_target" "$SECRETS_DIR" 2>&1; then
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' sahipliği korunamadı!" >&2
+        return 1
       fi
-
-      if ! chmod 750 "$SECRETS_DIR"; then
-        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0750 izni ayarlanamadı!" >&2
+      if ! setfacl -b "$SECRETS_DIR" || ! chmod 700 "$SECRETS_DIR"; then
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' dizini için 0700 izni ayarlanamadı!" >&2
+        return 1
+      fi
+      if ! command -v setfacl >/dev/null 2>&1 || ! setfacl -m u:1000:rx "$SECRETS_DIR"; then
+        echo "❌ [KRİTİK HATA] '${SECRETS_DIR}' için yalnızca UID 1000'e ACL verilemedi; 'acl' paketini kurun." >&2
         return 1
       fi
 
       for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
         if [ -f "$sfile" ]; then
-          if [ -n "$chown_target" ]; then
-            if ! chown "$chown_target:1000" "$sfile" 2>&1; then
-              if ! chown :1000 "$sfile" 2>&1; then
-                echo "❌ [KRİTİK HATA] '${sfile}' için GID 1000 atanamadı!" >&2
-                return 1
-              fi
-            fi
-          else
-            if ! chown :1000 "$sfile" 2>&1; then
-              echo "❌ [KRİTİK HATA] '${sfile}' için GID 1000 atanamadı!" >&2
-              return 1
-            fi
-          fi
-          if ! chmod 640 "$sfile"; then
-            echo "❌ [KRİTİK HATA] '${sfile}' için 0640 izni ayarlanamadı!" >&2
+          if [ -n "$chown_target" ] && ! chown "$chown_target" "$sfile" 2>&1; then
+            echo "❌ [KRİTİK HATA] '${sfile}' sahipliği korunamadı!" >&2
             return 1
           fi
-          if command -v setfacl >/dev/null 2>&1; then
-            setfacl -m u:1000:r,m::r "$sfile" 2>/dev/null || true
+          if ! setfacl -b "$sfile" || ! chmod 600 "$sfile" || ! setfacl -m u:1000:r-- "$sfile"; then
+            echo "❌ [KRİTİK HATA] '${sfile}' için yalnızca UID 1000'e ACL verilemedi!" >&2
+            return 1
           fi
         fi
       done
-      if command -v setfacl >/dev/null 2>&1; then
-        setfacl -m u:1000:rx,m::rx "$SECRETS_DIR" 2>/dev/null || true
-      fi
     else
       # Pure Root without SUDO_USER or sudo invoked by UID 1000
       # Assign ownership to UID 1000 when root; for non-root test/CI runners, retain current ownership
@@ -766,37 +743,21 @@ align_secrets_ownership_and_permissions() {
       # Operator is non-root with UID != 1000 (e.g. UID 1001 'deploy')
       local method_errors=()
 
-      # Attempt 1: Unprivileged group change (succeeds if operator belongs to group 1000)
-      local grp_err=""
-      if grp_err=$(chgrp 1000 "$SECRETS_DIR" 2>&1); then
-        if ! chmod 750 "$SECRETS_DIR" 2>&1; then
-          method_errors+=("chmod 750 $SECRETS_DIR: Başarısız")
-        fi
-        for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
-          if [ -f "$sfile" ]; then
-            if ! s_grp_err=$(chgrp 1000 "$sfile" 2>&1); then
-              method_errors+=("chgrp 1000 ($sfile): $s_grp_err")
-            fi
-            if ! chmod 640 "$sfile" 2>&1; then
-              method_errors+=("chmod 640 ($sfile): Başarısız")
-            fi
-          fi
-        done
-      else
-        method_errors+=("chgrp 1000: Kullanıcı GID 1000 grubuna dahil değil (${grp_err:-EPERM})")
-      fi
-
-      # Attempt 2: Unprivileged POSIX ACL (file owner can set ACL without root)
+      # Grant access to the container's numeric UID only; a shared host GID
+      # could include unrelated accounts.
       if command -v setfacl >/dev/null 2>&1; then
         local acl_err=""
-        # Ensure group read/traverse is enabled so POSIX ACL mask is at least r-x on dir and r-- on files
-        chmod 750 "$SECRETS_DIR" 2>/dev/null || true
-        if acl_err=$(setfacl -m u:1000:rx,m::rx "$SECRETS_DIR" 2>&1); then
+        if ! setfacl -b "$SECRETS_DIR" 2>/dev/null || ! chmod 700 "$SECRETS_DIR" 2>/dev/null; then
+          method_errors+=("chmod 700 $SECRETS_DIR: BaÅŸarÄ±sÄ±z")
+        elif acl_err=$(setfacl -m u:1000:rx "$SECRETS_DIR" 2>&1); then
           for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
             if [ -f "$sfile" ]; then
-              chmod 640 "$sfile" 2>/dev/null || true
+              if ! setfacl -b "$sfile" 2>/dev/null || ! chmod 600 "$sfile" 2>/dev/null; then
+                method_errors+=("chmod 600 ($sfile): BaÅŸarÄ±sÄ±z")
+                continue
+              fi
               local f_acl_err=""
-              if ! f_acl_err=$(setfacl -m u:1000:r,m::r "$sfile" 2>&1); then
+              if ! f_acl_err=$(setfacl -m u:1000:r-- "$sfile" 2>&1); then
                 method_errors+=("setfacl ($sfile): $f_acl_err")
               fi
             fi
@@ -808,7 +769,7 @@ align_secrets_ownership_and_permissions() {
         method_errors+=("setfacl: 'setfacl' aracı sistemde kurulu değil")
       fi
 
-      # Attempt 3: Controlled sudo (if needed and safe/available)
+      # Controlled sudo fallback, still using a UID-specific ACL.
       local check_needed=true
       local can_read_now=true
       for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE"; do
@@ -817,9 +778,7 @@ align_secrets_ownership_and_permissions() {
         cur_gid=$(stat -c "%g" "$sfile" 2>/dev/null || stat -f "%g" "$sfile" 2>/dev/null || echo "")
         cur_mode=$(stat -c "%a" "$sfile" 2>/dev/null || stat -f "%Lp" "$sfile" 2>/dev/null || echo "")
         local s_ok=false
-        if [ "$cur_gid" = "1000" ] && [ -n "$cur_mode" ] && [ "${cur_mode: -2:1}" -ge 4 ]; then
-          s_ok=true
-        elif command -v getfacl >/dev/null 2>&1; then
+        if command -v getfacl >/dev/null 2>&1; then
           if getfacl -n -c "$sfile" 2>/dev/null | grep -E "^(user|group):1000:r" | grep -qv "#effective:---"; then
             s_ok=true
           fi
@@ -830,20 +789,14 @@ align_secrets_ownership_and_permissions() {
       if [ "$can_read_now" = false ]; then
         if [ "$sudo_available" = true ]; then
           local sudo_err=""
-          if sudo_err=$($sudo_cmd chgrp 1000 "$SECRETS_DIR" 2>&1); then
-            $sudo_cmd chmod 750 "$SECRETS_DIR" 2>/dev/null || true
+          if sudo_err=$($sudo_cmd setfacl -b "$SECRETS_DIR" 2>&1) && $sudo_cmd chmod 700 "$SECRETS_DIR" 2>&1 && $sudo_cmd setfacl -m u:1000:rx "$SECRETS_DIR" 2>&1; then
             for sfile in "$ENC_KEY_FILE" "$PG_PASS_FILE" "$DB_PASS_FILE"; do
               if [ -f "$sfile" ]; then
-                $sudo_cmd chgrp 1000 "$sfile" 2>/dev/null || true
-                $sudo_cmd chmod 640 "$sfile" 2>/dev/null || true
-                if command -v setfacl >/dev/null 2>&1; then
-                  $sudo_cmd setfacl -m u:1000:r,m::r "$sfile" 2>/dev/null || true
-                fi
+                $sudo_cmd setfacl -b "$sfile" 2>/dev/null || true
+                $sudo_cmd chmod 600 "$sfile" 2>/dev/null || true
+                $sudo_cmd setfacl -m u:1000:r-- "$sfile" 2>/dev/null || true
               fi
             done
-            if command -v setfacl >/dev/null 2>&1; then
-              $sudo_cmd setfacl -m u:1000:rx,m::rx "$SECRETS_DIR" 2>/dev/null || true
-            fi
           else
             method_errors+=("sudo chgrp: Sudo ile grup atanamadı (${sudo_err:-hata})")
           fi
@@ -953,7 +906,7 @@ align_secrets_ownership_and_permissions() {
       done
       echo "" >&2
     fi
-    echo "Çözüm: Kurulumu 'sudo ./install.sh' ile çalıştırın veya 'sudo chown :1000 ${SECRETS_DIR} && chmod 750 ${SECRETS_DIR}' uygulayın." >&2
+    echo "Çözüm: Kurulumu 'sudo ./install.sh' ile çalıştırın veya UID 1000 için yalnızca kullanıcıya özel ACL ayarlayın: 'sudo setfacl -m u:1000:rx ${SECRETS_DIR}'" >&2
     return 1
   fi
 
@@ -1069,8 +1022,9 @@ align_secrets_ownership_and_permissions() {
         fi
         echo "Çözüm Seçenekleri:" >&2
         echo "  1. Kurulumu 'sudo ./install.sh' (veya 'sudo -E ./install.sh') ile çalıştırın." >&2
-        echo "  2. Veya dosyaların grubunu manuel olarak GID 1000 yapın:" >&2
-        echo "     sudo chown -R :1000 ${SECRETS_DIR} && chmod 750 ${SECRETS_DIR} && chmod 640 ${SECRETS_DIR}/*" >&2
+        echo "  2. Dosya ve dizinlere yalnızca UID 1000 için ACL ekleyin (GID 1000'i paylaşmayın):" >&2
+        echo "     sudo chmod 700 ${SECRETS_DIR} && sudo setfacl -m u:1000:rx ${SECRETS_DIR}" >&2
+        echo "     sudo chmod 600 ${ENC_KEY_FILE} ${PG_PASS_FILE} && sudo setfacl -m u:1000:r-- ${ENC_KEY_FILE} ${PG_PASS_FILE}" >&2
         echo "  3. Veya kullanıcınızı sudoers listesine ekleyin (NOPASSWD) ya da 'acl' paketini kurun (örn: apt install acl)." >&2
         return 1
       fi

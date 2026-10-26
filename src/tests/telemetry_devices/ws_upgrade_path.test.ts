@@ -12,7 +12,7 @@ describe('WebSocket HTTP upgrade endpoint allowlist', () => {
 });
 
 describe('WebSocket HTTP upgrade request target validation', () => {
-  it('accepts documented paths with query tokens', () => expect(parseWebSocketUpgradeUrl('/ws?token=abc')?.pathname).toBe('/ws'));
+  it('accepts the /ws route while leaving query credentials to the authentication policy', () => expect(parseWebSocketUpgradeUrl('/ws?token=abc')?.pathname).toBe('/ws'));
   it('accepts /api/ws', () => expect(parseWebSocketUpgradeUrl('/api/ws')?.pathname).toBe('/api/ws'));
   it('rejects absolute URLs', () => expect(parseWebSocketUpgradeUrl('http://evil.example/ws')).toBeNull());
   it('rejects protocol-relative URLs', () => expect(parseWebSocketUpgradeUrl('//evil.example/ws')).toBeNull());
@@ -23,6 +23,13 @@ describe('WebSocket HTTP upgrade request target validation', () => {
 
 // Regression guard: VPS_PRODUCTION must enforce authoritative PostgreSQL device lookup.
 describe('Production device authentication policy', () => {
+  it('does not accept device or session credentials from query parameters', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain("searchParams.get('token')");
+    expect(source).not.toContain("searchParams.get('apiKey')");
+  });
+
   it('requires PostgreSQL readiness for both production flags', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('../../server/services/websocket.ts', import.meta.url), 'utf8');

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { db } from '../../server/db.js';
+import { SchemaAuditor } from '../../server/database/schemaAuditor.js';
 import { DatabaseState } from '../../types.js';
 
 describe('SSH Tunnel & PostgreSQL Flapping Prevention Test Suite', () => {
@@ -9,6 +10,7 @@ describe('SSH Tunnel & PostgreSQL Flapping Prevention Test Suite', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete (db.postgresRepo as any).isMigrationGatePassed;
   });
 
   it('1. postgresRepo.setPool(pool) is idempotent and does not reset connection when called with the same pool instance', () => {
@@ -80,6 +82,12 @@ describe('SSH Tunnel & PostgreSQL Flapping Prevention Test Suite', () => {
 
   it('5. DatabaseAutoHealer does not drop READY state to DB_UNAVAILABLE when schema is healthy and migrations pass even with SSH latency', async () => {
     vi.spyOn(db.postgresRepo, 'isReady').mockReturnValue(true);
+    (db.postgresRepo as any).isMigrationGatePassed = vi.fn().mockReturnValue(true);
+    vi.spyOn(db.autoHealer, 'clearHungQueriesAndDeadlocks').mockResolvedValue(0);
+    vi.spyOn(SchemaAuditor, 'auditSchema').mockResolvedValue({
+      isHealthy: true,
+      humanReadableMessages: [],
+    } as any);
     db.setDatabaseState(DatabaseState.READY);
 
     const mockPool = {

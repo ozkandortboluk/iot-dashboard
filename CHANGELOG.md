@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.35] - 2026-10-26
+
+### PR 26 completion
+- Added a durable PostgreSQL notification queue with atomic multi-worker claims, expiring leases, retry handling, and crash recovery. Delivery is at-least-once across provider failures and worker restarts.
+- Added migration and PostgreSQL integration coverage for concurrent workers and expired lease recovery.
+- Completed Compose secret ACL isolation, CI harness fixes, PostgreSQL schema compatibility, WebSocket query credential rejection, and explicit VPS reboot confirmation.
+
+---
 ## 🚀 [v1.49.34] - 2026-10-25
 
 ### 🔔 Bildirim Kanalları İzolasyonu & Telegram Bot İletim Dayanıklılığı

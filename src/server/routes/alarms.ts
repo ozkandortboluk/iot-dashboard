@@ -386,7 +386,7 @@ export { notificationsRouter };
 // Notification Queue & Dispatch Router
 const notificationQueueRouter = Router();
 
-notificationQueueRouter.get('/', authenticateUser, (req, res) => {
+notificationQueueRouter.get('/', authenticateUser, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
   const currentUser = authReq.user!;
   const targetCustomerId = req.query.targetCustomerId as string | undefined;
@@ -401,16 +401,24 @@ notificationQueueRouter.get('/', authenticateUser, (req, res) => {
 
   const hasOptions = options.limit !== undefined || options.cursor !== undefined || options.status !== undefined || options.channel !== undefined || options.search !== undefined;
 
-  const queue = db.getNotificationQueue(currentUser.id, targetCustomerId, hasOptions ? options : undefined);
-  res.json(queue);
+  try {
+    const queue = await db.getNotificationQueueAsync(currentUser.id, targetCustomerId, hasOptions ? options : undefined);
+    res.json(queue);
+  } catch (err: any) {
+    console.error('[GET notification queue error]', err?.message || err);
+    res.status(503).json({ error: 'Bildirim kuyruğu şu anda kullanılamıyor.' });
+  }
 });
 
 notificationQueueRouter.post('/:id/retry', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    const updatedItem = db.retryQueueItem(req.params.id, currentUser);
-    broadcast('notification-queue:updated', db.getNotificationQueue());
+    const updatedItem = db.isPostgresProductionMode()
+      ? await db.retryNotificationQueueItem(req.params.id, currentUser)
+      : db.retryQueueItem(req.params.id, currentUser);
+    const refreshedQueue = await db.getNotificationQueueAsync(currentUser.id);
+    broadcast('notification-queue:updated', refreshedQueue);
     res.json({ item: updatedItem, message: 'Gönderim tekrar denemeye alındı.' });
   } catch (err: any) {
     const isAuthErr = err.message?.includes('Yetkisiz') || err.message?.includes('yetkiniz');
@@ -418,12 +426,14 @@ notificationQueueRouter.post('/:id/retry', authenticateUser, async (req, res) =>
   }
 });
 
-notificationQueueRouter.post('/clear', authenticateUser, (req, res) => {
+notificationQueueRouter.post('/clear', authenticateUser, async (req, res) => {
   try {
     const authReq = req as AuthenticatedRequest;
     const currentUser = authReq.user!;
-    db.clearQueue(currentUser.id);
-    broadcast('notification-queue:updated', db.getNotificationQueue());
+    if (db.isPostgresProductionMode()) await db.clearNotificationQueue(currentUser.id);
+    else db.clearQueue(currentUser.id);
+    const refreshedQueue = await db.getNotificationQueueAsync(currentUser.id);
+    broadcast('notification-queue:updated', refreshedQueue);
     res.json({ success: true, message: 'Gönderim kuyruğu temizlendi.' });
   } catch (err: any) {
     console.error('[notificationQueue clear error]', err?.message || err);

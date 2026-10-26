@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 describe('Consolidated development SSH and deferred migration safety', () => {
   const setup = readFileSync(new URL('../../server/services/setup.service.ts', import.meta.url), 'utf8');
   const runner = readFileSync(new URL('../../server/database/migrations/migrationRunner.ts', import.meta.url), 'utf8');
-  const migration = readFileSync(new URL('../../server/database/migrations/023_reconcile_timescale_hypertables.ts', import.meta.url), 'utf8');
+  const migration = readFileSync(new URL('../../server/database/migrations/staged_reconcile_timescale_hypertables.ts', import.meta.url), 'utf8');
 
   it('uses connected development SSH transport before saved direct DB config', () => {
     const method = setup.split('public getRuntimeConfig(): DatabaseConfigPayload | null {')[1]?.split('public saveRuntimeSecretConfig(')[0];
@@ -19,10 +19,10 @@ describe('Consolidated development SSH and deferred migration safety', () => {
     expect(setup.split(guarded).length - 1).toBe(2);
   });
 
-  it('keeps migration 023 dormant, preserving the 22 active migration contract', () => {
+  it('keeps the Timescale migration dormant and activates the durable queue migration', () => {
     expect(migration).toContain('STAGED MIGRATION — NOT ACTIVE');
     expect(migration).toContain("version: '023'");
-    expect(runner).not.toContain('migration023');
-    expect(runner).toContain('migration022,');
+    expect(runner).toContain("import { migration023 } from './023_persistent_notification_queue.js';");
+    expect(runner).toMatch(/migration022,[\s\S]{0,40}migration023,/);
   });
 });

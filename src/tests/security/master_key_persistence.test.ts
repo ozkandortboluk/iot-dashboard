@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { masterKeyProvider } from '../../server/services/masterKeyProvider.js';
@@ -6,6 +6,10 @@ import { masterKeyProvider } from '../../server/services/masterKeyProvider.js';
 describe('Master key / persistent key protection', () => {
   const keyPath = path.resolve(process.cwd(), 'data', '.vault_key');
   const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.ENCRYPTION_KEY;
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();

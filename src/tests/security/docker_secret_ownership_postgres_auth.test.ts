@@ -9,7 +9,7 @@ import { getVaultStatus } from '../../server/utils/crypto.js';
 
 // Isolate destructive installer/ownership tests from the checked-out repository.
 // /home/runner is not traversable by UID 1000 on GitHub-hosted runners.
-const sourceRoot = path.resolve(__dirname, '../..');
+const sourceRoot = path.resolve(__dirname, '../../..');
 const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-secret-test-'));
 // mkdtemp defaults to 0700; the UID 1000 runtime must traverse this parent.
 // Only the disposable parent is traversable: secrets remain private inside.
@@ -227,12 +227,14 @@ describe.skipIf(process.platform === 'win32')('Docker Secret Ownership, Vault Bo
 
     const stat = fs.statSync(encKeyPath);
 
-    // Verify mode is 0640 (owner rw, group r, others none)
-    expect(stat.mode & 0o040).toBe(0o040); // Group has read permission
+    // A named ACL grants UID 1000 access without granting the shared GID 1000.
+    const fileAcl = execSync(`getfacl -n -c '${encKeyPath}'`, { encoding: 'utf-8' });
+    expect(fileAcl).toMatch(/^user:1000:r--$/m);
+    expect(fileAcl).toMatch(/^group::---$/m);
     expect(stat.mode & 0o004).toBe(0);     // Others have NO read permission (NOT world-readable)
     expect(stat.mode & 0o002).toBe(0);     // Others have NO write permission
 
-    // Test MasterKeyProvider reading when file has 0640 mode
+    // Test MasterKeyProvider reading while base permissions remain owner-only.
     const provider = MasterKeyProvider.getInstance();
     provider.resetCache();
 
@@ -354,9 +356,14 @@ echo "OFFLINE_CODE=$code"
     asRoot(scriptCmd);
 
     const stat = fs.statSync(encKeyPath);
-    expect(stat.gid).toBe(1000);
-    expect(stat.mode & 0o040).toBe(0o040); // Group 1000 read
+    const fileAcl = execSync(`getfacl -n -c '${encKeyPath}'`, { encoding: 'utf-8' });
+    expect(fileAcl).toMatch(/^user:1000:r--$/m);
+    expect(fileAcl).toMatch(/^group::---$/m);
+    expect(stat.mode & 0o020).toBe(0); // No group write access
     expect(stat.mode & 0o004).toBe(0);     // Others forbidden
+
+    // A different host UID sharing GID 1000 (and not owning the file) must still be denied.
+    expect(() => execSync(`sudo -n setpriv --reuid 1002 --regid 1000 --clear-groups cat '${encKeyPath}'`, { stdio: 'pipe' })).toThrow();
 
     // Execute real read command AS unprivileged user 'node' (UID 1000, GID 1000)
     const readOutput = execSync(`sudo -n -- runuser -u "$(getent passwd 1000 | cut -d: -f1)" -- cat '${encKeyPath}'`, { encoding: 'utf-8' }).trim();

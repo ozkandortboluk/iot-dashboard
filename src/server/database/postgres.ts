@@ -20,6 +20,7 @@ import type {
   UserSession,
   ServiceToken,
   DispatchLogItem,
+  NotificationQueueItem,
   Firmware,
   OtaDeploymentJob,
   NotificationServiceConfig,
@@ -3195,6 +3196,207 @@ export class PostgresRepository {
     const cleanToken = token.trim();
     const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
     await this.query(`DELETE FROM user_sessions WHERE token_hash = $1 OR token = $2;`, [tokenHash, cleanToken]);
+  }
+
+  // ==========================================
+  // DURABLE NOTIFICATION QUEUE
+  // ==========================================
+  public async enqueueNotificationQueueItem(item: NotificationQueueItem): Promise<void> {
+    await this.query(`
+      INSERT INTO notification_queue (
+        id, notification_id, rule_id, tenant_id, user_name, channel, recipient,
+        title, message, severity, status, attempts, max_attempts, last_attempt_at,
+        next_retry_at, error_details, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17, $18
+      ) ON CONFLICT (id) DO NOTHING;
+    `, [
+      item.id, item.notificationId || null, item.ruleId || null, item.tenantId,
+      item.userName || null, item.channel, item.recipient, item.title, item.message,
+      item.severity, item.status, item.attempts, item.maxAttempts,
+      item.lastAttemptAt || null, item.nextRetryAt || null, item.errorDetails || null,
+      item.createdAt, item.updatedAt,
+    ]);
+  }
+
+  public async claimNotificationQueueItems(workerId: string, limit = 10, leaseMs = 120_000): Promise<NotificationQueueItem[]> {
+    const result = await this.query(`
+      WITH exhausted_leases AS (
+        UPDATE notification_queue
+        SET status = 'failed',
+            error_details = COALESCE(error_details, 'Worker lease expired after maximum attempts'),
+            lease_owner = NULL,
+            lease_until = NULL,
+            next_retry_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'processing'
+          AND lease_until <= CURRENT_TIMESTAMP
+          AND attempts >= max_attempts
+        RETURNING id
+      ), candidates AS (
+        SELECT id
+        FROM notification_queue
+        WHERE attempts < max_attempts
+          AND (
+            (status IN ('pending', 'retrying') AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP))
+            OR (status = 'processing' AND lease_until <= CURRENT_TIMESTAMP)
+          )
+        ORDER BY created_at, id
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+      ), claimed AS (
+        UPDATE notification_queue AS queue
+        SET status = 'processing',
+            attempts = queue.attempts + 1,
+            last_attempt_at = CURRENT_TIMESTAMP,
+            next_retry_at = NULL,
+            lease_owner = $1,
+            lease_until = CURRENT_TIMESTAMP + ($3 * INTERVAL '1 millisecond'),
+            updated_at = CURRENT_TIMESTAMP
+        FROM candidates
+        WHERE queue.id = candidates.id
+        RETURNING queue.*
+      )
+      SELECT * FROM claimed ORDER BY created_at, id;
+    `, [workerId, Math.max(1, Math.min(100, limit)), Math.max(1000, leaseMs)]);
+    return result.rows.map((row: any) => this.mapNotificationQueueRow(row));
+  }
+
+  public async extendNotificationQueueLease(itemId: string, workerId: string, leaseMs = 120_000): Promise<boolean> {
+    const result = await this.query(`
+      UPDATE notification_queue
+      SET lease_until = CURRENT_TIMESTAMP + ($3 * INTERVAL '1 millisecond'),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND status = 'processing' AND lease_owner = $2
+        AND lease_until > CURRENT_TIMESTAMP
+      RETURNING id;
+    `, [itemId, workerId, Math.max(1000, leaseMs)]);
+    return (result.rowCount || 0) > 0;
+  }
+
+  public async completeNotificationQueueItem(
+    itemId: string,
+    workerId: string,
+    outcome: { success: boolean; errorDetails?: string }
+  ): Promise<NotificationQueueItem | null> {
+    const result = await this.query(`
+      UPDATE notification_queue
+      SET status = CASE
+            WHEN $3::boolean THEN 'sent'
+            WHEN attempts < max_attempts THEN 'retrying'
+            ELSE 'failed'
+          END,
+          error_details = CASE WHEN $3::boolean THEN NULL ELSE $4 END,
+          next_retry_at = CASE
+            WHEN NOT $3::boolean AND attempts < max_attempts
+              THEN CURRENT_TIMESTAMP + (POWER(2, GREATEST(attempts - 1, 0)) * 10 * INTERVAL '1 second')
+            ELSE NULL
+          END,
+          lease_owner = NULL,
+          lease_until = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND status = 'processing' AND lease_owner = $2
+        AND lease_until > CURRENT_TIMESTAMP
+      RETURNING *;
+    `, [itemId, workerId, outcome.success, outcome.errorDetails || null]);
+    return result.rows[0] ? this.mapNotificationQueueRow(result.rows[0]) : null;
+  }
+
+  public async getNotificationQueueRows(options: {
+    tenantId?: string;
+    status?: string;
+    channel?: string;
+    search?: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ data: NotificationQueueItem[]; total: number; limit: number; nextCursor: string | null; hasMore: boolean }> {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    const add = (sql: string, value: any) => {
+      params.push(value);
+      conditions.push(sql.replace('?', `$${params.length}`));
+    };
+    if (options.tenantId) add('tenant_id = ?', options.tenantId);
+    if (options.status && options.status !== 'all') add('status = ?', options.status);
+    if (options.channel && options.channel !== 'all') add('channel = ?', options.channel);
+    if (options.search?.trim()) {
+      params.push(`%${options.search.trim()}%`);
+      const p = `$${params.length}`;
+      conditions.push(`(title ILIKE ${p} OR message ILIKE ${p} OR recipient ILIKE ${p})`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const count = await this.query(`SELECT COUNT(*)::int AS total FROM notification_queue ${where};`, params);
+    const total = Number(count.rows[0]?.total || 0);
+    const limit = Math.max(1, Math.min(200, Number(options.limit) || 50));
+    const cursorParams = [...params];
+    let cursorWhere = '';
+    if (options.cursor) {
+      cursorParams.push(options.cursor);
+      cursorWhere = `${where ? ' AND' : ' WHERE'} (created_at, id) < (
+        SELECT created_at, id FROM notification_queue WHERE id = $${cursorParams.length}
+      )`;
+    }
+    cursorParams.push(limit + 1);
+    const rows = await this.query(`
+      SELECT * FROM notification_queue ${where}${cursorWhere}
+      ORDER BY created_at DESC, id DESC LIMIT $${cursorParams.length};
+    `, cursorParams);
+    const hasMore = rows.rows.length > limit;
+    const page = rows.rows.slice(0, limit).map((row: any) => this.mapNotificationQueueRow(row));
+    return {
+      data: page,
+      total,
+      limit,
+      nextCursor: hasMore ? page[page.length - 1]?.id || null : null,
+      hasMore,
+    };
+  }
+
+  public async retryNotificationQueueItem(itemId: string, tenantId: string, isAdmin: boolean): Promise<NotificationQueueItem> {
+    const result = await this.query(`
+      UPDATE notification_queue
+      SET status = 'retrying', attempts = 0, next_retry_at = CURRENT_TIMESTAMP,
+          last_attempt_at = NULL, error_details = NULL, lease_owner = NULL,
+          lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND ($2::boolean OR tenant_id = $3)
+        AND status IN ('failed', 'retrying', 'pending')
+      RETURNING *;
+    `, [itemId, isAdmin, tenantId]);
+    if (!result.rows[0]) throw new Error('Bu bildirime erişim yetkiniz yok veya tekrar denenemez.');
+    return this.mapNotificationQueueRow(result.rows[0]);
+  }
+
+  public async clearNotificationQueue(tenantId: string, isAdmin: boolean): Promise<number> {
+    const result = await this.query(`
+      DELETE FROM notification_queue
+      WHERE status <> 'processing' AND ($1::boolean OR tenant_id = $2)
+      RETURNING id;
+    `, [isAdmin, tenantId]);
+    return result.rowCount || 0;
+  }
+
+  private mapNotificationQueueRow(row: any): NotificationQueueItem {
+    return {
+      id: row.id,
+      notificationId: row.notification_id || undefined,
+      ruleId: row.rule_id || undefined,
+      tenantId: row.tenant_id,
+      userName: row.user_name || undefined,
+      channel: row.channel,
+      recipient: row.recipient,
+      title: row.title,
+      message: row.message,
+      severity: row.severity,
+      status: row.status,
+      attempts: Number(row.attempts),
+      maxAttempts: Number(row.max_attempts),
+      lastAttemptAt: row.last_attempt_at ? new Date(row.last_attempt_at).toISOString() : undefined,
+      nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at).toISOString() : undefined,
+      errorDetails: row.error_details || undefined,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
   }
 
   // ==========================================
