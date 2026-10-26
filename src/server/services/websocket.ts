@@ -179,8 +179,9 @@ async function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
       safeSend(ws, JSON.stringify({ event: 'dashboard:layout', payload: userDashboard }));
     }
 
-    // Send persistent system settings to client
-    const allSettings = db.getAllSystemSettings();
+    // Keep sensitive server-only configuration out of the generic WebSocket bootstrap.
+    const allSettings = { ...db.getAllSystemSettings() };
+    delete allSettings.service_config;
     safeSend(ws, JSON.stringify({ event: 'system:settings:bootstrap', payload: allSettings }));
 
     if (user.role === 'admin') {
@@ -592,9 +593,19 @@ export function broadcast(event: string, payload: unknown) {
       return;
     }
 
+    // Sensitive server configuration is available only through dedicated admin APIs.
+    // Never send it through the generic real-time settings stream.
+    if (event === 'system:settings:updated') {
+      const settingUpdate = payload as { key?: unknown } | null;
+      if (settingUpdate && typeof settingUpdate === 'object' && settingUpdate.key === 'service_config') {
+        return;
+      }
+      safeSend(client, JSON.stringify({ event, payload, timestamp: new Date().toISOString() }));
+      return;
+    }
+
     // Explicitly whitelisted general events
     if (
-      event === 'system:settings:updated' ||
       event === 'simulator:updated' ||
       event === 'simulator:status' ||
       event === 'system:health'
