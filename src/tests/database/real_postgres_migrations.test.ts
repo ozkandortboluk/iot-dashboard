@@ -78,8 +78,8 @@ describe('Real PostgreSQL Migration & Upgrade Integration Matrix', () => {
         const queueTable = await client2.query(`SELECT to_regclass('notification_queue') AS relation;`);
         expect(queueTable.rows[0].relation).toBe('notification_queue');
 
-        const workerA = new PostgresRepository(pool);
-        const workerB = new PostgresRepository(pool);
+        const workerA = new PostgresRepository(migrationPool);
+        const workerB = new PostgresRepository(migrationPool);
         (workerA as any).isConnected = true;
         (workerB as any).isConnected = true;
         const queuePrefix = `q_pg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
