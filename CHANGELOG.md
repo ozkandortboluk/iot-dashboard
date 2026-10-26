@@ -3,6 +3,12 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.37] - 2026-10-26
+
+### ACL entegrasyon testi depo kökü düzeltmesi
+- Secret ownership test fixture’ı artık `src/` yerine depo kökünü kopyalar; Linux CI’da `install.sh` ve secret helper dosyaları fixture içinde bulunur.
+
+---
 ## 🚀 [v1.49.36] - 2026-10-26
 
 ### CI secret-ownership entegrasyon test yolu
