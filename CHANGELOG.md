@@ -3,6 +3,14 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.35] - 2026-10-26
+
+### Güvenli secret erişimi ve kurulum doğrulaması
+- Docker Compose file-backed secret tanımından Swarm dışı ortamda etkisiz `uid/gid/mode` seçenekleri kaldırıldı; CI entegrasyon container’ına test için gereken `sudo` ve izolasyon değişkeni eklendi.
+- VPS güncelleyicide reboot onayı `--yes` seçeneğinden ayrıldı; yeniden başlatma yalnızca etkileşimli açık onayla yapılır.
+- Secret erişimi paylaşılan GID 1000 yerine UID 1000’e özel POSIX ACL ile verilir; temel dosya/dizin izinleri `0600`/`0700` kalır.
+
+---
 ## 🚀 [v1.49.34] - 2026-10-25
 
 ### 🔔 Bildirim Kanalları İzolasyonu & Telegram Bot İletim Dayanıklılığı

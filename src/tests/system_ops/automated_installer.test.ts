@@ -191,7 +191,7 @@ exit 1
     expect(composeContent).toMatch(/\/api\/health\/live/);
 
     // File-backed Compose secrets are bind mounts; uid/gid/mode options are ignored outside Swarm.
-    // The installer must grant the non-root runtime user read access without making secrets world-readable.
+    // The installer grants only UID 1000 a named ACL; a shared host group must not gain access.
     expect(composeContent).toMatch(/source:\s*encryption_key/);
     expect(composeContent).toMatch(/target:\s*encryption_key/);
     expect(composeContent).not.toContain('uid: "1000"');
@@ -200,8 +200,9 @@ exit 1
 
     const secretsLibContent = fs.readFileSync(path.join(rootDir, 'scripts/setup/lib/secrets.sh'), 'utf-8');
     expect(secretsLibContent).toContain('align_secrets_ownership_and_permissions()');
-    expect(secretsLibContent).toContain('chown 1000:1000');
-    expect(secretsLibContent).toContain('chmod 640');
+    expect(secretsLibContent).toContain('setfacl -m u:1000:r--');
+    expect(secretsLibContent).toContain('chmod 600');
+    expect(secretsLibContent).not.toContain('chgrp 1000');
 
     // Dockerfile must maintain non-root USER node and initialize /run/secrets ownership
     const dockerfilePath = path.join(rootDir, 'Dockerfile');
