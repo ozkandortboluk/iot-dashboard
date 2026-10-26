@@ -7,7 +7,7 @@
 - Geliştirme Windows üzerindeki `C:\\iot-dashboard` çalışma alanında, Antigravity içindeki Codex ile yapılır. Üretim VPS'sinde doğrudan geliştirme yapma.
 - **İlk adım yalnızca salt okunur keşiftir.** Keşif raporu ve uygulama planı hazırlanmadan kod veya yapılandırma değiştirme.
 - Kullanıcının ayrıca açık onayı olmadan VPS'ye bağlanma, VPS üzerinde dosya oluşturma, paket kurma, servis etkinleştirme/yeniden başlatma, veritabanına yazma veya canlıya dağıtım yapma.
-- `main` dalına merge, herhangi bir dala push, PR merge ve deployment yapma. Bu görevde yalnızca özellik dalında çalış ve PR hazırla.
+- `main` dalına push/merge, PR merge ve deployment yapma. Bu görev PR #27'nin kendi dalında yürütülür; kullanıcı bu PR için uygulamayı açıkça istediği için, yalnızca mevcut PR dalına değişiklikleri göndermek gerekiyorsa ve diff/test özeti kullanıcıya gösterildikten sonra branch push yapılabilir. Başka dallara push yapma. Kullanıcı değişiklikleri veya güvenlik belirsizliği varsa dur.
 - GitHub Actions ya da GitHub üzerinde test çalıştırma; test workflow'u ekleme. Testler yerel/Antigravity ortamında, kullanıcı daha sonraki aşamaya açıkça izin verirse VPS üzerinde çalıştırılır.
 - Kullanıcının mevcut değişikliklerini koru. Başlangıçta `git status --short --branch`, aktif dal ve son commit'i incele. Kirli çalışma ağacını temizleme, resetleme, stash etme, mevcut dalı değiştirme/silme veya kullanıcı değişikliklerini üzerine yazma.
 - Secret, token, parola, özel anahtar, vault içeriği veya üretim verisini prompt, log, rapor, test fixture'ı ya da Git dosyasına koyma.
@@ -34,7 +34,7 @@ Varsayılan mod `observe_only` olmalı. İlk PR üretim VPS'sinde hiçbir şeyi 
 4. İlgili dosyalar yoksa yokluğunu açıkça raporla; varsayımsal dosya veya komut uydurma.
 5. Üretim VPS'sinin mevcut durumunu görmüş gibi davranma. Canlı durum doğrulaması sonraki, ayrı ve açıkça onaylanmış salt okunur aşamadır.
 6. Kısa keşif raporu ve uygulanabilir faz planı oluştur; `src/codex/WORK_PROGRESS.md` içine checkpoint yaz.
-7. Ardından, güvenlik sınırları içinde ve yalnızca özellik dalında uygulamaya devam et. Çalışma ağacı kirliyse veya güvenli ayrım yapılamıyorsa dosya değiştirmeyi durdur ve kullanıcıya bildir.
+7. Ardından, güvenlik sınırları içinde PR #27'nin mevcut dalında uygulamaya devam et; bu PR dalı dışında yeni dal açma, PR #27'nin kapsamını güncel tut. Çalışma ağacı kirliyse veya güvenli ayrım yapılamıyorsa dosya değiştirmeyi durdur ve kullanıcıya bildir.
 
 ## 3. Dosya düzeni
 
