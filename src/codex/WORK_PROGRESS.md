@@ -9,7 +9,7 @@
 - **Durum:** NOT_STARTED
 - **Aktif faz:** Faz 0 — Keşif
 - **Branch:** docs/codex-vps-implementation-prompt (başlangıç talimatı PR dalı; uygulama aynı PR üzerinde devam eder)
-- **Son bilinen commit:** e6a269307eec37757b017c722e917903649d2dd5
+- **Son bilinen commit:** fef936c3899db8787b8ae4b72be2a39dac05370e
 - **Son güncelleme:** 2026-10-26; uygulama Codex'i her checkpoint'te gerçek zamanı güncellemeli.
 
 ## Keşif özeti
@@ -20,6 +20,7 @@
 ## Tamamlanan adımlar
 
 - [x] Uygulama talimatı ve kesinti sonrası devam sözleşmesi eklendi.
+- [x] İhlal edilemez güvenlik sözleşmesi ve ayrı SECURITY.md eklendi.
 - [ ] Git çalışma ağacı ve branch durumu doğrulandı.
 - [ ] Repository mimarisi ve mevcut test komutları keşfedildi.
 - [ ] Mevcut secrets, backup, rollback, update ve security-audit düzeni kaynak koddan incelendi.
@@ -34,6 +35,12 @@ Antigravity içindeki Codex, bu dosya ve `IMPLEMENTATION_PROMPT.md` dosyasını 
 
 - `src/codex/IMPLEMENTATION_PROMPT.md` — ana uygulama talimatı, güvenlik sınırları ve resume workflow.
 - `src/codex/WORK_PROGRESS.md` — bu ilerleme kaydı.
+- `src/codex/SECURITY.md` — zorunlu güvenlik sınırları, onay kapıları ve olay durdurma kuralları.
+
+## Güvenlik güncellemesi
+
+- Varsayılan fail-closed, en az ayrıcalık, dış hedeflere zarar verebilecek işlemlerin yasaklanması, prompt injection savunması, açık onay kapıları, gizlilik/veri minimizasyonu, kaynak/maliyet sınırları ve acil durdurma kuralları eklendi.
+- Bu kurallar prompt tek başına mutlak güvenlik garantisi vermez; teknik izin ve ağ izolasyonu da gerektirir.
 
 ## Test kanıtları
 
