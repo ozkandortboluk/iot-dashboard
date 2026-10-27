@@ -1595,6 +1595,9 @@ export const DatabaseDataView: React.FC = () => {
             </div>
 
             <div className="space-y-3">
+              <div className="rounded-lg border border-amber-300/60 bg-amber-50/70 dark:border-amber-800/50 dark:bg-amber-950/20 p-3 text-[11px] text-amber-900 dark:text-amber-200">
+                Bu alan yalnızca mevcut veritabanı hedefine bağlantıyı test eder/kaydeder; başarısız test aktif ayarları değiştirmez. Host, port veya veritabanı adı değişikliği bu ekrandan engellenir. Kullanıcı adı/parola döndürmek için Sistem Secret Kasası bölümünü kullanın; parola URL içine yazılmamalıdır.
+              </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   PostgreSQL Bağlantı Adresi (DATABASE_URL)
