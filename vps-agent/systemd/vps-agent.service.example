@@ -9,7 +9,7 @@ User=vps-agent
 Group=vps-agent
 UMask=0077
 # Packaging must provide this executable before this example can be installed.
-ExecStart=/opt/vps-agent/current/bin/vps-agent --config /etc/vps-agent/monitor.json
+ExecStart=/usr/bin/node /opt/vps-agent/current/dist/cli.js --config /etc/vps-agent/monitor.json
 TimeoutStartSec=2min
 RuntimeDirectory=vps-agent
 RuntimeDirectoryMode=0700

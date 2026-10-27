@@ -11,14 +11,14 @@ Bu belge VPS Agent'ın ne yapabildiğini, ne yapamadığını ve hangi koşullar
 | Docker durumu | Sınırlı reader arayüzüyle beklenen container durumlarını değerlendirme | Docker socket/daemon erişimi varsayılan değildir; root-eşdeğer erişim verilmez |
 | Yedek metadata'sı | Desteklenen tekil artifact ve checksum sidecar'ını kontrol etme | Secret dosyaları içeren genel manifest desteklenmeyebilir; restore başarısını kanıtlamaz |
 | İzinli log özeti | Allowlist dosyalarında sınırlı boyut ve hata sayımı | Ham loglar rapora aktarılmaz; secret/kişisel veri dışarı gönderilmez |
-| Raporlama | Yapılandırılmış, redakte kontrol sonuçları ve günlük özet biçimlendirmesi | Kaydetmek için ayrıca tanımlı çalıştırıcı/runtime gerekir |
+| Raporlama | Yerel CLI etkin kontrolleri sırayla çalıştırır, JSON raporu stdout'a verir ve durumuna göre çıkış kodu döndürür | Rapor dosyası yazmaz; servis olarak kurulu değildir |
 | Telegram bildirimi | Yalnız giden HTTPS sender, fake sender ve tekrarları sınırlayan dedup modülleri | Token environment secret kaynağından okunmalı; gerçek mesaj varsayılan olarak kapalı ve ayrı onay gerektirir |
 | Runtime checkpoint | İzinli alanları doğrulayan, atomik ve kısıtlı dosya yazımı | Kaynak deposu içine yazamaz; özel runtime dizini gerekir |
 | Çalıştırma politikası | observe_only, timeout, sınırlı retry ve checker sonuçları | Sağlık sorunu otomatik düzeltme veya restart başlatmaz |
 
 ## 2. Bu sürümde bulunmayan özellikler
 
-- VPS üzerinde kurulmuş/etkinleştirilmiş servis veya zamanlayıcı. CLI yalnızca kaynak koddan yerel olarak çalıştırılır; paketleme/kurulum ayrı aşamadır.
+- VPS üzerinde kurulmuş/etkinleştirilmiş servis veya zamanlayıcı. CLI yalnızca operatör tarafından ayrı bir komutla çalıştırılır; paketleme/kurulum ayrı aşamadır.
 - Çalışan Codex CLI adapter'ı veya kendi kendine kod yazıp çalıştıran ajan döngüsü.
 - Web yönetim paneli, ana uygulamaya gömülü UI veya NexusNode ana API'siyle bağlantı.
 - Otomatik düzeltme, shell komutu çalıştırma, sudo/root, Docker socket erişimi.

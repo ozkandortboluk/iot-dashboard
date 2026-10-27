@@ -33,6 +33,7 @@ export async function runAgent(options: CliOptions): Promise<number> {
   const raw = await readFile(options.configPath, { encoding: 'utf8' });
   const config = parseMonitorConfig(JSON.parse(raw) as unknown);
   const checkers = createReadOnlyCheckers(config);
+  if (checkers.length === 0) throw new Error('no_checks_enabled');
   const results = await runCheckers(checkers, {
     timeoutMs: config.health.timeoutMs,
     retries: config.health.retries,
@@ -56,7 +57,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       : error instanceof Error && ['missing_config_path', 'config_path_must_be_absolute', 'unsupported_argument'].includes(error.message)
         ? error.message
         : 'vps_agent_startup_failed';
-    process.stderr.write(`${code}\n`);
-    process.exitCode = 64;
+    if (code.startsWith('usage:')) {
+      process.stdout.write(`${code}\n`);
+      process.exitCode = 0;
+    } else {
+      process.stderr.write(`${code}\n`);
+      process.exitCode = 64;
+    }
   }
 }

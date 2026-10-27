@@ -4,7 +4,7 @@ import { authorizeAction } from '../../core/policy.js';
 import { canStartApprovedRelease } from '../../approvals/policy.js';
 import { redactText } from '../../core/redaction.js';
 
-describe('Codex monitor configuration and policy', () => {
+describe('VPS Agent configuration and policy', () => {
   it('defaults to observe_only and disables privileged integrations', () => {
     const config = parseMonitorConfig({});
     expect(config.mode).toBe('observe_only');
