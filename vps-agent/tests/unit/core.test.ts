@@ -19,7 +19,8 @@ describe('VPS Agent configuration and policy', () => {
   });
 
   it('rejects non-loopback Docker proxies and invalid resource thresholds', () => {
-    expect(() => parseMonitorConfig({ docker: { enabled: true, readOnlyProxyUrl: 'http://example.com:2375/' } })).toThrow();
+    expect(() => parseMonitorConfig({ docker: { enabled: true, readOnlyProxyUrl: 'http://example.com:2375/', expectedContainers: ['nexus_app'] } })).toThrow();
+    expect(() => parseMonitorConfig({ docker: { enabled: true, expectedContainers: ['nexus_app'] } })).toThrow();
     expect(() => parseMonitorConfig({ system: { loadWarningPerCpu: 2, loadCriticalPerCpu: 1 } })).toThrow();
     expect(() => parseMonitorConfig({ system: { inodeWarningPercent: 90, inodeCriticalPercent: 80 } })).toThrow();
     expect(() => parseMonitorConfig({ telegram: { enabled: true } })).toThrow();
