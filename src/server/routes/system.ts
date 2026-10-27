@@ -18,16 +18,20 @@ import {
 import { simulationTelemetryController } from '../controllers/simulationTelemetry.controller.js';
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
 import { DataMaintenanceService } from '../database/dataMaintenance.js';
 import { emailService } from '../services/email.service.js';
+import pg from 'pg';
+const { Pool } = pg;
 import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
-import { isSshTunnelAllowed } from '../database/connection.js';
+import { isSshTunnelAllowed, isDefaultPassword, getPostgresSslOption } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
 import { verifyMasterEncryptionKey, verifyPassword, sanitizeLogString } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
+import { scheduleSystemReboot } from '../services/systemLifecycle.service.js';
 import {
   readBackupDestinationStatus,
   selectBackupDestination,
@@ -986,6 +990,457 @@ databaseRouter.post('/postgres/sync-all', authenticateUser, requireAdmin, async 
 
 databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresSetupGuide());
+});
+
+databaseRouter.post('/test-target', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const { host, port, database, user, password, sslMode, rejectUnauthorized } = req.body || {};
+
+  if (!host || !database || !user) {
+    return res.status(400).json({
+      success: false,
+      error: 'Host, veritabanı adı ve kullanıcı adı alanları zorunludur.',
+    });
+  }
+
+  const numPort = Number(port || 5432);
+  if (isNaN(numPort) || numPort < 1 || numPort > 65535) {
+    return res.status(400).json({
+      success: false,
+      error: 'Geçersiz port numarası (1 ile 65535 arasında olmalıdır).',
+    });
+  }
+
+  try {
+    setupService.validateDatabaseHost(host, numPort);
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: `Geçersiz veritabanı sunucu adresi: ${err?.message || err}`,
+    });
+  }
+
+  let effectivePassword = typeof password === 'string' ? password.trim() : '';
+  if (!effectivePassword || effectivePassword.includes('••••')) {
+    const activeDb = systemSecretsService.getDatabaseConfig();
+    if (activeDb.host === host && activeDb.database === database && activeDb.user === user) {
+      effectivePassword = systemSecretsService.getDatabasePassword();
+    }
+  }
+
+  const candidatePayload: any = {
+    host: String(host).trim(),
+    port: numPort,
+    database: String(database).trim(),
+    user: String(user).trim(),
+    password: effectivePassword,
+    sslMode: String(sslMode || 'disable'),
+    rejectUnauthorized: rejectUnauthorized !== false,
+  };
+
+  try {
+    const probe = await setupService.testConnection(candidatePayload, { allowCompletedSetup: true });
+    return res.json(probe);
+  } catch (err: any) {
+    return res.status(422).json({
+      success: false,
+      message: sanitizeLogString(err?.message || 'Bağlantı testi başarısız.'),
+      errorCode: err?.code || 'TEST_FAILED',
+    });
+  }
+});
+
+databaseRouter.post('/switch-target', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const operatorName = req.user ? `${req.user.name || req.user.email} (${req.user.id})` : 'admin';
+  const { host, port, database, user, password, sslMode, confirmDatabaseSwitch } = req.body || {};
+
+  if (!confirmDatabaseSwitch) {
+    return res.status(400).json({
+      success: false,
+      error: 'Veritabanı geçişini onaylamak için confirmDatabaseSwitch onay kutusu işaretlenmelidir.',
+    });
+  }
+
+  if (!host || !database || !user || !password) {
+    return res.status(400).json({
+      success: false,
+      error: 'Veritabanı geçişi için host, veritabanı adı, kullanıcı adı ve parola zorunludur.',
+    });
+  }
+
+  const numPort = Number(port || 5432);
+  if (isNaN(numPort) || numPort < 1 || numPort > 65535) {
+    return res.status(400).json({
+      success: false,
+      error: 'Geçersiz port numarası (1 ile 65535 arasında olmalıdır).',
+    });
+  }
+
+  try {
+    setupService.validateDatabaseHost(host, numPort);
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: `Geçersiz veritabanı adresi: ${err?.message || err}`,
+    });
+  }
+
+  const resolvedSslMode = (['disable', 'require', 'prefer', 'verify-full'].includes(String(sslMode))
+    ? String(sslMode)
+    : 'disable') as 'disable' | 'require' | 'prefer' | 'verify-full';
+
+  const candidateDb = {
+    host: String(host).trim(),
+    port: numPort,
+    database: String(database).trim(),
+    user: String(user).trim(),
+    password: String(password).trim(),
+    sslMode: resolvedSslMode,
+  };
+
+  // 1. ISOLATED PRE-FLIGHT PROBE: Test candidate connection without altering active pool
+  const probe = await setupService.testConnection(candidateDb, { allowCompletedSetup: true });
+  if (!probe.success) {
+    return res.status(422).json({
+      success: false,
+      error: 'Yeni veritabanı bağlantısı doğrulanamadı; mevcut veritabanı bağlantısı korunmuştur.',
+      details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+      errorCode: probe.errorCode,
+    });
+  }
+
+  // 2. WRONG DATABASE PREVENTION (SCHEMA & TABLE GATE):
+  // Target database MUST contain genuine NexusNode IoT Cloud tables.
+  const requiredTables = ['users', 'devices', 'telemetry_readings'];
+  const missingTables = requiredTables.filter((table) => !probe.tablesStatus?.[table]);
+  if (missingTables.length > 0) {
+    return res.status(422).json({
+      success: false,
+      error: 'Hedef veritabanında zorunlu NexusNode tabloları bulunamadı; yanlış veritabanına geçiş engellendi.',
+      details: `Eksik tablolar: ${missingTables.join(', ')}. Mevcut veritabanı bağlantısı korunmuştur. Yeni veritabanına geçmeden önce şemayı kurun veya verileri taşıyın.`,
+      tablesStatus: probe.tablesStatus,
+    });
+  }
+
+  // 3. ROLE PRIVILEGE GATE:
+  // Role must have required permissions on tables, schema, and sequences
+  const requiredPrivileges = [
+    'schema_usage',
+    'users_select', 'users_insert', 'users_update',
+    'devices_select', 'devices_insert', 'devices_update',
+    'telemetry_select', 'telemetry_insert', 'sequences_usage',
+  ];
+  const missingPrivileges = requiredPrivileges.filter((key) => probe.permissionsStatus?.[key] !== true);
+  if (missingPrivileges.length > 0) {
+    return res.status(422).json({
+      success: false,
+      error: 'Yeni kullanıcının/rolün NexusNode için gerekli veritabanı yetkileri doğrulanamadı; mevcut bağlantı korunmuştur.',
+      details: `Eksik veya doğrulanamayan yetkiler: ${missingPrivileges.join(', ')}. PostgreSQL tarafında kullanıcıya gerekli izinleri tanımlayıp tekrar deneyin.`,
+      permissionsStatus: probe.permissionsStatus,
+    });
+  }
+
+  // 4. ATOMIC SWITCH WITH IN-MEMORY SNAPSHOT & AUTOMATIC ROLLBACK:
+  const previousVaultDb = systemSecretsService.getDatabaseConfig();
+  const previousRuntimeConfig = setupService.getRuntimeConfig();
+  const previousStoredUrl = db.getPostgresUrl();
+
+  try {
+    // A) Persist to encrypted Central Vault
+    await systemSecretsService.updateDatabaseSecrets(candidateDb, operatorName);
+
+    // B) Persist to runtime secret store
+    setupService.saveRuntimeSecretConfig(candidateDb, setupService.isSetupCompleted());
+
+    // C) Save sanitized connection URL (passwords omitted from plaintext URL)
+    db.savePostgresUrl(setupService.buildConnectionString({ ...candidateDb, password: '' }));
+
+    // D) Recycle connection pool
+    db.recyclePgPool();
+
+    // E) Verify application repository is ready
+    const connected = await db.initPostgresRepository(true);
+    if (!connected) {
+      throw new Error('Yeni bağlantı kaydedildi ancak uygulama bağlantı havuzu hazır duruma gelemedi.');
+    }
+
+    systemLogger.info(
+      'database',
+      `Admin (${operatorName}) tarafından veritabanı ve rol geçişi başarıyla tamamlandı: ${candidateDb.user}@${candidateDb.host}:${candidateDb.port}/${candidateDb.database}`
+    );
+
+    return res.json({
+      success: true,
+      message: `Veritabanı ve rol geçişi başarıyla tamamlandı (${candidateDb.user}@${candidateDb.database}).`,
+      config: db.getPostgresConfig(),
+      databaseHealth: db.getDatabaseHealth(),
+    });
+  } catch (switchError: any) {
+    // ATOMIC ROLLBACK: Revert to previous configuration
+    systemLogger.warn(
+      'database',
+      `Yeni veritabanı havuzu başlatılamadı, otomatik geri alma (rollback) yürütülüyor: ${sanitizeLogString(switchError?.message || switchError)}`
+    );
+
+    try {
+      if (previousVaultDb.host && previousVaultDb.database) {
+        await systemSecretsService.updateDatabaseSecrets({
+          host: previousVaultDb.host,
+          port: previousVaultDb.port,
+          database: previousVaultDb.database,
+          user: previousVaultDb.user,
+          password: previousVaultDb.password,
+          sslMode: previousVaultDb.sslMode,
+        }, operatorName);
+      }
+      if (previousRuntimeConfig) {
+        setupService.saveRuntimeSecretConfig(previousRuntimeConfig, setupService.isSetupCompleted());
+      }
+      if (previousStoredUrl) {
+        db.savePostgresUrl(previousStoredUrl);
+      }
+      db.recyclePgPool();
+      await db.initPostgresRepository(true);
+    } catch (rollbackErr: any) {
+      systemLogger.critical(
+        'database',
+        `Rollback esnasında kritik hata: ${sanitizeLogString(rollbackErr?.message || rollbackErr)}`
+      );
+      return res.status(503).json({
+        success: false,
+        error: 'Yeni bağlantı etkinleştirilemedi ve otomatik geri alma sırasında sorun oluştu. Lütfen sunucu bağlantı loglarını inceleyin.',
+      });
+    }
+
+    return res.status(503).json({
+      success: false,
+      error: 'Yeni veritabanı bağlantısı etkinleştirilemedi. Önceki veritabanı ve bağlantı ayarları güvenle geri yüklendi.',
+      details: sanitizeLogString(switchError?.message || 'Uygulama havuzu başlatılamadı.'),
+    });
+  }
+});
+
+databaseRouter.post('/rotate-password', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const operatorName = req.user ? `${req.user.name || req.user.email} (${req.user.id})` : 'admin';
+  const { currentPassword, newPassword, confirmPassword } = req.body || {};
+
+  if (!currentPassword || typeof currentPassword !== 'string' || !currentPassword.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Mevcut veritabanı parolası zorunludur.',
+    });
+  }
+
+  if (!newPassword || typeof newPassword !== 'string' || !newPassword.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Yeni veritabanı parolası zorunludur.',
+    });
+  }
+
+  const trimmedNewPassword = newPassword.trim();
+  const trimmedCurrentPassword = currentPassword.trim();
+
+  if (trimmedNewPassword.length < 8) {
+    return res.status(400).json({
+      success: false,
+      error: 'Yeni parola en az 8 karakter uzunluğunda olmalıdır.',
+    });
+  }
+
+  if (confirmPassword !== undefined && trimmedNewPassword !== String(confirmPassword).trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Yeni parola ile parola tekrarı eşleşmiyor.',
+    });
+  }
+
+  if (trimmedCurrentPassword === trimmedNewPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Yeni parola mevcut parola ile aynı olamaz.',
+    });
+  }
+
+  if (isDefaultPassword(trimmedNewPassword)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Güvensiz veya varsayılan parola tespit edildi. Lütfen güçlü ve tahmin edilemez bir parola belirleyin.',
+    });
+  }
+
+  const currentDbConfig = systemSecretsService.getDatabaseConfig();
+  const runtimeDbConfig = setupService.getRuntimeConfig();
+  const host = currentDbConfig.host || runtimeDbConfig?.host;
+  const port = currentDbConfig.port || runtimeDbConfig?.port || 5432;
+  const database = currentDbConfig.database || runtimeDbConfig?.database;
+  const username = currentDbConfig.user || runtimeDbConfig?.user;
+  const rawSslMode = currentDbConfig.sslMode || runtimeDbConfig?.sslMode || 'disable';
+
+  if (!host || !database || !username) {
+    return res.status(400).json({
+      success: false,
+      error: 'Aktif veritabanı yapılandırması (host, veritabanı veya kullanıcı adı) bulunamadı.',
+    });
+  }
+
+  const sslMode = (['disable', 'require', 'prefer', 'verify-full'].includes(rawSslMode)
+    ? rawSslMode
+    : 'disable') as 'disable' | 'require' | 'prefer' | 'verify-full';
+
+  // Validate username format (safety check against SQL injection in identifier)
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Geçersiz veritabanı kullanıcı adı biçimi.',
+    });
+  }
+
+  // 1. PRE-VALIDATION: Test connection with currentPassword
+  const currentCandidatePayload: any = {
+    host,
+    port,
+    database,
+    user: username,
+    password: trimmedCurrentPassword,
+    sslMode,
+    rejectUnauthorized: sslMode !== 'disable',
+  };
+
+  const preflight = await setupService.testConnection(currentCandidatePayload, { allowCompletedSetup: true });
+  if (!preflight.success) {
+    return res.status(422).json({
+      success: false,
+      error: 'Mevcut veritabanı parolası doğrulanamadı. Girilen mevcut parola hatalı olabilir.',
+      details: sanitizeLogString(preflight.message || 'Kimlik doğrulama başarısız.'),
+    });
+  }
+
+  // 2. EXECUTE ALTER ROLE ON POSTGRESQL USING VERIFIED CURRENT CONNECTION
+  const connStr = setupService.buildConnectionString(currentCandidatePayload);
+  const sslOption = sslMode === 'disable' ? undefined : (getPostgresSslOption(connStr) || { rejectUnauthorized: true });
+  const alterPool = new Pool({
+    connectionString: connStr,
+    max: 1,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 2000,
+    ssl: sslOption,
+  });
+
+  let alterClient: any = null;
+  try {
+    alterClient = await alterPool.connect();
+    // Safe escaping: replace single quotes with two single quotes
+    const escapedNewPassword = trimmedNewPassword.replace(/'/g, "''");
+    // Run ALTER ROLE
+    await alterClient.query(`ALTER ROLE "${username}" WITH PASSWORD '${escapedNewPassword}';`);
+  } catch (alterErr: any) {
+    systemLogger.error('database', `ALTER ROLE başarısız oldu: ${sanitizeLogString(alterErr?.message || alterErr)}`);
+    return res.status(500).json({
+      success: false,
+      error: 'PostgreSQL sunucusunda parola değiştirme komutu (ALTER ROLE) çalıştırılamadı.',
+      details: sanitizeLogString(alterErr?.message || 'Yetki veya veritabanı hatası.'),
+    });
+  } finally {
+    if (alterClient) {
+      try { alterClient.release(); } catch {}
+    }
+    try { await alterPool.end(); } catch {}
+  }
+
+  // 3. POST-VALIDATION: Verify that new password connects successfully
+  const newCandidatePayload: any = {
+    host,
+    port,
+    database,
+    user: username,
+    password: trimmedNewPassword,
+    sslMode,
+    rejectUnauthorized: sslMode !== 'disable',
+  };
+
+  const postCheck = await setupService.testConnection(newCandidatePayload, { allowCompletedSetup: true });
+  if (!postCheck.success) {
+    // Attempt emergency rollback on PostgreSQL with old password
+    try {
+      const rescuePool = new Pool({
+        connectionString: setupService.buildConnectionString(currentCandidatePayload),
+        max: 1,
+        connectionTimeoutMillis: 5000,
+        ssl: sslOption,
+      });
+      const rClient = await rescuePool.connect();
+      const escapedOldPassword = trimmedCurrentPassword.replace(/'/g, "''");
+      await rClient.query(`ALTER ROLE "${username}" WITH PASSWORD '${escapedOldPassword}';`);
+      rClient.release();
+      await rescuePool.end();
+    } catch {}
+
+    return res.status(500).json({
+      success: false,
+      error: 'Yeni parola PostgreSQL üzerinde tanımlandı ancak yeni parola ile bağlantı doğrulanamadı. Parola eski haline geri döndürülmeye çalışıldı.',
+    });
+  }
+
+  // 4. COMMIT TO ENCRYPTED VAULT, RUNTIME SECRETS & RECYCLE APPLICATION POOL
+  try {
+    await systemSecretsService.updateDatabaseSecrets({
+      host,
+      port,
+      database,
+      user: username,
+      password: trimmedNewPassword,
+      sslMode,
+    }, operatorName);
+
+    setupService.saveRuntimeSecretConfig(newCandidatePayload, setupService.isSetupCompleted());
+
+    // Update secret file on host if present so Docker secrets remain synchronized
+    const secretPaths = [
+      '/opt/nexusnode-iot/secrets/postgres_password',
+      path.resolve(process.cwd(), 'secrets', 'postgres_password'),
+    ];
+    for (const sPath of secretPaths) {
+      try {
+        if (fs.existsSync(sPath)) {
+          fs.writeFileSync(sPath, trimmedNewPassword, 'utf8');
+        }
+      } catch {}
+    }
+
+    db.savePostgresUrl(setupService.buildConnectionString({ ...newCandidatePayload, password: '' }));
+    db.recyclePgPool();
+    const connected = await db.initPostgresRepository(true);
+    if (!connected) {
+      throw new Error('Yeni parola ile uygulama havuzu başlatılamadı.');
+    }
+
+    systemLogger.info(
+      'database',
+      `Admin (${operatorName}) tarafından veritabanı kullanıcısının (${username}) parolası başarıyla değiştirildi ve Vault güncellendi.`
+    );
+
+    // 5. SECURITY PROTOCOL: Terminate all active sessions & trigger system reboot
+    await db.terminateAllSessions('Veritabanı parolası sistem üzerinden değiştirildi');
+    res.clearCookie('nexus_session_token');
+
+    scheduleSystemReboot('Veritabanı parolası değiştirildi - Sistem yeniden başlatılıyor', 1500);
+
+    return res.json({
+      success: true,
+      message: `Veritabanı parolası PostgreSQL sunucusunda ve sistem kasasında başarıyla değiştirildi. Güvenlik gereği tüm aktif oturumlar kapatıldı ve sistem yeniden başlatılıyor.`,
+      sessionsRevoked: true,
+      rebooting: true,
+      config: db.getPostgresConfig(),
+      databaseHealth: db.getDatabaseHealth(),
+    });
+  } catch (commitErr: any) {
+    systemLogger.error('database', `Kasa güncelleme veya havuz yenileme hatası: ${sanitizeLogString(commitErr?.message || commitErr)}`);
+    return res.status(500).json({
+      success: false,
+      error: 'Parola PostgreSQL tarafında değiştirildi ancak uygulama kasası güncellenirken hata oluştu. Lütfen bağlantı ayarlarını kontrol edin.',
+      details: sanitizeLogString(commitErr?.message || commitErr),
+    });
+  }
 });
 
 // Canonical Schema Metadata & Schema Auditor Endpoints

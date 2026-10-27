@@ -1935,6 +1935,7 @@ class LocalDatabase {
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
   public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
   public async terminateUserOtherSessions(userId: string, currentToken: string) { return this.userRepository.terminateUserOtherSessions(userId, currentToken); }
+  public async terminateAllSessions(reason?: string): Promise<void> { await this.userRepository.terminateAllSessions(reason); }
   public async getUserSessions(userId: string) { return this.userRepository.getUserSessions(userId); }
   public async checkDeviceStatuses(): Promise<boolean> { return await this.deviceRepository.checkDeviceStatuses(); }
   public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> { return await this.deviceRepository.processDeviceTelemetryArrival(deviceId); }

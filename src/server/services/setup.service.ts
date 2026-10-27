@@ -68,6 +68,7 @@ export interface SetupStatusResponse {
     adminCreated: boolean;
   };
   completedAt?: string;
+  localFallbackActive?: boolean;
 }
 
 export interface DbTestResult {
@@ -128,6 +129,7 @@ export class SetupService {
   private completedAtDate: string | null = null;
   private setupToken: string | null = null;
   private lastDbError: string | null = null;
+  private localFallbackActive: boolean = false;
 
   private constructor() {
     this.loadRuntimeSecretConfig();
@@ -138,6 +140,14 @@ export class SetupService {
       SetupService.instance = new SetupService();
     }
     return SetupService.instance;
+  }
+
+  public isLocalFallbackActive(): boolean {
+    return this.localFallbackActive;
+  }
+
+  public setLocalFallbackActive(active: boolean): void {
+    this.localFallbackActive = active;
   }
 
   /**
@@ -837,6 +847,7 @@ export class SetupService {
         await client.query('SELECT 1;');
         isDbConnected = true;
         this.lastDbError = null;
+        this.localFallbackActive = false;
 
         // Admin check in PostgreSQL:
         // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
@@ -911,12 +922,16 @@ export class SetupService {
         systemMode = 'SETUP';
         this.getOrInitSetupToken();
       } else if (!isDbConnected) {
-        // If PostgreSQL is unreachable, strictly return MAINTENANCE mode in production
-        const isProd = process.env.NODE_ENV === 'production' || isProductionVpsEnvironment();
-        if (isProd || process.env.STRICT_MAINTENANCE_LOCK === 'true' || !hasAdmin) {
-          systemMode = 'MAINTENANCE';
-        } else {
+        if (this.localFallbackActive) {
           systemMode = 'READY';
+        } else {
+          // If PostgreSQL is unreachable, strictly return MAINTENANCE mode in production
+          const isProd = process.env.NODE_ENV === 'production' || isProductionVpsEnvironment();
+          if (isProd || process.env.STRICT_MAINTENANCE_LOCK === 'true' || !hasAdmin) {
+            systemMode = 'MAINTENANCE';
+          } else {
+            systemMode = 'READY';
+          }
         }
       } else if (!hasAdmin) {
         // PostgreSQL is connected, setup was completed, but admin user is missing.
@@ -1056,6 +1071,7 @@ export class SetupService {
         adminCreated: hasAdmin,
       },
       completedAt: this.completedAtDate || undefined,
+      localFallbackActive: this.localFallbackActive,
     };
   }
 

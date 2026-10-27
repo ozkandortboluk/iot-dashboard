@@ -8,6 +8,7 @@ import { emailService } from '../services/email.service.js';
 import { db } from '../db.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { isMaskedSecret, sanitizeLogString } from '../utils/crypto.js';
+import { scheduleSystemReboot } from '../services/systemLifecycle.service.js';
 
 export const secretsRouter = Router();
 
@@ -136,6 +137,7 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
 
   const { database, email, notifications } = req.body || {};
 
+  let dbPasswordChanged = false;
   try {
     // 1. Database connection changes are preflighted before any active configuration is mutated.
     if (database && typeof database === 'object') {
@@ -151,7 +153,9 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
         password: incomingPassword && !isMaskedSecret(incomingPassword)
           ? incomingPassword
           : previousDb.password,
-        sslMode: String(database.sslMode ?? previousDb.sslMode ?? 'disable'),
+        sslMode: (['disable', 'require', 'prefer', 'verify-full'].includes(String(database.sslMode))
+          ? String(database.sslMode)
+          : previousDb.sslMode || 'disable') as 'disable' | 'require' | 'prefer' | 'verify-full',
       };
 
       if (isNaN(candidateDb.port) || candidateDb.port < 1 || candidateDb.port > 65535) {
@@ -242,6 +246,13 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
           const connected = await db.initPostgresRepository(true);
           if (!connected) {
             throw new Error('Yeni bağlantı kaydedildi ancak uygulama bağlantı havuzu hazır duruma gelemedi.');
+          }
+
+          if (passwordChanged) {
+            dbPasswordChanged = true;
+            await db.terminateAllSessions('Veritabanı parolası Kasa üzerinden güncellendi');
+            res.clearCookie('nexus_session_token');
+            scheduleSystemReboot('Veritabanı parolası güncellendi - Sistem yeniden başlatılıyor', 1500);
           }
         } catch (applyError: any) {
           // Best-effort rollback: restore the previous Vault/runtime metadata and reconnect to the old target.
@@ -338,7 +349,11 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
     const updatedState = systemSecretsService.getPublicSecretsState();
     return res.json({
       success: true,
-      message: 'Güvenlik ve secret parametreleri başarıyla güncellendi.',
+      message: dbPasswordChanged
+        ? 'Veritabanı parolası başarıyla güncellendi. Güvenlik gereği tüm aktif oturumlar kapatıldı ve sistem yeniden başlatılıyor.'
+        : 'Güvenlik ve secret parametreleri başarıyla güncellendi.',
+      rebooting: dbPasswordChanged ? true : undefined,
+      sessionsRevoked: dbPasswordChanged ? true : undefined,
       data: updatedState,
     });
   } catch (err: any) {

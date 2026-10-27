@@ -287,6 +287,18 @@ export const SystemSecretsPanel: React.FC = () => {
         throw new Error(data.error || 'Secret güncellenemedi.');
       }
 
+      if (data.rebooting || data.sessionsRevoked) {
+        setSaveSuccess(true);
+        try {
+          localStorage.removeItem('nexus_session_token');
+          sessionStorage.clear();
+        } catch {}
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2500);
+        return;
+      }
+
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
       fetchSecrets();

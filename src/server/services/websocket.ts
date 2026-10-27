@@ -166,6 +166,29 @@ export function terminateDeviceSockets(deviceId: string, codeOrReason: number | 
   });
 }
 
+/**
+ * Actively disconnects all connected WebSocket client sessions.
+ * Used during system-wide database password rotation and security reboot.
+ */
+export function terminateAllSessionsSockets(code = 1008, reason = 'Database password changed - all sessions revoked'): void {
+  if (!wss) return;
+  (wss.clients as Set<AuthenticatedWebSocket>).forEach((ws) => {
+    try {
+      safeSend(
+        ws,
+        JSON.stringify({
+          event: 'auth:session_expired',
+          payload: { reason, code: 'CREDENTIALS_ROTATED' },
+          timestamp: new Date().toISOString(),
+        })
+      );
+      ws.close(code, reason);
+    } catch {
+      ws.terminate();
+    }
+  });
+}
+
 // Push initial state data to authenticated client
 async function sendBootstrapData(ws: AuthenticatedWebSocket, user: User) {
   try {

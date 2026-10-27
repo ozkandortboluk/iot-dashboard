@@ -15,6 +15,7 @@ import {
   Search,
   Filter,
   Eye,
+  EyeOff,
   FileJson,
   Layers,
   Server,
@@ -356,6 +357,25 @@ export const DatabaseDataView: React.FC = () => {
 
   // PostgreSQL Configuration & Setup State
   const [engineConfig, setEngineConfig] = useState<DatabaseEngineConfig | null>(null);
+
+  const parsedPostgresDetails = useMemo(() => {
+    const raw = engineConfig?.postgresUrl || engineConfig?.rawPostgresUrl || '';
+    if (!raw) return { host: 'timescaledb', port: 5432, database: 'iot_dashboard', user: 'iot_user', sslMode: 'disable' };
+    try {
+      const u = new URL(raw.replace(/^postgres(ql)?:\/\//i, 'http://'));
+      const searchParams = new URLSearchParams(u.search);
+      return {
+        host: u.hostname || 'timescaledb',
+        port: Number(u.port || 5432),
+        database: u.pathname.replace(/^\//, '') || 'iot_dashboard',
+        user: u.username || 'iot_user',
+        sslMode: searchParams.get('sslmode') || 'disable',
+      };
+    } catch {
+      return { host: 'timescaledb', port: 5432, database: 'iot_dashboard', user: 'iot_user', sslMode: 'disable' };
+    }
+  }, [engineConfig?.postgresUrl, engineConfig?.rawPostgresUrl]);
+
   const [inputPostgresUrl, setInputPostgresUrl] = useState<string>(() => {
     // SEC-07: Passwords must NEVER be stored in localStorage. Purge any legacy stored URL.
     try { localStorage.removeItem('nexusnode_last_postgres_url'); } catch {}
@@ -386,6 +406,32 @@ export const DatabaseDataView: React.FC = () => {
     message: string;
     tablesCreated?: string[];
   } | null>(null);
+
+  // Target Database & Role Switch State
+  const [targetHost, setTargetHost] = useState('');
+  const [targetPort, setTargetPort] = useState(5432);
+  const [targetDatabase, setTargetDatabase] = useState('');
+  const [targetUser, setTargetUser] = useState('');
+  const [targetPassword, setTargetPassword] = useState('');
+  const [targetSslMode, setTargetSslMode] = useState('disable');
+  const [confirmSwitch, setConfirmSwitch] = useState(false);
+  const [showTargetPassword, setShowTargetPassword] = useState(false);
+  const [testingTarget, setTestingTarget] = useState(false);
+  const [targetTestResult, setTargetTestResult] = useState<any>(null);
+  const [switchingTarget, setSwitchingTarget] = useState(false);
+  const [switchTargetResult, setSwitchTargetResult] = useState<{ success: boolean; message: string; details?: string } | null>(null);
+
+  // Database Password Rotation State
+  const [currentDbPassword, setCurrentDbPassword] = useState('');
+  const [newDbPassword, setNewDbPassword] = useState('');
+  const [confirmDbPassword, setConfirmDbPassword] = useState('');
+  const [showCurrentDbPassword, setShowCurrentDbPassword] = useState(false);
+  const [showNewDbPassword, setShowNewDbPassword] = useState(false);
+  const [showConfirmDbPassword, setShowConfirmDbPassword] = useState(false);
+  const [verifyingCurrentDbPassword, setVerifyingCurrentDbPassword] = useState(false);
+  const [currentDbPasswordVerifyResult, setCurrentDbPasswordVerifyResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+  const [rotatingDbPassword, setRotatingDbPassword] = useState(false);
+  const [rotateDbPasswordResult, setRotateDbPasswordResult] = useState<{ success: boolean; message: string; details?: string } | null>(null);
 
   // Engine Switch Modal State
   const [engineModalOpen, setEngineModalOpen] = useState(false);
@@ -677,6 +723,237 @@ export const DatabaseDataView: React.FC = () => {
     }
   };
 
+  const handleTestTarget = async () => {
+    if (!targetHost || !targetDatabase || !targetUser) {
+      alert('Lütfen sunucu adresi, veritabanı adı ve kullanıcı adı alanlarını doldurun.');
+      return;
+    }
+    setTestingTarget(true);
+    setTargetTestResult(null);
+    setSwitchTargetResult(null);
+    try {
+      const res = await fetch('/api/database/test-target', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          host: targetHost,
+          port: targetPort,
+          database: targetDatabase,
+          user: targetUser,
+          password: targetPassword || undefined,
+          sslMode: targetSslMode,
+        }),
+      });
+      const data = await res.json();
+      setTargetTestResult(data);
+    } catch (err: any) {
+      setTargetTestResult({
+        success: false,
+        message: err.message || 'Bağlantı testi başarısız oldu.',
+      });
+    } finally {
+      setTestingTarget(false);
+    }
+  };
+
+  const handleSwitchTarget = async () => {
+    if (!confirmSwitch) {
+      alert('Geçişi başlatmadan önce "Bu veritabanı ve role geçiş yapılmasını onaylıyorum" onay kutusunu işaretlemelisiniz.');
+      return;
+    }
+    if (!targetHost || !targetDatabase || !targetUser || !targetPassword) {
+      alert('Host, veritabanı adı, kullanıcı adı ve parola alanlarının tümü zorunludur.');
+      return;
+    }
+    if (!window.confirm(`DİKKAT: Uygulama "${targetUser}@${targetDatabase}" veritabanına ve rolüne geçiş yapacaktır. Mevcut bağlantı doğrulanıp korunacaktır. Devam edilsin mi?`)) {
+      return;
+    }
+
+    setSwitchingTarget(true);
+    setSwitchTargetResult(null);
+    try {
+      const res = await fetch('/api/database/switch-target', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          host: targetHost,
+          port: targetPort,
+          database: targetDatabase,
+          user: targetUser,
+          password: targetPassword,
+          sslMode: targetSslMode,
+          confirmDatabaseSwitch: true,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSwitchTargetResult({ success: true, message: data.message });
+        if (data.config) {
+          setEngineConfig(data.config);
+        }
+        await fetchDatabaseStats();
+      } else {
+        setSwitchTargetResult({
+          success: false,
+          message: data.error || 'Veritabanı geçişi gerçekleştirilemedi.',
+          details: data.details,
+        });
+      }
+    } catch (err: any) {
+      setSwitchTargetResult({
+        success: false,
+        message: err.message || 'Geçiş sırasında ağ hatası oluştu.',
+      });
+    } finally {
+      setSwitchingTarget(false);
+    }
+  };
+
+  const handlePreFillCurrentTarget = () => {
+    const pc = parsedPostgresDetails;
+    if (pc) {
+      if (pc.host) setTargetHost(pc.host);
+      if (pc.port) setTargetPort(Number(pc.port));
+      if (pc.database) setTargetDatabase(pc.database);
+      if (pc.user) setTargetUser(pc.user);
+      if (pc.sslMode) setTargetSslMode(pc.sslMode);
+    }
+  };
+
+  const handleVerifyCurrentDbPassword = async () => {
+    if (!currentDbPassword) {
+      alert('Lütfen önce mevcut veritabanı parolanızı girin.');
+      return;
+    }
+    const pc = parsedPostgresDetails;
+    setVerifyingCurrentDbPassword(true);
+    setCurrentDbPasswordVerifyResult(null);
+    try {
+      const res = await fetch('/api/database/test-target', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          host: pc?.host || 'timescaledb',
+          port: pc?.port || 5432,
+          database: pc?.database || 'iot_dashboard',
+          user: pc?.user || 'iot_user',
+          password: currentDbPassword,
+          sslMode: pc?.sslMode || 'disable',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCurrentDbPasswordVerifyResult({
+          success: true,
+          message: 'Mevcut veritabanı parolası başarıyla doğrulandı. Yeni parolanızı belirleyebilirsiniz.',
+          latencyMs: data.latencyMs,
+        });
+      } else {
+        setCurrentDbPasswordVerifyResult({
+          success: false,
+          message: data.message || data.error || 'Mevcut parola doğrulanamadı. Girilen parola hatalı olabilir.',
+        });
+      }
+    } catch (err: any) {
+      setCurrentDbPasswordVerifyResult({
+        success: false,
+        message: err.message || 'Doğrulama sırasında ağ hatası oluştu.',
+      });
+    } finally {
+      setVerifyingCurrentDbPassword(false);
+    }
+  };
+
+  const handleRotateDbPassword = async () => {
+    const trimmedCurrent = currentDbPassword.trim();
+    const trimmedNew = newDbPassword.trim();
+    const trimmedConfirm = confirmDbPassword.trim();
+
+    if (!trimmedCurrent) {
+      alert('Mevcut veritabanı parolası zorunludur.');
+      return;
+    }
+    if (!trimmedNew) {
+      alert('Yeni veritabanı parolası zorunludur.');
+      return;
+    }
+    if (trimmedNew.length < 8) {
+      alert('Yeni parola en az 8 karakter uzunluğunda olmalıdır.');
+      return;
+    }
+    if (trimmedNew !== trimmedConfirm) {
+      alert('Yeni parola ile parola tekrarı eşleşmiyor.');
+      return;
+    }
+    if (trimmedCurrent === trimmedNew) {
+      alert('Yeni parola mevcut parola ile aynı olamaz.');
+      return;
+    }
+
+    const activeUser = parsedPostgresDetails.user || 'iot_user';
+    if (!window.confirm(`DİKKAT: "${activeUser}" veritabanı kullanıcısının parolası PostgreSQL sunucusunda değiştirilecek ve sistem kasasına (Vault) güvenle kaydedilecektir. Devam edilsin mi?`)) {
+      return;
+    }
+
+    setRotatingDbPassword(true);
+    setRotateDbPasswordResult(null);
+    try {
+      const res = await fetch('/api/database/rotate-password', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          currentPassword: trimmedCurrent,
+          newPassword: trimmedNew,
+          confirmPassword: trimmedConfirm,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCurrentDbPassword('');
+        setNewDbPassword('');
+        setConfirmDbPassword('');
+        setCurrentDbPasswordVerifyResult(null);
+        if (data.config) {
+          setEngineConfig(data.config);
+        }
+
+        if (data.rebooting || data.sessionsRevoked) {
+          setRotateDbPasswordResult({
+            success: true,
+            message: data.message || 'Veritabanı parolası başarıyla değiştirildi! Tüm aktif oturumlar kapatıldı ve sistem yeniden başlatılıyor. Giriş ekranına yönlendiriliyorsunuz...',
+          });
+          try {
+            localStorage.removeItem('nexus_session_token');
+            sessionStorage.clear();
+          } catch {}
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 3000);
+          return;
+        }
+
+        setRotateDbPasswordResult({
+          success: true,
+          message: data.message || 'Veritabanı parolası başarıyla değiştirildi.',
+        });
+        await fetchDatabaseStats();
+      } else {
+        setRotateDbPasswordResult({
+          success: false,
+          message: data.error || 'Parola değiştirilemedi.',
+          details: data.details,
+        });
+      }
+    } catch (err: any) {
+      setRotateDbPasswordResult({
+        success: false,
+        message: err.message || 'Parola değiştirme işlemi sırasında ağ hatası oluştu.',
+      });
+    } finally {
+      setRotatingDbPassword(false);
+    }
+  };
+
   const handleApplyEngineSwitch = async () => {
     setSwitchingEngine(true);
     setSwitchSuccessMsg(null);
@@ -917,6 +1194,35 @@ export const DatabaseDataView: React.FC = () => {
 
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={() => {
+                setActiveCategory('settings');
+                setActiveTab('postgres');
+                setTimeout(() => {
+                  document.getElementById('safe-db-password-rotation-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-xs font-semibold text-white rounded-lg transition cursor-pointer shadow-xs"
+              title="PostgreSQL Veritabanı Şifresi Değiştirme Paneline Git"
+            >
+              <Key className="w-4 h-4 text-white" />
+              <span>Şifre Değiştir</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveCategory('settings');
+                setActiveTab('postgres');
+                setTimeout(() => {
+                  document.getElementById('safe-db-switch-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-xs font-semibold text-white rounded-lg transition cursor-pointer shadow-xs"
+              title="Güvenli Veritabanı ve Rol Geçiş Paneline Git"
+            >
+              <ShieldCheck className="w-4 h-4 text-white" />
+              <span>Veritabanı & Rol Geçişi</span>
+            </button>
 
             <button
               onClick={fetchDatabaseStats}
@@ -1015,7 +1321,7 @@ export const DatabaseDataView: React.FC = () => {
             {
               id: 'settings' as const,
               title: '⚙️ Sunucu & Konfigürasyon',
-              desc: 'PostgreSQL kurulumu, mail sunucusu & saklama ilkeleri',
+              desc: 'PostgreSQL & rol geçişi, zamanlanmış yedekler, mail & saklama',
               icon: Server,
             },
           ].map((cat) => {
@@ -1030,8 +1336,8 @@ export const DatabaseDataView: React.FC = () => {
                     setActiveTab('growth_analytics');
                   } else if (cat.id === 'explorer' && !['explorer', 'users', 'collections'].includes(activeTab)) {
                     setActiveTab('explorer');
-                  } else if (cat.id === 'settings' && !['scheduled_backups', 'postgres', 'email_settings', 'retention', 'factory_reset'].includes(activeTab)) {
-                    setActiveTab('scheduled_backups');
+                  } else if (cat.id === 'settings' && !['postgres', 'scheduled_backups', 'email_settings', 'retention', 'factory_reset'].includes(activeTab)) {
+                    setActiveTab('postgres');
                   }
                 }}
                 className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex items-start gap-3 ${
@@ -1133,8 +1439,8 @@ export const DatabaseDataView: React.FC = () => {
           {activeCategory === 'settings' && (
             <>
               {[
+                { id: 'postgres' as const, label: 'PostgreSQL & Rol Geçişi', icon: Server, badge: 'Geçiş Paneli' },
                 { id: 'scheduled_backups' as const, label: 'Zamanlanmış Snapshot Yedeği', icon: HardDrive, badge: 'Afet Kurtarma' },
-                { id: 'postgres' as const, label: 'PostgreSQL & Sunucu Kurulumu', icon: Server },
                 { id: 'email_settings' as const, label: 'E-Posta & Mail Sunucu Ayarları', icon: Mail, badge: 'SMTP / Resend' },
                 { id: 'retention' as const, label: 'Veri Saklama & Otomatik Temizlik', icon: Trash2, badge: 'Eski Kayıt Silme' },
               ].map((tab) => {
@@ -1758,6 +2064,472 @@ export const DatabaseDataView: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* SAFE DATABASE PASSWORD ROTATION CARD */}
+          <div id="safe-db-password-rotation-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-violet-500/80 dark:border-violet-500 p-5 shadow-md space-y-4">
+            <div className="border-b border-violet-100 dark:border-violet-900/50 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200/50 dark:border-violet-800/50">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    Veritabanı Parolası Değiştirme (Database Password Rotation)
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-800 dark:bg-violet-900/60 dark:text-violet-300">
+                      Sadece Admin
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Önce mevcut geçerli bilgilerinizi girip doğrulayın, ardından yeni parolanızı belirleyin. Parola PostgreSQL üzerinde güncellenir ve sistem şifreli kasası (Vault) ile senkronize edilir.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Active Connection Target Info Badges */}
+            <div className="rounded-lg border border-violet-100 dark:border-violet-900/40 bg-violet-50/40 dark:bg-violet-950/20 p-3 text-xs text-violet-950 dark:text-violet-200">
+              <span className="text-[11px] font-semibold block mb-1.5 opacity-80">Parolası Değiştirilecek Aktif Veritabanı Hedefi:</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">Host:</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {parsedPostgresDetails.host}:{parsedPostgresDetails.port}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">Veritabanı:</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {parsedPostgresDetails.database}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">Kullanıcı (Rol):</span>
+                  <span className="font-semibold text-violet-700 dark:text-violet-300">
+                    {parsedPostgresDetails.user}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">SSL:</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {parsedPostgresDetails.sslMode}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Steps Workflow Banner */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[11px]">
+              <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40">
+                <div className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1">
+                  <span className="w-4 h-4 rounded-full bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300 flex items-center justify-center text-[10px] font-bold">1</span>
+                  <span>Mevcut Bilgileri Gir & Doğrula</span>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Yetkisiz parola değişikliklerini önlemek için mevcut parolanız izole bağlantı ile doğrulanır.
+                </p>
+              </div>
+              <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40">
+                <div className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1">
+                  <span className="w-4 h-4 rounded-full bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300 flex items-center justify-center text-[10px] font-bold">2</span>
+                  <span>PostgreSQL ALTER ROLE</span>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400">
+                  PostgreSQL üzerinde parola değiştirme sorgusu güvenle çalıştırılır ve yeni bağlantı doğrulanır.
+                </p>
+              </div>
+              <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40">
+                <div className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1">
+                  <span className="w-4 h-4 rounded-full bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-300 flex items-center justify-center text-[10px] font-bold">3</span>
+                  <span>Kasa Senkronizasyonu & Havuz</span>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Şifreli vault güncellenir, bağlantı havuzu yenilenir; sistem kesintisiz çalışmaya devam eder.
+                </p>
+              </div>
+            </div>
+
+            {/* Password Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+              {/* Current Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Mevcut Veritabanı Parolası *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentDbPassword ? 'text' : 'password'}
+                    placeholder="Mevcut geçerli parola"
+                    value={currentDbPassword}
+                    onChange={(e) => {
+                      setCurrentDbPassword(e.target.value);
+                      setCurrentDbPasswordVerifyResult(null);
+                    }}
+                    className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-violet-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentDbPassword(!showCurrentDbPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showCurrentDbPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleVerifyCurrentDbPassword}
+                  disabled={verifyingCurrentDbPassword || !currentDbPassword}
+                  className="mt-1.5 text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${verifyingCurrentDbPassword ? 'animate-spin' : ''}`} />
+                  <span>{verifyingCurrentDbPassword ? 'Doğrulanıyor...' : 'Mevcut Parolayı Test Et'}</span>
+                </button>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Yeni Veritabanı Parolası *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewDbPassword ? 'text' : 'password'}
+                    placeholder="En az 8 karakter"
+                    value={newDbPassword}
+                    onChange={(e) => setNewDbPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-violet-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewDbPassword(!showNewDbPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showNewDbPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <span className={`text-[11px] mt-1 block ${newDbPassword.length >= 8 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                  {newDbPassword.length > 0 ? (newDbPassword.length >= 8 ? '✓ Uzunluk geçerli' : `En az 8 karakter olmalı (${newDbPassword.length}/8)`) : 'Minimum 8 karakter'}
+                </span>
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Yeni Parola Tekrarı *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmDbPassword ? 'text' : 'password'}
+                    placeholder="Yeni parolayı tekrar girin"
+                    value={confirmDbPassword}
+                    onChange={(e) => setConfirmDbPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-violet-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmDbPassword(!showConfirmDbPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showConfirmDbPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <span className={`text-[11px] mt-1 block ${confirmDbPassword ? (newDbPassword === confirmDbPassword ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500') : 'text-slate-400'}`}>
+                  {confirmDbPassword ? (newDbPassword === confirmDbPassword ? '✓ Parolalar eşleşiyor' : '✗ Parolalar eşleşmiyor') : 'Doğrulama için tekrar girin'}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={handleRotateDbPassword}
+                disabled={rotatingDbPassword || !currentDbPassword || !newDbPassword || newDbPassword.length < 8 || newDbPassword !== confirmDbPassword}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
+              >
+                <Key className={`w-3.5 h-3.5 ${rotatingDbPassword ? 'animate-spin' : ''}`} />
+                <span>{rotatingDbPassword ? 'Parola Güncelleniyor...' : 'Parolayı Doğrula, Değiştir ve Devam Et'}</span>
+              </button>
+            </div>
+
+            {/* Current Password Verification Feedback */}
+            {currentDbPasswordVerifyResult && (
+              <div
+                className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+                  currentDbPasswordVerifyResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-900 dark:text-rose-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  {currentDbPasswordVerifyResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />}
+                  <span>{currentDbPasswordVerifyResult.message}</span>
+                </div>
+                {currentDbPasswordVerifyResult.latencyMs !== undefined && (
+                  <span className="text-[11px] font-mono opacity-80 shrink-0">{currentDbPasswordVerifyResult.latencyMs}ms</span>
+                )}
+              </div>
+            )}
+
+            {/* Rotation Result Banner */}
+            {rotateDbPasswordResult && (
+              <div
+                className={`p-3.5 rounded-lg border text-xs flex flex-col gap-1.5 ${
+                  rotateDbPasswordResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-900 dark:text-rose-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  {rotateDbPasswordResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />}
+                  <span>{rotateDbPasswordResult.message}</span>
+                </div>
+                {rotateDbPasswordResult.details && (
+                  <p className="text-[11px] pl-6 font-mono opacity-90">{rotateDbPasswordResult.details}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* SAFE DATABASE & ROLE SWITCH CARD */}
+          <div id="safe-db-switch-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-indigo-500/80 dark:border-indigo-500 p-5 shadow-md space-y-4">
+            <div className="border-b border-indigo-100 dark:border-indigo-900/50 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    Güvenli Veritabanı & Rol Geçiş Paneli (Target & Role Switcher)
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300">
+                      Sadece Admin
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Yeni veritabanı veya rolü önce izole test eder, zorunlu tabloları ve izinleri doğrular; hata durumunda mevcut bağlantıyı korur.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePreFillCurrentTarget}
+                className="px-2.5 py-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 rounded border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1 self-start sm:self-auto"
+                title="Aktif veritabanı ayarlarını form alanlarına aktarır"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Mevcut Bilgileri Doldur</span>
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span>Fail-Safe Koruması:</span>
+              </p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                Hedef veritabanında NexusNode IoT tabloları (users, devices, telemetry) veya kullanıcının okuma/yazma/sequence yetkileri eksikse geçiş <strong>engellenir</strong> ve mevcut veritabanı kesintisiz çalışmaya devam eder.
+              </p>
+            </div>
+
+            {/* Inputs Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Sunucu Adresi (Host) *
+                </label>
+                <input
+                  type="text"
+                  placeholder="timescaledb veya 127.0.0.1"
+                  value={targetHost}
+                  onChange={(e) => setTargetHost(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Port *
+                </label>
+                <input
+                  type="number"
+                  placeholder="5432"
+                  value={targetPort}
+                  onChange={(e) => setTargetPort(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Veritabanı Adı (Database) *
+                </label>
+                <input
+                  type="text"
+                  placeholder="iot_production"
+                  value={targetDatabase}
+                  onChange={(e) => setTargetDatabase(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Kullanıcı Adı / Rol (User) *
+                </label>
+                <input
+                  type="text"
+                  placeholder="iot_prod_app"
+                  value={targetUser}
+                  onChange={(e) => setTargetUser(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Parola (Password) *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showTargetPassword ? 'text' : 'password'}
+                    placeholder="••••••••••••"
+                    value={targetPassword}
+                    onChange={(e) => setTargetPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTargetPassword(!showTargetPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showTargetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  SSL Modu
+                </label>
+                <select
+                  value={targetSslMode}
+                  onChange={(e) => setTargetSslMode(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold focus:outline-hidden focus:border-indigo-500"
+                >
+                  <option value="disable">disable (Yerel / Docker)</option>
+                  <option value="prefer">prefer</option>
+                  <option value="require">require (Bulut / TLS)</option>
+                  <option value="verify-full">verify-full (Katı CA Doğrulaması)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Confirmation Checkbox */}
+            <div className="pt-2 flex items-start gap-2">
+              <input
+                type="checkbox"
+                id="confirm-switch-checkbox"
+                checked={confirmSwitch}
+                onChange={(e) => setConfirmSwitch(e.target.checked)}
+                className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <label htmlFor="confirm-switch-checkbox" className="text-xs text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
+                Bu veritabanına ve role geçiş yapılmasını onaylıyorum. Doğrulama başarısız olursa mevcut bağlantının korunacağını biliyorum.
+              </label>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={handleTestTarget}
+                disabled={testingTarget || switchingTarget}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${testingTarget ? 'animate-spin text-indigo-500' : ''}`} />
+                <span>{testingTarget ? 'Doğrulanıyor...' : '1. Hedefi Önce Doğrula (Test)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSwitchTarget}
+                disabled={switchingTarget || testingTarget || !confirmSwitch}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
+              >
+                <ShieldCheck className={`w-3.5 h-3.5 ${switchingTarget ? 'animate-spin' : ''}`} />
+                <span>{switchingTarget ? 'Geçiş Yapılıyor...' : '2. Doğrula & Güvenle Geçiş Yap'}</span>
+              </button>
+            </div>
+
+            {/* Target Test Result Banner */}
+            {targetTestResult && (
+              <div
+                className={`p-3.5 rounded-lg border text-xs flex flex-col gap-2 ${
+                  targetTestResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-900 dark:text-rose-200'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    {targetTestResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-rose-500" />}
+                    <span>{targetTestResult.message}</span>
+                  </div>
+                  {targetTestResult.latencyMs !== undefined && (
+                    <span className="text-[11px] font-mono opacity-80">Gecikme: {targetTestResult.latencyMs}ms</span>
+                  )}
+                </div>
+
+                {targetTestResult.tablesStatus && (
+                  <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                    <span className="text-[11px] font-semibold block mb-1.5">Tablo Varlık Kontrolü (Yanlış DB Koruması):</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      {Object.entries(targetTestResult.tablesStatus).map(([tbl, exists]) => (
+                        <div key={tbl} className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${exists ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                          <span className="font-mono">{tbl}</span>
+                          <span className="opacity-70">({exists ? 'Mevcut' : 'Eksik'})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {targetTestResult.permissionsStatus && (
+                  <div className="pt-2 border-t border-emerald-200/60 dark:border-emerald-800/40">
+                    <span className="text-[11px] font-semibold block mb-1.5">Rol Yetkileri (Least Privilege):</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                      {Object.entries(targetTestResult.permissionsStatus).map(([perm, ok]) => (
+                        <div key={perm} className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                          <span className="font-mono">{perm}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Switch Target Result Banner */}
+            {switchTargetResult && (
+              <div
+                className={`p-3.5 rounded-lg border text-xs flex flex-col gap-1.5 ${
+                  switchTargetResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-900 dark:text-rose-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  {switchTargetResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />}
+                  <span>{switchTargetResult.message}</span>
+                </div>
+                {switchTargetResult.details && (
+                  <p className="text-[11px] pl-6 font-mono opacity-90">{switchTargetResult.details}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

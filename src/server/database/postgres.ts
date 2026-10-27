@@ -3113,6 +3113,13 @@ export class PostgresRepository {
     await this.query(`DELETE FROM user_sessions WHERE user_id = $1`, [userId]);
   }
 
+  public async deleteAllSessions(): Promise<void> {
+    if (!this.pool) return;
+    await this.query(`DELETE FROM user_sessions;`).catch((err: any) => {
+      console.warn('[PostgreSQL deleteAllSessions Hatası]:', err?.message || err);
+    });
+  }
+
   public async saveSession(session: UserSession): Promise<void> {
     if (!this.pool || !session.token) return;
     const sessionId = (session as any).id || `sess_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
