@@ -208,6 +208,21 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
           });
         }
 
+        const requiredPrivileges = [
+          'schema_usage', 'schema_create',
+          'users_select', 'users_insert', 'users_update',
+          'devices_select', 'devices_insert', 'devices_update',
+          'telemetry_select', 'telemetry_insert', 'sequences_usage',
+        ];
+        const missingPrivileges = requiredPrivileges.filter((key) => probe.permissionsStatus?.[key] !== true);
+        if (missingPrivileges.length > 0) {
+          return res.status(422).json({
+            success: false,
+            error: 'Yeni veritabanı kullanıcısının NexusNode için gerekli yetkileri doğrulanamadı; mevcut ayarlar korunmuştur.',
+            details: `Eksik veya doğrulanamayan yetkiler: ${missingPrivileges.join(', ')}. PostgreSQL tarafında gerekli şema, tablo ve sequence yetkilerini verip yeniden deneyin.`,
+          });
+        }
+
         try {
           await systemSecretsService.updateDatabaseSecrets(database, operatorName);
           const effectiveDb = systemSecretsService.getDatabaseConfig();
