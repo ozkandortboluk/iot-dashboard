@@ -3843,6 +3843,14 @@ class LocalDatabase {
       };
     } catch (err: any) {
       // Failed candidate probes must not alter active connection metadata or readiness indicators.
+      const activeStoredUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
+      const isTestingActiveUrl = !customUrl || customUrl.trim() === activeStoredUrl;
+      if (isTestingActiveUrl && this.data.databaseSettings) {
+        this.data.databaseSettings.isPostgresConnected = false;
+        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+        this.saveData(this.data);
+      }
+
       let parsedHost = '';
       let parsedPort = 5432;
       let parsedDb = '';
