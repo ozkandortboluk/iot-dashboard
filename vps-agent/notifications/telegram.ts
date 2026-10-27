@@ -31,10 +31,9 @@ export class TelegramHttpSender implements MessageSender {
         signal: combined,
         redirect: 'error',
       });
-      try { await response.body?.cancel(); } catch { /* response body may contain provider details; discard */ }
+      try { await response.body?.cancel(); } catch { /* provider response is discarded */ }
       if (!response.ok) throw new Error('telegram_provider_rejected');
     } catch {
-      // Do not include provider URL, token, response body, or error message.
       throw new Error('telegram_delivery_failed');
     }
   }
@@ -48,16 +47,22 @@ export function readTelegramCredentials(env: NodeJS.ProcessEnv, tokenName: strin
 }
 
 const notificationText: Record<string, string> = {
-  app_readiness: 'NexusNode: uygulama readiness kontrolü başarısız.',
+  app_liveness: 'NexusNode: uygulama liveness kontrolü başarısız.',
+  app_readiness: 'NexusNode: uygulama/veritabanı readiness kontrolü başarısız.',
+  database_readiness: 'NexusNode: uygulama/veritabanı readiness kontrolü başarısız.',
   host_resources: 'NexusNode: host kaynak eşik uyarısı.',
   docker_containers: 'NexusNode: Docker container durum uyarısı.',
   backup_artifact: 'NexusNode: yedek doğrulama veya yaş kontrolü uyarısı.',
   allowed_log_summary: 'NexusNode: izinli loglarda hata işaretleri bulundu.',
 };
 
-export function formatCriticalNotifications(report: MonitorReport): Array<{ checkId: string; status: 'warning' | 'critical'; text: string }> {
+export function formatCriticalNotifications(report: MonitorReport): Array<{ checkId: string; status: 'warning' | 'critical' | 'unknown'; text: string }> {
   return report.results
-    .filter((result) => result.status === 'critical' || result.status === 'warning')
+    .filter((result) => result.status === 'critical' || result.status === 'warning' || result.status === 'unknown')
     .filter((result) => notificationText[result.id] !== undefined)
-    .map((result) => ({ checkId: result.id, status: result.status as 'warning' | 'critical', text: notificationText[result.id] }));
+    .map((result) => ({
+      checkId: result.id,
+      status: result.status as 'warning' | 'critical' | 'unknown',
+      text: result.status === 'unknown' ? `${notificationText[result.id]} Kontrol sonucu doğrulanamadı.` : notificationText[result.id],
+    }));
 }
