@@ -1,13 +1,12 @@
 [Unit]
-Description=Daily VPS Agent read-only health audit (example only)
+Description=Periodic VPS Agent read-only monitoring (example only)
 
 [Timer]
-OnCalendar=*-*-* 09:00:00 Europe/Istanbul
-AccuracySec=1min
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
 Persistent=true
 Unit=vps-agent.service
 
 [Install]
 WantedBy=timers.target
-
-# Do not install or enable from this PR. No production task is scheduled.
