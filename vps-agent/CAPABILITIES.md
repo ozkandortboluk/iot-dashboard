@@ -20,7 +20,7 @@ Bu PR kaynak kodu ve testler içerir; henüz yerel test/build veya gerçek VPS �
 ## Bu sürümde bulunmayanlar
 
 - Kurulmuş/etkinleştirilmiş VPS servisi veya zamanlayıcı; systemd dosyaları örnektir.
-- Çalışan Codex CLI adapter'ı veya kendiliğinden kod yazıp çalıştıran ajan döngüsü.
+- Herhangi bir shell/komut çalıştıran ajan döngüsü veya otomatik kod yazma özelliği.
 - Ana uygulamaya gömülü UI/API/DB bağlantısı.
 - Doğrudan Docker socket/daemon erişimi yoktur; Docker durumu yalnız ayrıca yapılandırılmış loopback read-only proxy üzerinden okunabilir.
 - Otomatik düzeltme, shell komutu, sudo/root, DB yazımı, migration, restore veya volume işlemi.
