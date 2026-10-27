@@ -17,7 +17,7 @@
 - AI'ye yalnız sabit kontrol/hata kodları ve sayısal/boolean metrikler gönderilir; ham log/secret/URL/telemetri gönderilmez.
 - AI çıktı/timeout sınırları eklendi; AI çıktısı komut olarak çalıştırılmaz veya Telegram'a otomatik gönderilmez.
 - Örnek systemd timer 5 dakikalık izleme için güncellendi; servis/timer kurulmadı.
-- Docker daemon adapter'ı bilinçli olarak eklenmedi; socket root-eşdeğer risk doğurabilir.
+- Doğrudan Docker socket yerine yalnız loopback read-only proxy'ye sabit GET isteği yapan adapter eklendi; proxy ayrıca kurulmalı ve doğrulanmalı.
 - Yeni testler yazıldı ancak henüz çalıştırılmadı.
 
 ## Tek seferlik yerel doğrulama listesi
