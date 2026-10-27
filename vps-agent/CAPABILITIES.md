@@ -7,7 +7,7 @@ Bu belge VPS Agent'ın ne yapabildiğini, ne yapamadığını ve hangi koşullar
 | Alan | Kaynakta bulunan yetenek | Sınır |
 |---|---|---|
 | HTTP sağlık kontrolü | Yapılandırılmış live/ready URL'lerine HTTP isteği | Yalnız izin verilen loopback adresleri ve sabit health yolları; yanıt gövdesi saklanmaz |
-| Sistem kaynakları | CPU/bellek/disk gibi host metriklerini denetleyen checker | Çalışma ortamına ve platforma bağlı; üretim hostunda doğrulanmış değil |
+| Sistem kaynakları | Disk doluluğu, inode kullanımı, bellek ve CPU başına load eşikleri | OS metrikleri platforma bağlıdır; eşikler yapılandırılabilir ve üretim hostunda doğrulanmış değildir |
 | Docker durumu | Sınırlı reader arayüzüyle beklenen container durumlarını değerlendirme | Docker socket/daemon erişimi varsayılan değildir; root-eşdeğer erişim verilmez |
 | Yedek metadata'sı | Desteklenen tekil artifact ve checksum sidecar'ını kontrol etme | Secret dosyaları içeren genel manifest desteklenmeyebilir; restore başarısını kanıtlamaz |
 | İzinli log özeti | Allowlist dosyalarında sınırlı boyut ve hata sayımı | Ham loglar rapora aktarılmaz; secret/kişisel veri dışarı gönderilmez |

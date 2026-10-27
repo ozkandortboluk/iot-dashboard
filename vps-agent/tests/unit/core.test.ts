@@ -17,6 +17,11 @@ describe('VPS Agent configuration and policy', () => {
     expect(() => parseMonitorConfig({ health: { readyUrl: 'http://127.0.0.1/admin' } })).toThrow();
   });
 
+  it('rejects inverted resource thresholds', () => {
+    expect(() => parseMonitorConfig({ system: { loadWarningPerCpu: 2, loadCriticalPerCpu: 1 } })).toThrow();
+    expect(() => parseMonitorConfig({ system: { inodeWarningPercent: 90, inodeCriticalPercent: 80 } })).toThrow();
+  });
+
   it('denies mutations, release and unverified model analysis', () => {
     expect(authorizeAction('observe_only', 'read_health').allowed).toBe(true);
     expect(authorizeAction('observe_only', 'service_restart').allowed).toBe(false);

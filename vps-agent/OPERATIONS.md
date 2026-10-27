@@ -2,7 +2,7 @@
 
 Bu klasör tek başına üretim kurulumu değildir. CLI yerel/izole ortamda operatör tarafından başlatılabilir; kod VPS'ye kopyalanmaz; servis kurulum/enable edilmez; gerçek Telegram mesajı gönderilmez; runtime dizini otomatik oluşturulmaz.
 
-## Yerel geliştirme
+## Kaynak eşikleri\nÖrnek eşikler disk/inode %80 uyarı ve %90 kritik; bellek %80 uyarı ve %92 kritik; CPU başına 1,5 load uyarı ve 3 load kritik değeridir. Bunlar başlangıç değerleridir, her VPS için evrensel performans sınırı değildir. Gerçek üretim yükü gözlenerek ayarlanmalıdır.\n\n## Yerel geliştirme
 Config örneği yalnız yerel/mock denetim içindir. Varsayılan mod observe_only'dir. Codex CLI başlatılmaz. Testler geliştirici makinesinde veya izole ortamda çalıştırılır; GitHub üzerinde test çalıştırılmaz.
 
 ## Runtime

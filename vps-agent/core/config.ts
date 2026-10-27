@@ -38,7 +38,11 @@ export const monitorConfigSchema = z.object({
     diskCriticalPercent: z.number().min(2).max(100).default(90),
     memoryWarningPercent: z.number().min(1).max(99).default(80),
     memoryCriticalPercent: z.number().min(2).max(100).default(92),
-  }).strict().default({ mountPath: '/', diskWarningPercent: 80, diskCriticalPercent: 90, memoryWarningPercent: 80, memoryCriticalPercent: 92, enabled: true }),
+    inodeWarningPercent: z.number().min(1).max(99).default(80),
+    inodeCriticalPercent: z.number().min(2).max(100).default(90),
+    loadWarningPerCpu: z.number().min(0.1).max(10).default(1.5),
+    loadCriticalPerCpu: z.number().min(0.2).max(20).default(3),
+  }).strict().default({ mountPath: '/', diskWarningPercent: 80, diskCriticalPercent: 90, memoryWarningPercent: 80, memoryCriticalPercent: 92, inodeWarningPercent: 80, inodeCriticalPercent: 90, loadWarningPerCpu: 1.5, loadCriticalPerCpu: 3, enabled: true }),
   docker: z.object({ enabled: z.boolean().default(false), expectedContainers: z.array(z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/)).max(16).default([]) }).strict().default({ enabled: false, expectedContainers: [] }),
   backup: z.object({
     enabled: z.boolean().default(false),
@@ -65,6 +69,12 @@ export const monitorConfigSchema = z.object({
   }
   if (value.system.memoryCriticalPercent <= value.system.memoryWarningPercent) {
     ctx.addIssue({ code: 'custom', path: ['system', 'memoryCriticalPercent'], message: 'Critical memory threshold must exceed warning threshold.' });
+  }
+  if (value.system.inodeCriticalPercent <= value.system.inodeWarningPercent) {
+    ctx.addIssue({ code: 'custom', path: ['system', 'inodeCriticalPercent'], message: 'Critical inode threshold must exceed warning threshold.' });
+  }
+  if (value.system.loadCriticalPerCpu <= value.system.loadWarningPerCpu) {
+    ctx.addIssue({ code: 'custom', path: ['system', 'loadCriticalPerCpu'], message: 'Critical CPU load threshold must exceed warning threshold.' });
   }
   if (value.backup) {
     for (const [name, path] of [['artifactPath', value.backup.artifactPath], ['checksumPath', value.backup.checksumPath]] as const) {
