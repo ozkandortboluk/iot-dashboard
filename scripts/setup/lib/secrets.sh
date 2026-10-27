@@ -157,6 +157,12 @@ verify_postgres_password() {
 }
 
 ensure_secrets_initialized() {
+  # Bash xtrace expands command substitutions and can print recovered plaintext credentials.
+  # Disable tracing for the remainder of this shell before any secret is read or assigned.
+  case $- in
+    *x*) set +x ;;
+  esac
+
   log_step "3. Kriptografik Kasa (Vault) ve Docker Secret Dosyaları Hazırlanıyor..."
 
   local SECRETS_DIR="./secrets"
