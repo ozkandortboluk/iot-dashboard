@@ -24,6 +24,7 @@ describe('VPS Agent configuration and policy', () => {
     expect(() => parseMonitorConfig({ system: { loadWarningPerCpu: 2, loadCriticalPerCpu: 1 } })).toThrow();
     expect(() => parseMonitorConfig({ system: { inodeWarningPercent: 90, inodeCriticalPercent: 80 } })).toThrow();
     expect(() => parseMonitorConfig({ telegram: { enabled: true } })).toThrow();
+    expect(() => parseMonitorConfig({ ai: { enabled: true } })).toThrow();
   });
 
   it('denies mutations and requires explicit per-run approval for outbound integrations', () => {
