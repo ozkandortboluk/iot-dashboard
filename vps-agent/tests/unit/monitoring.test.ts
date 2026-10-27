@@ -42,7 +42,7 @@ describe('read-only monitoring checks', () => {
     expect(() => new DockerReadOnlyHttpReader('http://example.com:2375/')).toThrow('docker_proxy_url_must_be_loopback_http');
   });
 
-  it('verifies only a single allowed artifact checksum', async () =>
+  it('verifies only a single allowed artifact checksum', async () => {
     const dir = await tempDir();
     const artifactPath = path.join(dir, 'backup.archive.age');
     const checksumPath = path.join(dir, 'backup.archive.age.sha256');
