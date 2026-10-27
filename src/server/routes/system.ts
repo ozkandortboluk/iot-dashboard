@@ -681,6 +681,33 @@ adminRouter.post('/service-tokens/:id/revoke', authenticateUser, requireAdmin, a
 // Database Management Router
 const databaseRouter = Router();
 
+/**
+ * A connection-string edit from the general settings screen may rotate credentials,
+ * but must not silently redirect production to a different data source.
+ */
+function isSameConfiguredPostgresTarget(candidateUrl: string): boolean {
+  const activeUrl = db.getPostgresUrl().trim();
+  if (!activeUrl) return true; // Initial configuration is still allowed.
+  const parseTarget = (raw: string) => {
+    const normalized = raw.trim().replace(/^postgres(?:ql)?:\\/\\//i, 'http://');
+    const parsed = new URL(normalized);
+    return {
+      host: parsed.hostname.toLowerCase(),
+      port: Number(parsed.port || 5432),
+      database: decodeURIComponent(parsed.pathname.replace(/^\\//, '')),
+    };
+  };
+  try {
+    const candidate = parseTarget(candidateUrl);
+    const active = parseTarget(activeUrl);
+    return candidate.host === active.host &&
+      candidate.port === active.port &&
+      candidate.database === active.database;
+  } catch {
+    return false;
+  }
+}
+
 databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getDatabaseHealth());
 });
@@ -888,6 +915,12 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, async (req, res) 
   }
 
   if (postgresUrl && targetEngine !== 'local') {
+    if (!isSameConfiguredPostgresTarget(postgresUrl)) {
+      return res.status(409).json({
+        success: false,
+        error: 'Bu ekran mevcut veritabanı hedefini değiştiremez. Host/port/veritabanı adı değişikliği için ayrı, yedek doğrulamalı bakım ve veri taşıma işlemi gerekir.',
+      });
+    }
     const probe = await db.testPostgresConnection(postgresUrl);
     if (!probe.success) {
       return res.status(422).json({
@@ -913,6 +946,12 @@ databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, async 
     return res.status(400).json({ error: 'Geçersiz veritabanı bağlantı adresi.' });
   }
   const trimmed = postgresUrl.trim();
+  if (!isSameConfiguredPostgresTarget(trimmed)) {
+    return res.status(409).json({
+      success: false,
+      error: 'Bu ekran mevcut veritabanı hedefini değiştiremez. Host/port/veritabanı adı değişikliği için ayrı, yedek doğrulamalı bakım ve veri taşıma işlemi gerekir.',
+    });
+  }
   const probe = await db.testPostgresConnection(trimmed);
   if (!probe.success) {
     return res.status(422).json({
