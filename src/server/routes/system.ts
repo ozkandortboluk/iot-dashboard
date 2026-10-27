@@ -898,7 +898,8 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
     }
   }
 
-  db.setActiveEngine(targetEngine, postgresUrl);
+  // A successful probe already committed the candidate URL; do not re-save a raw URL/password here.
+  db.setActiveEngine(targetEngine);
   res.json({
     success: true,
     message: `Veritabanı yapılandırması güncellendi.`,
