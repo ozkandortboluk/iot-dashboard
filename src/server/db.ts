@@ -3862,10 +3862,12 @@ class LocalDatabase {
           this.data.databaseSettings.isPostgresConnected = previousConnected ?? false;
           this.saveData(this.data);
           this.recyclePgPool();
-          await this.initPostgresRepository(true).catch(() => false);
+          const rollbackConnected = await this.initPostgresRepository(true).catch(() => false);
           return {
             success: false,
-            message: 'Bağlantı testi başarılı olsa da uygulama havuzu başlatılamadı; önceki bağlantı ayarları geri yüklendi.',
+            message: rollbackConnected
+              ? 'Bağlantı testi başarılı olsa da uygulama havuzu başlatılamadı; önceki bağlantı ayarları geri yüklendi.'
+              : 'Yeni bağlantı etkinleştirilemedi ve önceki bağlantı da doğrulanamadı. Üretim değişikliklerini durdurup sunucu bağlantı ayarlarını inceleyin.',
             latencyMs,
             tablesStatus,
           };
