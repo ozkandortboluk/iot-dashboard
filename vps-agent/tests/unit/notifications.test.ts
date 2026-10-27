@@ -10,11 +10,21 @@ describe('outgoing notification behavior', () => {
     const dedup = new EventDeduplicator(1_000, 4);
     const event = { code: 'health_http_unavailable', checkId: 'app_readiness', status: 'critical' as const };
     expect(dedup.shouldSend(event, 10_000)).toBe(true);
+    dedup.markSent(event, 10_000);
     expect(dedup.shouldSend(event, 10_500)).toBe(false);
     expect(dedup.shouldSend(event, 11_001)).toBe(true);
   });
 
-  it('uses fake sender with fixed notification text and no metric/log content', async () => {
+  it('restores notification deduplication from persisted state', () => {
+    const event = { code: 'status_critical', checkId: 'app_readiness', status: 'critical' as const };
+    const firstRun = new EventDeduplicator(86_400_000);
+    firstRun.markSent(event, 10_000);
+    const secondRun = new EventDeduplicator(86_400_000, 200, firstRun.exportState(10_500));
+    expect(secondRun.wasSent(event, 10_500)).toBe(true);
+    expect(secondRun.shouldSend(event, 10_500)).toBe(false);
+  });
+
+  it('uses fixed notification text and excludes metric/log content', async () => {
     const report = buildReport([{ id: 'app_readiness', status: 'critical', severity: 'critical', checkedAt: new Date().toISOString(), durationMs: 2, summary: 'health_connection_failed', metrics: { httpStatus: 503 } }]);
     const notifications = formatCriticalNotifications(report);
     const sender = new FakeMessageSender();
