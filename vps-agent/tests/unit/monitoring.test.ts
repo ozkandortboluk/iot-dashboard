@@ -14,7 +14,7 @@ import { createReadOnlyCheckers } from '../../operations/checkFactory.js';
 const tempDirs: string[] = [];
 afterEach(async () => { await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
-async function tempDir() { const dir = await mkdtemp(path.join(os.tmpdir(), 'nexus-codex-test-')); tempDirs.push(dir); return dir; }
+async function tempDir() { const dir = await mkdtemp(path.join(os.tmpdir(), 'vps-agent-test-')); tempDirs.push(dir); return dir; }
 const context = { signal: new AbortController().signal, now: () => new Date('2026-10-26T10:00:00.000Z') };
 
 describe('read-only monitoring checks', () => {
