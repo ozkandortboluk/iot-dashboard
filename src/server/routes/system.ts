@@ -26,7 +26,7 @@ import { emailService } from '../services/email.service.js';
 import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
-import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
+import { verifyMasterEncryptionKey, verifyPassword, sanitizeLogString } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
 import {
   readBackupDestinationStatus,
@@ -875,7 +875,7 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresConfig());
 });
 
-databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
+databaseRouter.post('/config', authenticateUser, requireAdmin, async (req, res) => {
   const { engine, postgresUrl } = req.body;
   const targetEngine = engine || db.getActiveEngine() || 'timescaledb';
   if (!targetEngine || !['postgres', 'timescaledb', 'local'].includes(targetEngine)) {
@@ -907,7 +907,7 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   });
 });
 
-databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, (req, res) => {
+databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, async (req, res) => {
   const { postgresUrl } = req.body;
   if (!postgresUrl || typeof postgresUrl !== 'string' || !postgresUrl.trim()) {
     return res.status(400).json({ error: 'Geçersiz veritabanı bağlantı adresi.' });
