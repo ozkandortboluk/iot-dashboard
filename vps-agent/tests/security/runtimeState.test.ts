@@ -1,10 +1,12 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readRuntimeCheckpoint, writeRuntimeCheckpoint } from '../../core/runtimeState.js';
 
 const directories: string[] = [];
+const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
 
 describe('runtime checkpoint safety', () => {
@@ -28,6 +30,6 @@ describe('runtime checkpoint safety', () => {
   });
 
   it('refuses to write runtime state below the source tree', async () => {
-    await expect(writeRuntimeCheckpoint(path.resolve('runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored inside the repository working directory');
+    await expect(writeRuntimeCheckpoint(path.join(agentRoot, 'runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored inside the VPS Agent source directory');
   });
 });

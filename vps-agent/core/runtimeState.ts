@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface RuntimeCheckpoint {
   schemaVersion: 1;
@@ -11,10 +12,12 @@ export interface RuntimeCheckpoint {
   dailySummarySentLocalDate?: string;
 }
 
+const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
 function assertExternalRuntimePath(filePath: string): string {
   const resolved = path.resolve(filePath);
-  const relative = path.relative(process.cwd(), resolved);
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new Error('Runtime state cannot be stored inside the repository working directory.');
+  const relative = path.relative(sourceRoot, resolved);
+  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new Error('Runtime state cannot be stored inside the VPS Agent source directory.');
   return resolved;
 }
 
