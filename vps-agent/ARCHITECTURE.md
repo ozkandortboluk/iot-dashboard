@@ -38,7 +38,7 @@ AI isteği sabit checker kimlikleri, durum/hata kodları ve yalnız sayısal/boo
 | Secret sızıntısı | Tokenlar env'den; sabit Telegram metni; AI'ye ham log gönderilmez | AI API'sine sınırlı metrik gönderilir ve maliyet doğurabilir |
 | Dış ağ çağrısı | Sabit HTTPS endpoint, explicit CLI flag, timeout | API anahtarı host kurulumunda korunmalı |
 | Eşzamanlı çalıştırma | Exclusive lock | Çökme sonrası stale lock elle incelenir |
-| Docker root eşdeğeri | Docker socket adapter'ı yok | Gerçek Docker durumu bu sürümde bağlanmamıştır |
+| Docker root eşdeğeri | Doğrudan Docker socket yok; yalnız loopback read-only proxy | Proxy ayrı kurulmalı ve salt-okunur endpoint ile sınırlandırılmalı |
 | Otomatik değişiklik | Shell/DB/deploy/restart yolu yok | Bakım otomasyonu kapsam dışıdır |
 
 ## Durum
