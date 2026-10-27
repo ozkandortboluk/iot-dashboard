@@ -5,15 +5,15 @@ ConditionPathExists=/etc/vps-agent/monitor.json
 
 [Service]
 Type=oneshot
-User=nexusnode-codex
-Group=nexusnode-codex
+User=vps-agent
+Group=vps-agent
 UMask=0077
 # Packaging must provide this executable before this example can be installed.
-ExecStart=/opt/nexusnode-codex/current/bin/nexusnode-codex --config /etc/nexusnode-codex/monitor.json
+ExecStart=/opt/vps-agent/current/bin/vps-agent --config /etc/vps-agent/monitor.json
 TimeoutStartSec=2min
-RuntimeDirectory=nexusnode-codex
+RuntimeDirectory=vps-agent
 RuntimeDirectoryMode=0700
-StateDirectory=nexusnode-codex
+StateDirectory=vps-agent
 StateDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
@@ -27,7 +27,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/var/lib/nexusnode-codex /run/nexusnode-codex
+ReadWritePaths=/var/lib/vps-agent /run/vps-agent
 StandardOutput=journal
 StandardError=journal
 
