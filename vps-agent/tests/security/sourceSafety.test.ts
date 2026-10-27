@@ -6,7 +6,7 @@ async function listFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map(async (entry) => {
     const resolved = path.join(directory, entry.name);
-    if (entry.isDirectory()) return listFiles(resolved);
+    if (entry.isDirectory()) return ['node_modules', '.git', 'coverage'].includes(entry.name) ? [] : listFiles(resolved);
     return /\.(ts|json)$/.test(entry.name) ? [resolved] : [];
   }));
   return nested.flat();
