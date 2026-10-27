@@ -148,7 +148,7 @@ async function executeRun(options: CliOptions, config: ReturnType<typeof parseMo
 export async function runAgent(options: CliOptions): Promise<number> {
   const raw = await readFile(options.configPath, { encoding: 'utf8' });
   const config = parseMonitorConfig(JSON.parse(raw) as unknown);
-  if (config.telegram.enabled && !config.runtime.statePath) throw new Error('runtime_state_path_required_for_telegram');
+  if ((config.telegram.enabled || config.ai.enabled) && !config.runtime.statePath) throw new Error('runtime_state_path_required_for_external_integrations');
   if (config.runtime.statePath) {
     // Validate the path before creating the directory or lock file.
     await readRuntimeCheckpoint(config.runtime.statePath);
