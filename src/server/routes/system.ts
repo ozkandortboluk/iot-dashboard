@@ -1335,6 +1335,7 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
 systemRouter.get(['/system/settings', '/settings'], authenticateUser, (req, res) => {
   const settings = { ...db.getAllSystemSettings() };
   delete settings.service_config; // Ensure sensitive server configuration is not leaked
+  delete settings.codex_monitor_config; // Legacy orphan setting remains hidden; VPS Agent no longer reads or writes it.
   res.json({
     success: true,
     settings,
@@ -1343,6 +1344,7 @@ systemRouter.get(['/system/settings', '/settings'], authenticateUser, (req, res)
 
 systemRouter.get(['/system/settings/:key', '/settings/:key'], authenticateUser, (req, res) => {
   const { key } = req.params;
+  if (key === 'codex_monitor_config') return res.status(404).json({ error: 'Ayar bulunamadı.' });
   if (key === 'service_config' && (req as any).user?.role !== 'admin') {
     return res.status(403).json({ error: 'Bu ayara erişim yetkiniz bulunmamaktadır.' });
   }
@@ -1359,6 +1361,7 @@ systemRouter.get(['/system/settings/:key', '/settings/:key'], authenticateUser, 
 
 systemRouter.post(['/system/settings/:key', '/settings/:key'], authenticateUser, requireAdmin, async (req, res) => {
   const { key } = req.params;
+  if (key === 'codex_monitor_config') return res.status(400).json({ error: 'Bu eski ayar anahtarı artık desteklenmiyor.' });
   const { value, updatedAt } = req.body;
   if (value === undefined) {
     return res.status(400).json({ error: 'value parametresi zorunludur.' });
