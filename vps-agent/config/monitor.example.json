@@ -1,0 +1,45 @@
+{
+  "mode": "observe_only",
+  "timezone": "Europe/Istanbul",
+  "summaryHour": 9,
+  "health": {
+    "enabled": true,
+    "liveUrl": "http://127.0.0.1:3000/api/health/live",
+    "readyUrl": "http://127.0.0.1:3000/api/health/ready",
+    "timeoutMs": 3000,
+    "retries": 1
+  },
+  "system": {
+    "enabled": true,
+    "mountPath": "/",
+    "diskWarningPercent": 80,
+    "diskCriticalPercent": 90,
+    "memoryWarningPercent": 80,
+    "memoryCriticalPercent": 92,
+    "inodeWarningPercent": 80,
+    "inodeCriticalPercent": 90,
+    "loadWarningPerCpu": 1.5,
+    "loadCriticalPerCpu": 3
+  },
+  "docker": {
+    "enabled": false,
+    "expectedContainers": ["nexus_app", "nexus_timescaledb"]
+  },
+  "logs": {
+    "enabled": false,
+    "allowedFiles": [],
+    "maxBytesPerFile": 131072
+  },
+  "telegram": {
+    "enabled": false,
+    "tokenEnv": "VPS_AGENT_TELEGRAM_BOT_TOKEN",
+    "chatIdEnv": "VPS_AGENT_TELEGRAM_CHAT_ID",
+    "dailySummaryHour": 9
+  },
+  "ai": {
+    "enabled": false,
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "model": "gpt-4.1-mini",
+    "maxOutputTokens": 250
+  }
+}

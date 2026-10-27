@@ -19,7 +19,6 @@ import {
   X,
   RefreshCw,
   Monitor,
-  Bot,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getRoleBadgeInfo } from '../lib/permissions';
@@ -33,7 +32,6 @@ import {
 } from '../config/version';
 import { apiFetch } from '../lib/apiFetch';
 import { canShowSshControls } from '../lib/sshRuntimePolicy';
-import { ADMIN_PLUGINS_TAB } from '../codex/plugin';
 
 interface SidebarProps {
   activeTab: string;
@@ -355,11 +353,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           id: 'system_logs',
           label: 'Sistem & Hata Günlükleri',
           icon: Terminal,
-        },
-        {
-          id: ADMIN_PLUGINS_TAB.id,
-          label: ADMIN_PLUGINS_TAB.label,
-          icon: Bot,
         },
         {
           id: 'account_settings',
