@@ -113,8 +113,8 @@ export const monitorConfigSchema = z.object({
   if (value.docker.enabled && value.docker.expectedContainers.length === 0) {
     ctx.addIssue({ code: 'custom', path: ['docker', 'expectedContainers'], message: 'Docker monitoring requires at least one expected container.' });
   }
-  if (value.telegram.enabled && !value.runtime.statePath) {
-    ctx.addIssue({ code: 'custom', path: ['runtime', 'statePath'], message: 'A private runtime.statePath is required when Telegram is enabled.' });
+  if ((value.telegram.enabled || value.ai.enabled) && !value.runtime.statePath) {
+    ctx.addIssue({ code: 'custom', path: ['runtime', 'statePath'], message: 'A private runtime.statePath is required when external integrations are enabled.' });
   }
 });
 
