@@ -18,7 +18,8 @@ describe('VPS Agent configuration and policy', () => {
     expect(() => parseMonitorConfig({ health: { readyUrl: 'http://127.0.0.1/admin' } })).toThrow();
   });
 
-  it('rejects inverted resource thresholds and Telegram without persistent state', () => {
+  it('rejects non-loopback Docker proxies and invalid resource thresholds', () => {
+    expect(() => parseMonitorConfig({ docker: { enabled: true, readOnlyProxyUrl: 'http://example.com:2375/' } })).toThrow();
     expect(() => parseMonitorConfig({ system: { loadWarningPerCpu: 2, loadCriticalPerCpu: 1 } })).toThrow();
     expect(() => parseMonitorConfig({ system: { inodeWarningPercent: 90, inodeCriticalPercent: 80 } })).toThrow();
     expect(() => parseMonitorConfig({ telegram: { enabled: true } })).toThrow();
