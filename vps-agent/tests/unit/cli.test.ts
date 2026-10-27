@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseCliArgs } from '../../cli.js';
 
@@ -8,13 +9,14 @@ describe('VPS Agent CLI arguments', () => {
   });
 
   it('accepts only known flags and keeps external actions disabled by default', () => {
-    expect(parseCliArgs(['--config', '/etc/vps-agent/monitor.json'])).toEqual({
-      configPath: '/etc/vps-agent/monitor.json',
+    const absoluteConfig = path.resolve('monitor.json');
+    expect(parseCliArgs(['--config', absoluteConfig])).toEqual({
+      configPath: absoluteConfig,
       allowTelegramSend: false,
       allowAiAnalysis: false,
     });
-    expect(parseCliArgs(['--config', '/etc/vps-agent/monitor.json', '--allow-telegram-send', '--allow-ai-analysis'])).toEqual({
-      configPath: '/etc/vps-agent/monitor.json',
+    expect(parseCliArgs(['--config', absoluteConfig, '--allow-telegram-send', '--allow-ai-analysis'])).toEqual({
+      configPath: absoluteConfig,
       allowTelegramSend: true,
       allowAiAnalysis: true,
     });
