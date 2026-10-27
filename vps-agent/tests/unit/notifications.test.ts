@@ -33,6 +33,14 @@ describe('outgoing notification behavior', () => {
     expect(sender.messages[0]).not.toContain('503');
   });
 
+  it('formats unknown monitoring outcomes as bounded alerts', () => {
+    const report = buildReport([{ id: 'app_readiness', status: 'unknown', severity: 'warning', checkedAt: new Date().toISOString(), durationMs: 1, summary: 'timeout' }]);
+    const notifications = formatCriticalNotifications(report);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].text).toContain('doğrulanamadı');
+    expect(notifications[0].text).not.toContain('timeout');
+  });
+
   it('keeps provider token out of errors and discards provider response body', async () => {
     const token = '123456:abcdefghijklmnopqrstuvwxyzABCDEF';
     const fetcher = vi.fn(async () => new Response('provider private detail', { status: 503 }));
