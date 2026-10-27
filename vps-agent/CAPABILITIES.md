@@ -18,7 +18,7 @@ Bu belge VPS Agent'ın ne yapabildiğini, ne yapamadığını ve hangi koşullar
 
 ## 2. Bu sürümde bulunmayan özellikler
 
-- Hazır, paketlenmiş ve üretime kurulabilir daemon/CLI giriş noktası.
+- VPS üzerinde kurulmuş/etkinleştirilmiş servis veya zamanlayıcı. CLI yalnızca kaynak koddan yerel olarak çalıştırılır; paketleme/kurulum ayrı aşamadır.
 - Çalışan Codex CLI adapter'ı veya kendi kendine kod yazıp çalıştıran ajan döngüsü.
 - Web yönetim paneli, ana uygulamaya gömülü UI veya NexusNode ana API'siyle bağlantı.
 - Otomatik düzeltme, shell komutu çalıştırma, sudo/root, Docker socket erişimi.

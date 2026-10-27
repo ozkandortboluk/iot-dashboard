@@ -10,7 +10,7 @@ VPS Agent, NexusNode IoT Dashboard'dan bağımsız tasarlanan salt-okunur VPS sa
 - Kaldırma işlemi: UNINSTALL.md
 
 ## Durum
-Bu depo denetim modüllerini ve testlerini içerir; tamamlanmış/kurulmuş VPS servisi veya çalışan web paneli değildir. Örnek systemd birimleri kurulum talimatı değil, taslaktır. Codex CLI çağıran çalışan adapter yoktur. VPS bağlantısı, servis kurulumu, zamanlayıcı veya Telegram gönderimi kendiliğinden başlamaz.
+Bu depo denetim modüllerini, yerel CLI giriş noktasını ve testlerini içerir; tamamlanmış/kurulmuş VPS servisi veya çalışan web paneli değildir. Örnek systemd birimleri kurulum talimatı değil, taslaktır. Codex CLI çağıran çalışan adapter yoktur. VPS bağlantısı, servis kurulumu, zamanlayıcı veya Telegram gönderimi kendiliğinden başlamaz.
 
 ## Bağımsız doğrulama
 Testler geliştiricinin kendi makinesinde veya izole ortamda çalıştırılmalıdır; GitHub üzerinde test çalıştırılmaz.

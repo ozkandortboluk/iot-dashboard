@@ -1,6 +1,6 @@
 # VPS Agent — İşletim notları
 
-Bu klasör tek başına üretim kurulumu değildir. Kod VPS'ye kopyalanmaz; servis kurulum/enable edilmez; gerçek Telegram mesajı gönderilmez; runtime dizini oluşturulmaz.
+Bu klasör tek başına üretim kurulumu değildir. CLI yerel/izole ortamda operatör tarafından başlatılabilir; kod VPS'ye kopyalanmaz; servis kurulum/enable edilmez; gerçek Telegram mesajı gönderilmez; runtime dizini otomatik oluşturulmaz.
 
 ## Yerel geliştirme
 Config örneği yalnız yerel/mock denetim içindir. Varsayılan mod observe_only'dir. Codex CLI başlatılmaz. Testler geliştirici makinesinde veya izole ortamda çalıştırılır; GitHub üzerinde test çalıştırılmaz.

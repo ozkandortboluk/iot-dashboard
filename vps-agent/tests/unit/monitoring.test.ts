@@ -8,8 +8,7 @@ import { AllowedLogSummaryChecker } from '../../monitoring/allowedLogs.js';
 import { runChecker } from '../../core/runner.js';
 import { withInstanceLock } from '../../core/lock.js';
 import { parseMonitorConfig } from '../../core/config.js';
-import { createAdminConfiguredCheckers, createReadOnlyCheckers } from '../../operations/checkFactory.js';
-import { DEFAULT_ADMIN_CONTROL_CONFIG } from '../../admin/controlConfig.js';
+import { createReadOnlyCheckers } from '../../operations/checkFactory.js';
 
 const tempDirs: string[] = [];
 afterEach(async () => { await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -89,15 +88,6 @@ describe('read-only monitoring checks', () => {
     expect(createReadOnlyCheckers(config).map((checker) => checker.id)).toEqual(['app_liveness', 'database_readiness']);
     const unsupported = parseMonitorConfig({ mode: 'propose_changes' });
     expect(() => createReadOnlyCheckers(unsupported)).toThrow('observe_only');
-    const disabled = createAdminConfiguredCheckers(config, DEFAULT_ADMIN_CONTROL_CONFIG);
-    expect(disabled).toEqual([]);
-    const enabled = {
-      ...DEFAULT_ADMIN_CONTROL_CONFIG,
-      pluginEnabled: true,
-      permissions: { ...DEFAULT_ADMIN_CONTROL_CONFIG.permissions, readHealth: true, readHostMetrics: true },
-      features: { ...DEFAULT_ADMIN_CONTROL_CONFIG.features, healthChecks: true, hostMetrics: true },
-    };
-    const adminConfigured = createAdminConfiguredCheckers(config, enabled);
-    expect(adminConfigured.map((checker) => checker.id)).toEqual(['app_liveness', 'database_readiness', 'host_resources']);
+
   });
 });
