@@ -3747,7 +3747,7 @@ class LocalDatabase {
     };
   }
 
-  public async testPostgresConnection(customUrl?: string, options: { applyOnSuccess?: boolean } = {}): Promise<{
+  public async testPostgresConnection(customUrl?: string, options: { applyOnSuccess?: boolean } = { applyOnSuccess: true }): Promise<{
     success: boolean;
     message: string;
     version?: string;
