@@ -43,7 +43,21 @@ export const monitorConfigSchema = z.object({
     loadWarningPerCpu: z.number().min(0.1).max(10).default(1.5),
     loadCriticalPerCpu: z.number().min(0.2).max(20).default(3),
   }).strict().default({ mountPath: '/', diskWarningPercent: 80, diskCriticalPercent: 90, memoryWarningPercent: 80, memoryCriticalPercent: 92, inodeWarningPercent: 80, inodeCriticalPercent: 90, loadWarningPerCpu: 1.5, loadCriticalPerCpu: 3, enabled: true }),
-  docker: z.object({ enabled: z.boolean().default(false), expectedContainers: z.array(z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/)).max(16).default([]) }).strict().default({ enabled: false, expectedContainers: [] }),
+  docker: z.object({
+    enabled: z.boolean().default(false),
+    expectedContainers: z.array(z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/)).max(16).default([]),
+    readOnlyProxyUrl: z.string().url().optional().superRefine((value, ctx) => {
+      if (value === undefined) return;
+      try {
+        const url = new URL(value);
+        if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) {
+          ctx.addIssue({ code: 'custom', message: 'Docker proxy URL must be a loopback HTTP root URL without credentials or query.' });
+        }
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'Invalid Docker proxy URL.' });
+      }
+    }),
+  }).strict().default({ enabled: false, expectedContainers: [] }),
   backup: z.object({
     enabled: z.boolean().default(false),
     allowedRoot: absolutePath,
