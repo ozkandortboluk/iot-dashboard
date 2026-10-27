@@ -137,39 +137,127 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
   const { database, email, notifications } = req.body || {};
 
   try {
-    // 1. Update Database Secrets if provided
+    // 1. Database connection changes are preflighted before any active configuration is mutated.
     if (database && typeof database === 'object') {
-      if (database.port !== undefined && database.port !== null && database.port !== '') {
-        const numPort = Number(database.port);
-        if (isNaN(numPort) || numPort < 1 || numPort > 65535) {
-          return res.status(400).json({ success: false, error: 'Veritabanı port numarası 1 ile 65535 arasında geçerli bir sayı olmalıdır.' });
-        }
+      const previousDb = systemSecretsService.getDatabaseConfig();
+      const incomingPassword = typeof database.password === 'string' ? database.password : '';
+      const candidateDb: DatabaseConfigPayload = {
+        host: String(database.host ?? previousDb.host).trim(),
+        port: database.port !== undefined && database.port !== null && database.port !== ''
+          ? Number(database.port)
+          : previousDb.port,
+        database: String(database.database ?? previousDb.database).trim(),
+        user: String(database.user ?? previousDb.user).trim(),
+        password: incomingPassword && !isMaskedSecret(incomingPassword)
+          ? incomingPassword
+          : previousDb.password,
+        sslMode: String(database.sslMode ?? previousDb.sslMode ?? 'disable'),
+      };
+
+      if (isNaN(candidateDb.port) || candidateDb.port < 1 || candidateDb.port > 65535) {
+        return res.status(400).json({ success: false, error: 'Veritabanı port numarası 1 ile 65535 arasında geçerli bir sayı olmalıdır.' });
       }
-      if (database.host) {
-        setupService.validateDatabaseHost(String(database.host), Number(database.port || 5432));
+      if (!candidateDb.host || !candidateDb.database || !candidateDb.user || !candidateDb.password) {
+        return res.status(400).json({ success: false, error: 'Bağlantı değişikliği için host, veritabanı, kullanıcı ve parola gereklidir.' });
       }
-      if (database.sslMode && !['disable', 'require', 'verify-full'].includes(String(database.sslMode))) {
+      if (!['disable', 'require', 'verify-full'].includes(candidateDb.sslMode)) {
         return res.status(400).json({ success: false, error: 'Geçersiz veritabanı SSL modu.' });
       }
 
-      await systemSecretsService.updateDatabaseSecrets(database, operatorName);
+      const passwordChanged = Boolean(incomingPassword && !isMaskedSecret(incomingPassword) && incomingPassword !== previousDb.password);
+      const databaseChanged =
+        candidateDb.host !== previousDb.host ||
+        candidateDb.port !== previousDb.port ||
+        candidateDb.database !== previousDb.database ||
+        candidateDb.user !== previousDb.user ||
+        candidateDb.sslMode !== previousDb.sslMode ||
+        passwordChanged;
 
-      // Also propagate to setupService runtime config so DB pool can re-connect
-      const currentDb = systemSecretsService.getDatabaseConfig();
-      if (currentDb.isConfigured) {
-        const payload: DatabaseConfigPayload = {
-          host: currentDb.host,
-          port: currentDb.port,
-          database: currentDb.database,
-          user: currentDb.user,
-          password: currentDb.password,
-          sslMode: (currentDb.sslMode as any) || 'disable',
-        };
+      if (databaseChanged) {
+        setupService.validateDatabaseHost(candidateDb.host, candidateDb.port);
+
+        // Probe the candidate using a short-lived pool. This does not mutate the active URL or pool.
+        const probe = await setupService.testConnection(candidateDb, { allowCompletedSetup: true });
+        if (!probe.success) {
+          return res.status(422).json({
+            success: false,
+            error: 'Yeni veritabanı bağlantısı doğrulanamadı; mevcut ayarlar korunmuştur.',
+            details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+            errorCode: probe.errorCode,
+          });
+        }
+
+        // Never switch the application to an empty/uninitialized database by mistake.
+        const requiredTables = ['users', 'devices', 'telemetry_readings'];
+        const missingTables = requiredTables.filter((table) => !probe.tablesStatus?.[table]);
+        if (missingTables.length > 0) {
+          return res.status(422).json({
+            success: false,
+            error: 'Hedef veritabanında NexusNode şeması doğrulanamadı; mevcut ayarlar korunmuştur.',
+            details: `Eksik zorunlu tablolar: ${missingTables.join(', ')}. Yeni veritabanını uygulamaya bağlamadan önce verileri ve şemayı kontrollü biçimde taşıyın.`,
+          });
+        }
+
         try {
-          setupService.saveRuntimeSecretConfig(payload, setupService.isSetupCompleted());
-          db.savePostgresUrl(setupService.buildConnectionString(payload));
-        } catch (dbErr: any) {
-          systemLogger.warn('database', `Runtime DB yapılandırması güncellenemedi: ${sanitizeLogString(dbErr?.message || dbErr)}`);
+          await systemSecretsService.updateDatabaseSecrets(database, operatorName);
+          const effectiveDb = systemSecretsService.getDatabaseConfig();
+          const effectivePayload: DatabaseConfigPayload = {
+            host: effectiveDb.host,
+            port: effectiveDb.port,
+            database: effectiveDb.database,
+            user: effectiveDb.user,
+            password: effectiveDb.password,
+            sslMode: effectiveDb.sslMode as any || 'disable',
+          };
+
+          setupService.saveRuntimeSecretConfig(effectivePayload, setupService.isSetupCompleted());
+          // Persist only non-password connection metadata; the encrypted Vault remains authoritative for passwords.
+          db.savePostgresUrl(setupService.buildConnectionString({ ...effectivePayload, password: '' }));
+          db.recyclePgPool();
+          const connected = await db.initPostgresRepository(true);
+          if (!connected) {
+            throw new Error('Yeni bağlantı kaydedildi ancak uygulama bağlantı havuzu hazır duruma gelemedi.');
+          }
+        } catch (applyError: any) {
+          // Best-effort rollback: restore the previous Vault/runtime metadata and reconnect to the old target.
+          try {
+            await systemSecretsService.updateDatabaseSecrets({
+              host: previousDb.host,
+              port: previousDb.port,
+              database: previousDb.database,
+              user: previousDb.user,
+              password: previousDb.password,
+              sslMode: previousDb.sslMode,
+            }, operatorName);
+            setupService.saveRuntimeSecretConfig({
+              host: previousDb.host,
+              port: previousDb.port,
+              database: previousDb.database,
+              user: previousDb.user,
+              password: previousDb.password,
+              sslMode: previousDb.sslMode as any,
+            }, setupService.isSetupCompleted());
+            db.savePostgresUrl(setupService.buildConnectionString({
+              host: previousDb.host,
+              port: previousDb.port,
+              database: previousDb.database,
+              user: previousDb.user,
+              password: '',
+              sslMode: previousDb.sslMode as any,
+            }));
+            db.recyclePgPool();
+            await db.initPostgresRepository(true);
+          } catch (rollbackError: any) {
+            systemLogger.error('database', `DB bağlantı değişikliği geri alınamadı; elle müdahale gerekiyor: ${sanitizeLogString(rollbackError?.message || rollbackError)}`);
+            return res.status(503).json({
+              success: false,
+              error: 'Bağlantı değişikliği başarısız oldu ve otomatik geri dönüş doğrulanamadı. Üretim değişikliklerini durdurun ve sunucu yapılandırmasını inceleyin.',
+            });
+          }
+          return res.status(503).json({
+            success: false,
+            error: 'Yeni bağlantı etkinleştirilemedi. Önceki bağlantı ayarları geri yüklendi.',
+          });
         }
       }
     }
