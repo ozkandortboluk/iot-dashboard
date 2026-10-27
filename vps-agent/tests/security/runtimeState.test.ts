@@ -28,6 +28,6 @@ describe('runtime checkpoint safety', () => {
   });
 
   it('refuses to write runtime state below the source tree', async () => {
-    await expect(writeRuntimeCheckpoint(path.resolve('vps-agent/runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored inside the repository working directory');
+    await expect(writeRuntimeCheckpoint(path.resolve('runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored inside the repository working directory');
   });
 });

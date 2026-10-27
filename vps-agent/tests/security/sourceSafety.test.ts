@@ -14,7 +14,7 @@ async function listFiles(directory: string): Promise<string[]> {
 
 describe('source safety scan', () => {
   it('contains no token-shaped literals or shell/process execution adapter', async () => {
-    const root = path.resolve('vps-agent');
+    const root = path.resolve(process.cwd());
     const files = (await listFiles(root)).filter((file) => !file.includes(`${path.sep}tests${path.sep}`));
     const source = (await Promise.all(files.map((file) => readFile(file, 'utf8')))).join('\n');
     expect(source).not.toMatch(/\b\d{6,}:[A-Za-z0-9_-]{25,}\b/);

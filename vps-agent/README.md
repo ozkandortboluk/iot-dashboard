@@ -16,7 +16,10 @@ Bu depo denetim modüllerini ve testlerini içerir; tamamlanmış/kurulmuş VPS 
 Testler geliştiricinin kendi makinesinde veya izole ortamda çalıştırılmalıdır; GitHub üzerinde test çalıştırılmaz.
 
 ~~~powershell
-npm.cmd exec -- vitest run --config vps-agent/vitest.config.ts
+cd vps-agent
+npm.cmd install
+npm.cmd test
+npm.cmd run type-check
 ~~~
 
 VPS Agent'a özel bağımsız paket dosyaları klasör içindedir; kök uygulamanın bağımlılıklarına güvenerek çalıştırılmamalıdır.
