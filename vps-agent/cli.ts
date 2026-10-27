@@ -128,7 +128,10 @@ async function executeRun(options: CliOptions, config: ReturnType<typeof parseMo
 
   if (statePath) await writeRuntimeCheckpoint(statePath, nextState);
 
-  const integrationFailed = Number(notifications.failed ?? 0) > 0 || analysis.status === 'failed';
+  const integrationFailed = Number(notifications.failed ?? 0) > 0
+    || notifications.status === 'blocked'
+    || analysis.status === 'failed'
+    || analysis.status === 'blocked';
   const output = {
     ...report,
     notifications,
@@ -146,6 +149,8 @@ export async function runAgent(options: CliOptions): Promise<number> {
   const config = parseMonitorConfig(JSON.parse(raw) as unknown);
   if (config.telegram.enabled && !config.runtime.statePath) throw new Error('runtime_state_path_required_for_telegram');
   if (config.runtime.statePath) {
+    // Validate the path before creating the directory or lock file.
+    await readRuntimeCheckpoint(config.runtime.statePath);
     const directory = path.dirname(config.runtime.statePath);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const info = await lstat(directory);
