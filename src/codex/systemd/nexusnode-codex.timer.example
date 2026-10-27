@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily NexusNode Codex read-only health audit (example only)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Europe/Istanbul
+AccuracySec=1min
+Persistent=true
+Unit=nexusnode-codex.service
+
+[Install]
+WantedBy=timers.target
+
+# Do not install or enable from this PR. No production task is scheduled.

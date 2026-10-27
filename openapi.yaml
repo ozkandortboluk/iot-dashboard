@@ -1,0 +1,133 @@
+openapi: 3.0.3
+info:
+  title: Industrial IoT & Telemetry Realtime Platform API
+  description: REST API ve Gerçek Zamanlı Telemetri, Cihaz Yönetimi, Çok Kiracılı İzolasyon, Kural & Alarm Motoru OpenAPI Şartnamesi.
+  version: 1.0.0
+  contact:
+    name: Özkan Dörtbölük
+    email: admin@dashboard.io
+servers:
+  - url: http://localhost:3000
+    description: Yerel Geliştirme Sunucusu
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: nexus_session_token
+      description: Tarayıcı HttpOnly oturum çerezi.
+    ServiceBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Service Token (nxs_srv_...)
+      description: AI Studio veya sunucular arası erişim için Servis Token'ı (nxs_srv_...)
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Cihaz kimlik doğrulama anahtarı.
+
+paths:
+  /api/health:
+    get:
+      summary: Sistem Sağlık Durumu
+      responses:
+        '200':
+          description: Sağlıklı
+  /api/auth/login:
+    post:
+      summary: Kullanıcı Girişi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Başarılı Giriş
+        '401':
+          description: Hatalı Şifre
+  /api/admin/service-tokens:
+    post:
+      summary: Yeni Servis Jetonu Oluştur (Admin)
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Oluşturuldu
+    get:
+      summary: Servis Jetonlarını Listele (Admin)
+      security:
+        - CookieAuth: []
+      responses:
+        '200':
+          description: Jeton listesi
+  /api/devices:
+    get:
+      summary: Cihazları Listele
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '200':
+          description: Cihaz listesi
+    post:
+      summary: Yeni Cihaz Ekle
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '201':
+          description: Oluşturuldu
+  /api/telemetry:
+    get:
+      summary: Canlı ve Son Telemetri Verileri
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '200':
+          description: Telemetri listesi
+    post:
+      summary: Telemetri Verisi Gönder
+      security:
+        - ApiKeyAuth: []
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '201':
+          description: Kaydedildi
+  /api/rules:
+    get:
+      summary: Alarm Kurallarını Listele
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '200':
+          description: Kurallar
+    post:
+      summary: Yeni Alarm Kuralı Oluştur
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '201':
+          description: Oluşturuldu
+  /api/alarms:
+    get:
+      summary: Aktif Alarmları Listele
+      security:
+        - CookieAuth: []
+        - ServiceBearerAuth: []
+      responses:
+        '200':
+          description: Alarmlar

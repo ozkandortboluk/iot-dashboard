@@ -1,0 +1,219 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
+
+export interface MasterKeyStatus {
+  configured: boolean;
+  source: 'docker_secret' | 'secrets_file' | 'data_vault_key' | 'env' | 'missing';
+  sourcePath?: string;
+  isProduction: boolean;
+  error?: string;
+}
+
+const DOCKER_SECRET_KEY_PATH = '/run/secrets/encryption_key';
+const SECRETS_DIR_KEY_PATH = path.resolve(process.cwd(), 'secrets', 'encryption_key');
+const LOCAL_VAULT_KEY_PATH = path.resolve(process.cwd(), 'data', '.vault_key');
+
+/**
+ * Single Authoritative Master Key Provider (Single Source of Truth)
+ * Centralizes root AES-256-GCM Vault encryption key resolution.
+ * Replaces fragmented, divergent resolution logic across the codebase.
+ */
+export class MasterKeyProvider {
+  private static instance: MasterKeyProvider;
+  private cachedKeyBuffer: Buffer | null = null;
+  private cachedSource: 'docker_secret' | 'secrets_file' | 'data_vault_key' | 'env' | 'missing' = 'missing';
+  private cachedSourcePath?: string;
+  private lastError: Error | null = null;
+
+  private constructor() {}
+
+  public static getInstance(): MasterKeyProvider {
+    if (!MasterKeyProvider.instance) {
+      MasterKeyProvider.instance = new MasterKeyProvider();
+    }
+    return MasterKeyProvider.instance;
+  }
+
+  public resetCache(): void {
+    this.cachedKeyBuffer = null;
+    this.cachedSource = 'missing';
+    this.cachedSourcePath = undefined;
+    this.lastError = null;
+  }
+
+  public derive32ByteKey(raw: string): Buffer {
+    const trimmed = raw.trim();
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      return Buffer.from(trimmed, 'hex');
+    }
+    return crypto.createHash('sha256').update(trimmed, 'utf8').digest();
+  }
+
+  /**
+   * Returns the single authoritative 32-byte AES-256 master key.
+   *
+   * PRODUCTION POLICY:
+   * - STRICTLY AND EXCLUSIVELY /run/secrets/encryption_key (Docker Secret).
+   * - All environment variables, local files, and auto-generation are forbidden.
+   * - If missing or empty in production, returns null (fail-closed).
+   *
+   * DEVELOPMENT / TEST / PREVIEW POLICY:
+   * 1. Docker Secret (/run/secrets/encryption_key) if mounted.
+   * 2. Local secrets mount (secrets/encryption_key) if present.
+   * 3. Persistent local vault key file (data/.vault_key) if present (MUST BE PRESERVED ON RESTART).
+   * 4. Custom path via ENCRYPTION_KEY_PATH / ENCRYPTION_KEY_FILE.
+   * 5. Explicit process.env.ENCRYPTION_KEY if provided.
+   * 6. If none exist in development: generates a high-entropy 32-byte key, persists it once to
+   *    data/.vault_key (chmod 0600) so that ALL subsequent restarts continue to use the exact same key!
+   */
+  public getKey(): Buffer | null {
+    if (this.cachedKeyBuffer) {
+      return this.cachedKeyBuffer;
+    }
+
+    const isProd = isProductionVpsEnvironment();
+
+    if (isProd) {
+      try {
+        if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
+          const raw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
+          // Production policy: strictly require 64 hexadecimal characters (256-bit cryptographic root key)
+          // 32+ character plain text SHA-256 derivation is forbidden in production (fail-closed)
+          if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+            this.cachedKeyBuffer = Buffer.from(raw, 'hex');
+            this.cachedSource = 'docker_secret';
+            this.cachedSourcePath = DOCKER_SECRET_KEY_PATH;
+            this.lastError = null;
+            return this.cachedKeyBuffer;
+          }
+        }
+      } catch (err: any) {
+        this.lastError = err;
+        console.error(`[MasterKeyProvider] HATA: '${DOCKER_SECRET_KEY_PATH}' mevcut fakat okunamadı (${err.code || err.message}).`);
+        console.error(`[MasterKeyProvider] Erişim hatası: Konteyner kullanıcısı (node: UID/GID 1000) için dosya okuma izinleri (mode 0640 / GID 1000) yetersiz.`);
+      }
+
+      this.cachedSource = 'missing';
+      return null;
+    }
+
+    // --- NON-PRODUCTION (Dev / Test / Cloud Run Sandbox) ---
+
+    // 1. Docker secret
+    try {
+      if (fs.existsSync(DOCKER_SECRET_KEY_PATH)) {
+        const raw = fs.readFileSync(DOCKER_SECRET_KEY_PATH, 'utf8').trim();
+        if (raw && raw.length >= 16) {
+          this.cachedKeyBuffer = this.derive32ByteKey(raw);
+          this.cachedSource = 'docker_secret';
+          this.cachedSourcePath = DOCKER_SECRET_KEY_PATH;
+          return this.cachedKeyBuffer;
+        }
+      }
+    } catch {}
+
+    // 2. secrets/encryption_key
+    try {
+      if (fs.existsSync(SECRETS_DIR_KEY_PATH)) {
+        const raw = fs.readFileSync(SECRETS_DIR_KEY_PATH, 'utf8').trim();
+        if (raw && raw.length >= 16) {
+          this.cachedKeyBuffer = this.derive32ByteKey(raw);
+          this.cachedSource = 'secrets_file';
+          this.cachedSourcePath = SECRETS_DIR_KEY_PATH;
+          return this.cachedKeyBuffer;
+        }
+      }
+    } catch {}
+
+    // 3. Persistent local development key: never silently replace a damaged key.
+    // An existing key may encrypt valuable Vault records, even outside production.
+    if (fs.existsSync(LOCAL_VAULT_KEY_PATH)) {
+      try {
+        const raw = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
+        if (raw.length < 16) {
+          throw new Error('Persistent Vault master key is invalid');
+        }
+        this.cachedKeyBuffer = this.derive32ByteKey(raw);
+        this.cachedSource = 'data_vault_key';
+        this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+        return this.cachedKeyBuffer;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error : new Error(String(error));
+        this.cachedSource = 'missing';
+        return null; // Fail closed; never rotate a key after read/corruption errors.
+      }
+    }
+
+    // 4. Custom key path if specified
+    const customKeyPath = process.env.ENCRYPTION_KEY_PATH || process.env.ENCRYPTION_KEY_FILE;
+    if (customKeyPath) {
+      try {
+        if (fs.existsSync(customKeyPath)) {
+          const raw = fs.readFileSync(customKeyPath, 'utf8').trim();
+          if (raw && raw.length >= 16) {
+            this.cachedKeyBuffer = this.derive32ByteKey(raw);
+            this.cachedSource = 'secrets_file';
+            this.cachedSourcePath = customKeyPath;
+            return this.cachedKeyBuffer;
+          }
+        }
+      } catch {}
+    }
+
+    // 5. Environment variable
+    const envKey = (process.env.ENCRYPTION_KEY || '').trim();
+    if (envKey && envKey.length >= 16) {
+      this.cachedKeyBuffer = this.derive32ByteKey(envKey);
+      this.cachedSource = 'env';
+      return this.cachedKeyBuffer;
+    }
+
+    // 6. Local development sandbox bootstrap: persist a fresh key to data/.vault_key so restarts reuse it!
+    try {
+      const dataDir = path.dirname(LOCAL_VAULT_KEY_PATH);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      const newKeyHex = crypto.randomBytes(32).toString('hex');
+      // Exclusive creation prevents two processes from overwriting each other's key.
+      fs.writeFileSync(LOCAL_VAULT_KEY_PATH, newKeyHex, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      this.cachedKeyBuffer = this.derive32ByteKey(newKeyHex);
+      this.cachedSource = 'data_vault_key';
+      this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+      return this.cachedKeyBuffer;
+    } catch (error) {
+      // A concurrent process may have won the create race. Use its persisted key,
+      // but never replace it or generate an ephemeral incompatible master key.
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        try {
+          const winner = fs.readFileSync(LOCAL_VAULT_KEY_PATH, 'utf8').trim();
+          if (winner.length < 16) throw new Error('Concurrent master key is invalid', { cause: error });
+          this.cachedKeyBuffer = this.derive32ByteKey(winner);
+          this.cachedSource = 'data_vault_key';
+          this.cachedSourcePath = LOCAL_VAULT_KEY_PATH;
+          return this.cachedKeyBuffer;
+        } catch (readError) {
+          this.lastError = readError instanceof Error ? readError : new Error(String(readError));
+          return null;
+        }
+      }
+      this.lastError = error instanceof Error ? error : new Error(String(error));
+      return null;
+    }
+  }
+
+  public getStatus(): MasterKeyStatus {
+    const isConfigured = this.getKey() !== null;
+    return {
+      configured: isConfigured,
+      source: this.cachedSource,
+      sourcePath: this.cachedSourcePath,
+      isProduction: isProductionVpsEnvironment(),
+      error: this.lastError?.message,
+    };
+  }
+}
+
+export const masterKeyProvider = MasterKeyProvider.getInstance();

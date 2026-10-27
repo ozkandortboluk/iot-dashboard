@@ -1,0 +1,46 @@
+node_modules/
+dist/
+build/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+data/
+data/.db_config.json
+data/.system_secrets.json
+data/.setup_token
+data/.vault_key
+*.secret*
+*.pem
+*.key
+*.crt
+docker/certs/*.crt
+docker/certs/*.key
+docker/certs/*.pem
+secrets/
+db.json
+uploads/keys/
+uploads/firmware/
+# Backups
+backups/
+*.bak
+
+# Temporary scratch scripts & debug dumps
+fix_*
+fix-*
+get_*
+check_*
+test_*
+patch_*
+output.txt
+temp_*
+*.tmp
+cookies.txt
+
+# Explicitly ensure all test files in src/tests are tracked
+!src/tests/
+!src/tests/**
+
+
+

@@ -1,0 +1,161 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.1-pg16
+    container_name: nexus_timescaledb
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
+      # Initialization-only Docker secret: TimescaleDB reads cluster bootstrap password directly from Docker Secret file.
+      # Never exposed in plaintext .env or injected into the app container environment.
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
+    # Security: In production, database is isolated inside nexus_net.
+    # To expose port locally for external tools, set POSTGRES_PORT_BIND=127.0.0.1:5432:5432 in .env
+    ports:
+      - "${POSTGRES_PORT_BIND:-127.0.0.1:5432:5432}"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_user} -d ${POSTGRES_DB:-iot_dashboard}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - nexus_net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iot-dashboard-app
+    container_name: nexus_app
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    # Security: Route public traffic via Nginx reverse proxy (nexus_proxy).
+    # App node port is restricted to localhost loopback or internal nexus_net container network.
+    ports:
+      - "${PORT_BIND:-127.0.0.1:3000:3000}"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Security: Root encryption key is provided strictly via Docker Secret (/run/secrets/encryption_key)
+      # Application secrets (database password, JWT secret, session secret, OTA signing key)
+      # are stored exclusively in Central Security Vault (AES-256-GCM encrypted in data/.system_secrets.json).
+      # No plaintext secrets are leaked in app container environment.
+      DB_HOST: ${DB_HOST:-timescaledb}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${POSTGRES_DB:-iot_dashboard}
+      DB_USER: ${POSTGRES_USER:-iot_user}
+      POSTGRES_HOST: ${DB_HOST:-timescaledb}
+      POSTGRES_PORT: ${DB_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
+      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
+      # Security: Application secrets (database password, JWT secret, session secret, OTA signing key)
+      # are stored exclusively in Central Security Vault (AES-256-GCM encrypted in data/.system_secrets.json
+      # or PostgreSQL system_settings). Root ENCRYPTION_KEY unlocks the vault. No plaintext secrets in app container env.
+    volumes:
+      - app_data:/app/data
+    # File-backed Compose secrets are bind mounts; uid/gid/mode are ignored outside Swarm.
+    # Host-side access is configured by align_secrets_ownership_and_permissions().
+    secrets:
+      - source: encryption_key
+        target: encryption_key
+    healthcheck:
+      test: [ "CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - nexus_net
+
+  proxy:
+    profiles: [ "docker-proxy" ]
+    image: nginx:alpine
+    container_name: nexus_proxy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    pids_limit: 128
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/certs:/etc/nginx/certs:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost/healthz" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - nexus_net
+
+  adminer:
+    image: adminer:4.8.1
+    container_name: nexus_adminer
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Security: Restrict Adminer to localhost interface only to prevent public web exposure
+    ports:
+      - "${ADMINER_PORT_BIND:-127.0.0.1:8080:8080}"
+    networks:
+      - nexus_net
+    depends_on:
+      - timescaledb
+
+volumes:
+  timescaledb_data:
+  app_data:
+
+secrets:
+  encryption_key:
+    file: ./secrets/encryption_key
+  postgres_password:
+    file: ./secrets/postgres_password
+
+networks:
+  nexus_net:
+    driver: bridge

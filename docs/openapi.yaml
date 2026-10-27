@@ -1,0 +1,341 @@
+openapi: 3.0.3
+info:
+  title: Industrial IoT Real-Time Analytics & Ingestion API
+  version: 1.0.0
+  description: |
+    High-throughput REST API for IoT edge devices (ESP32/ESP8266/STM32/Raspberry Pi),
+    telemetry streaming, TimescaleDB time-series downsampling, automated chunk compression,
+    device configuration, and alarm evaluation engine.
+  contact:
+    name: IoT Engineering Team
+    email: ozkan.1403@gmail.com
+
+servers:
+  - url: /api
+    description: Primary API Gateway Endpoint
+
+paths:
+  /telemetry:
+    post:
+      summary: Ingest Real-Time Device Telemetry
+      description: Ingests multi-metric telemetry readings into the TimescaleDB hypertable and evaluates active threshold alarm rules.
+      operationId: ingestTelemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryIngestRequest'
+      responses:
+        '200':
+          description: Telemetry successfully recorded and broadcast over WebSocket.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  readingsRecorded:
+                    type: integer
+                    example: 3
+                  alarmsTriggered:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AlarmEvent'
+
+    get:
+      summary: Query Raw Telemetry Readings
+      description: Returns historical telemetry readings with optional device, metric, and time window filters.
+      operationId: queryTelemetry
+      parameters:
+        - name: deviceId
+          in: query
+          schema:
+            type: string
+          description: Optional device identifier filter
+        - name: metric
+          in: query
+          schema:
+            type: string
+          description: Optional metric name filter (e.g., temperature, humidity)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Max rows to return
+      responses:
+        '200':
+          description: List of historical telemetry records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TelemetryRecord'
+
+  /timescale/stats:
+    get:
+      summary: Retrieve TimescaleDB Hypertable & Compression Metrics
+      description: Returns chunk partition list, compression ratio (e.g. 91.8%), space saved in MB, and continuous aggregates status.
+      operationId: getTimescaleStats
+      responses:
+        '200':
+          description: Detailed TimescaleDB statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimescaleDBStats'
+
+  /timescale/compress-now:
+    post:
+      summary: Trigger Manual Chunk Compression
+      description: Immediately compresses all uncompressed chunks older than the configured threshold (e.g. 7 days).
+      operationId: compressTimescaleChunksNow
+      responses:
+        '200':
+          description: Compression operation summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: '3 chunk başarıyla LZ4 algoritmasıyla sıkıştırıldı.'
+
+  /timescale/policies:
+    post:
+      summary: Update TimescaleDB Compression & Data Retention Policies
+      operationId: updateTimescalePolicies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                compressOlderThanDays:
+                  type: integer
+                  default: 7
+                dropOlderThanDays:
+                  type: integer
+                  default: 90
+      responses:
+        '200':
+          description: Policy update confirmation.
+
+  /timescale/time-bucket:
+    get:
+      summary: Query Downsampled Time-Bucket Aggregates
+      description: Uses SQL time_bucket() to calculate AVG, MIN, MAX, COUNT for time-series charts.
+      operationId: queryTimeBucketTelemetry
+      parameters:
+        - name: bucket
+          in: query
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 1d]
+            default: 5m
+        - name: deviceId
+          in: query
+          schema:
+            type: string
+        - name: metric
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Array of bucketed aggregates.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeBucketDataPoint'
+
+  /devices:
+    get:
+      summary: List Registered Edge Devices
+      operationId: listDevices
+      responses:
+        '200':
+          description: List of IoT devices and their current status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+    post:
+      summary: Register or Update an IoT Device
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Device'
+      responses:
+        '200':
+          description: Device saved successfully.
+
+  /alarms:
+    get:
+      summary: List Active Alarms & History
+      operationId: listAlarms
+      responses:
+        '200':
+          description: Array of alarm occurrences.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlarmEvent'
+
+  /database/config:
+    get:
+      summary: Get Active Database Engine Configuration
+      operationId: getDatabaseConfig
+      responses:
+        '200':
+          description: Current engine config.
+    post:
+      summary: Switch Database Engine (postgres, firestore-hybrid, local)
+      operationId: switchDatabaseEngine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                engine:
+                  type: string
+                  enum: [postgres, firestore-hybrid, local]
+                postgresUrl:
+                  type: string
+      responses:
+        '200':
+          description: Engine switch result.
+
+components:
+  schemas:
+    TelemetryIngestRequest:
+      type: object
+      required:
+        - deviceId
+      properties:
+        deviceId:
+          type: string
+          example: esp32-factory-sensor-01
+        temperature:
+          type: number
+          example: 24.8
+        humidity:
+          type: number
+          example: 52.4
+        pressure:
+          type: number
+          example: 1013.25
+        voltage:
+          type: number
+          example: 3.3
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+
+    TelemetryRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        metric:
+          type: string
+        value:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    TimeBucketDataPoint:
+      type: object
+      properties:
+        timeBucket:
+          type: string
+          format: date-time
+        deviceId:
+          type: string
+        metric:
+          type: string
+        avgValue:
+          type: number
+        minValue:
+          type: number
+        maxValue:
+          type: number
+        readingCount:
+          type: integer
+
+    TimescaleDBStats:
+      type: object
+      properties:
+        hypertableEnabled:
+          type: boolean
+        totalChunks:
+          type: integer
+        compressedChunks:
+          type: integer
+        compressionRatioPercent:
+          type: number
+        spaceSavedMB:
+          type: number
+        totalReadingsCount:
+          type: integer
+
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        deviceType:
+          type: string
+        status:
+          type: string
+          enum: [online, offline, warning, error]
+        lastPing:
+          type: string
+
+    AlarmEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        ruleId:
+          type: string
+        deviceId:
+          type: string
+        metric:
+          type: string
+        value:
+          type: number
+        severity:
+          type: string
+          enum: [critical, warning, info]
+        status:
+          type: string
+          enum: [active, acknowledged, resolved]
+        triggeredAt:
+          type: string

@@ -1,0 +1,17 @@
+{
+  "name": "NexusNode IoT Endüstriyel Platform",
+  "short_name": "NexusNode IoT",
+  "description": "nexusnodeiot.com.tr - Endüstriyel Saha & IoT Telemetri İzleme Platformu",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

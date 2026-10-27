@@ -1,0 +1,20 @@
+[Unit]
+Description=NexusNode encrypted offsite disaster recovery backup
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+OnFailure=nexus-dr-alert@%n.service
+
+[Service]
+Type=oneshot
+User=root
+Environment=DR_CONFIG_FILE=/etc/nexusnode/dr.conf
+WorkingDirectory=/opt/iot-dashboard/iot-dashboard
+ExecStart=/opt/iot-dashboard/iot-dashboard/scripts/dr/nexus-dr.sh backup
+UMask=0077
+Nice=10
+TimeoutStartSec=12h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/var/backups /tmp

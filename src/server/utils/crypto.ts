@@ -1,0 +1,274 @@
+import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
+import { masterKeyProvider } from '../services/masterKeyProvider.js';
+import { isProductionVpsEnvironment } from '../config/runtimeEnvironment.js';
+
+export function hashPassword(password: string): string {
+  return bcrypt.hashSync(password, 10);
+}
+
+/**
+ * Strictly verifies a password against a valid bcrypt hash ($2a$, $2b$, $2y$, $2$).
+ * Plaintext password hashes are STRICTLY REJECTED to prevent fallback vulnerabilities.
+ */
+export function verifyPassword(password: string, hash: string): boolean {
+  if (!hash || typeof hash !== 'string') return false;
+  if (!hash.startsWith('$2a$') && !hash.startsWith('$2b$') && !hash.startsWith('$2y$') && !hash.startsWith('$2$')) {
+    return false;
+  }
+  return bcrypt.compareSync(password, hash);
+}
+
+/**
+ * Validates a user password during login and determines whether a legacy non-bcrypt password
+ * needs a one-time migration to bcrypt.
+ */
+export function verifyAndMigratePassword(password: string, hash: string): { isValid: boolean; needsMigration: boolean } {
+  if (!hash || typeof hash !== 'string') return { isValid: false, needsMigration: false };
+  if (hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$') || hash.startsWith('$2$')) {
+    return { isValid: bcrypt.compareSync(password, hash), needsMigration: false };
+  }
+  // One-time legacy plaintext verification for auto-migration to bcrypt
+  const isValid = password === hash;
+  return { isValid, needsMigration: isValid };
+}
+
+// ============================================================================
+// AES-256-GCM SECURE VAULT ENCRYPTION INFRASTRUCTURE
+// ============================================================================
+
+export function resetEncryptionKeyCache(): void {
+  masterKeyProvider.resetCache();
+}
+
+/**
+ * Resolves the 256-bit (32-byte) AES master key via MasterKeyProvider (Single Source of Truth).
+ */
+export function resolveEncryptionKey(): Buffer | null {
+  return masterKeyProvider.getKey();
+}
+
+/**
+ * Derives a strict 32-byte (256-bit) Buffer from a string using SHA-256
+ */
+export function derive32ByteKey(raw: string): Buffer {
+  return masterKeyProvider.derive32ByteKey(raw);
+}
+
+/**
+ * Validates a user-supplied encryption key against the active Vault root encryption key.
+ * Uses timingSafeEqual to prevent side-channel timing attacks.
+ */
+export function verifyMasterEncryptionKey(providedKey: string): { valid: boolean; reason?: string } {
+  if (!providedKey || typeof providedKey !== 'string') {
+    return { valid: false, reason: 'Kasa şifreleme anahtarı (Encryption Key) girilmedi.' };
+  }
+  const clean = providedKey.trim();
+  if (clean.length < 8) {
+    return { valid: false, reason: 'Girilen şifreleme anahtarı geçersiz veya çok kısa.' };
+  }
+
+  const activeBuffer = resolveEncryptionKey();
+  if (!activeBuffer) {
+    return { valid: false, reason: 'Sistem Kasa (Vault) şifreleme anahtarı yapılandırılmamış.' };
+  }
+
+  try {
+    const candidateBuffer = derive32ByteKey(clean);
+    if (candidateBuffer.length === activeBuffer.length && crypto.timingSafeEqual(candidateBuffer, activeBuffer)) {
+      return { valid: true };
+    }
+  } catch (err: any) {
+    return { valid: false, reason: err?.message || 'Anahtar doğrulama hatası.' };
+  }
+
+  return { valid: false, reason: 'Girilen Kasa şifreleme anahtarı sistemin aktif kök anahtarı ile eşleşmiyor.' };
+}
+
+/**
+ * Checks if the Secret Vault is configured with an active encryption key
+ */
+export function isVaultConfigured(): boolean {
+  return resolveEncryptionKey() !== null;
+}
+
+/**
+ * Returns diagnostic metadata regarding vault key status (never revealing the key)
+ */
+export function getVaultStatus(): {
+  configured: boolean;
+  source: string;
+  isProduction: boolean;
+  message?: string;
+  error?: string;
+} {
+  const status = masterKeyProvider.getStatus();
+  return {
+    configured: status.configured,
+    source: status.source,
+    isProduction: status.isProduction,
+    error: status.error,
+    message: status.configured
+      ? 'Secret Vault AES-256-GCM şifreleme anahtarı aktif.'
+      : status.error
+        ? `Secret Vault erişim hatası: ${status.error}. /run/secrets/encryption_key dosya okuma izinlerini (UID/GID 1000) kontrol ediniz.`
+        : status.isProduction
+          ? 'Secret Vault yapılandırılmamış: Üretim ortamında /run/secrets/encryption_key Docker secret dosyası tanımlanmalıdır.'
+          : 'Secret Vault geliştirme modunda yapılandırılmamış.',
+  };
+}
+
+/**
+ * Resets cached key for testing
+ */
+export function resetKeyCacheForTesting(): void {
+  masterKeyProvider.resetCache();
+}
+
+/**
+ * Options for decryptSecret
+ */
+export interface DecryptSecretOptions {
+  allowLegacyPlaintext?: boolean;
+  context?: string;
+}
+
+/**
+ * Encrypts a sensitive string (API token, secret header, bot token) using AES-256-GCM.
+ * Throws in production if Secret Vault is not configured.
+ */
+export function encryptSecret(plainText?: string): string {
+  if (!plainText || !plainText.trim()) return '';
+  if (plainText.startsWith('enc:v1:')) return plainText; // already encrypted
+
+  const key = resolveEncryptionKey();
+  if (!key) {
+    throw new Error('Secret Vault yapılandırılmamış: ENCRYPTION_KEY ortam değişkeni veya /run/secrets/encryption_key tanımlanmalıdır.');
+  }
+
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let encrypted = cipher.update(plainText, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+
+  return `enc:v1:${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+/**
+ * Decrypts an AES-256-GCM encrypted secret.
+ * Rejects silent unencrypted plaintext in production unless explicitly allowed during controlled migration.
+ */
+export function decryptSecret(cipherText?: string, options?: DecryptSecretOptions): string {
+  if (!cipherText || !cipherText.trim()) return '';
+
+  if (cipherText.startsWith('enc:v1:')) {
+    const key = resolveEncryptionKey();
+    if (!key) {
+      if (process.env.NODE_ENV === 'production') {
+        console.warn('[Security Warning] Secret Vault yapılandırılmamış (ENCRYPTION_KEY eksik). Şifreli veri çözülemiyor.');
+      }
+      return '';
+    }
+
+    try {
+      const parts = cipherText.split(':');
+      if (parts.length !== 5) return '';
+      const [, , ivHex, authTagHex, encryptedHex] = parts;
+      const iv = Buffer.from(ivHex, 'hex');
+      const authTag = Buffer.from(authTagHex, 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(authTag);
+      let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch {
+      // Optional fallback for controlled key migration if LEGACY_ENCRYPTION_KEY is provided
+      if (process.env.LEGACY_ENCRYPTION_KEY) {
+        try {
+          const legacyKey = derive32ByteKey(process.env.LEGACY_ENCRYPTION_KEY);
+          const parts = cipherText.split(':');
+          const [, , ivHex, authTagHex, encryptedHex] = parts;
+          const decipher = crypto.createDecipheriv('aes-256-gcm', legacyKey, Buffer.from(ivHex, 'hex'));
+          decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+          let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+          decrypted += decipher.final('utf8');
+          return decrypted;
+        } catch {}
+      }
+      return '';
+    }
+  }
+
+  // Not starting with 'enc:v1:' (Plaintext legacy value)
+  if (options?.allowLegacyPlaintext) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(`[Security Migration] Şifrelenmemiş (plaintext) secret kontrollü migration ile okundu (${options.context || 'legacy_migration'}). Vault'a şifrelenmeli.`);
+    }
+    return cipherText;
+  }
+
+  // In production: Reject unencrypted plaintext values
+  if (process.env.NODE_ENV === 'production') {
+    console.error(`[Security Violation] Şifrelenmemiş (plaintext) secret algılandı ve reddedildi (${options?.context || 'legacy_unencrypted_secret'}). Tüm secretlar 'enc:v1:' formatında olmalıdır.`);
+    return '';
+  }
+
+  // In development/test mode: allow legacy plaintext with warning
+  return cipherText;
+}
+
+/**
+ * Masks a sensitive secret so that only the last 4 characters are visible (••••••••son4),
+ * or returns empty string if no secret is present.
+ */
+export function maskSecret(secret?: string): string {
+  if (!secret || !secret.trim()) return '';
+  const trimmed = secret.trim();
+
+  let raw = trimmed;
+  if (trimmed.startsWith('enc:v1:')) {
+    raw = decryptSecret(trimmed).trim();
+  }
+
+  if (!raw) return '';
+  if (raw.length <= 4) {
+    return '••••••••';
+  }
+  return `••••••••${raw.slice(-4)}`;
+}
+
+/**
+ * Checks if a value is a masked string (e.g. contains •••• or ****)
+ */
+export function isMaskedSecret(val?: string): boolean {
+  if (!val) return false;
+  return val.includes('••••') || val.includes('****') || val.startsWith('••••••••') || val.startsWith('********');
+}
+
+/**
+ * Comprehensive log & error message sanitizer.
+ * Masks database passwords in connection strings, Resend tokens, SMTP passwords,
+ * Telegram/WhatsApp bot tokens, Authorization headers, setup tokens, and private keys.
+ */
+export function sanitizeLogString(str?: string): string {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    // 1. Mask postgresql://user:password@host (handles passwords with @ or special characters)
+    .replace(/(postgres(?:ql)?:\/\/[^:\/\s"']+?:)(.+)(@[a-zA-Z0-9_.-]+(?::\d+)?(?:\/[^\s?]*)?(?:\?[^\s]*)?)/gi, '$1••••••••$3')
+    // 2. Mask Resend API keys & Service Tokens
+    .replace(/re_[a-zA-Z0-9_-]{10,}/g, 're_••••••••')
+    .replace(/nxs_srv_[a-zA-Z0-9_-]{10,}/g, 'nxs_srv_••••••••')
+    // 3. Mask Telegram & WhatsApp bot tokens
+    .replace(/\b\d{6,12}:[a-zA-Z0-9_-]{20,}\b/g, '••••••••:••••••••')
+    // 4. Mask Authorization & Bearer / Basic headers
+    .replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s"']+/gi, '$1••••••••')
+    .replace(/(Bearer\s+)[a-zA-Z0-9_.-]{12,}/gi, '$1••••••••')
+    // 5. Mask explicit password/secret/token key-value assignments
+    .replace(/(password|passwd|pass|secret|smtpPass|smtp_pass|api_key|apikey|private_key|privateKey|setup_token|recovery_token)\s*[:=]\s*["']?([^"'\s,}{]+)["']?/gi, (match, p1, p2) => {
+      if (isMaskedSecret(p2)) return match;
+      return `${p1}=••••••••`;
+    })
+    // 6. Redact PEM Private Keys
+    .replace(/-----BEGIN (?:RSA|EC|DSA|ED25519|OPENSSH|PRIVATE) KEY-----[\s\S]*?-----END (?:RSA|EC|DSA|ED25519|OPENSSH|PRIVATE) KEY-----/g, '[REDACTED PRIVATE KEY]');
+}

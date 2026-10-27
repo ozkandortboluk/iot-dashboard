@@ -1,0 +1,142 @@
+import type { Device } from '../../types.js';
+
+export class TenantSecurityService {
+  /**
+   * Helper: Checks if the user is an active administrator based on role.
+   * Hardcoded user IDs (usr_admin, admin) are NOT treated as inherently privileged.
+   */
+  public isAdminUser(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
+    if (!user) return false;
+    if (user.status === 'suspended' || user.deletedAt) return false;
+    return user.role === 'admin';
+  }
+
+  /**
+   * Kural 1: Müşteriler diğer müşterilerin verilerine ve cihazlarına erişemezler,
+   * verilerini okuyamazlar ya da değiştiremezler. Sadece yönetici tüm müşteri cihazlarına
+   * ve verilerine ulaşabilir.
+   */
+  public canUserAccessDevice(
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
+    dev: Device | undefined | null,
+    tenantMemberships: any[] = []
+  ): boolean {
+    if (!user || !dev) return false;
+
+    // SEC-09: Suspended, inactive, or deleted accounts MUST be strictly blocked regardless of ID or role
+    if ((user.status && user.status !== 'active') || user.deletedAt) {
+      return false;
+    }
+
+    // 1. Sistem yöneticisi (admin) tüm müşteri cihazlarına ve verilerine tam erişim yetkisine sahiptir
+    if (this.isAdminUser(user)) {
+      return true;
+    }
+
+    // Sentinel system tenant devices ('usr_admin' or 'system') require active admin role!
+    // A customer account whose ID happens to be 'usr_admin' gains NO privilege over sentinel devices.
+    if (dev.tenantId === 'usr_admin' || dev.tenantId === 'system') {
+      return false;
+    }
+
+    // 2. Cihazın doğrudan sahibi kontrolü (tenantId, customerId veya userId)
+    if (dev.tenantId && (dev.tenantId === user.id || dev.tenantId === (user as any).tenantId)) {
+      return true;
+    }
+    if ((dev as any).customerId && (dev as any).customerId === user.id) {
+      return true;
+    }
+    if ((dev as any).userId && (dev as any).userId === user.id) {
+      return true;
+    }
+
+    // 3. Çoklu üyelik / Tenant Memberships kontrolü (aktif üyelik şartı)
+    if (Array.isArray(tenantMemberships) && dev.tenantId) {
+      const isMember = tenantMemberships.some(
+        (m: any) =>
+          (m.userId === user.id || m.memberId === user.id) &&
+          m.tenantId === dev.tenantId &&
+          (m.status === 'active' || m.status === undefined) &&
+          m.status !== 'suspended' &&
+          m.status !== 'inactive' &&
+          !m.deletedAt
+      );
+      if (isMember) return true;
+    }
+
+    // Diğer tüm durumlarda erişim KESİNLİKLE ENGELLENİR
+    return false;
+  }
+
+  /**
+   * Cihaz listesini kullanıcının yetkisine göre filtreler.
+   */
+  public filterDevicesForUser(
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
+    devices: Device[],
+    tenantMemberships: any[] = []
+  ): Device[] {
+    if (!user) return [];
+    if (this.isAdminUser(user)) {
+      return devices;
+    }
+    return devices.filter((dev) => this.canUserAccessDevice(user, dev, tenantMemberships));
+  }
+
+  /**
+   * Kural 1: Sanal cihaz ve veri işleme işi SADECE YÖNETİCİYE aittir.
+   * Müşteriler sanal simülatör cihazı oluşturamaz, çalıştıramaz veya düzenleyemez.
+   */
+  public isSimulatorAllowed(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
+    return this.isAdminUser(user);
+  }
+
+  public canUserPerformSimulation(user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null): boolean {
+    return this.isSimulatorAllowed(user);
+  }
+
+  public filterAccessibleDevices(
+    user: { id: string; role?: string; status?: string; deletedAt?: string | null } | undefined | null,
+    devices: Device[],
+    tenantMemberships: any[] = []
+  ): Device[] {
+    return this.filterDevicesForUser(user, devices, tenantMemberships);
+  }
+
+  /**
+   * Cihaz sahipliğini ve kanonik tenant_id değerini doğrular.
+   * - Kural 1: Müşteriler başka müşterilere ait cihaz oluşturamaz, değiştiremez veya devredemez.
+   * - Boş veya geçersiz tenantId'leri kanonik olarak 'usr_admin'e yönlendirir.
+   * - Hedef kiracının sistemde kayıtlı olduğunu teyit eder.
+   */
+  public validateAndResolveDeviceOwnership(
+    targetTenantId: string | undefined | null,
+    requestingUser?: { id: string; role?: string; status?: string; deletedAt?: string | null } | null,
+    existingUsers: { id: string }[] = []
+  ): { canonicalTenantId: string; error?: string } {
+    const rawTenant = (targetTenantId || '').trim();
+
+    // 1. Yetkisiz müşteri kontrolü (Kural 1)
+    if (requestingUser && !this.isAdminUser(requestingUser)) {
+      // Normal müşteri yalnızca kendi adına cihaz oluşturabilir veya yönetebilir
+      return { canonicalTenantId: requestingUser.id };
+    }
+
+    // 2. Yönetici isteği: Belirtilen kiracının geçerliliği
+    if (!rawTenant || rawTenant === 'usr_admin' || rawTenant === 'admin') {
+      return { canonicalTenantId: 'usr_admin' };
+    }
+
+    const exists = existingUsers.some((u) => u.id === rawTenant);
+    if (!exists) {
+      return {
+        canonicalTenantId: 'usr_admin',
+        error: `Belirtilen müşteri/kiracı kimliği (${rawTenant}) sistemde bulunamadı. Cihaz kanonik olarak Sistem Yöneticisine devredildi.`
+      };
+    }
+
+    return { canonicalTenantId: rawTenant };
+  }
+}
+
+export const tenantSecurityService = new TenantSecurityService();

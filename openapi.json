@@ -1,0 +1,510 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Industrial IoT & Telemetry Realtime Platform API",
+    "description": "REST API ve Gerçek Zamanlı Telemetri, Cihaz Yönetimi, Çok Kiracılı İzolasyon, Kural & Alarm Motoru OpenAPI Şartnamesi.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Özkan Dörtbölük",
+      "email": "admin@dashboard.io"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Yerel Geliştirme Sunucusu"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "CookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "nexus_session_token",
+        "description": "Tarayıcı HttpOnly oturum çerezi."
+      },
+      "ServiceBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Service Token (nxs_srv_...)",
+        "description": "AI Studio veya sunucular arası erişim için Servis Token'ı (nxs_srv_...)"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Cihaz kimlik doğrulama anahtarı."
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "customer", "analyst"] },
+          "companyName": { "type": "string" },
+          "phone": { "type": "string" },
+          "notificationEmail": { "type": "string" },
+          "whatsappNumber": { "type": "string" },
+          "telegramChatId": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["sensor", "actuator", "plc", "meter", "inverter", "gateway", "server", "camera"] },
+          "apiKey": { "type": "string" },
+          "status": { "type": "string", "enum": ["online", "offline", "warning", "maintenance"] },
+          "location": { "type": "string" },
+          "ipAddress": { "type": "string" },
+          "lastSeen": { "type": "string", "format": "date-time" },
+          "rateLimitPerMin": { "type": "number" },
+          "isSimulated": { "type": "boolean" },
+          "metrics": { "type": "object", "additionalProperties": { "type": "number" } }
+        }
+      },
+      "TelemetryReading": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "deviceId": { "type": "string" },
+          "deviceName": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "metric": { "type": "string" },
+          "value": { "type": "number" },
+          "unit": { "type": "string" }
+        }
+      },
+      "ThresholdRule": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "userId": { "type": "string" },
+          "deviceId": { "type": "string" },
+          "metric": { "type": "string" },
+          "condition": { "type": "string", "enum": [">", ">=", "<", "<=", "==", "!="] },
+          "threshold": { "type": "number" },
+          "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "ActiveAlarm": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "ruleId": { "type": "string" },
+          "deviceId": { "type": "string" },
+          "deviceName": { "type": "string" },
+          "severity": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "acknowledged", "silenced", "resolved"] },
+          "message": { "type": "string" },
+          "triggeredAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ServiceTokenMetadata": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "tokenPrefix": { "type": "string" },
+          "userId": { "type": "string" },
+          "tenantId": { "type": "string" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "lastUsedAt": { "type": "string", "format": "date-time" },
+          "isRevoked": { "type": "boolean" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Sistem Sağlık Durumu",
+        "description": "Sunucu, veritabanı ve arka plan servislerinin operasyonel durumunu döner.",
+        "responses": {
+          "200": {
+            "description": "Sağlıklı",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "timestamp": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Kullanıcı Girişi",
+        "description": "Email ve şifre ile giriş yapılarak HttpOnly oturum çerezi (nexus_session_token) ayarlanır ve kullanıcı profili dönülür.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "example": "user@example.com" },
+                  "password": { "type": "string", "example": "your_secure_password" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Başarılı giriş",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Geçersiz e-posta veya şifre" }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "summary": "Geçerli Oturum Bilgisi",
+        "security": [{ "CookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Kullanıcı profili",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Yetkisiz istek" }
+        }
+      }
+    },
+    "/api/admin/service-tokens": {
+      "post": {
+        "summary": "Yeni Servis Jetonu Oluştur (Admin)",
+        "description": "AI Studio veya harici servis entegrasyonu için güvenli servis jetonu türetir. Düz metin jeton yalnızca bir kez gösterilir.",
+        "security": [{ "CookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "example": "AI Studio Production Token" },
+                  "userId": { "type": "string" },
+                  "tenantId": { "type": "string" },
+                  "scopes": { "type": "array", "items": { "type": "string" }, "example": ["devices:read", "telemetry:read"] },
+                  "expiresInDays": { "type": "number", "default": 365 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Oluşturulan servis jetonu ve metadataları",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "token": { "type": "string", "example": "nxs_srv_..." },
+                    "metadata": { "$ref": "#/components/schemas/ServiceTokenMetadata" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Servis jetonları veya yetkisiz kullanıcılar servis jetonu oluşturamaz" }
+        }
+      },
+      "get": {
+        "summary": "Servis Jetonlarını Listele (Admin)",
+        "description": "Tanımlı servis jetonlarının metadatalarını döndürür. Düz metin jetonlar veya hash'ler kesinlikle döndürülmez.",
+        "security": [{ "CookieAuth": [] }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "serviceTokens": { "type": "array", "items": { "$ref": "#/components/schemas/ServiceTokenMetadata" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "summary": "Cihazları Listele",
+        "description": "Admin tüm cihazları, Müşteri ise yalnızca kendine ait cihazları listeler.",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Cihaz listesi",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Device" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Yeni Cihaz Oluştur",
+        "description": "Fiziksel veya sanal cihaz kaydı oluşturur.",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "type"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "type": { "type": "string" },
+                  "location": { "type": "string" },
+                  "isSimulated": { "type": "boolean" },
+                  "metrics": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Oluşturulan cihaz",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Device" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devices/{id}": {
+      "get": {
+        "summary": "Cihaz Detayı",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Device" } } } },
+          "404": { "description": "Cihaz bulunamadı" }
+        }
+      },
+      "delete": {
+        "summary": "Cihaz Sil",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Cihaz başarıyla silindi" }
+        }
+      }
+    },
+    "/api/devices/{id}/control": {
+      "post": {
+        "summary": "Cihaz Kontrol Komutu Gönder (Röle/Aç-Kapa)",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["pinOrMetric", "value"],
+                "properties": {
+                  "pinOrMetric": { "type": "string" },
+                  "value": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Komut işlendi" }
+        }
+      }
+    },
+    "/api/telemetry": {
+      "get": {
+        "summary": "Canlı ve Son Telemetri Verileri",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [
+          { "name": "deviceId", "in": "query", "schema": { "type": "string" } },
+          { "name": "metric", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/TelemetryReading" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Telemetri Verisi Enjekte Et (Cihaz Ingestion)",
+        "security": [{ "ApiKeyAuth": [] }, { "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["deviceId", "metric", "value"],
+                "properties": {
+                  "deviceId": { "type": "string" },
+                  "metric": { "type": "string" },
+                  "value": { "type": "number" },
+                  "unit": { "type": "string" },
+                  "apiKey": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Telemetri kaydedildi ve kurallar çalıştırıldı" }
+        }
+      }
+    },
+    "/api/rules": {
+      "get": {
+        "summary": "Alarm Kurallarını Listele",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ThresholdRule" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Yeni Alarm Kuralı Oluştur",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ThresholdRule" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ThresholdRule" } } } }
+        }
+      }
+    },
+    "/api/alarms": {
+      "get": {
+        "summary": "Aktif Alarmları Listele",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ActiveAlarm" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alarms/{id}/ack": {
+      "post": {
+        "summary": "Alarmı Onayla (Acknowledge)",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Alarm onaylandı" }
+        }
+      }
+    },
+    "/api/alarms/{id}/silence": {
+      "post": {
+        "summary": "Alarmı Sustur (Mute)",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "durationMinutes": { "type": "number", "default": 15 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Alarm susturuldu" }
+        }
+      }
+    },
+    "/api/alarms/{id}/resolve": {
+      "post": {
+        "summary": "Alarmı Manuel Kapat / Çöz",
+        "security": [{ "CookieAuth": [] }, { "ServiceBearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Alarm çözüldü ve kapatıldı" }
+        }
+      }
+    }
+  }
+}
