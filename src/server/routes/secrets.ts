@@ -160,15 +160,25 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
       if (!candidateDb.host || !candidateDb.database || !candidateDb.user || !candidateDb.password) {
         return res.status(400).json({ success: false, error: 'Bağlantı değişikliği için host, veritabanı, kullanıcı ve parola gereklidir.' });
       }
-      if (!['disable', 'require', 'verify-full'].includes(candidateDb.sslMode)) {
+      if (!['disable', 'require', 'prefer', 'verify-full'].includes(candidateDb.sslMode)) {
         return res.status(400).json({ success: false, error: 'Geçersiz veritabanı SSL modu.' });
+      }
+
+      // Changing host/port/database can silently point production at a different dataset.
+      // This credential-rotation path intentionally supports only the existing database endpoint.
+      if (
+        candidateDb.host !== previousDb.host ||
+        candidateDb.port !== previousDb.port ||
+        candidateDb.database !== previousDb.database
+      ) {
+        return res.status(409).json({
+          success: false,
+          error: 'Bu ekran yalnızca mevcut veritabanı için kullanıcı/parola ve SSL ayarlarını güvenli biçimde döndürür. Host, port veya veritabanı adını değiştirmek veri kaynağını değiştirebilir; bunun için doğrulanmış yedek, taşıma/şema kontrolü ve ayrı bakım planı gerekir. Hiçbir ayar değiştirilmedi.',
+        });
       }
 
       const passwordChanged = Boolean(incomingPassword && !isMaskedSecret(incomingPassword) && incomingPassword !== previousDb.password);
       const databaseChanged =
-        candidateDb.host !== previousDb.host ||
-        candidateDb.port !== previousDb.port ||
-        candidateDb.database !== previousDb.database ||
         candidateDb.user !== previousDb.user ||
         candidateDb.sslMode !== previousDb.sslMode ||
         passwordChanged;
