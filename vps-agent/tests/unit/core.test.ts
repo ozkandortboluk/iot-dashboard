@@ -10,6 +10,7 @@ describe('VPS Agent configuration and policy', () => {
     expect(config.mode).toBe('observe_only');
     expect(config.docker.enabled).toBe(false);
     expect(config.telegram.enabled).toBe(false);
+    expect(config.ai.enabled).toBe(false);
   });
 
   it('rejects non-loopback health URLs and unapproved paths', () => {
@@ -17,17 +18,20 @@ describe('VPS Agent configuration and policy', () => {
     expect(() => parseMonitorConfig({ health: { readyUrl: 'http://127.0.0.1/admin' } })).toThrow();
   });
 
-  it('rejects inverted resource thresholds', () => {
+  it('rejects inverted resource thresholds and Telegram without persistent state', () => {
     expect(() => parseMonitorConfig({ system: { loadWarningPerCpu: 2, loadCriticalPerCpu: 1 } })).toThrow();
     expect(() => parseMonitorConfig({ system: { inodeWarningPercent: 90, inodeCriticalPercent: 80 } })).toThrow();
+    expect(() => parseMonitorConfig({ telegram: { enabled: true } })).toThrow();
   });
 
-  it('denies mutations, release and unverified model analysis', () => {
+  it('denies mutations and requires explicit per-run approval for outbound integrations', () => {
     expect(authorizeAction('observe_only', 'read_health').allowed).toBe(true);
     expect(authorizeAction('observe_only', 'service_restart').allowed).toBe(false);
     expect(authorizeAction('approved_release', 'deploy').allowed).toBe(false);
     expect(authorizeAction('observe_only', 'send_telegram').allowed).toBe(false);
     expect(authorizeAction('observe_only', 'send_telegram', { realTelegramApproved: true }).allowed).toBe(true);
+    expect(authorizeAction('observe_only', 'analyze_with_ai').allowed).toBe(false);
+    expect(authorizeAction('observe_only', 'analyze_with_ai', { aiAnalysisApproved: true }).allowed).toBe(true);
     expect(authorizeAction('propose_changes', 'analyze_with_codex').allowed).toBe(false);
     expect(canStartApprovedRelease({ explicitHumanApproval: true })).toBe(false);
   });
