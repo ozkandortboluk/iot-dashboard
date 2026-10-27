@@ -887,6 +887,17 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
     return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
   }
 
+  if (postgresUrl && targetEngine !== 'local') {
+    const probe = await db.testPostgresConnection(postgresUrl);
+    if (!probe.success) {
+      return res.status(422).json({
+        success: false,
+        error: 'Yeni bağlantı doğrulanamadı; mevcut bağlantı yapılandırması korunmuştur.',
+        details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+      });
+    }
+  }
+
   db.setActiveEngine(targetEngine, postgresUrl);
   res.json({
     success: true,
@@ -901,10 +912,17 @@ databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, (req, 
     return res.status(400).json({ error: 'Geçersiz veritabanı bağlantı adresi.' });
   }
   const trimmed = postgresUrl.trim();
-  db.savePostgresUrl(trimmed);
+  const probe = await db.testPostgresConnection(trimmed);
+  if (!probe.success) {
+    return res.status(422).json({
+      success: false,
+      error: 'Bağlantı doğrulanamadı; kayıtlı bağlantı değiştirilmedi.',
+      details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+    });
+  }
   res.json({
     success: true,
-    message: 'PostgreSQL bağlantı adresi başarıyla kaydedildi.',
+    message: 'Bağlantı doğrulandı ve güvenli biçimde kaydedildi.',
     config: db.getPostgresConfig(),
   });
 });
