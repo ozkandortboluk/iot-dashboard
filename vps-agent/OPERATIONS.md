@@ -1,18 +1,27 @@
 # VPS Agent — İşletim notları
 
-Bu klasör tek başına üretim kurulumu değildir. CLI yerel/izole ortamda operatör tarafından başlatılabilir; kod VPS'ye kopyalanmaz; servis kurulum/enable edilmez; gerçek Telegram mesajı gönderilmez; runtime dizini otomatik oluşturulmaz.
+Bu PR bir üretim kurulumu değildir. CLI elle başlatılabilir; VPS'ye kopyalama, servis kurma/enable etme, gerçek Telegram gönderimi veya üretim değişikliği yapılmaz.
 
-## Kaynak eşikleri\nÖrnek eşikler disk/inode %80 uyarı ve %90 kritik; bellek %80 uyarı ve %92 kritik; CPU başına 1,5 load uyarı ve 3 load kritik değeridir. Bunlar başlangıç değerleridir, her VPS için evrensel performans sınırı değildir. Gerçek üretim yükü gözlenerek ayarlanmalıdır.\n\n## Yerel geliştirme
-Config örneği yalnız yerel/mock denetim içindir. Varsayılan mod observe_only'dir. Codex CLI başlatılmaz. Testler geliştirici makinesinde veya izole ortamda çalıştırılır; GitHub üzerinde test çalıştırılmaz.
+## İzleme aralığı
 
-## Runtime
-Runtime dosyaları repository dışındaki özel bir dizinde tutulmalıdır. Önerilen Linux izinleri: ayrı root olmayan kullanıcı, runtime dizini 0700, config/state dosyaları 0600. Kaynak, yedek ve secret dizinlerine yazma hakkı verilmez. Windows ACL'leri production izin kanıtı değildir.
+Örnek systemd timer her 5 dakikada bir salt-okunur denetim başlatır; timer kurulmuş/etkin değildir. Günlük özet saati Europe/Istanbul zaman diliminde telegram.dailySummaryHour ile belirlenir. Eşikler başlangıç değerleridir: disk/inode %80 uyarı ve %90 kritik; bellek %80 uyarı ve %92 kritik; CPU başına load 1,5 uyarı ve 3 kritik. Gerçek host yükü izlenerek ayarlanmalıdır.
 
-## Yedek ve geri dönüş
-Mevcut NexusNode yedekleme script'leri çağrılmaz veya değiştirilmez. Yedek kontrolü yalnız desteklenen artifact/checksum biçimini okur; SHA-256 eşleşmesi restore edilebilirliği kanıtlamaz. Hata servis restart'ı, DB rollback'i, restore, silme veya yeni yedek başlatmaz.
+## Runtime ve kilit
 
-## Bildirim
-Telegram yalnız giden HTTPS içindir; token VPS_AGENT_TELEGRAM_BOT_TOKEN gibi güvenli environment secret kaynağından okunur. Gerçek gönderim varsayılan değildir ve ayrıca açık onay ister.
+Kalıcı bildirim dedup ve günlük özet için runtime.statePath ayarlanmalıdır. Linux'ta üst dizin yalnız servis hesabına açık (0700), state dosyası (0600) olmalıdır. State kaynak ağacı dışında tutulur. Eşzamanlı çalışmayı engelleyen .lock dosyası beklenmeyen kesinti sonrası kalırsa otomatik silinmez; PID/işlem ve çalışma durumu operatörce incelenmeden kaldırılmamalıdır.
 
-## Kurulum öncesi kapılar
-Üretim hostu, service account, gerçek dosya izinleri, ağ allowlist'i, secret kaynağı ve runtime davranışı doğrulanmamıştır. Kurulumdan önce ayrı salt-okunur keşif, paketleme, yerel test ve kullanıcı onayı gerekir.
+## Telegram
+
+Telegram varsayılan kapalıdır. Açmak için config etkinleştirilir, token/chat ID environment secret olarak tanımlanır ve CLI'a --allow-telegram-send eklenir. Mesajlar sabit ve sınırlı içeriktedir; tekrarlar 24 saat boyunca bastırılır. Günlük özetin gönderim tarihi kalıcı state'e yazılır. Gerçek mesaj gönderimi bu PR'da test edilmemiştir.
+
+## AI teşhisi
+
+AI varsayılan kapalıdır. ai.enabled=true, OPENAI_API_KEY (veya ai.apiKeyEnv ile seçilen env) ve --allow-ai-analysis gerekir. Yalnız uyarı/kritik/bilinmeyen sonuç varsa çağrılır. Gönderilen veri yalnız sabit checker/hata kodları ve sayısal/boolean metriklerdir; ham log, URL, secret veya müşteri telemetrisi gönderilmez. Çıktı öneridir; komut çalıştırılmaz ve Telegram'a otomatik iletilmez. API kullanımı maliyet doğurabilir; model/çıktı sınırı yapılandırılabilir.
+
+## Docker ve yedek
+
+Docker durum checker'ı için yalnız arayüz vardır; gerçek daemon/socket adapter'ı bilerek bağlanmamıştır çünkü Docker socket root-eşdeğer yetki sağlayabilir. Yedek checker tekil artifact/checksum biçimini salt-okunur inceler; restore başlatmaz ve restore başarısını kanıtlamaz. Mevcut NexusNode yedek script'leri çağrılmaz veya değiştirilmez.
+
+## Geri dönüş ve onay
+
+Agent hatası restart, DB rollback, restore, silme, servis kurulumu, push/merge veya deployment başlatmaz. Gerçek VPS kurulumu, servis hesabı, izinler, ağ ve secret yönetimi ayrı açık onay gerektirir. GitHub üzerinde test çalıştırılmaz; yerel test/type-check/build sonuçları doğrulanmadan PR birleştirilmez.
