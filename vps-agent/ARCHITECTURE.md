@@ -1,18 +1,46 @@
-# VPS Agent — Mimari ve izolasyon
+# VPS Agent — Mimari ve tehdit modeli
 
-## Yerleşim
-VPS Agent, repository kökünde vps-agent/ altında ayrı bir alt projedir. Ana uygulama src/ içinden VPS Agent import etmez. VPS Agent da ana uygulamanın server, UI, permission veya database modüllerini import etmez.
+## Sınırlar
 
-## Bağımlılık sınırı
-- Kendi package.json, tsconfig.json, vitest.config.ts, config örneği, dokümantasyonu ve testleri vardır.
-- Ana uygulamanın package.json, lockfile, build script'i, Docker Compose, Nginx, API route'ları ve DB migration'ları VPS Agent için değiştirilmez.
-- Ana uygulama kaldırıldığında VPS Agent kendi bağımsız tasarımına göre ileride ayrı servis olarak paketlenebilir; mevcut kaynak henüz kurulu servis değildir.
-- Ana uygulama kaldırılırken VPS Agent silinmek zorunda değildir; iki yönde de çalışma zamanı bağımlılığı olmamalıdır.
+VPS Agent bağımsız vps-agent/ paketidir. Ana NexusNode UI/API/DB/build/deployment modüllerini import etmez; ana uygulama da VPS Agent modüllerini import etmez. Bu PR kaynak kodunu değiştirir, production VPS'sine erişmez.
 
 ## Veri akışı
-Operatörün ayrıca başlattığı çalışma -> config doğrulama -> read-only checker'lar -> redakte rapor -> isteğe bağlı ve ayrıca onaylı outgoing notification.
 
-Health yanıt gövdesi yok sayılır. DB portuna doğrudan bağlanılmaz. Docker daemon adapter'ı yalnız reader arayüzüdür; daemon/socket erişimi verilmesi root-eşdeğer risk doğurur ve varsayılan değildir.
+~~~text
+systemd timer (örnek; kurulu değil) veya elle CLI
+  -> strict config + observe_only policy + instance lock
+  -> salt-okunur HTTP / host / allowlist log / opsiyonel backup check
+  -> redakte JSON raporu
+  -> private runtime state (dedup + daily summary checkpoint)
+  -> opsiyonel Telegram (config + env secret + CLI bayrağı)
+  -> opsiyonel AI diagnosis (yalnız hata varsa; config + env secret + CLI bayrağı)
+~~~
 
-## Kapsam dışı
-Ana uygulama yönetim paneli, API route'u, generic settings endpoint'i, uygulama veritabanı ayarı veya ana uygulama lifecycle'ına bağlanan scheduler yoktur. Üretim VPS durumu bu repository'den doğrulanamaz.
+AI isteği sabit checker kimlikleri, durum/hata kodları ve yalnız sayısal/boolean metrikleri taşır. Ham log, health response body, URL, secret ve müşteri telemetrisi gönderilmez. AI yanıtı sadece raporda öneri olarak yer alır; komut çalıştırılmaz ve Telegram'a otomatik iletilmez.
+
+## Modüller
+
+- core/config.ts: Zod config doğrulama ve eşik tutarlılığı.
+- core/policy.ts: varsayılan read-only davranış ve dış entegrasyon onay kapıları.
+- core/runner.ts: timeout/retry sınırıyla seri checker çalıştırma.
+- core/runtimeState.ts: whitelist alanlı, atomik ve özel runtime state; kaynak ağacına yazma yasağı.
+- core/lock.ts: aynı anda birden çok çalışmayı engelleyen lock.
+- monitoring/: HTTP health, host kaynakları, Docker reader arayüzü, backup artifact ve allowlist log sayımı.
+- notifications/: sabit metinli Telegram sender, günlük özet ve kalıcılaştırılabilir dedup.
+- analysis/openAiAnalyzer.ts: yalnız opt-in hata teşhisi, sabit endpoint, zaman/çıktı sınırı, hassas girdi minimizasyonu.
+- systemd/: örnek servis/timer dosyaları; kurulum yapmaz.
+
+## Güvenlik ve kalan riskler
+
+| Risk | Kontrol | Kalan sınır |
+|---|---|---|
+| Bildirim spam'i | 24 saatlik kalıcı event dedup; günlük özet tarihi state'e yazılır | Yeni hata kodu veya durum yeni olay sayılır |
+| Secret sızıntısı | Tokenlar env'den; sabit Telegram metni; AI'ye ham log gönderilmez | AI API'sine sınırlı metrik gönderilir ve maliyet doğurabilir |
+| Dış ağ çağrısı | Sabit HTTPS endpoint, explicit CLI flag, timeout | API anahtarı host kurulumunda korunmalı |
+| Eşzamanlı çalıştırma | Exclusive lock | Çökme sonrası stale lock elle incelenir |
+| Docker root eşdeğeri | Docker socket adapter'ı yok | Gerçek Docker durumu bu sürümde bağlanmamıştır |
+| Otomatik değişiklik | Shell/DB/deploy/restart yolu yok | Bakım otomasyonu kapsam dışıdır |
+
+## Durum
+
+Kaynak kod ve testler eklendi; yerel test/type-check/build henüz çalıştırılmadı ve gerçek VPS üzerinde doğrulanmadı. Bu mimari belge production hazır oluş kanıtı değildir.
