@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpHealthChecker } from '../../monitoring/httpHealth.js';
+import { DockerReadOnlyHttpReader, DockerStatusChecker } from '../../monitoring/dockerStatus.js';
 import { BackupArtifactChecker } from '../../monitoring/backupArtifact.js';
 import { AllowedLogSummaryChecker } from '../../monitoring/allowedLogs.js';
 import { runChecker } from '../../core/runner.js';
@@ -29,7 +30,19 @@ describe('read-only monitoring checks', () => {
     void cancel;
   });
 
-  it('verifies only a single allowed artifact checksum', async () => {
+  it('checks expected containers through a loopback read-only proxy only', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify([
+      { Names: ['/nexus_app'], State: 'running' },
+      { Names: ['/nexus_timescaledb'], State: 'running' },
+    ]), { status: 200 }));
+    const reader = new DockerReadOnlyHttpReader('http://127.0.0.1:2375/', fetcher);
+    const result = await new DockerStatusChecker(['nexus_app', 'nexus_timescaledb'], reader).run(context);
+    expect(result.status).toBe('ok');
+    expect(fetcher).toHaveBeenCalledWith(new URL('http://127.0.0.1:2375/containers/json?all=1&limit=100'), expect.objectContaining({ method: 'GET', redirect: 'error' }));
+    expect(() => new DockerReadOnlyHttpReader('http://example.com:2375/')).toThrow('docker_proxy_url_must_be_loopback_http');
+  });
+
+  it('verifies only a single allowed artifact checksum', async () =>
     const dir = await tempDir();
     const artifactPath = path.join(dir, 'backup.archive.age');
     const checksumPath = path.join(dir, 'backup.archive.age.sha256');
