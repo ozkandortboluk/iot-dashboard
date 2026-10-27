@@ -3737,7 +3737,7 @@ class LocalDatabase {
     };
   }
 
-  public async testPostgresConnection(customUrl?: string): Promise<{
+  public async testPostgresConnection(customUrl?: string, options: { applyOnSuccess?: boolean } = {}): Promise<{
     success: boolean;
     message: string;
     version?: string;
@@ -3807,44 +3807,48 @@ class LocalDatabase {
       try { client.release(); client = null; } catch {}
       try { await pool.end(); pool = null; } catch {}
 
-      // Update cached stats in local state
-      if (!this.data.databaseSettings) {
-        this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
-      }
-      this.data.databaseSettings.isPostgresConnected = true;
-      this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
-      this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-      if (customUrl && !customUrl.includes('••••••••')) {
-        let urlToPersist = customUrl.trim();
-        // In production the password is authoritative in the encrypted Vault; never duplicate it in db.json.
-        if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
-          try {
-            const parsed = new URL(urlToPersist);
-            parsed.password = '';
-            urlToPersist = parsed.toString();
-          } catch {
-            return { success: false, message: 'Bağlantı adresi geçerli biçimde saklanamadı.' };
-          }
+      if (options.applyOnSuccess !== false) {
+        // Commit candidate URL and health metadata only after a successful probe.
+        if (!this.data.databaseSettings) {
+          this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
         }
-        this.data.databaseSettings.postgresUrl = urlToPersist;
-      }
-      this.saveData(this.data);
+        this.data.databaseSettings.isPostgresConnected = true;
+        this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
+        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+        if (customUrl && !customUrl.includes('••••••••')) {
+          let urlToPersist = customUrl.trim();
+          // In production the password is authoritative in the encrypted Vault; never duplicate it in db.json.
+          if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+            try {
+              const parsed = new URL(urlToPersist);
+              parsed.password = '';
+              urlToPersist = parsed.toString();
+            } catch {
+              return { success: false, message: 'Bağlantı adresi geçerli biçimde saklanamadı.' };
+            }
+          }
+          this.data.databaseSettings.postgresUrl = urlToPersist;
+        }
+        this.saveData(this.data);
 
-      // Re-initialize active Postgres repository and sync memory data
-      this.recyclePgPool();
-      await this.initPostgresRepository().catch(() => {});
+        // Re-initialize active Postgres repository and sync memory data.
+        this.recyclePgPool();
+        await this.initPostgresRepository().catch(() => {});
+      }
 
       return {
         success: true,
-        message: 'PostgreSQL sunucusu ile başarılı bağlantı sağlandı.',
-        version: this.data.databaseSettings.postgresVersion,
+        message: options.applyOnSuccess === false
+          ? 'PostgreSQL bağlantı testi başarılı; kayıtlı yapılandırma değiştirilmedi.'
+          : 'PostgreSQL sunucusu ile başarılı bağlantı sağlandı.',
+        version: versionStr.split(' on ')[0] || versionStr,
         latencyMs,
         tablesStatus,
       };
     } catch (err: any) {
       // Failed candidate probes must not alter active connection metadata or readiness indicators.
       const activeStoredUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
-      const isTestingActiveUrl = !customUrl || customUrl.trim() === activeStoredUrl;
+      const isTestingActiveUrl = options.applyOnSuccess !== false && (!customUrl || customUrl.trim() === activeStoredUrl);
       if (isTestingActiveUrl && this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
         this.data.databaseSettings.lastTestedAt = new Date().toISOString();
