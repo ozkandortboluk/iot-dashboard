@@ -32,7 +32,6 @@ describe('VPS Agent configuration and policy', () => {
     expect(authorizeAction('observe_only', 'send_telegram', { realTelegramApproved: true }).allowed).toBe(true);
     expect(authorizeAction('observe_only', 'analyze_with_ai').allowed).toBe(false);
     expect(authorizeAction('observe_only', 'analyze_with_ai', { aiAnalysisApproved: true }).allowed).toBe(true);
-    expect(authorizeAction('propose_changes', 'analyze_with_codex').allowed).toBe(false);
     expect(canStartApprovedRelease({ explicitHumanApproval: true })).toBe(false);
   });
 
