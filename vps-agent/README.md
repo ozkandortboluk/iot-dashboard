@@ -22,7 +22,7 @@ CLI varsayılan olarak salt-okunur kontrolleri çalıştırır; gerçek Telegram
 - Telegram için telegram.enabled=true, özel runtime.statePath ve VPS_AGENT_TELEGRAM_BOT_TOKEN / VPS_AGENT_TELEGRAM_CHAT_ID environment değerleri gerekir. Gerçek mesaj için komuta ayrıca --allow-telegram-send eklenmelidir.
 - AI varsayılan kapalıdır. Açmak için ai.enabled=true, OPENAI_API_KEY environment değeri ve komuta --allow-ai-analysis eklenmelidir. AI yalnız uyarı/kritik/bilinmeyen sonuç varsa çağrılır; ham log, secret, URL veya müşteri telemetrisi gönderilmez.
 - Bu bayrakları örnek systemd servisine eklemek operatörün ayrıca yaptığı bir tercihtir.
-- Docker adapter'ı bilerek bağlanmamıştır; docker.enabled=true tek başına gerçek Docker bağlantısı sağlamaz.
+- Docker izleme için docker.enabled=true ve readOnlyProxyUrl ile ayrıca kurulmuş, loopback üzerinde çalışan read-only Docker API proxy gerekir. VPS Agent doğrudan Docker socket'ine bağlanmaz.
 
 ## Bağımsız doğrulama
 
