@@ -488,7 +488,7 @@ secretsRouter.post('/test-database', authenticateUser, requireAdmin, async (req:
       sslMode,
     };
 
-    const result = await setupService.testConnection(testPayload);
+    const result = await setupService.testConnection(testPayload, { allowCompletedSetup: true });
     return res.json({
       success: result.success,
       message: result.message ? sanitizeLogString(result.message) : undefined,
