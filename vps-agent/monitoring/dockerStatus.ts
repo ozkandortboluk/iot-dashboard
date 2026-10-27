@@ -10,7 +10,7 @@ export interface DockerStatusReader { listContainers(signal: AbortSignal): Promi
 export class DockerReadOnlyHttpReader implements DockerStatusReader {
   constructor(private readonly proxyUrl: string, private readonly fetchImpl: typeof fetch = fetch) {
     const url = new URL(proxyUrl);
-    if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+    if (!['127.0.0.1', '[::1]'].includes(url.hostname)
       || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) {
       throw new Error('docker_proxy_url_must_be_loopback_http');
     }
