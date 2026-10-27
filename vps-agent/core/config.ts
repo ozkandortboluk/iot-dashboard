@@ -50,7 +50,7 @@ export const monitorConfigSchema = z.object({
       if (value === undefined) return;
       try {
         const url = new URL(value);
-        if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) {
+        if (!['127.0.0.1', '[::1]'].includes(url.hostname) || url.protocol !== 'http:' || url.pathname !== '/' || url.username || url.password || url.search || url.hash) {
           ctx.addIssue({ code: 'custom', message: 'Docker proxy URL must be a loopback HTTP root URL without credentials or query.' });
         }
       } catch {
