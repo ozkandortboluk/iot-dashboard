@@ -20,7 +20,7 @@ The POSTGRES_USER, POSTGRES_DB, and POSTGRES_PASSWORD_FILE values in Compose are
 ## Supported rotation procedure
 
 1. Take a fresh database backup and verify it can be read/restored in an isolated environment.
-2. For a password rotation, change the PostgreSQL role password using a controlled DBA procedure first, or preferably create a new least-privilege application role and grant it the required schema/table/sequence privileges. The panel does not execute ALTER ROLE.
+2. For a reversible rotation, create a new least-privilege application role and grant it the required schema/table/sequence privileges. Avoid changing the active role's password in place: that invalidates the old credential and means application-side rollback cannot restore connectivity by itself. If an in-place password change is unavoidable, schedule a maintenance window and have a DBA ready to restore the previous PostgreSQL role password. The panel does not execute ALTER ROLE.
 3. In System Secrets, enter the already-valid candidate username/password for the same host, port, and database. Keep the password field masked to preserve the current secret when not rotating it.
 4. Save. The application probes the candidate first; failed authentication or missing core tables must leave the previous settings intact.
 5. Confirm /api/health/ready, write/read paths, device telemetry ingestion, notifications, and backup jobs. Keep the old PostgreSQL role until this validation period passes.
