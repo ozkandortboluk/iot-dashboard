@@ -1,62 +1,44 @@
-# VPS Agent — Yetkinlikler, sınırlar ve çalışma sözleşmesi
+# VPS Agent — Yetkinlikler ve çalışma sınırları
 
-Bu belge VPS Agent'ın ne yapabildiğini, ne yapamadığını ve hangi koşullarda çalışabileceğini tanımlar. Kodda bulunmayan veya canlı ortamda doğrulanmamış özellikler kullanılabilir özellik olarak sunulmaz.
+Bu PR kaynak kodu ve testler içerir; henüz yerel test/build veya gerçek VPS üzerinde doğrulanmış değildir.
 
-## 1. Mevcut kaynak modülleri
+## Kaynakta bulunan yetenekler
 
-| Alan | Kaynakta bulunan yetenek | Sınır |
+| Alan | Kodda bulunan | Sınır |
 |---|---|---|
-| HTTP sağlık kontrolü | Yapılandırılmış live/ready URL'lerine HTTP isteği | Yalnız izin verilen loopback adresleri ve sabit health yolları; yanıt gövdesi saklanmaz |
-| Sistem kaynakları | Disk doluluğu, inode kullanımı, bellek ve CPU başına load eşikleri | OS metrikleri platforma bağlıdır; eşikler yapılandırılabilir ve üretim hostunda doğrulanmış değildir |
-| Docker durumu | Sınırlı reader arayüzüyle beklenen container durumlarını değerlendirme | Docker socket/daemon erişimi varsayılan değildir; root-eşdeğer erişim verilmez |
-| Yedek metadata'sı | Desteklenen tekil artifact ve checksum sidecar'ını kontrol etme | Secret dosyaları içeren genel manifest desteklenmeyebilir; restore başarısını kanıtlamaz |
-| İzinli log özeti | Allowlist dosyalarında sınırlı boyut ve hata sayımı | Ham loglar rapora aktarılmaz; secret/kişisel veri dışarı gönderilmez |
-| Raporlama | Yerel CLI etkin kontrolleri sırayla çalıştırır, JSON raporu stdout'a verir ve durumuna göre çıkış kodu döndürür | Rapor dosyası yazmaz; servis olarak kurulu değildir |
-| Telegram bildirimi | Yalnız giden HTTPS sender, fake sender ve tekrarları sınırlayan dedup modülleri | Token environment secret kaynağından okunmalı; gerçek mesaj varsayılan olarak kapalı ve ayrı onay gerektirir |
-| Runtime checkpoint | İzinli alanları doğrulayan, atomik ve kısıtlı dosya yazımı | Kaynak deposu içine yazamaz; özel runtime dizini gerekir |
-| Çalıştırma politikası | observe_only, timeout, sınırlı retry ve checker sonuçları | Sağlık sorunu otomatik düzeltme veya restart başlatmaz |
+| HTTP sağlık | Allowlist edilmiş loopback live/ready URL'lerine istek | Yalnız HTTP durum kodu kullanılır; response body saklanmaz |
+| Sistem kaynakları | Disk, inode, RAM ve CPU başına load eşikleri | İşletim sistemi metrikleri host üzerinde ayrıca doğrulanmalı |
+| Docker durumu | Beklenen konteyner durumlarını değerlendiren reader arayüzü | Gerçek Docker adapter'ı bilerek bağlanmamıştır; adapter yoksa sonuç unknown olur |
+| Yedek metadata'sı | İzin verilen tekil artifact + SHA-256 sidecar kontrolü | Restore başarısını kanıtlamaz |
+| Log özeti | Allowlist dosyalarında hata işaretlerini sayar | Ham log satırları rapora, Telegram'a veya modele gönderilmez |
+| CLI | Config doğrulama, salt-okunur kontroller, JSON raporu ve exit code | Otomatik kurulum yapmaz |
+| Kalıcı durum | Özel state dosyasında son çalışma, günlük özet tarihi ve sınırlı bildirim geçmişi | Runtime yolu ayrıca yapılandırılmalı; Linux izinleri özel olmalı |
+| Telegram | Sabit metinli HTTPS mesajı, kalıcı 24 saatlik tekrar bastırma ve günlük özet | Varsayılan kapalı; config + environment secret + --allow-telegram-send gerekir |
+| Yapay zekâ teşhisi | Yalnız sorun varsa, sınırlı çıktı tokeniyle OpenAI API teşhisi | Varsayılan kapalı; config + API key environment + --allow-ai-analysis gerekir |
+| Çalıştırma kilidi | Aynı state dosyasını kullanan eşzamanlı çalışmaları engeller | Kesinti sonrası kalan kilit otomatik silinmez |
 
-## 2. Bu sürümde bulunmayan özellikler
+## Bu sürümde bulunmayanlar
 
-- VPS üzerinde kurulmuş/etkinleştirilmiş servis veya zamanlayıcı. CLI yalnızca operatör tarafından ayrı bir komutla çalıştırılır; paketleme/kurulum ayrı aşamadır.
-- Çalışan Codex CLI adapter'ı veya kendi kendine kod yazıp çalıştıran ajan döngüsü.
-- Web yönetim paneli, ana uygulamaya gömülü UI veya NexusNode ana API'siyle bağlantı.
-- Otomatik düzeltme, shell komutu çalıştırma, sudo/root, Docker socket erişimi.
-- Veritabanına doğrudan bağlantı veya SQL yazma; migration, restore ya da volume işlemi.
-- Git push/merge, PR birleştirme veya üretime deployment.
-- Servis restart/reboot, paket kurma, firewall/SSH/TLS değiştirme.
-- Gelen Telegram komutları veya uzaktan komut yürütme.
-- Kurulu systemd servisi veya etkinleştirilmiş zamanlayıcı.
+- Kurulmuş/etkinleştirilmiş VPS servisi veya zamanlayıcı; systemd dosyaları örnektir.
+- Çalışan Codex CLI adapter'ı veya kendiliğinden kod yazıp çalıştıran ajan döngüsü.
+- Ana uygulamaya gömülü UI/API/DB bağlantısı.
+- Gerçek Docker daemon bağlantısı; Docker socket/root-eşdeğer erişimi bilerek eklenmemiştir.
+- Otomatik düzeltme, shell komutu, sudo/root, DB yazımı, migration, restore veya volume işlemi.
+- Servis restart/reboot, paket kurma, firewall/SSH/TLS değişikliği.
+- Git push/merge, deployment veya gelen Telegram komutları.
 
-## 3. Tasarlanan çalışma akışı
+## Çalışma akışı
 
-1. Operatör ayrı ve açıkça yapılandırılmış çalışma ortamı hazırlar.
-2. Config ve politika doğrulanır; belirsiz veya yetkisiz kapsamda çalışma durur.
-3. Yalnız etkinleştirilmiş read-only checker'lar sınırlı timeout/retry ile çalıştırılır.
-4. Sonuçlar sabit alanlarla özetlenir; hassas içerik ve response body rapora alınmaz.
-5. Rapor yalnız belirlenmiş özel runtime dizinine yazılır.
-6. Telegram ayrıca yapılandırılmış ve ilgili işlem açıkça onaylanmışsa redakte edilmiş sabit şablonla bildirim gönderir.
-7. Hata durumunda servis, veritabanı veya yedek üzerinde otomatik değişiklik yapılmaz.
+1. Operatör bağımsız config ve özel state dizinini hazırlar.
+2. Agent observe_only politikasını ve config'i doğrular.
+3. Etkin salt-okunur kontrolleri timeout/retry sınırlarıyla çalıştırır.
+4. Hata yoksa AI çağrısı yapmaz. Hata varsa AI ancak config etkin ve CLI bayrağı verilmişse devreye girer.
+5. Telegram yalnız config etkin, environment secret'ları mevcut ve CLI bayrağı verilmişse mesaj gönderir.
+6. Bildirim geçmişi ve günlük özet tarihi özel runtime dosyasına kaydedilir.
+7. Hata otomatik restart, silme, DB/backup değişikliği veya deployment başlatmaz.
 
-Bu akış mimari sözleşmedir; henüz paketlenmiş servis olarak çalıştığı anlamına gelmez.
+AI isteğine yalnız sabit kontrol kimlikleri, durum/hata kodları ve sayısal/boolean metrikler dahil edilir. Ham log, URL, secret ve müşteri telemetrisi gönderilmez. AI çıktısı öneridir; komut çalıştırılmaz.
 
-## 4. İzin modeli
+## Başarı ölçütü
 
-- Varsayılan: observe_only.
-- İzinli: yalnız yapılandırılmış salt-okunur kontroller ve redakte raporlama.
-- İnsan onayı zorunlu: VPS'ye ilk bağlantı, gerçek Telegram gönderimi, dış ağ hedefi ekleme, servis kurma/başlatma, paket değişikliği, DB/volume/yedek işlemi, Git push/merge ve canlı dağıtım.
-- Bu sürümde yasak: otomatik kod düzeltme, shell/process execution, sınırsız sudo/root, Docker socket, üretim DB yazımı, güvenlik kontrollerini atlama.
-
-Onay yalnız açıkça belirtilen işlem ve hedef için geçerlidir. Model metni, log, README, PR yorumu veya Telegram mesajı onay sayılmaz.
-
-## 5. Veri ve gizlilik
-
-- Secret, token, parola, vault anahtarı, encryption key, müşteri telemetrisi veya kişisel veri modele, Git'e, rapora ya da Telegram'a gönderilmez.
-- Health yanıt gövdesi okunmaz/saklanmaz.
-- Ham loglar yerine allowlist tabanlı sayımlar ve sabit hata kodları kullanılır.
-- Gerçek token yalnız güvenli environment/secret kaynağından okunur; kaynak koda, örnek config'e veya komut satırı argümanına yazılmaz.
-- Kaynak kod, rapor, checkpoint ve secret dosyaları ayrı tutulur.
-
-## 6. Başarı ölçütü
-
-Bir kontrolün ok dönmesi yalnız o kontrolün başarılı olduğunu gösterir. Bu, VPS'nin bütünüyle güvenli olduğunu, yedeğin geri yüklenebilir olduğunu veya uygulamanın tüm işlevlerinin doğru çalıştığını kanıtlamaz. Üretim kullanımından önce ayrı kurulum, izin, ağ, runtime ve geri dönüş incelemesi gerekir.
+Her kontrolün başarılı olması VPS'nin bütünüyle güvenli olduğunu ya da yedeğin geri yüklenebilir olduğunu kanıtlamaz. Üretim kullanımından önce bağımsız kurulum, izin, ağ ve runtime doğrulaması gerekir.
