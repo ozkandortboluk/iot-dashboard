@@ -8,8 +8,10 @@ Type=oneshot
 User=vps-agent
 Group=vps-agent
 UMask=0077
-# Packaging must provide this executable before this example can be installed.
+# Packaging must provide the built CLI before this example can be installed.
 ExecStart=/usr/bin/node /opt/vps-agent/current/dist/cli.js --config /etc/vps-agent/monitor.json
+# Append --allow-telegram-send only after explicitly enabling and approving Telegram delivery.
+# Append --allow-ai-analysis only after explicitly enabling and approving external AI diagnosis.
 TimeoutStartSec=2min
 RuntimeDirectory=vps-agent
 RuntimeDirectoryMode=0700
@@ -17,9 +19,9 @@ StateDirectory=vps-agent
 StateDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
-PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -30,5 +32,3 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadWritePaths=/var/lib/vps-agent /run/vps-agent
 StandardOutput=journal
 StandardError=journal
-
-# Do not install or enable from this PR. Docker socket, DB secrets and sudo are not granted.
