@@ -7,8 +7,17 @@ describe('VPS Agent CLI arguments', () => {
     expect(() => parseCliArgs(['--config', 'monitor.json'])).toThrow('config_path_must_be_absolute');
   });
 
-  it('accepts only an explicit config path and rejects unknown arguments', () => {
-    expect(parseCliArgs(['--config', '/etc/vps-agent/monitor.json'])).toEqual({ configPath: '/etc/vps-agent/monitor.json' });
+  it('accepts only known flags and keeps external actions disabled by default', () => {
+    expect(parseCliArgs(['--config', '/etc/vps-agent/monitor.json'])).toEqual({
+      configPath: '/etc/vps-agent/monitor.json',
+      allowTelegramSend: false,
+      allowAiAnalysis: false,
+    });
+    expect(parseCliArgs(['--config', '/etc/vps-agent/monitor.json', '--allow-telegram-send', '--allow-ai-analysis'])).toEqual({
+      configPath: '/etc/vps-agent/monitor.json',
+      allowTelegramSend: true,
+      allowAiAnalysis: true,
+    });
     expect(() => parseCliArgs(['--unsafe'])).toThrow('unsupported_argument');
   });
 });
