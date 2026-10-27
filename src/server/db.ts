@@ -3753,10 +3753,7 @@ class LocalDatabase {
       suggestionSteps: string[];
     };
   }> {
-    if (customUrl && !customUrl.includes('••••••••')) {
-      this.savePostgresUrl(customUrl.trim());
-    }
-
+    // A candidate URL is probed without changing active configuration. It is committed only after success.
     const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
       return {
@@ -3818,7 +3815,18 @@ class LocalDatabase {
       this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
       this.data.databaseSettings.lastTestedAt = new Date().toISOString();
       if (customUrl && !customUrl.includes('••••••••')) {
-        this.data.databaseSettings.postgresUrl = customUrl.trim();
+        let urlToPersist = customUrl.trim();
+        // In production the password is authoritative in the encrypted Vault; never duplicate it in db.json.
+        if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+          try {
+            const parsed = new URL(urlToPersist);
+            parsed.password = '';
+            urlToPersist = parsed.toString();
+          } catch {
+            return { success: false, message: 'Bağlantı adresi geçerli biçimde saklanamadı.' };
+          }
+        }
+        this.data.databaseSettings.postgresUrl = urlToPersist;
       }
       this.saveData(this.data);
 
@@ -3834,15 +3842,7 @@ class LocalDatabase {
         tablesStatus,
       };
     } catch (err: any) {
-      if (this.data.databaseSettings) {
-        this.data.databaseSettings.isPostgresConnected = false;
-        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-        if (customUrl && !customUrl.includes('••••••••')) {
-          this.data.databaseSettings.postgresUrl = customUrl.trim();
-        }
-        this.saveData(this.data);
-      }
-
+      // Failed candidate probes must not alter active connection metadata or readiness indicators.
       let parsedHost = '';
       let parsedPort = 5432;
       let parsedDb = '';
