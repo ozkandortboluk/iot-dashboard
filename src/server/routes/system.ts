@@ -930,7 +930,7 @@ databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, async 
 
 databaseRouter.post('/postgres/test', authenticateUser, requireAdmin, async (req, res) => {
   const { postgresUrl } = req.body;
-  const result = await db.testPostgresConnection(postgresUrl);
+  const result = await db.testPostgresConnection(postgresUrl, { applyOnSuccess: false });
   res.json(result);
 });
 
