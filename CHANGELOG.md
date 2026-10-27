@@ -3,6 +3,15 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.49.36] - 2026-10-27
+
+### Security, backup reliability, and Codex operations guidance
+- Removed a credential-like connection string from the current changelog and documented safe historical credential remediation.
+- Redacted sensitive service configuration from WebSocket bootstrap and live settings updates.
+- Allowed verified fallback backups to omit a plaintext `.env` file when deployments use Docker secrets.
+- Added the Codex VPS implementation prompt, security contract, and resumable work checkpoint.
+
+---
 ## 🚀 [v1.49.35] - 2026-10-26
 
 ### PR 26 completion
