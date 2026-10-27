@@ -28,7 +28,7 @@
   },
   "telegram": {
     "enabled": false,
-    "tokenEnv": "NEXUS_CODEX_TELEGRAM_BOT_TOKEN",
+    "tokenEnv": "VPS_AGENT_TELEGRAM_BOT_TOKEN",
     "chatIdEnv": "NEXUS_CODEX_TELEGRAM_CHAT_ID",
     "dailySummaryHour": 9
   }

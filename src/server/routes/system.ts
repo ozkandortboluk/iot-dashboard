@@ -3,7 +3,6 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { db } from '../db.js';
 import { DatabaseState } from '../../types.js';
-import { codexAdminRouter } from '../../codex/admin/router.js';
 import { broadcast, getWebSocketClientsCount } from '../services/websocket.js';
 import {
   simulatorActive,
@@ -51,8 +50,6 @@ const startTime = Date.now();
 // System Router
 const systemRouter = Router();
 
-// Optional Codex admin plugin route; remove this mount and settings filters to detach the plugin.
-systemRouter.use('/system/codex', codexAdminRouter);
 
 // Health Check Endpoints: Liveness (/health/live) & Readiness (/health/ready)
 systemRouter.get(['/health/live', '/health/liveness'], (req, res) => {
@@ -1338,7 +1335,6 @@ timescaleRouter.get('/export', authenticateUser, async (req, res) => {
 systemRouter.get(['/system/settings', '/settings'], authenticateUser, (req, res) => {
   const settings = { ...db.getAllSystemSettings() };
   delete settings.service_config; // Ensure sensitive server configuration is not leaked
-  delete settings.codex_monitor_config; // Codex permissions are exposed only through the admin-only endpoint.
   res.json({
     success: true,
     settings,
@@ -1347,7 +1343,7 @@ systemRouter.get(['/system/settings', '/settings'], authenticateUser, (req, res)
 
 systemRouter.get(['/system/settings/:key', '/settings/:key'], authenticateUser, (req, res) => {
   const { key } = req.params;
-  if (['service_config', 'codex_monitor_config'].includes(key) && (req as any).user?.role !== 'admin') {
+  if (key === 'service_config' && (req as any).user?.role !== 'admin') {
     return res.status(403).json({ error: 'Bu ayara erişim yetkiniz bulunmamaktadır.' });
   }
   const value = db.getSystemSetting(key);
@@ -1363,9 +1359,6 @@ systemRouter.get(['/system/settings/:key', '/settings/:key'], authenticateUser, 
 
 systemRouter.post(['/system/settings/:key', '/settings/:key'], authenticateUser, requireAdmin, async (req, res) => {
   const { key } = req.params;
-  if (key === 'codex_monitor_config') {
-    return res.status(400).json({ error: 'Codex ayarları için /api/system/codex/config uç noktasını kullanın.' });
-  }
   const { value, updatedAt } = req.body;
   if (value === undefined) {
     return res.status(400).json({ error: 'value parametresi zorunludur.' });

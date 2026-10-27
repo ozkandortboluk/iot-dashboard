@@ -1,5 +1,4 @@
 import type { Role } from '../types';
-import { ADMIN_PLUGINS_TAB_ID } from '../codex/pluginMetadata';
 
 export type PermissionAction =
   | 'manage_customers'      // Müşteri oluşturma/düzenleme/silme (Sadece Admin)
@@ -190,7 +189,6 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
     'database_data',
     'security',
     'system_logs',
-    ADMIN_PLUGINS_TAB_ID,
     'deployment',
     'account_settings',
     'help',

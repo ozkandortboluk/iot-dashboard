@@ -55,10 +55,10 @@ export const monitorConfigSchema = z.object({
   }).strict().default({ enabled: false, allowedFiles: [], maxBytesPerFile: 128 * 1024 }),
   telegram: z.object({
     enabled: z.boolean().default(false),
-    tokenEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('NEXUS_CODEX_TELEGRAM_BOT_TOKEN'),
-    chatIdEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('NEXUS_CODEX_TELEGRAM_CHAT_ID'),
+    tokenEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('VPS_AGENT_TELEGRAM_BOT_TOKEN'),
+    chatIdEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('VPS_AGENT_TELEGRAM_CHAT_ID'),
     dailySummaryHour: z.number().int().min(0).max(23).default(9),
-  }).strict().default({ enabled: false, tokenEnv: 'NEXUS_CODEX_TELEGRAM_BOT_TOKEN', chatIdEnv: 'NEXUS_CODEX_TELEGRAM_CHAT_ID', dailySummaryHour: 9 }),
+  }).strict().default({ enabled: false, tokenEnv: 'VPS_AGENT_TELEGRAM_BOT_TOKEN', chatIdEnv: 'VPS_AGENT_TELEGRAM_CHAT_ID', dailySummaryHour: 9 }),
 }).strict().superRefine((value, ctx) => {
   if (value.system.diskCriticalPercent <= value.system.diskWarningPercent) {
     ctx.addIssue({ code: 'custom', path: ['system', 'diskCriticalPercent'], message: 'Critical disk threshold must exceed warning threshold.' });

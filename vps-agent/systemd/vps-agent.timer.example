@@ -1,11 +1,11 @@
 [Unit]
-Description=Daily NexusNode Codex read-only health audit (example only)
+Description=Daily VPS Agent read-only health audit (example only)
 
 [Timer]
 OnCalendar=*-*-* 09:00:00 Europe/Istanbul
 AccuracySec=1min
 Persistent=true
-Unit=nexusnode-codex.service
+Unit=vps-agent.service
 
 [Install]
 WantedBy=timers.target

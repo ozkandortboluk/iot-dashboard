@@ -1,0 +1,21 @@
+{
+  "name": "vps-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "type-check": "tsc --noEmit",
+    "check": "npm run type-check && npm test"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vitest": "^4.1.10"
+  }
+}

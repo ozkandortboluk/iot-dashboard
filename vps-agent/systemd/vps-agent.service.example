@@ -1,7 +1,7 @@
 [Unit]
-Description=NexusNode Codex read-only health audit (example only)
+Description=VPS Agent read-only health audit (example only)
 After=network.target
-ConditionPathExists=/etc/nexusnode-codex/monitor.json
+ConditionPathExists=/etc/vps-agent/monitor.json
 
 [Service]
 Type=oneshot

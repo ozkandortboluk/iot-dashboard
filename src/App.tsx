@@ -23,7 +23,6 @@ import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { SystemLogsView } from './components/system/SystemLogsView';
-import { ADMIN_PLUGINS_TAB } from './codex/plugin';
 import { ServerStatusView } from './components/system/ServerStatusView';
 import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
 import { MaintenanceView } from './components/setup/MaintenanceView';
@@ -114,7 +113,6 @@ function DashboardContent() {
     server_status: 'Sunucu Durumu & Canlı Sistem Metrikleri',
     security: 'Güvenlik & Audit Logları',
     system_logs: 'Sunucu Sistem & Hata Günlükleri',
-    [ADMIN_PLUGINS_TAB.id]: ADMIN_PLUGINS_TAB.label,
     deployment: 'Sunucu & DB Kurulum Rehberi',
     account_settings: 'Hesap & Şifre Ayarları',
     help: 'Yardım & Bilgi Merkezi',
@@ -235,7 +233,6 @@ function DashboardContent() {
           )}
           {isAdmin && safeActiveTab === 'security' && <SecurityView />}
           {isAdmin && safeActiveTab === 'system_logs' && <SystemLogsView />}
-          {isAdmin && safeActiveTab === ADMIN_PLUGINS_TAB.id && <ADMIN_PLUGINS_TAB.component />}
           {isAdmin && safeActiveTab === 'deployment' && <HelpView initialTab="server_deployment" onNavigateToTab={(tab) => setActiveTab(tab)} />}
           {safeActiveTab === 'account_settings' && <AccountSettingsView />}
           {safeActiveTab === 'help' && <HelpView onNavigateToTab={(tab) => setActiveTab(tab)} />}

@@ -13,8 +13,8 @@ export interface RuntimeCheckpoint {
 
 function assertExternalRuntimePath(filePath: string): string {
   const resolved = path.resolve(filePath);
-  const relative = path.relative(path.resolve(process.cwd(), 'src', 'codex'), resolved);
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new Error('Runtime state cannot be stored under src/codex.');
+  const relative = path.relative(process.cwd(), resolved);
+  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new Error('Runtime state cannot be stored inside the repository working directory.');
   return resolved;
 }
 

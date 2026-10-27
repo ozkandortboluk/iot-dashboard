@@ -1,6 +1,4 @@
 import type { MonitorConfig } from '../core/config.js';
-import type { AdminControlConfig } from '../admin/controlConfig.js';
-import { applyAdminControlConfig } from '../admin/bridge.js';
 import { assertReadOnlyMode } from '../core/policy.js';
 import type { ReadOnlyChecker } from '../core/types.js';
 import type { DockerStatusReader } from '../monitoring/dockerStatus.js';
@@ -24,6 +22,3 @@ export function createReadOnlyCheckers(config: MonitorConfig, adapters: { fetchI
   return checkers;
 }
 
-export function createAdminConfiguredCheckers(base: MonitorConfig, control: AdminControlConfig, adapters: { fetchImpl?: typeof fetch; dockerReader?: DockerStatusReader } = {}): ReadOnlyChecker[] {
-  return createReadOnlyCheckers(applyAdminControlConfig(base, control), adapters);
-}

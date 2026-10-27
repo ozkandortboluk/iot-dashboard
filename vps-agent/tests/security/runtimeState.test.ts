@@ -9,7 +9,7 @@ afterEach(async () => { await Promise.all(directories.splice(0).map((directory) 
 
 describe('runtime checkpoint safety', () => {
   it('writes atomically with private mode and resumes only whitelisted state', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'nexus-codex-state-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'vps-agent-state-'));
     directories.push(root);
     const directory = path.join(root, 'runtime');
     await mkdir(directory, { mode: 0o700 });
@@ -28,6 +28,6 @@ describe('runtime checkpoint safety', () => {
   });
 
   it('refuses to write runtime state below the source tree', async () => {
-    await expect(writeRuntimeCheckpoint(path.resolve('src/codex/runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored under src/codex');
+    await expect(writeRuntimeCheckpoint(path.resolve('vps-agent/runtime-state.json'), { schemaVersion: 1 })).rejects.toThrow('cannot be stored inside the repository working directory');
   });
 });
