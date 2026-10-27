@@ -18,7 +18,10 @@ export interface RuntimeCheckpoint {
   notificationHistory?: PersistedNotification[];
 }
 
-const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const sourceRoot = path.basename(path.dirname(moduleDirectory)) === 'dist'
+  ? path.resolve(moduleDirectory, '../..')
+  : path.resolve(moduleDirectory, '..');
 
 function assertExternalRuntimePath(filePath: string): string {
   const resolved = path.resolve(filePath);
