@@ -689,12 +689,12 @@ function isSameConfiguredPostgresTarget(candidateUrl: string): boolean {
   const activeUrl = db.getPostgresUrl().trim();
   if (!activeUrl) return true; // Initial configuration is still allowed.
   const parseTarget = (raw: string) => {
-    const normalized = raw.trim().replace(/^postgres(?:ql)?:\\/\\//i, 'http://');
+    const normalized = raw.trim().replace(/^postgres(?:ql)?:\/\//i, 'http://');
     const parsed = new URL(normalized);
     return {
       host: parsed.hostname.toLowerCase(),
       port: Number(parsed.port || 5432),
-      database: decodeURIComponent(parsed.pathname.replace(/^\\//, '')),
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
     };
   };
   try {
