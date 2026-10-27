@@ -1061,8 +1061,11 @@ export class SetupService {
   /**
    * Tests real PostgreSQL connection with strict timeout, version checks, and ZERO password leaking
    */
-  public async testConnection(config: DatabaseConfigPayload): Promise<DbTestResult> {
-    if (this.isSetupCompleted()) {
+  public async testConnection(
+    config: DatabaseConfigPayload,
+    options: { allowCompletedSetup?: boolean } = {},
+  ): Promise<DbTestResult> {
+    if (this.isSetupCompleted() && !options.allowCompletedSetup) {
       throw new Error('Kurulum zaten tamamlanmış ve kilitlenmiştir. Güvenlik nedeniyle test API\'si devre dışıdır.');
     }
 
