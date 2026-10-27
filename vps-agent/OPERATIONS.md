@@ -20,7 +20,7 @@ AI varsayılan kapalıdır. ai.enabled=true, OPENAI_API_KEY (veya ai.apiKeyEnv i
 
 ## Docker ve yedek
 
-Docker durum kontrolü yalnızca ayrıca kurulmuş loopback read-only HTTP proxy üzerinden çalışabilir. Config içindeki docker.readOnlyProxyUrl yalnızca localhost/127.0.0.1/::1 ve HTTP root URL kabul eder; agent yalnız sabit GET /containers/json endpoint'ini çağırır. Proxy kurulum/izinleri bu PR tarafından yapılmaz. Doğrudan Docker socket kullanılmaz. Yedek checker tekil artifact/checksum biçimini salt-okunur inceler; restore başlatmaz ve restore başarısını kanıtlamaz. Mevcut NexusNode yedek script'leri çağrılmaz veya değiştirilmez.
+Docker durum kontrolü yalnızca ayrıca kurulmuş loopback read-only HTTP proxy üzerinden çalışabilir. Config içindeki docker.readOnlyProxyUrl yalnızca 127.0.0.1/::1 ve HTTP root URL kabul eder; agent yalnız sabit GET /containers/json endpoint'ini çağırır. Proxy kurulum/izinleri bu PR tarafından yapılmaz. Doğrudan Docker socket kullanılmaz. Yedek checker tekil artifact/checksum biçimini salt-okunur inceler; restore başlatmaz ve restore başarısını kanıtlamaz. Mevcut NexusNode yedek script'leri çağrılmaz veya değiştirilmez.
 
 ## Geri dönüş ve onay
 
