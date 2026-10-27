@@ -8,7 +8,7 @@ Bu PR kaynak kodu ve testler içerir; henüz yerel test/build veya gerçek VPS �
 |---|---|---|
 | HTTP sağlık | Allowlist edilmiş loopback live/ready URL'lerine istek | Yalnız HTTP durum kodu kullanılır; response body saklanmaz |
 | Sistem kaynakları | Disk, inode, RAM ve CPU başına load eşikleri | İşletim sistemi metrikleri host üzerinde ayrıca doğrulanmalı |
-| Docker durumu | Beklenen konteyner durumlarını değerlendiren reader arayüzü | Gerçek Docker adapter'ı bilerek bağlanmamıştır; adapter yoksa sonuç unknown olur |
+| Docker durumu | Beklenen konteyner durumlarını değerlendiren reader arayüzü | İsteğe bağlı loopback read-only HTTP proxy adapter'ı vardır; config varsayılan kapalıdır ve proxy kurulumu ayrı iştir |
 | Yedek metadata'sı | İzin verilen tekil artifact + SHA-256 sidecar kontrolü | Restore başarısını kanıtlamaz |
 | Log özeti | Allowlist dosyalarında hata işaretlerini sayar | Ham log satırları rapora, Telegram'a veya modele gönderilmez |
 | CLI | Config doğrulama, salt-okunur kontroller, JSON raporu ve exit code | Otomatik kurulum yapmaz |
@@ -22,7 +22,7 @@ Bu PR kaynak kodu ve testler içerir; henüz yerel test/build veya gerçek VPS �
 - Kurulmuş/etkinleştirilmiş VPS servisi veya zamanlayıcı; systemd dosyaları örnektir.
 - Çalışan Codex CLI adapter'ı veya kendiliğinden kod yazıp çalıştıran ajan döngüsü.
 - Ana uygulamaya gömülü UI/API/DB bağlantısı.
-- Gerçek Docker daemon bağlantısı; Docker socket/root-eşdeğer erişimi bilerek eklenmemiştir.
+- Doğrudan Docker socket/daemon erişimi yoktur; Docker durumu yalnız ayrıca yapılandırılmış loopback read-only proxy üzerinden okunabilir.
 - Otomatik düzeltme, shell komutu, sudo/root, DB yazımı, migration, restore veya volume işlemi.
 - Servis restart/reboot, paket kurma, firewall/SSH/TLS değişikliği.
 - Git push/merge, deployment veya gelen Telegram komutları.
