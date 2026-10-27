@@ -3525,7 +3525,17 @@ class LocalDatabase {
       };
     }
     if (url && !url.includes('••••••••')) {
-      this.data.databaseSettings.postgresUrl = url.trim();
+      let urlToPersist = url.trim();
+      if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+        try {
+          const parsed = new URL(urlToPersist);
+          parsed.password = '';
+          urlToPersist = parsed.toString();
+        } catch {
+          throw new Error('Geçersiz PostgreSQL bağlantı adresi; kayıtlı ayarlar değiştirilmedi.');
+        }
+      }
+      this.data.databaseSettings.postgresUrl = urlToPersist;
       this.saveData(this.data);
     }
   }
@@ -3807,33 +3817,64 @@ class LocalDatabase {
       try { client.release(); client = null; } catch {}
       try { await pool.end(); pool = null; } catch {}
 
-      if (options.applyOnSuccess !== false) {
-        // Commit candidate URL and health metadata only after a successful probe.
+      if (options.applyOnSuccess === true) {
+        const requiredTables = ['users', 'devices', 'telemetry_readings'];
+        const missingTables = requiredTables.filter((table) => !tablesStatus[table]);
+        if (missingTables.length > 0) {
+          return {
+            success: false,
+            message: `Hedef veritabanında zorunlu NexusNode tabloları eksik: ${missingTables.join(', ')}. Kayıtlı bağlantı değiştirilmedi.`,
+            latencyMs,
+            tablesStatus,
+          };
+        }
+
+        const previousStoredUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
+        const previousConnected = this.data.databaseSettings?.isPostgresConnected;
         if (!this.data.databaseSettings) {
           this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
         }
-        this.data.databaseSettings.isPostgresConnected = true;
-        this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
-        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+
         if (customUrl && !customUrl.includes('••••••••')) {
           let urlToPersist = customUrl.trim();
-          // In production the password is authoritative in the encrypted Vault; never duplicate it in db.json.
           if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
             try {
               const parsed = new URL(urlToPersist);
               parsed.password = '';
               urlToPersist = parsed.toString();
             } catch {
-              return { success: false, message: 'Bağlantı adresi geçerli biçimde saklanamadı.' };
+              return { success: false, message: 'Bağlantı adresi güvenli biçimde saklanamadı; kayıtlı ayarlar değiştirilmedi.' };
             }
           }
           this.data.databaseSettings.postgresUrl = urlToPersist;
         }
         this.saveData(this.data);
 
-        // Re-initialize active Postgres repository and sync memory data.
+        // Apply only after probe + schema gate, and verify the application's own pool can initialize.
         this.recyclePgPool();
-        await this.initPostgresRepository().catch(() => {});
+        const connected = await this.initPostgresRepository(true).catch(() => false);
+        if (!connected) {
+          if (previousStoredUrl) {
+            this.data.databaseSettings.postgresUrl = previousStoredUrl;
+          } else {
+            delete this.data.databaseSettings.postgresUrl;
+          }
+          this.data.databaseSettings.isPostgresConnected = previousConnected ?? false;
+          this.saveData(this.data);
+          this.recyclePgPool();
+          await this.initPostgresRepository(true).catch(() => false);
+          return {
+            success: false,
+            message: 'Bağlantı testi başarılı olsa da uygulama havuzu başlatılamadı; önceki bağlantı ayarları geri yüklendi.',
+            latencyMs,
+            tablesStatus,
+          };
+        }
+
+        this.data.databaseSettings.isPostgresConnected = true;
+        this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
+        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+        this.saveData(this.data);
       }
 
       return {
