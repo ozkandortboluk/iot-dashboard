@@ -4,7 +4,7 @@
 
 The System Secrets panel can safely rotate the application's connection credentials only when the candidate connection is already valid and points at the existing database endpoint. It does not alter PostgreSQL roles, role passwords, create/rename databases, copy data, or change Docker Compose bootstrap settings.
 
-The POSTGRES_USER, POSTGRES_DB, and POSTGRES_PASSWORD_FILE values in Compose are initialization inputs for a new PostgreSQL data directory; changing them is not a reliable way to rename a role/database or rotate a password on an already initialized TimescaleDB volume.
+The POSTGRES_USER, POSTGRES_DB, and POSTGRES_PASSWORD_FILE values in Compose are initialization inputs for a new PostgreSQL data directory; changing them is not a reliable way to rename a role/database or rotate a password on an already initialized TimescaleDB volume. In particular, replacing secrets/postgres_password alone does not change the password stored for an existing PostgreSQL role; the role must be changed on the server, then the application's Vault credential must be updated and tested.
 
 ## Changes in this PR
 
