@@ -78,6 +78,7 @@ export interface DbTestResult {
   timescaleVersion?: string;
   latencyMs?: number;
   tablesStatus?: Record<string, boolean>;
+  permissionsStatus?: Record<string, boolean>;
   errorCode?: string;
 }
 
@@ -1137,6 +1138,35 @@ export class SetupService {
         audit_logs: existingTables.has('audit_logs'),
       };
 
+      let permissionsStatus: Record<string, boolean> | undefined;
+      if (tablesStatus.users && tablesStatus.devices && tablesStatus.telemetry_readings) {
+        const privilegeRes = await client.query(`
+          SELECT
+            has_schema_privilege(current_user, 'public', 'USAGE') AS schema_usage,
+            has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create,
+            has_table_privilege(current_user, 'public.users', 'SELECT') AS users_select,
+            has_table_privilege(current_user, 'public.users', 'INSERT') AS users_insert,
+            has_table_privilege(current_user, 'public.users', 'UPDATE') AS users_update,
+            has_table_privilege(current_user, 'public.devices', 'SELECT') AS devices_select,
+            has_table_privilege(current_user, 'public.devices', 'INSERT') AS devices_insert,
+            has_table_privilege(current_user, 'public.devices', 'UPDATE') AS devices_update,
+            has_table_privilege(current_user, 'public.telemetry_readings', 'SELECT') AS telemetry_select,
+            has_table_privilege(current_user, 'public.telemetry_readings', 'INSERT') AS telemetry_insert,
+            NOT EXISTS (
+              SELECT 1
+              FROM pg_class seq
+              JOIN pg_namespace ns ON ns.oid = seq.relnamespace
+              WHERE ns.nspname = 'public'
+                AND seq.relkind = 'S'
+                AND NOT has_sequence_privilege(current_user, seq.oid, 'USAGE')
+            ) AS sequences_usage;
+        `);
+        const rawPermissions = privilegeRes.rows[0] || {};
+        permissionsStatus = Object.fromEntries(
+          Object.entries(rawPermissions).map(([key, value]) => [key, value === true]),
+        );
+      }
+
       return {
         success: true,
         message: 'PostgreSQL bağlantısı başarılı.',
@@ -1145,6 +1175,7 @@ export class SetupService {
         timescaleVersion,
         latencyMs,
         tablesStatus,
+        permissionsStatus,
       };
     } catch (err: any) {
       const rawMsg = err?.message || String(err);
