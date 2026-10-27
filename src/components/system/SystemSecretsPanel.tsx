@@ -847,7 +847,7 @@ export const SystemSecretsPanel: React.FC = () => {
             <div className="p-3 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-900/30 rounded-2xl flex items-start gap-3 text-xs text-slate-600 dark:text-slate-300">
               <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
               <span>
-                Burada girilen veritabanı parolası sunucu tarafında AES-256-GCM ile şifrelenir. <code className="font-mono">.env</code> veya <code className="font-mono">docker-compose.yml</code> içinde şifrenizi tutmak zorunda kalmazsınız.
+                Parola sunucu tarafında AES-256-GCM ile şifrelenir ve düz metin olarak loglanmaz. Kaydetmeden önce yeni kullanıcı/parola aynı mevcut veritabanına karşı doğrulanır; temel NexusNode tabloları yoksa değişiklik reddedilir. Bu ekran PostgreSQL rolünün parolasını değiştirmez ve host/port/veritabanı adını değiştirmez: önce PostgreSQL tarafında yeni rol/parolayı ve gerekli yetkileri hazırlayın. Veritabanı adını değiştirmek ayrı, yedek doğrulamalı bakım/taşıma işlemidir.
               </span>
             </div>
 
