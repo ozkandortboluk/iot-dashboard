@@ -63,6 +63,15 @@ export const monitorConfigSchema = z.object({
     chatIdEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('VPS_AGENT_TELEGRAM_CHAT_ID'),
     dailySummaryHour: z.number().int().min(0).max(23).default(9),
   }).strict().default({ enabled: false, tokenEnv: 'VPS_AGENT_TELEGRAM_BOT_TOKEN', chatIdEnv: 'VPS_AGENT_TELEGRAM_CHAT_ID', dailySummaryHour: 9 }),
+  ai: z.object({
+    enabled: z.boolean().default(false),
+    apiKeyEnv: z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/).default('OPENAI_API_KEY'),
+    model: z.string().regex(/^[a-zA-Z0-9._-]{1,80}$/).default('gpt-4.1-mini'),
+    maxOutputTokens: z.number().int().min(100).max(500).default(250),
+  }).strict().default({ enabled: false, apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-4.1-mini', maxOutputTokens: 250 }),
+  runtime: z.object({
+    statePath: absolutePath.optional(),
+  }).strict().default({}),
 }).strict().superRefine((value, ctx) => {
   if (value.system.diskCriticalPercent <= value.system.diskWarningPercent) {
     ctx.addIssue({ code: 'custom', path: ['system', 'diskCriticalPercent'], message: 'Critical disk threshold must exceed warning threshold.' });
@@ -77,12 +86,15 @@ export const monitorConfigSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['system', 'loadCriticalPerCpu'], message: 'Critical CPU load threshold must exceed warning threshold.' });
   }
   if (value.backup) {
-    for (const [name, path] of [['artifactPath', value.backup.artifactPath], ['checksumPath', value.backup.checksumPath]] as const) {
+    for (const [name, filePath] of [['artifactPath', value.backup.artifactPath], ['checksumPath', value.backup.checksumPath]] as const) {
       const root = value.backup.allowedRoot.replace(/[\\/]+$/, '');
-      if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) {
+      if (!filePath.startsWith(`${root}/`) && !filePath.startsWith(`${root}\\`)) {
         ctx.addIssue({ code: 'custom', path: ['backup', name], message: 'Backup file must be under allowedRoot.' });
       }
     }
+  }
+  if (value.telegram.enabled && !value.runtime.statePath) {
+    ctx.addIssue({ code: 'custom', path: ['runtime', 'statePath'], message: 'A private runtime.statePath is required when Telegram is enabled.' });
   }
 });
 
