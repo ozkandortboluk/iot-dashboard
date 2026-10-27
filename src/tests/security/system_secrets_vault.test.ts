@@ -772,6 +772,47 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       expect(Array.isArray(migration.unmigratedEnvKeys)).toBe(true);
       expect(typeof migration.details).toBe('string');
     });
+    it('rejects database-name changes through the credential rotation form', async () => {
+      const originalDb = systemSecretsService.getDatabaseConfig();
+      const baseline = {
+        host: 'timescaledb',
+        port: 5432,
+        database: 'iot_dashboard',
+        user: 'iot_user',
+        password: 'existing_vault_password_for_test',
+        sslMode: 'disable',
+      };
+      const testConnectionSpy = vi.spyOn(setupService, 'testConnection');
+
+      try {
+        await systemSecretsService.updateDatabaseSecrets(baseline, 'test_baseline');
+        const response = await request(app)
+          .put('/api/system/secrets')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            database: {
+              ...baseline,
+              database: 'different_database',
+            },
+          });
+
+        expect(response.status).toBe(409);
+        expect(response.body.success).toBe(false);
+        expect(testConnectionSpy).not.toHaveBeenCalled();
+        expect(systemSecretsService.getDatabaseConfig().database).toBe(baseline.database);
+      } finally {
+        testConnectionSpy.mockRestore();
+        await systemSecretsService.updateDatabaseSecrets({
+          host: originalDb.host,
+          port: originalDb.port,
+          database: originalDb.database,
+          user: originalDb.user,
+          password: originalDb.password,
+          sslMode: originalDb.sslMode,
+        }, 'test_restore');
+      }
+    });
+
     it('does not persist a database credential change when candidate preflight fails', async () => {
       const originalDb = systemSecretsService.getDatabaseConfig();
       const baseline = {
