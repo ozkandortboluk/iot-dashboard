@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { OpenAIDiagnoser } from './analysis/openAiAnalyzer.js';
 import { parseMonitorConfig } from './core/config.js';
 import { withInstanceLock } from './core/lock.js';
+import { authorizeAction } from './core/policy.js';
 import { buildReport } from './core/report.js';
 import { readRuntimeCheckpoint, writeRuntimeCheckpoint, type RuntimeCheckpoint } from './core/runtimeState.js';
 import { runCheckers } from './core/runner.js';
@@ -112,7 +113,7 @@ async function executeRun(options: CliOptions, config: ReturnType<typeof parseMo
       }));
     if (report.status === 'ok') {
       analysis = { status: 'skipped', summaryCode: 'no_meaningful_findings' };
-    } else if (!options.allowAiAnalysis) {
+    } else if (!authorizeAction(config.mode, 'analyze_with_ai', { aiAnalysisApproved: options.allowAiAnalysis }).allowed) {
       analysis = { status: 'blocked', summaryCode: 'explicit_ai_approval_flag_required' };
     } else if (!process.env[config.ai.apiKeyEnv]) {
       analysis = { status: 'skipped', summaryCode: 'ai_api_key_missing' };
