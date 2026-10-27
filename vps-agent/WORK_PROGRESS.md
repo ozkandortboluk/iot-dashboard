@@ -1,17 +1,30 @@
 # VPS Agent — İlerleme durumu
 
 ## Durum
-- Aşama: bağımsızlaştırma, adlandırma ve salt-okunur CLI geliştirme.
-- Durum: IN_PROGRESS — bağımsız salt-okunur CLI eklendi; yerel doğrulama henüz yapılmadı.
-- Üretim VPS'sine erişilmedi; canlı değişiklik yapılmadı.
-- GitHub üzerinde test çalıştırılmadı.
+- Aşama: bağımsızlaştırma ve salt-okunur izleme/uyarı akışını tamamlama.
+- Durum: IN_PROGRESS — CLI'a kalıcı state, lock, dedup, Telegram ve opt-in AI teşhis akışı bağlandı; yerel doğrulamalar bekliyor.
+- GitHub üzerinde test çalıştırılmadı; GitHub Actions test workflow'u eklenmedi.
+- Üretim VPS'sine erişilmedi; canlı değişiklik yapılmadı; gerçek Telegram mesajı veya AI API çağrısı gönderilmedi.
 
-## Bu değişiklikte hedeflenenler
-- NexusNode Codex adını VPS Agent olarak değiştirmek.
-- Kod ve belgeleri src/codex yerine repository kökündeki vps-agent/ altında toplamak.
-- Ana uygulama UI/API/permission/DB ayar bağlantılarını kaldırmak.
-- VPS Agent için ayrı paket ve test yapılandırması eklemek.
-- Yetkinlikler, olmayan özellikler, güvenlik sınırları ve kaldırma yöntemini belgelemek.\n- Mutlak config yolu isteyen CLI ile JSON raporu/çıkış kodu üretmek; bilinmeyen argümanları reddetmek.\n- Taşınan testlerden kalan ana uygulama admin modülü importlarını kaldırmak.
+## Bu değişiklikte
+- VPS Agent bağımsız pakette tutuldu ve ana uygulama bağlantıları kaldırıldı.
+- CLI config ile salt-okunur kontrolleri çalıştırır, JSON raporu ve exit code üretir.
+- Kaynak ağacı dışında özel runtime state ve eşzamanlı çalıştırma kilidi eklendi.
+- Bildirim dedup geçmişi kalıcı hale getirildi; 24 saat içinde aynı olay tekrar gönderilmez.
+- Telegram akışı CLI'a bağlandı; config, environment secret ve --allow-telegram-send olmadan dış mesaj gönderilmez.
+- Günlük özetin gönderim günü state dosyasında saklanır.
+- AI teşhisi yalnız uyarı/kritik/bilinmeyen sonuç varsa çalışabilir; config, API key env ve --allow-ai-analysis gerekir.
+- AI'ye yalnız sabit kontrol/hata kodları ve sayısal/boolean metrikler gönderilir; ham log/secret/URL/telemetri gönderilmez.
+- AI çıktı/timeout sınırları eklendi; AI çıktısı komut olarak çalıştırılmaz veya Telegram'a otomatik gönderilmez.
+- Örnek systemd timer 5 dakikalık izleme için güncellendi; servis/timer kurulmadı.
+- Docker daemon adapter'ı bilinçli olarak eklenmedi; socket root-eşdeğer risk doğurabilir.
+- Yeni testler yazıldı ancak henüz çalıştırılmadı.
 
-## Sonraki adım
-Yerel Windows/Antigravity çalışma alanında branch'i al; diff'i incele; bağımsız test ve ana uygulama type-check/build'i yerel ortamda çalıştır. Gerçek sonuçları bu dosyaya kaydet. Hiçbir şeyi merge veya canlıya dağıtma.
+## Tek seferlik yerel doğrulama listesi
+1. VPS Agent: npm.cmd test, npm.cmd run type-check, npm.cmd run build.
+2. Ana uygulama: mevcut yerel type-check/build ve ilgili testler.
+3. Ana uygulama ile VPS Agent arasında import/derleme/Compose/DB migration bağımlılığı olmadığını doğrula.
+4. CLI config/exit code, runtime state izinleri, lock, Telegram fake/blocked flow, dedup ve AI veri minimizasyonu senaryolarını doğrula.
+5. Test sonuçlarını ancak gerçek çalıştırmadan sonra buraya yaz.
+
+Hiçbir şeyi merge veya canlıya dağıtma. Gerçek Telegram/AI gönderimi, servis kurulumu, VPS erişimi ve üretim değişiklikleri ayrı açık onay gerektirir.
