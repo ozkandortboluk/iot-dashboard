@@ -30,3 +30,14 @@
 - PR #32 head commit'i için erişilebilen workflow run veya combined status bulunamadı. Bu, testlerin geçtiği anlamına gelmez.
 - Yerel checkout/test çalıştırma olanağı bu oturumda yok; test, lint, type-check ve build sonuçları doğrulanmadı.
 - Yeni gözlem: `src/tests/security/secret_recovery_trace.test.ts` mevcut haliyle kaynak metninde `set +x` bulunduğunu denetliyor; gerçek Bash xtrace çıktısında sahte sırrın sızmadığını çalıştırarak kanıtlamıyor. Yukarıdaki runtime regresyon maddesi bu nedenle açık bırakıldı.
+
+
+## Güncel PR #31 diff doğrulaması — 2026-10-28 (ek kayıt)
+- [ ] **P1 / PR #31 — gerçek parola rotasyonu hâlâ ALTER ROLE çalıştırıyor:** Güncel dal dosyası `src/server/routes/system.ts` içindeki `/rotate-password` akışında `ALTER ROLE` ve eski parola ile kurtarma denemesi hâlâ mevcut. PR açıklamasında rol değiştirme otomasyonunun kapsam dışı olduğu yazmasına rağmen diff bunu doğrulamıyor. Güvenli geri alma ve tüm hata yollarında Vault/runtime/pool tutarlılığı kanıtlanmadan birleştirme.
+- [ ] **P1 / PR #31 — hedef geçiş endpoint'i hâlâ var:** `/switch-target` host/port/database hedefi kabul ediyor ve tablo/rol izin kontrollerinden sonra Vault/runtime/db URL'sini değiştirip pool'u yeniliyor. Aynı isimli tablolar hedefin doğru veri kaynağı olduğunu kanıtlamaz. Genel ayarlardan hedef değiştirmeyi kapatma iddiası, bu endpoint'in ve arayüz erişiminin gerçekten kaldırıldığı/engellendiği güncel diff ile doğrulanmalı.
+- [ ] **P2 / PR #31 — host secret dosyasına yazma denemesi hâlâ mevcut:** `/rotate-password` `/opt/nexusnode-iot/secrets/postgres_password` ve çalışma dizinindeki `secrets/postgres_password` yollarını yazmayı deniyor; hatalar sessizce yutuluyor. Uygulama konteynerinin host secret dosyasını güncellediği garanti değil. Bu yolu kaldır veya güvenli ayrı rotasyon arayüzü kur; kısmi hata durumunu test et.
+- [ ] PR #31'in gerçek diff'ini PR açıklamasıyla karşılaştır; açıklamadaki yapılmış sayılan değişiklikleri dosya ve test kanıtı olmadan tamamlandı olarak işaretleme.
+
+## CI doğrulaması — ek kayıt
+- [ ] PR #32 head `56fb8779b913d6304ce81c7e87bed23ebd470c4a` için Actions run listesi ve combined status boş döndü; CI geçişi doğrulanmış değil.
+- [ ] `.github/workflows/ci.yml` tüm branch push ve PR olaylarında otomatik çalışır. Kullanıcının GitHub'da test çalıştırmama tercihi geçerli; bu PR'da manuel run yapılmadı. [skip ci] yalnızca ilgili commit tetiklemesini engellemeye yönelik, test sonucu yerine geçmez.
