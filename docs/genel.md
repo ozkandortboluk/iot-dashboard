@@ -16,7 +16,6 @@
 
 ## Veritabanı parola ve hedef yönetimi
 
-- [ ] Güncel `main` değişikliklerini PR dalına güvenli biçimde taşı ve aynı kod/test denetimlerini PR dalında tekrarla. Son incelemede dal `origin/main`'den 32 commit gerideydi.
 - [ ] Başarısız parola veya aday bağlantı işlemlerinde PostgreSQL rolü, Vault, runtime yapılandırması ve pool tutarlılığını izole veritabanı testleriyle doğrula.
 - [ ] Uygulama servisinin host secret dosyasına yazma yollarını ve hata raporlamasını gözden geçir; kapalı route'lar servis düzeyindeki diğer yazma davranışlarını kanıtlamaz.
 

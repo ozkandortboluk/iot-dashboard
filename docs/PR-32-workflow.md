@@ -21,10 +21,11 @@ Bash secret kurtarma sırasında `bash -x` izlerinin düz metin PostgreSQL parol
 
 ## Güncel durum
 
-Runtime regresyon testi ve yerel kalite kontrolleri tamamlandı. Son doğrulamada yerel dal `origin/main`'den 32 commit gerideydi; main'deki değişiklikler PR dalına taşınmış sayılmaz. PR'a özgü açık CI sonucu dışında bu dosyada başka bekleyen kod doğrulaması yok.
+`origin/main` değişiklikleri PR dalına alındı. Birleşik dalda yerel test, lint, type-check ve build yeniden doğrulanıyor. GitHub Actions sonucu hâlâ gözlenmedi; iş akışı elle başlatılmadı.
 
 ## Kayıt
 
 - 2026-10-28 ilk inceleme: statik test gerçek xtrace çıktısını kanıtlamadığı için runtime testi istendi.
 - 2026-10-29: runtime Bash testi eklendi; yerel test, lint, type-check ve build başarılı.
 - 2026-10-29: main ve diğer işler PR #32 kapsamından ayrılarak `docs/genel.md` dosyasına taşındı.
+- 2026-10-29: güncel main değişiklikleri dala alındı; sürüm 1.51.1'e yükseltildi.

@@ -2,9 +2,11 @@
 
 ## KURAL 1: Sürümlendirme ve Ortam/GitHub Takip Politikası (Continuous Patch Versioning & Environment Sync)
 
-1. **Her Değişiklikte Son Hane 1 Kademe Artar (Patch Increment)**:
-   - Projede yapılan her değişiklik, yeni özellik, hata düzeltmesi veya sistem geliştirmesinde sürüm numarasının son hanesi (`x.y.Z` -> `x.y.Z+1`) 1 kademe artırılır.
-   - Yeni büyük modüller veya köklü mimari dönüşümlerde MINOR (`x.Y.0`) veya MAJOR (`X.0.0`) kuralları geçerliliğini korur.
+1. **Dal içi değişiklikler ve ana dala birleştirme sürümü**:
+   - Dal içindeki geliştirme ve düzeltmelerde PATCH (`z`) hanesini artır (`x.y.z` -> `x.y.(z+1)`).
+   - Bir dal ana dala birleştirilirken MINOR (`y`) hanesini artır ve PATCH hanesini sıfırla (`x.y.z` -> `x.(y+1).0`).
+   - Yalnız kapsamlı değişikliklerde veya kullanıcı açıkça istediğinde MAJOR (`x`) hanesini artır (`x.y.z` -> `(x+1).0.0`).
+   - Birleştirme öncesinde sürüm artışını bir kez uygula; her commit için ayrı artış yapma.
 2. **Senkronize Sürüm Güncelleme**:
    - Her sürüm yükseltildiğinde `package.json`, `package-lock.json`, `src/config/version.ts` ve `CHANGELOG.md` dosyaları birbiriyle tam senkron tutulur.
    - `CHANGELOG.md` dosyasına yapılan işler derli toplu ve anlamlı başlıklar halinde yeni sürüm başlığı altına eklenir.

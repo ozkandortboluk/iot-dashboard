@@ -25,6 +25,8 @@ import { resolveTrustProxy } from './src/server/config/trustProxyPolicy.js';
 import { sshTunnelService } from './src/server/services/sshTunnel.service.js';
 import { spaRouteGuardMiddleware, createSpaFallbackHandler, isScannerOrProbingPath } from './src/server/utils/spaFallbackGuard.js';
 import { clusterSyncService } from './src/server/services/clusterSync.service.js';
+import { registerShutdownHook, performGracefulShutdown, scheduleSystemReboot, isSystemShuttingDown } from './src/server/services/systemLifecycle.service.js';
+export { performGracefulShutdown, scheduleSystemReboot, isSystemShuttingDown };
 
 // Bootstrap runtime security secrets early in dev/test only
 ensureRuntimeSecuritySecrets();
@@ -65,58 +67,6 @@ import { serverStatusRouter } from './src/server/routes/serverStatus.js';
 import { secretsRouter } from './src/server/routes/secrets.js';
 
 // Global Process Crash Shields
-let isShuttingDown = false;
-
-export async function performGracefulShutdown(reason: string, exitCode = 0) {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-  console.log(`[Graceful Shutdown] ${reason} - Sunucu güvenli şekilde durduruluyor...`);
-
-  // RUN-05: Absolute deadline for entire shutdown chain to prevent zombie hangs
-  const forceExitDeadline = setTimeout(() => {
-    console.warn(`[Graceful Shutdown] Kapanış zaman aşımına uğradı (4s deadline). Zorla çıkılıyor.`);
-    process.exit(exitCode);
-  }, 4000);
-  forceExitDeadline.unref();
-
-  // 1. Stop background workers, timers, and tunnels
-  try { stopNoDataWorker(); } catch {}
-  try { stopCommandExpiryWorker(); } catch {}
-  try { stopOtaWorker(); } catch {}
-  try { setSimulatorActive(false); } catch {}
-  try { db.autoHealer?.stopWatchdog(); } catch {}
-  try { await sshTunnelService.disconnectTunnel(); } catch {}
-  try { clusterSyncService.cleanupListener(); } catch {}
-  try { systemLogger.flush(); } catch {}
-
-  // 2. Close WebSocket server & disconnect all client sockets
-  try { stopWebSocketServer(); } catch {}
-
-  // 3. Concurrently close HTTP listener and recycle PostgreSQL pool
-  const serverClosePromise = new Promise((resolve) => {
-    server.close(() => {
-      console.log('[Graceful Shutdown] HTTP dinleyici kapatıldı.');
-      resolve(true);
-    });
-  });
-
-  const poolClosePromise = (async () => {
-    try {
-      await recycleSharedPgPool();
-      console.log('[Graceful Shutdown] PostgreSQL bağlantı havuzu kapatıldı.');
-    } catch {}
-  })();
-
-  await Promise.race([
-    Promise.all([serverClosePromise, poolClosePromise]),
-    new Promise((r) => setTimeout(r, 2000)),
-  ]);
-
-  clearTimeout(forceExitDeadline);
-  console.log(`[Graceful Shutdown] Kapanış zinciri tamamlandı. Çıkış kodu: ${exitCode}`);
-  process.exit(exitCode);
-}
-
 function gracefulCrashExit(errType: string, err: any) {
   performGracefulShutdown(`CRITICAL PROCESS CRASH (${errType})`, 1);
 }
@@ -201,7 +151,7 @@ app.set('trust proxy', parsedTrustProxy);
 
 // Fast 503 Service Unavailable rejection for new incoming requests when shutting down
 app.use((_req, res, next) => {
-  if (isShuttingDown) {
+  if (isSystemShuttingDown()) {
     res.setHeader('Connection', 'close');
     return res.status(503).json({
       success: false,
@@ -759,10 +709,42 @@ async function setupViteOrStatic() {
 
 setupViteOrStatic();
 
-// Graceful Shutdown Handler
-const gracefulShutdown = (signal: string) => {
-  performGracefulShutdown(`Sinyal alındı (${signal})`, 0);
-};
+// Register server listener, background workers, and pool shutdown hooks
+registerShutdownHook(async () => {
+  // 1. Stop background workers, timers, and tunnels
+  try { stopNoDataWorker(); } catch {}
+  try { stopCommandExpiryWorker(); } catch {}
+  try { stopOtaWorker(); } catch {}
+  try { setSimulatorActive(false); } catch {}
+  try { db.autoHealer?.stopWatchdog(); } catch {}
+  try { await sshTunnelService.disconnectTunnel(); } catch {}
+  try { clusterSyncService.cleanupListener(); } catch {}
+  try { systemLogger.flush(); } catch {}
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  // 2. Close WebSocket server & disconnect all client sockets
+  try { stopWebSocketServer(); } catch {}
+
+  // 3. Concurrently close HTTP listener and recycle PostgreSQL pool
+  const serverClosePromise = new Promise((resolve) => {
+    server.close(() => {
+      console.log('[Graceful Shutdown] HTTP dinleyici kapatıldı.');
+      resolve(true);
+    });
+  });
+
+  const poolClosePromise = (async () => {
+    try {
+      await recycleSharedPgPool();
+      console.log('[Graceful Shutdown] PostgreSQL bağlantı havuzu kapatıldı.');
+    } catch {}
+  })();
+
+  await Promise.race([
+    Promise.all([serverClosePromise, poolClosePromise]),
+    new Promise((r) => setTimeout(r, 2000)),
+  ]);
+});
+
+// Graceful Shutdown Signal Handlers
+process.on('SIGINT', () => performGracefulShutdown('Sinyal alındı (SIGINT)', 0));
+process.on('SIGTERM', () => performGracefulShutdown('Sinyal alındı (SIGTERM)', 0));

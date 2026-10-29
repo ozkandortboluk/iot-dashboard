@@ -3,16 +3,110 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
-## 🚀 [v1.50.2] - 2026-10-29
-
-### Open work tracking
-- Added a project rule to carry unfinished work from closed pull requests into `docs/genel.md` without pull request identifiers.
-
----
-## 🚀 [v1.50.1] - 2026-10-29
+## 🚀 [v1.51.1] - 2026-10-29
 
 ### Secret recovery trace protection
-- Added a runtime Bash xtrace regression test using an isolated temporary fixture to confirm recovered PostgreSQL passwords do not appear in trace output and tracing stays disabled for subsequent caller commands.
+- Added a runtime Bash xtrace regression test to confirm recovered PostgreSQL passwords do not appear in trace output and tracing stays disabled for subsequent caller commands.
+- Added project-wide tracking for unfinished work carried over from closed pull requests.
+
+---
+## 🚀 [v1.51.0] - 2026-10-29
+
+### Güvenli PostgreSQL Bağlantısı ve Sürüm Takibi
+- PostgreSQL bağlantı, migration ve repository altyapısı ile güvenli kimlik bilgisi döndürme akışı eklendi.
+- Sürüm karşılaştırma kartı, GitHub `main/package.json` dosyasındaki sürümü okuyacak şekilde güncellendi.
+
+---
+## 🚀 [v1.50.10] - 2026-10-29
+
+### GitHub Depo Sürümünü Canlı Gösterme
+- Sistem sürümü uç noktası, GitHub ana dalındaki `package.json` sürümünü kısa süreli önbellekle okur; böylece ana dala yeni sürüm alındığında site yeniden dağıtılmadan gösterilir.
+- Sürüm takibi için GitHub Release yayımlama zorunluluğu kaldırıldı. GitHub'a geçici olarak erişilemediğinde önceden bilinen sürüm kullanılır.
+
+---
+## [v1.50.9] - 2026-10-29
+
+### CI and Rollback Validation
+- Return an explicit maintenance response when the restored database pool cannot be verified.
+- Isolate the missing-recipient backup test output path so it cannot be affected by a pre-existing project backup directory.
+
+---
+## [v1.50.8] - 2026-10-29
+
+### Database Credential Rollback Safety
+- Disabled the emergency database configuration endpoint that bypassed schema and privilege checks and swallowed Vault or connection-pool failures.
+- Restricted password changes to staged PostgreSQL roles and require the previous role to remain usable for rollback.
+- Normalize candidate passwords before connection checks and persistence so the tested secret matches the stored secret.
+
+---
+## [v1.50.7] - 2026-10-28
+
+### PostgreSQL Credential Safety and Data Source Protection
+- Disabled in-app PostgreSQL role password changes and generic target database switching. Both admin endpoints return 410 without changing Vault, runtime settings, or the connection pool.
+- Pre-created PostgreSQL credentials can be saved through System Secrets only for the existing host, port, and database after the read-only connection preflight succeeds.
+- Updated regression coverage to verify authorization and that the retired endpoints perform no credential or pool mutations.
+
+## 🚀 [v1.50.6] - 2026-10-27
+
+### Veritabanı ve Vault Parola Senkronizasyonu & Kendi Kendini Onarma (Database & Vault Password Resync & Auto-Heal)
+- **Docker Secret Yedekli Parola Çözümleme (`getDockerSecretPassword`):** Üretim ortamında (`connection.ts`), Vault parolasının bulunamadığı veya geçersiz olduğu durumlarda `/run/secrets/postgres_password` ve host secret dosyalarını güvenle okuyan ve boş parola kilitlenmesini engelleyen otomatik geri dönüş katmanı eklendi.
+- **Şifre Döndürmede Host Secret Dosyası Senkronizasyonu:** `POST /api/database/rotate-password` rotasında PostgreSQL'de `ALTER ROLE` işletilip Vault güncellendikten sonra, Docker host üzerindeki `secrets/postgres_password` dosyası da yeni şifreyle senkronize edilerek VPS servislerinin çelişkiye düşmesi engellendi.
+- **VPS Terminali Canlı Kurtarma Kılavuzu:** Docker TimescaleDB/PostgreSQL konteynerinin `POSTGRES_PASSWORD_FILE` değişkenini yalnızca ilk kurulumda (`initdb`) okuduğu, sonradan yapılan dosya değişikliklerinin PostgreSQL motoru içine yansımadığı durumlarda tek satırlık `ALTER ROLE` kurtarma komutu belgelendi.
+
+---
+## 🚀 [v1.50.5] - 2026-10-27
+
+### Veritabanı Şifresi Değişiminde Otomatik Oturum Kapatma ve Güvenli Yeniden Başlatma (Password Rotation Session Invalidation & Graceful System Reboot)
+- **Tüm Aktif Oturumların Güvenli İptali (Session Revocation):** Veritabanı parolası sistem arayüzleri üzerinden (`/api/database/rotate-password`, `/api/system/secrets`, `/api/setup/emergency-database-config`) değiştirildiğinde, hem PostgreSQL (`user_sessions` tablosu) hem de bellek/WAL katmanındaki (`db.data.sessions`) tüm kullanıcı oturumları eş zamanlı olarak temizlenir.
+- **Canlı WebSocket İstemcilerinin Sonlandırılması:** Aktif tüm WebSocket istemcilerine `1008 Policy Violation` kodu ve `auth:session_expired` olayı (neden: `CREDENTIALS_ROTATED`) gönderilerek bağlantıları güvenle sonlandırılır.
+- **Kimlik Doğrulama Çerezlerinin (Cookies) Sıfırlanması:** İstemciye dönen HTTP yanıtında `nexus_session_token` çerezi anında temizlenir (`Set-Cookie: nexus_session_token=; Max-Age=0`).
+- **Kontrollü Sistem Yeniden Başlatma (Graceful Reboot):** HTTP yanıtının tarayıcıya güvenle ulaşmasını garanti altına almak için 1.5 saniyelik gecikmeli kontrollü sistem yeniden başlatma mekanizması (`scheduleSystemReboot`) devreye alınır; arka plan işçileri, havuzlar ve sunucu dinleyicisi düzenli biçimde kapatılır ve Docker (`restart: unless-stopped`) veya dev watcher süreci temiz şekilde yeniden ayağa kaldırır.
+- **Arayüz Bildirimi ve Otomatik Yönlendirme:** Kullanıcı arayüzünde (`DatabaseDataView.tsx` ve `SystemSecretsPanel.tsx`) parola değişimi başarılı olduğunda yerel `localStorage` ve `sessionStorage` oturum bilgileri temizlenerek kullanıcıya işlem özeti sunulur ve kullanıcı 3 saniye içerisinde otomatik olarak giriş ekranına (`/`) yönlendirilir.
+- **Kapsamlı Entegrasyon Testleri:** `src/tests/database/database_password_session_termination.test.ts` eklenerek şifre rotasyonu, kasa güncellemesi ve acil durum yapılandırmasında oturum sonlandırma ve yeniden başlatma tetikleyicileri %100 doğrulandı.
+
+---
+## 🚀 [v1.50.4] - 2026-10-27
+
+### Bakım Modu Buton Fonksiyonları ve Acil Veritabanı Kurtarma Sistemi (Maintenance View Emergency Reconfiguration)
+- **Acil Veritabanı ve Şifre Kurtarma Modalı:** `MaintenanceView.tsx` ekranındaki "Ayarları Düzenle" butonu tıklanarak açılan tam etkileşimli "Veritabanı Bağlantı & Şifre Kurtarma" modalı eklendi. Kullanıcılar PostgreSQL şifresi değiştikten sonra arayüz üzerinden yeni şifreyi girip `POST /api/setup/emergency-database-config` ile anında test edebilir ve sisteme kesintisiz bağlanabilir.
+- **Doğrulamalı Acil Durum API Uç Noktası:** `POST /api/setup/emergency-database-config` uç noktası; tek kullanımlık Recovery Token (`data/.recovery_token`), aktif admin oturumu veya yerel admin giriş bilgileri ile yetkilendirilerek yeni bağlantıyı `SELECT 1;` ile izole doğrular, Vault ve runtime secret dosyalarını günceller ve bağlantı havuzunu geri dönüştürür.
+- **Yerel WAL/SQLite Çevrimdışı Mod Geçişi:** "Panele Devam Et (Yerel Mod)" butonunun kilitlenmesi giderildi. `POST /api/setup/enable-local-fallback` uç noktası ve onay modalı eklenerek PostgreSQL offline iken admin kullanıcılarının yerel SQLite/WAL motoru üzerinden sisteme erişebilmeleri sağlandı. PostgreSQL yeniden bağlandığında sistem otomatik olarak canlı veritabanına geri döner.
+- **SSH Tüneli Buton İzolasyonu:** "SSH Tüneli İle Bağlan" butonunun VPS/Docker üretim ortamlarında yanıltıcı ve tepkisiz görünmesi engellendi; buton yalnızca `sshTunnelAllowed` izni aktif olan AI Studio/çalışma istasyonu ortamlarında görünür hale getirildi.
+- **VPS Konsol Komut Kılavuzu:** Bakım ekranı hata teşhis paneline terminal operatörleri için tek tıkla kopyalanabilir VPS komut kutusu eklendi (`echo -n "..." > /opt/nexusnode-iot/secrets/postgres_password && docker compose restart app`).
+- **Otomasyon Testleri:** `src/tests/database/maintenance_emergency_recovery.test.ts` eklenerek acil yapılandırma, kurtarma anahtarı doğrulama ve yerel mod geçişleri %100 test kapsamına alındı.
+
+---
+## 🚀 [v1.50.3] - 2026-10-27
+
+### Geliştirici Sunucusu Watch Modu & Rota Senkronizasyonu (Dev Server Watch Mode & Hot Reload)
+- **Dev Script Watch Modu:** `package.json` içerisindeki `"dev"` komutu `tsx watch --clear-screen=false server.ts` olarak güncellendi; böylece backend rotalarında ve TypeScript dosyalarında yapılan değişikliklerin sunucuyu yeniden başlatmadan otomatik olarak algılanması sağlandı.
+- **Rota Doğrulaması:** `POST /api/database/rotate-password` uç noktasının Express `server.ts` ve `databaseRouter` eşleşmesi teyit edildi.
+
+---
+## 🚀 [v1.50.2] - 2026-10-27
+
+### Sistem Üzerinden Veritabanı Şifresi Değiştirme (Database Password Rotation)
+- **Doğrulamalı Şifre Değiştirme Uç Noktası:** Admin kullanıcılarının mevcut geçerli şifrelerini doğrulayarak veritabanı şifrelerini sistem üzerinden güncelleyebileceği `POST /api/database/rotate-password` uç noktası eklendi.
+- **İki Aşamalı Doğrulama (Two-Phase Pre/Post Flight Verification):** İşlem öncesinde mevcut şifre izole bağlantı ile doğrulanır (hatalı şifre girişinde 422 döner). Ardından PostgreSQL sunucusunda `ALTER ROLE "<username>" WITH PASSWORD '<new_password>';` işletilir ve yeni şifreyle anında test bağlantısı gerçekleştirilir.
+- **Acil Geri Alma (Emergency Rescue Rollback):** Yeni şifre tanımlandığı halde bağlantı doğrulanamazsa, sistem anında kurtarma oturumu açarak şifreyi eski haline geri döndürür.
+- **Şifreli Kasa & Havuz Senkronizasyonu:** Başarılı işlem sonucunda Central Security Vault (`systemSecretsService`), runtime secrets ve PostgreSQL bağlantı havuzu sıfır kesintiyle güncellenir.
+- **Kullanıcı Arayüzü & Hızlı Gezinme:** `DatabaseDataView.tsx` içerisine "🔐 Veritabanı Parolası Değiştirme (Rotate Password)" paneli, canlı şifre eşleşme göstergesi, mevcut parolayı izole test etme butonu ve üst gezinme çubuğuna doğrudan panele kaydıran "Şifre Değiştir" butonu eklendi.
+- **Hedef Geçiş Paneli Ön Doldurma:** "Güvenli Veritabanı & Rol Geçiş Paneli"ne tek tıkla aktif host, port, db ve kullanıcı adını form alanlarına aktaran "Mevcut Bilgileri Doldur" özelliği eklendi.
+- **Otomasyon & Güvenlik Testleri:** `database_target_switch.test.ts` test dosyasına 7 yeni şifre döndürme güvenlik testi (401 unauthenticated, 403 non-admin, 400 validation, 422 preflight fail) eklendi ve tüm 16 test başarıyla geçti.
+- **Kılavuz Güncellemesi:** `docs/DATABASE_ROLE_SWITCH_AND_ROLLBACK.md` dokümanına Bölüm 4.3 eklenerek sistem üzerinden şifre değiştirme mimarisi ve API kullanımı belgelendi.
+
+---
+## 🚀 [v1.50.1] - 2026-10-27
+
+### Güvenli Veritabanı ve Rol Geçiş Sistemi (Safe Database Target & Role Switch)
+- **Doğrulamalı Geçiş API'si:** Yalnızca Admin rolü tarafından erişilebilen `POST /api/database/test-target` ve `POST /api/database/switch-target` uç noktaları eklendi.
+- **İzole Ön Doğrulama (Pre-Flight Probe):** Aktif havuza dokunulmadan geçici havuz ile bağlantı testi yapılması, ağ veya kimlik hatalarında mevcut bağlantının %100 korunması sağlandı.
+- **Yanlış Veritabanına Geçiş Engeli (Anti-Drift Table Gate):** Hedef veritabanında zorunlu NexusNode IoT Cloud tabloları (`users`, `devices`, `telemetry_readings`) taranarak boş veya yanlış veritabanına geçiş kesin olarak engellendi.
+- **Rol Yetki Denetimi (Least Privilege Gate):** Kullanıcının gerekli şema, tablo ve sequence izinleri PostgreSQL iç katalog fonksiyonları ile doğrulandı.
+- **Atomik Rollback Koruması:** Geçiş öncesi in-memory snapshot alınması, şifreli Vault (`systemSecretsService`) güncellemesi ve havuz başlatılamazsa otomatik olarak önceki ayarlara dönülmesi sağlandı.
+- **Yönetici Kullanıcı Arayüzü:** `DatabaseDataView.tsx` sayfasına canlı tablo ve yetki checklist'i içeren güvenli "Hedef Veritabanı ve Rol Geçiş Paneli" eklendi.
+- **Operasyonel Kılavuz:** `docs/DATABASE_ROLE_SWITCH_AND_ROLLBACK.md` dokümanı oluşturularak PostgreSQL rol oluşturma, izin verme, geçiş yapma ve acil durum geri alma (rollback) SQL adımları belgelendi.
+- **Entegrasyon Testleri:** `src/tests/database/database_target_switch.test.ts` ile yetkilendirme, tablo eksikliği, yetki eksikliği, başarılı geçiş ve otomatik rollback senaryoları doğrulandı.
 
 ---
 ## 🚀 [v1.50.0] - 2026-10-27

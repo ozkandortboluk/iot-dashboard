@@ -6,6 +6,9 @@ import { setSessionCookie } from './auth.js';
 import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { requireSetupAuth, isRequestSetupAuthenticated, extractSetupToken } from '../middleware/setupAuth.js';
+import { db } from '../db.js';
+import { isRealAdminUser } from '../database/postgres.js';
+import { scheduleSystemReboot } from '../services/systemLifecycle.service.js';
 
 export const setupRouter = Router();
 
@@ -427,4 +430,236 @@ setupRouter.post('/recover-admin', async (req: Request, res: Response) => {
       message: err?.message || 'Yönetici hesabı kurtarılamadı.',
     });
   }
+});
+
+/**
+ * POST /api/setup/emergency-database-config
+ * Disaster-recovery endpoint for updating database configuration & password when in MAINTENANCE mode.
+ * Strictly requires either:
+ * 1) Valid single-use or stored Recovery Token (from data/.recovery_token)
+ * 2) Valid active Admin session
+ * 3) Valid Admin email + password matching local admin account
+ */
+setupRouter.post('/emergency-database-config', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    success: false,
+    code: 'EMERGENCY_DATABASE_CONFIG_DISABLED',
+    message: 'Emergency database changes are disabled. Use Administration > System Secrets to safely change the database role or password, and keep the previous role available during rollback.',
+  });
+});
+/*
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`emergency_db:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({ success: false, error: 'Çok fazla istek. Lütfen bekleyin.', retryAfterSeconds: rateLimit.retryAfterSeconds });
+  }
+
+  const {
+    recoveryToken,
+    adminEmail,
+    adminPassword,
+    host,
+    port,
+    database,
+    user,
+    password,
+    sslMode,
+  } = req.body || {};
+
+  let authenticated = false;
+
+  // 1. Check recovery token (body, header, or cookie)
+  const candidateToken = recoveryToken || extractSetupToken(req);
+  if (candidateToken && typeof candidateToken === 'string') {
+    authenticated = setupService.validateRecoveryToken(candidateToken.trim());
+  }
+
+  // 2. Check active admin session
+  if (!authenticated) {
+    const authHeader = req.headers.authorization;
+    const cookieToken = req.cookies?.nexus_session_token;
+    const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null) || cookieToken;
+    if (token) {
+      try {
+        const session = (await db.verifySessionAsync?.(token)) || db.verifySession(token);
+        if (session && session.user.role === 'admin') {
+          authenticated = true;
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Check admin credentials (email + password)
+  if (!authenticated && adminEmail && adminPassword) {
+    try {
+      const authResult = await db.authenticate(String(adminEmail).trim(), String(adminPassword));
+      if (authResult && authResult.user.role === 'admin') {
+        authenticated = true;
+      }
+    } catch {}
+  }
+
+  if (!authenticated) {
+    return res.status(401).json({
+      success: false,
+      code: 'EMERGENCY_AUTH_REQUIRED',
+      message: 'Güvenlik doğrulaması başarısız. Lütfen kurtarma anahtarınızı (Recovery Token) veya yönetici bilgilerinizi giriniz.',
+      hint: 'Sunucudaki "data/.recovery_token" dosyasındaki anahtarı giriniz.',
+    });
+  }
+
+  if (password === undefined || password === null) {
+    return res.status(400).json({
+      success: false,
+      message: 'Veritabanı şifresi alanı zorunludur.',
+    });
+  }
+
+  const currentRuntime = (setupService.getRuntimeConfig() as any) || {};
+  const effectiveConfig: DatabaseConfigPayload = {
+    host: String(host || currentRuntime.host || 'timescaledb').trim(),
+    port: parseInt(String(port || currentRuntime.port || 5432), 10) || 5432,
+    database: String(database || currentRuntime.database || 'iot_dashboard').trim(),
+    user: String(user || currentRuntime.user || 'iot_user').trim(),
+    password: String(password),
+    sslMode: sslMode || currentRuntime.sslMode || 'disable',
+  };
+
+  try {
+    // Test PostgreSQL candidate connection with SELECT 1;
+    const testResult = await setupService.testConnection(effectiveConfig, { allowCompletedSetup: true });
+    if (!testResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: `Veritabanı bağlantısı doğrulanamadı: ${testResult.message}`,
+        errorCode: testResult.errorCode,
+      });
+    }
+
+    // Persist to server runtime secret file
+    setupService.saveRuntimeSecretConfig(effectiveConfig, true);
+
+    // Update vault secrets
+    await systemSecretsService.updateDatabaseSecrets(effectiveConfig, 'emergency-maintenance-ui').catch(() => {});
+
+    // Try updating secret file on host if present
+    const secretPaths = [
+      '/opt/nexusnode-iot/secrets/postgres_password',
+      path.resolve(process.cwd(), 'secrets', 'postgres_password'),
+    ];
+    for (const sPath of secretPaths) {
+      try {
+        if (fs.existsSync(sPath)) {
+          fs.writeFileSync(sPath, effectiveConfig.password, 'utf8');
+        }
+      } catch {}
+    }
+
+    // Recycle shared pool & re-init database repository
+    await recycleSharedPgPool().catch(() => {});
+    db.savePostgresUrl(setupService.buildConnectionString({ ...effectiveConfig, password: '' }));
+    db.recyclePgPool();
+    await db.initPostgresRepository(true).catch(() => {});
+
+    // Deactivate local fallback if it was active
+    setupService.setLocalFallbackActive(false);
+
+    // Invalidate all active user sessions across PostgreSQL and WAL to prevent stale/unauthorized access with old credentials
+    await db.terminateAllSessions('Acil durum veritabanı ayarları güncellendi');
+    res.clearCookie('nexus_session_token');
+
+    // Schedule graceful reboot so all connection pools, background workers, and container processes reload with the new database configuration
+    scheduleSystemReboot('Acil durum veritabanı ayarları güncellendi - Sistem yeniden başlatılıyor', 1500);
+
+    systemLogger.info(
+      'database',
+      `Acil durum veritabanı ayarları başarıyla güncellendi (Host: ${effectiveConfig.host}, DB: ${effectiveConfig.database}, User: ${effectiveConfig.user}) (IP: ${clientIp})`
+    );
+
+    return res.json({
+      success: true,
+      message: 'Veritabanı bağlantısı başarıyla doğrulandı ve kaydedildi! Tüm aktif oturumlar kapatıldı, sistem yeniden başlatılıyor.',
+      systemMode: 'READY',
+      rebooting: true,
+      sessionsRevoked: true,
+      dbConfig: {
+        host: effectiveConfig.host,
+        port: effectiveConfig.port,
+        database: effectiveConfig.database,
+        user: effectiveConfig.user,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: `Veritabanı konfigürasyonu kaydedilemedi: ${err?.message || err}`,
+    });
+  }
+});
+
+*/
+/**
+ * POST /api/setup/enable-local-fallback
+ * Enables offline local SQLite/WAL fallback mode when PostgreSQL is unreachable.
+ * Requires Recovery Token, Active Admin Session, or Admin Email + Password.
+ */
+setupRouter.post('/enable-local-fallback', async (req: Request, res: Response) => {
+  const clientIp = getClientIp(req);
+  const rateLimit = rateLimiterService.checkIpRateLimit(`local_fallback:${clientIp}`, 10);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({ success: false, error: 'Çok fazla istek. Lütfen bekleyin.' });
+  }
+
+  const { recoveryToken, adminEmail, adminPassword } = req.body || {};
+  let authenticated = false;
+
+  const candidateToken = recoveryToken || extractSetupToken(req);
+  if (candidateToken && typeof candidateToken === 'string') {
+    authenticated = setupService.validateRecoveryToken(candidateToken.trim());
+  }
+
+  if (!authenticated) {
+    const authHeader = req.headers.authorization;
+    const cookieToken = req.cookies?.nexus_session_token;
+    const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null) || cookieToken;
+    if (token) {
+      try {
+        const session = (await db.verifySessionAsync?.(token)) || db.verifySession(token);
+        if (session && session.user.role === 'admin') {
+          authenticated = true;
+        }
+      } catch {}
+    }
+  }
+
+  if (!authenticated && adminEmail && adminPassword) {
+    try {
+      const authResult = await db.authenticate(String(adminEmail).trim(), String(adminPassword));
+      if (authResult && authResult.user.role === 'admin') {
+        authenticated = true;
+      }
+    } catch {}
+  }
+
+  // If system has no admin, allow fallback for disaster recovery
+  if (!authenticated && !db.getUsers().some(isRealAdminUser)) {
+    authenticated = true;
+  }
+
+  if (!authenticated) {
+    return res.status(401).json({
+      success: false,
+      code: 'AUTH_REQUIRED',
+      message: 'Yerel Moda geçmek için kurtarma anahtarı (Recovery Token) veya yönetici bilgileri gereklidir.',
+    });
+  }
+
+  setupService.setLocalFallbackActive(true);
+  systemLogger.info('system', `Acil durum yerel modu (WAL/SQLite) aktif edildi (IP: ${clientIp})`);
+
+  return res.json({
+    success: true,
+    message: 'Yerel Mod başarıyla etkinleştirildi. Sisteme erişebilirsiniz.',
+    systemMode: 'READY',
+  });
 });

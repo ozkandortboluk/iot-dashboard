@@ -34,6 +34,16 @@ function safeTerminateSessionSocket(sessionToken: string, code = 1008, reason = 
   } catch {}
 }
 
+function safeTerminateAllSockets(code = 1008, reason = 'All sessions revoked') {
+  try {
+    import('../services/websocket.js').then((wsMod) => {
+      if (typeof wsMod.terminateAllSessionsSockets === 'function') {
+        wsMod.terminateAllSessionsSockets(code, reason);
+      }
+    }).catch(() => {});
+  } catch {}
+}
+
 function safeBroadcast(event: string, payload: any) {
   try {
     import('../services/websocket.js').then((wsMod) => {
@@ -690,6 +700,17 @@ export class UserRepository {
     this.db.data.sessions = (this.db.data.sessions || []).filter(
       (s: any) => s.userId !== userId || s.tokenHash === currentHash || s.token === currentToken
     );
+    this.db.saveData(this.db.data, true);
+  }
+
+  public async terminateAllSessions(reason = 'Tüm aktif oturumlar sonlandırıldı'): Promise<void> {
+    safeTerminateAllSockets(1008, reason);
+    if (this.isPgReady()) {
+      await this.db.postgresRepo.deleteAllSessions().catch((e: any) => {
+        console.warn('[PG Error deleteAllSessions]', e?.message || e);
+      });
+    }
+    this.db.data.sessions = [];
     this.db.saveData(this.db.data, true);
   }
 

@@ -587,7 +587,12 @@ function SystemStateGuard() {
     }
 
     if (systemMode === 'MAINTENANCE') {
-      return <MaintenanceView onRetry={checkStatus} />;
+      return (
+        <MaintenanceView
+          onRetry={checkStatus}
+          sshTunnelAllowed={sshTunnelAllowed}
+        />
+      );
     }
 
     if (systemMode === 'RECOVERY') {

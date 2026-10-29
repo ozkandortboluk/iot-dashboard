@@ -125,7 +125,7 @@ describe('Zero-Touch Automated Single-Command Installer & Extensible Architectur
     const mockBin = path.join(rootDir, 'data', 'mock-bin');
     fs.mkdirSync(mockBin, { recursive: true });
     fs.writeFileSync(path.join(mockBin, 'age'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    const backupsDir = path.join(rootDir, 'backups');
+    const backupsDir = path.join(sandboxRoot, 'backup-output-must-not-be-created');
     let backupError: unknown;
     try {
       execSync(`bash ${installScriptPath} --backup`, {
