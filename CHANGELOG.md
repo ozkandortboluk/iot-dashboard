@@ -3,6 +3,13 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## [v1.50.9] - 2026-10-29
+
+### CI and Rollback Validation
+- Return an explicit maintenance response when the restored database pool cannot be verified.
+- Isolate the missing-recipient backup test output path so it cannot be affected by a pre-existing project backup directory.
+
+---
 ## [v1.50.8] - 2026-10-29
 
 ### Database Credential Rollback Safety

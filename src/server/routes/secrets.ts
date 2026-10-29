@@ -307,7 +307,11 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
             db.recyclePgPool();
             const rollbackConnected = await db.initPostgresRepository(true);
             if (!rollbackConnected) {
-              throw new Error('Önceki veritabanı bağlantısı geri yüklendi ancak uygulama havuzu doğrulanamadı.');
+              systemLogger.error('database', 'Önceki veritabanı ayarları yüklendi ancak geri dönüş bağlantısı doğrulanamadı.');
+              return res.status(503).json({
+                success: false,
+                error: 'Bağlantı değişikliği başarısız oldu ve otomatik geri dönüş doğrulanamadı. Üretim değişikliklerini durdurun ve sunucu yapılandırmasını inceleyin.',
+              });
             }
           } catch (rollbackError: any) {
             systemLogger.error('database', `DB bağlantı değişikliği geri alınamadı; elle müdahale gerekiyor: ${sanitizeLogString(rollbackError?.message || rollbackError)}`);
