@@ -3,6 +3,13 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.51.0] - 2026-10-29
+
+### Güvenli PostgreSQL Bağlantısı ve Sürüm Takibi
+- PostgreSQL bağlantı, migration ve repository altyapısı ile güvenli kimlik bilgisi döndürme akışı eklendi.
+- Sürüm karşılaştırma kartı, GitHub `main/package.json` dosyasındaki sürümü okuyacak şekilde güncellendi.
+
+---
 ## 🚀 [v1.50.10] - 2026-10-29
 
 ### GitHub Depo Sürümünü Canlı Gösterme
