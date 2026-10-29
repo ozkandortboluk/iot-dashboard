@@ -220,6 +220,10 @@ export function startCommandExpiryWorker(intervalMs = 30000) {
   }, intervalMs);
 }
 
+export function isCommandExpiryWorkerRunning(): boolean {
+  return expiryWorkerTimer !== null;
+}
+
 export function stopCommandExpiryWorker() {
   if (expiryWorkerTimer) {
     clearInterval(expiryWorkerTimer);

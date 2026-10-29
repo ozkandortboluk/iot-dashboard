@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard,
+  Sliders,
+  ChevronDown,
+  ServerCog,
   Activity,
   Cpu,
   BarChart3,
@@ -59,6 +62,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
   const [isGithubRefreshing, setIsGithubRefreshing] = useState(false);
   const [isRuntimeRefreshing, setIsRuntimeRefreshing] = useState(false);
+  const [expandedSubMenus, setExpandedSubMenus] = useState<Record<string, boolean>>({
+    system_settings: true,
+  });
+
+  const toggleSubMenu = (menuId: string) => {
+    setExpandedSubMenus((prev) => ({
+      ...prev,
+      [menuId]: !prev[menuId],
+    }));
+  };
 
   const fetchRuntimeInfo = useCallback(async () => {
     setIsRuntimeRefreshing(true);
@@ -98,16 +111,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, []);
 
-  useEffect(() => {
-    fetchRuntimeInfo();
-    fetchGithubVersion();
-  }, [fetchRuntimeInfo, fetchGithubVersion]);
-
   const role = user?.role || 'customer';
   const isAdmin = role === 'admin';
   const isOperator = role === 'operator';
   const isAnalyst = role === 'analyst';
   const isCustomer = role === 'customer';
+
+  useEffect(() => {
+    fetchRuntimeInfo();
+    if (isAdmin) {
+      fetchGithubVersion();
+    }
+  }, [fetchRuntimeInfo, fetchGithubVersion, isAdmin]);
 
   const customerMenuItems = [
     {
@@ -325,8 +340,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
-      section: 'SİSTEM & GÜVENLİK',
+      section: 'SİSTEM YÖNETİMİ',
       items: [
+        {
+          id: 'system_settings',
+          label: 'Sistem ve Ayarları',
+          icon: ServerCog,
+          subItems: [
+            {
+              id: 'system_engines',
+              label: 'Sistem Motorları',
+              icon: Sliders,
+            },
+            {
+              id: 'database_data',
+              label: 'PostgreSQL & Veritabanı',
+              icon: Database,
+            },
+            {
+              id: 'system_logs',
+              label: 'Sistem & Hata Günlükleri',
+              icon: Terminal,
+            },
+          ],
+        },
         {
           id: 'generator',
           label: 'Sanal Veri Üreteci',
@@ -348,19 +385,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: Activity,
         },
         {
-          id: 'database_data',
-          label: 'PostgreSQL & Veritabanı',
-          icon: Database,
-        },
-        {
           id: 'security',
           label: 'Güvenlik & Audit Logları',
           icon: ShieldCheck,
-        },
-        {
-          id: 'system_logs',
-          label: 'Sistem & Hata Günlükleri',
-          icon: Terminal,
         },
         {
           id: ADMIN_PLUGINS_TAB.id,
@@ -429,24 +456,71 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <p className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5">
           {group.section}
         </p>
-        {group.items.map((item) => {
+        {group.items.map((item: any) => {
           const Icon = item.icon;
-          const isActive = activeTab === item.id;
+          const hasSubItems = Boolean(item.subItems && item.subItems.length > 0);
+          const isSubActive = Boolean(item.subItems?.some((s: any) => s.id === activeTab));
+          const isActive = activeTab === item.id || isSubActive;
+          const isExpanded = expandedSubMenus[item.id] ?? (isSubActive || isActive);
+
           return (
-            <button
-              key={item.id}
-              onClick={() => handleSelectTab(item.id)}
-              className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl transition-all text-xs font-medium cursor-pointer ${
-                isActive
-                  ? activeThemeClass
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Icon className={`w-4 h-4 ${isActive ? iconActiveColor : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </div>
-            </button>
+            <div key={item.id} className="space-y-1">
+              <button
+                key={item.id}
+                onClick={() => {
+                  handleSelectTab(item.id);
+                  if (hasSubItems) {
+                    setExpandedSubMenus((prev) => ({ ...prev, [item.id]: true }));
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl transition-all text-xs font-medium cursor-pointer ${
+                  isActive
+                    ? activeThemeClass
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon className={`w-4 h-4 ${isActive ? iconActiveColor : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                </div>
+                {hasSubItems && (
+                  <ChevronDown
+                    onClick={(e: any) => {
+                      e.stopPropagation();
+                      toggleSubMenu(item.id);
+                    }}
+                    className={`w-3.5 h-3.5 transition-transform ${
+                      isExpanded ? 'rotate-0 text-indigo-500' : '-rotate-90 text-slate-400'
+                    }`}
+                  />
+                )}
+              </button>
+
+              {hasSubItems && isExpanded && (
+                <div className="ml-4 pl-3 border-l-2 border-indigo-200 dark:border-indigo-900/60 space-y-1 my-1">
+                  {item.subItems.map((sub: any) => {
+                    const SubIcon = sub.icon;
+                    const isCurrentSubActive = activeTab === sub.id;
+                    return (
+                      <button
+                        key={sub.id}
+                        onClick={() => handleSelectTab(sub.id)}
+                        className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all text-[11px] font-medium cursor-pointer ${
+                          isCurrentSubActive
+                            ? 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-500/20'
+                            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <SubIcon className={`w-3.5 h-3.5 ${isCurrentSubActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                          <span>{sub.label}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -595,9 +669,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </button>
 
-        {/* Alt Kart: GitHub Depo Sürümü */}
-        <a
-          href={GITHUB_REPO_URL}
+        {/* Alt Kart: GitHub Depo Sürümü (Sadece Yönetici / Admin) */}
+        {isAdmin && (
+          <a
+            href={GITHUB_REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
           id="sidebar-github-version-link"
@@ -638,7 +713,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }`} />
             </div>
           </div>
-        </a>
+          </a>
+        )}
       </div>
     </div>
   );

@@ -624,15 +624,23 @@ class SSHTunnelService {
                 }
               }
 
+              const isSuccess = isPgConnected || !hasValidDbPassword;
+              if (!isSuccess) {
+                this.addLog('GÜVENLİK KONTROLÜ: Veritabanı güvenlik kontrolü başarısız oldu. SSH tüneli otomatik olarak kapatılıyor...');
+                this.status = 'error';
+                this.lastError = 'PostgreSQL bağlantı doğrulaması başarısız oldu.';
+                this.cleanup();
+              }
+
               const successMsg = isPgConnected
                 ? `SSH Tüneli ve PostgreSQL bağlantısı başarıyla kuruldu! (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort})`
                 : !hasValidDbPassword
                 ? `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}). Uzak veritabanına bağlanmak için lütfen PostgreSQL parolanızı giriniz.`
-                : `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL veritabanı bağlantısı kurulamadı. Lütfen veritabanı kullanıcı adı ve şifrenizi kontrol edin.`;
+                : `SSH Tüneli kuruldu (127.0.0.1:${localPort} -> ${remoteHost}:${remotePort}), ancak PostgreSQL veritabanı bağlantısı kurulamadı. Güvenlik kontrolleri başarısız olduğu için tünel otomatik olarak kapatıldı.`;
 
               resolve({
-                success: isPgConnected || !hasValidDbPassword,
-                transportConnected: true,
+                success: isSuccess,
+                transportConnected: isSuccess,
                 isPgConnected,
                 databaseState: dbState,
                 message: successMsg,

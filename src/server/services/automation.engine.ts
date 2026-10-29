@@ -4,9 +4,20 @@ import { systemLogger } from './systemLogger.service.js';
 import type { TelemetryReading, Automation } from '../../types.js';
 
 export class AutomationEngine {
+  private enabled: boolean = true;
+
+  public isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  public setEnabled(val: boolean): void {
+    this.enabled = val;
+  }
+
   private activeLocks = new Set<string>();
 
   public async evaluateAutomations(reading: TelemetryReading): Promise<void> {
+    if (!this.enabled) return;
     const automations = db.data.automations || [];
     if (automations.length === 0) return;
 

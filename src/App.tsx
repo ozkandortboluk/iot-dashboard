@@ -23,6 +23,8 @@ import { AutomationsView } from './components/AutomationsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
 import { FirmwareView } from './components/FirmwareView';
 import { SystemLogsView } from './components/system/SystemLogsView';
+import { SystemSettingsView } from './components/SystemSettingsView';
+import { SystemEnginesView } from './components/SystemEnginesView';
 import { ADMIN_PLUGINS_TAB } from './codex/plugin';
 import { ServerStatusView } from './components/system/ServerStatusView';
 import { DatabaseSetupWizard } from './components/setup/DatabaseSetupWizard';
@@ -102,6 +104,8 @@ function DashboardContent() {
 
   const tabTitles: Record<string, string> = {
     dashboard: 'Canlı İzleme Dashboard',
+    system_settings: 'Sistem ve Ayarları',
+    system_engines: 'Sistem ve Ayarları > Sistem Motorları',
     devices: isCustomer ? 'Cihazlarım & Sensör Verileri' : 'Saha Cihazları',
     device_health: 'Cihaz Sağlığı ve Bakım',
     firmware_ota: 'Firmware & OTA Yönetimi',
@@ -110,10 +114,10 @@ function DashboardContent() {
     generator: 'Sanal Veri & Telemetri Üreteci',
     analytics: 'Veri Analizi & Raporlama',
     notifications: 'Bildirimler & Alarmlar',
-    database_data: 'PostgreSQL & Veritabanı Yönetimi',
+    database_data: 'Sistem ve Ayarları > PostgreSQL & Veritabanı',
     server_status: 'Sunucu Durumu & Canlı Sistem Metrikleri',
     security: 'Güvenlik & Audit Logları',
-    system_logs: 'Sunucu Sistem & Hata Günlükleri',
+    system_logs: 'Sistem ve Ayarları > Sistem & Hata Günlükleri',
     [ADMIN_PLUGINS_TAB.id]: ADMIN_PLUGINS_TAB.label,
     deployment: 'Sunucu & DB Kurulum Rehberi',
     account_settings: 'Hesap & Şifre Ayarları',
@@ -198,7 +202,12 @@ function DashboardContent() {
             />
           )}
           {safeActiveTab === 'devices' && (
-            <DevicesView onNavigateToHelp={() => setActiveTab('help')} />
+            <DevicesView
+              onNavigateToHelp={() => setActiveTab('help')}
+              onNavigateToHealth={() => setActiveTab('device_health')}
+              onNavigateToAutomations={() => setActiveTab('automations')}
+              onNavigateToTab={(tab) => setActiveTab(tab)}
+            />
           )}
           {safeActiveTab === 'automations' && <AutomationsView />}
           {safeActiveTab === 'device_health' && (
@@ -229,12 +238,22 @@ function DashboardContent() {
           {isAdmin && safeActiveTab === 'generator' && <DataGeneratorView />}
           {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'analytics' && <AnalyticsView />}
           {safeActiveTab === 'notifications' && <NotificationsView />}
-          {isAdmin && safeActiveTab === 'database_data' && <DatabaseDataView />}
+          {isAdmin && safeActiveTab === 'database_data' && (
+            <DatabaseDataView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
           {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'server_status' && (
             <ServerStatusView onNavigateToTab={(tab) => setActiveTab(tab)} />
           )}
           {isAdmin && safeActiveTab === 'security' && <SecurityView />}
-          {isAdmin && safeActiveTab === 'system_logs' && <SystemLogsView />}
+          {isAdmin && safeActiveTab === 'system_logs' && (
+            <SystemLogsView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
+          {isAdmin && safeActiveTab === 'system_settings' && (
+            <SystemSettingsView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
+          {isAdmin && safeActiveTab === 'system_engines' && (
+            <SystemEnginesView onNavigateToTab={(tab) => setActiveTab(tab)} />
+          )}
           {isAdmin && safeActiveTab === ADMIN_PLUGINS_TAB.id && <ADMIN_PLUGINS_TAB.component />}
           {isAdmin && safeActiveTab === 'deployment' && <HelpView initialTab="server_deployment" onNavigateToTab={(tab) => setActiveTab(tab)} />}
           {safeActiveTab === 'account_settings' && <AccountSettingsView />}
@@ -564,6 +583,16 @@ function SystemStateGuard() {
               setSshGatePassed(true);
               setConnectionLostNotice(false);
               checkStatus();
+            } else {
+              // Pre-login check failed: auto-disconnect SSH tunnel
+              try {
+                const token = sessionStorage.getItem('nexus_ssh_bootstrap_token');
+                await fetch('/api/system/ssh-tunnel/disconnect', {
+                  method: 'POST',
+                  headers: token ? { 'X-SSH-Bootstrap-Token': token } : {},
+                  credentials: 'include',
+                });
+              } catch {}
             }
           }}
         />

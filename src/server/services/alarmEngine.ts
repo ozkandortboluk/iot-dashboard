@@ -3,6 +3,16 @@ import { broadcast, broadcastToTenant } from './websocket.js';
 import type { ActiveAlarm, ThresholdRule, TelemetryReading, User } from '../../types.js';
 
 export class AlarmEngine {
+  private enabled: boolean = true;
+
+  public isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  public setEnabled(val: boolean): void {
+    this.enabled = val;
+  }
+
   public async getAlarms(requestingUserId?: string, targetCustomerId?: string): Promise<ActiveAlarm[]> {
     return await db.getAlarms(requestingUserId, targetCustomerId);
   }

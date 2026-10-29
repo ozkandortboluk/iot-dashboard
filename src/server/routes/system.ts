@@ -19,6 +19,7 @@ import { simulationTelemetryController } from '../controllers/simulationTelemetr
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
+import { systemEnginesService } from '../services/systemEngines.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
@@ -217,21 +218,38 @@ systemRouter.get('/runtime', (req, res) => {
   });
 });
 
-// System Version & GitHub Sync Diagnostic Endpoint (v1.49.2)
+// System Version & GitHub Sync Diagnostic Endpoint (v1.51.2)
+// Müşteri ekranları sadece sunucudaki uygulama sürümünü görmeli; admin hem mevcut hem de GitHub'daki sürümü görmeli.
 systemRouter.get(['/system/version', '/version'], async (req, res) => {
   const config = getRuntimeConfig();
   const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
-  const githubRelease = await getLatestGithubVersion();
 
-  let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
-  const versionComparison = compareVersions(APP_VERSION, githubRelease.version);
-  if (versionComparison > 0) {
-    syncStatus = 'ahead';
-  } else if (versionComparison < 0) {
-    syncStatus = 'behind';
+  let isAdmin = false;
+  try {
+    const authReq = req as AuthenticatedRequest;
+    if (authReq.user?.role?.toLowerCase() === 'admin') {
+      isAdmin = true;
+    } else {
+      const authHeader = req.headers['authorization'];
+      let token = req.headers['x-auth-token'] as string;
+      if (!token && authHeader) {
+        token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+      }
+      if (!token && (req as any).cookies?.nexus_session_token) {
+        token = (req as any).cookies.nexus_session_token;
+      }
+      if (token) {
+        const verified = await db.verifySessionAsync(token.trim());
+        if (verified?.user?.role?.toLowerCase() === 'admin') {
+          isAdmin = true;
+        }
+      }
+    }
+  } catch {
+    isAdmin = false;
   }
 
-  return res.json({
+  const payload: Record<string, any> = {
     appName: APP_NAME,
     version: APP_VERSION,
     releaseTag: APP_RELEASE_TAG,
@@ -239,15 +257,71 @@ systemRouter.get(['/system/version', '/version'], async (req, res) => {
     environment,
     isVps: config.isVps,
     isAiStudio: config.isAiStudio,
-    github: {
+  };
+
+  // Yönetici (Admin) hem mevcut hem de GitHub deposundaki sürümü görebilir
+  if (isAdmin) {
+    const githubRelease = await getLatestGithubVersion();
+    let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
+    const versionComparison = compareVersions(APP_VERSION, githubRelease.version);
+    if (versionComparison > 0) {
+      syncStatus = 'ahead';
+    } else if (versionComparison < 0) {
+      syncStatus = 'behind';
+    }
+
+    payload.github = {
       repo: GITHUB_REPO,
       repoUrl: GITHUB_REPO_URL,
       releasesUrl: GITHUB_RELEASES_URL,
       version: githubRelease.version,
       releaseTag: githubRelease.releaseTag,
       syncStatus,
-    },
-  });
+    };
+  }
+
+  return res.json(payload);
+});
+
+// System Engines Management Endpoints
+systemRouter.get('/system/engines', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const engines = await systemEnginesService.getEnginesList();
+    return res.json({ success: true, engines });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Sistem motorları listelenirken hata oluştu' });
+  }
+});
+
+systemRouter.post('/system/engines/:id/toggle', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled alanı boolean (true/false) olmalıdır.' });
+    }
+    const result = await systemEnginesService.toggleEngine(req.params.id, enabled);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Motor durumu değiştirilemedi.' });
+  }
+});
+
+systemRouter.post('/system/engines/:id/trigger', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await systemEnginesService.triggerEngine(req.params.id);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Motor manuel tetiklenemedi.' });
+  }
+});
+
+systemRouter.post('/system/engines/:id/config', authenticateUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await systemEnginesService.configureEngine(req.params.id, req.body);
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Motor ayarları kaydedilemedi.' });
+  }
 });
 
 // System Status Endpoint for Frontend / Diagnostics

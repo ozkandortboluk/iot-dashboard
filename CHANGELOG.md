@@ -3,6 +3,175 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.51.11] - 2026-10-29
+
+### 📡 Saha Cihazları Sayfası Standart Üst Başlığı, Hızlı Navigasyon & Dinamik Silme Dönüşümü
+- **Standart Sayfa Üst Başlığı & Sağ Köşe Butonları (`DevicesView.tsx`, `App.tsx`)**:
+  - Tüm Saha Cihazları sayfasının tepesine sistem genelindeki tasarım standartlarına tam uyumlu (`text-lg sm:text-xl font-bold`, ikon kutulu ve açık/koyu tema duyarlı) modern bir üst başlık kartı entegre edildi.
+  - Başlığın sağ üst köşesine doğrudan tek tıkla erişim sağlayan iki hızlı operasyonel navigasyon butonu konumlandırıldı:
+    - 🩺 **Cihaz Sağlığı & Bakım** butonu (`device_health` masasına hızlı yönlendirme)
+    - 🤖 **Otomasyon & Senaryolar** butonu (`automations` masasına hızlı yönlendirme)
+- **"Cihaz Ekle" Butonunun "Sil" Butonuna Dinamik Dönüşümü (`DevicesView.tsx`)**:
+  - Cihaz listesinde herhangi bir cihazın önündeki onay kutucuğu (tik işareti) seçildiğinde, normal şartlarda görünen mor "Yeni Cihaz Ekle" butonu otomatik olarak kırmızı renkli **"Seçilenleri Sil (X)"** butonuna dönüşür.
+  - Seçimler kaldırıldığında buton yeniden "Yeni Cihaz Ekle" durumuna geri döner.
+- **Gereksiz Seçim Bandının Arayüzden Kaldırılması (`DevicesView.tsx`)**:
+  - Cihaz seçimi yapıldığında tablonun üstünde beliren ve görsel kalabalık oluşturan "X cihaz seçildi. Tüm Filtrelenenleri Seç" bildirim şeridi arayüzden tamamen temizlendi.
+- **Birim ve Arayüz Testleri (`devices_view_header_and_selection.test.ts`)**:
+  - Standart başlık hiyerarşisi, sağ köşe navigasyon butonları, dinamik sil butonuna dönüşüm mantığı ve eski seçim bandının temizlendiğini doğrulayan 6/6 test paketi eklendi.
+
+---
+## 🚀 [v1.51.10] - 2026-10-29
+
+### 📡 Sanal Veri Üreteci & Test Laboratuvarı Geliştirmeleri ve Standart Dashboard Başlık Tasarımı
+- **Standart ve Kompakt Sayfa Başlığı Entegrasyonu (`DataGeneratorView.tsx`)**:
+  - Sayfa tepesindeki hantal ve aşırı büyük koyu gradient afiş kaldırıldı; diğer yönetim ekranlarıyla tam uyumlu, orantılı (`text-lg sm:text-xl font-bold`), temiz ikon kutulu ve açık/koyu temaya duyarlı modern bir başlık kartı tasarlandı.
+  - Başlık kartının sağ tarafına Otonom Simülatör çalışma durum göstergesi (nabız atan yeşil/kırmızı gösterge ve Duraklat/Başlat anahtarı) entegre edildi.
+  - Başlığın hemen altına 4 kartlık özet istatistik paneli eklendi: **Paket Frekansı / Hızı**, **Anomali Oranı**, **Aktif Test Senaryosu** ve **Kayıtlı Simüle Cihaz Sayısı**.
+- **Çift Enjeksiyon Modu - Tekil Metrik ve Kompozit Çoklu Sensör Paketi (`DataGeneratorView.tsx`)**:
+  - Tekil metrik enjeksiyonunun yanı sıra 4 temel sensör metriğini (Sıcaklık, Bağıl Nem, Titreşim ve Güç Tüketimi) tek bir HTTP yükünde canlı simülasyona aktaran **Kompozit Çoklu Sensör Paketi** modu eklendi.
+- **Hızlı Anomali Enjeksiyon Paleti (Acil Durum & Alarm Tatbikatı) (`DataGeneratorView.tsx`)**:
+  - Alarm ve bildirim motorlarını anında tetiklemek ve arıza senaryolarını test etmek üzere 4 adet tek tıkla enjeksiyon butonu eklendi:
+    - 🔥 **Aşırı Sıcaklık:** 98.8 °C
+    - ⚡ **Voltaj Sıçraması:** 18.5 kW
+    - ⚠️ **Mekanik Titreşim:** 38.4 mm/s
+    - 🌪️ **Kritik Basınç Düşüşü:** 780 hPa
+- **Hızlı Simülasyon Yük Profilleri (`DataGeneratorView.tsx`)**:
+  - Simülasyon motorunu tek tıkla önceden yapılandırılmış çalışma modlarına geçiren hızlı profil butonları eklendi:
+    - **Sakin / Düşük Yük:** 5 sn aralık, %0 anomali
+    - **Standart Saha:** 2 sn aralık, %5 anomali
+    - **Stres & Hız Testi:** 500 ms aralık, %20 anomali
+    - **Kaotik Arıza Tatbikatı:** 1 sn aralık, %40 anomali
+- **Canlı Simülasyon Konsolu Geliştirmeleri & Dışa Aktarma (`DataGeneratorView.tsx`)**:
+  - **CSV ve JSON Olarak İndirme:** Konsola düşen telemetri paketlerini tek tıkla standart CSV (`exportToCSV`) ve JSON (`exportToJSON`) dosyaları olarak dışa aktarma desteği sağlandı.
+  - **Çift Filtreleme:** Canlı konsol hem metrik türüne (Sıcaklık, CPU, Güç, Titreşim, Basınç, Nem) hem de hedef sanal cihaza göre anlık filtrelenebilir.
+  - **Canlı Akışı Dondurma/Duraklatma ve Temizleme:** Hata analizi sırasında akan veriyi dondurma (`Pause` / `Play`) ve terminali temizleme butonları korundu ve optimize edildi.
+- **Fiziksel Cihaz Koruma Kalkanı Doğrulaması**:
+  - Gerçek saha donanımlarına yanlışlıkla simülasyon veya sentetik test verisi enjekte edilmesini kesin olarak engelleyen güvenlik kontrolleri (`isSimulated` doğrulaması) muhafaza edildi ve görsel güvenlik rozetiyle arayüzde vurgulandı.
+- **Birim ve Arayüz Testleri (`data_generator_view.test.ts`)**:
+  - Tekil enjeksiyon, kompozit enjeksiyon, fiziksel donanım koruma kalkanı, toplu veri patlaması, dışa aktarma yardımcıları ve başlık orantı standartlarını doğrulayan 6/6 Vitest testi eklendi.
+
+---
+## 🚀 [v1.51.9] - 2026-10-29
+
+### 🎛️ Sistem Motorları Sayfası Karo / Liste Görünüm Modu ve Standart Dashboard Başlık Tasarımı
+- **Karo (Grid) ve Liste (Tablo) Görünüm Modu Seçimi (`SystemEnginesView.tsx`)**:
+  - Kullanıcının sistem motorlarını kartlar halinde (**Karo Modu**) veya kompakt bir satır tablosu halinde (**Liste Modu**) görüntüleyebilmesini sağlayan görünüm geçiş anahtarı (`LayoutGrid` / `List`) eklendi.
+  - Kullanıcı tercihi `useUserPreference` kancası aracılığıyla `system_engines_view_mode` anahtarıyla hem veritabanında hem de tarayıcıda kalıcı olarak saklanır.
+  - **Liste Modu**: Motor ikonu, adı, etiketi, kategori açıklaması, çalışma durumu rozeti, temel metrik çipleri, döngü frekansı, son çalışma zamanı ve inline aksiyon butonlarını (Durdur/Başlat, Tetikle, Ayarlar, Masaya Git) içeren yüksek verimli tablo arayüzü sunuldu.
+- **Standart ve Kompakt Sayfa Başlığı Entegrasyonu (`SystemEnginesView.tsx`)**:
+  - Sayfa tepesindeki hantal ve aşırı büyük koyu gradient afiş kaldırıldı; diğer yönetim sayfalarıyla (`DeviceHealthView.tsx`, `SystemLogsView.tsx`, `DatabaseDataView.tsx`) tam uyumlu, orantılı ve modern bir başlık kartı tasarlandı.
+  - "Sistem ve Ayarları'na Dön" hızlı dönüş bağlantısı, kompakt ikon kutusu, `Sistem Motorları` sayfa başlığı ve `Otonom Servis Masası` rozeti eklendi.
+  - Başlığın hemen altına 4 kartlık kompakt özet istatistik çubuğu (Toplam Motor, Çalışan Motor, Durdurulan, Worker Havuzu) konumlandırıldı.
+- **Birim ve Arayüz Testleri (`system_engines.test.ts`)**:
+  - `SystemEnginesView` bileşeninin Karo/Liste modlarını, `useUserPreference` entegrasyonunu ve standart başlık hiyerarşisini doğrulayan testler eklendi.
+
+---
+## 🚀 [v1.51.8] - 2026-10-29
+
+### 🔐 SSH Bağlantı Ekranı Enter Tuşu Tetiklemesi & Giriş Öncesi Güvenlik Doğrulaması Otomatik Kapatma
+- **SSH Şifresi Girişinde Enter Tuşu ile Tünel Başlatma (`SSHTunnelDrawer.tsx`)**:
+  - SSH bağlantı ekranında kullanıcı SSH şifresini yazıp `Enter` tuşuna bastığında `handleConnect()` fonksiyonu tetiklenerek "Tüneli Başlat" butonuna basılmış gibi bağlantı akışı başlatılır.
+  - Aynı şekilde SSH Host, Port, Kullanıcı Adı, Host Key Parmak İzi ve Veritabanı Şifresi alanlarında da `Enter` tuşu desteği sağlandı.
+- **Giriş Öncesi Güvenlik Kontrollerinde Başarısızlık Durumunda Otomatik Kapatma (`SSHTunnelDrawer.tsx`, `App.tsx`, `sshTunnel.service.ts`)**:
+  - SSH bağlantısı açıldıktan sonra yürütülen giriş öncesi güvenlik kontrollerinden herhangi biri (SSH bağlantı durumu, PostgreSQL `SELECT 1` sorgu doğrulaması, veritabanı `READY` durumu veya SHA256 Host Key Parmak İzi doğrulaması) başarısız olursa SSH tüneli güvenlik amacıyla anında ve otomatik olarak kapatılır (`disconnect`).
+  - Sunucu tarafında `sshTunnel.service.ts` içinde veritabanı doğrulaması başarısız olduğunda tünel dinleyicisi ve istemcisi anında sonlandırılarak (`cleanup`) tünelin asılı veya açık kalması kesin olarak engellendi.
+  - İstemci tarafında `SSHTunnelDrawer.tsx` ve `App.tsx` bileşenlerinde kontroller geçilemediğinde tünel otomatik kapatılarak kullanıcıya açık uyarı verildi.
+- **Birim ve Güvenlik Testleri (`ssh_enter_and_autoclose.test.ts`)**:
+  - Enter tuşu tetikleyicisi, tüm giriş öncesi güvenlik kontrollerinin eksiksizliği ve sunucu/istemci taraflı otomatik kapatma mantığını doğrulayan Vitest test paketi eklendi.
+
+---
+## 🚀 [v1.51.7] - 2026-10-29
+
+### 🗂️ Veritabanı ve Hata Günlüklerinin "Sistem ve Ayarları" Alt Sayfası Olarak Yapılandırılması
+- **Sol Menü (Sidebar) Hiyerarşik Düzenlemesi (`Sidebar.tsx`)**:
+  - `PostgreSQL & Veritabanı` (`database_data`) ve `Sistem & Hata Günlükleri` (`system_logs`) sayfaları sol menüde "Sistem ve Ayarları" (`system_settings`) sekmesinin altına hiyerarşik alt sayfalar olarak taşındı.
+  - Üst menü sadeleştirilerek gereksiz tekrarlar temizlendi.
+- **Doğrudan ve Hızlı Gezinme Entegrasyonu (`App.tsx`, `DatabaseDataView.tsx`, `SystemLogsView.tsx`)**:
+  - `database_data` ve `system_logs` seçildiğinde dış kapsayıcı afişler olmadan doğrudan ilgili uzmanlık masası açılacak şekilde yapılandırıldı.
+  - Her iki ekranın başlık alanına "← Sistem ve Ayarları'na Dön" hızlı gezinme butonu eklendi.
+  - Breadcrumb çubuğunda hiyerarşik yapı (`Sistem ve Ayarları > PostgreSQL & Veritabanı`, `Sistem ve Ayarları > Sistem & Hata Günlükleri`) senkronize edildi.
+- **Sistem ve Ayarları Genel Masası Genişletilmesi (`SystemSettingsView.tsx`)**:
+  - Ana görünüm kartlarına "PostgreSQL & Veritabanı" ve "Sistem & Hata Günlükleri" hızlı erişim modül kartları eklendi. Tek tıkla ilgili alt masalara geçiş sağlandı.
+
+
+---
+## 🚀 [v1.51.6] - 2026-10-29
+
+### 🎨 "Sistem ve Ayarları" Sadeleştirilmiş Modüler Tasarımı & Bağımsız Alt Sayfa Entegrasyonu
+- **Doğrudan ve İzole Alt Sayfa Gösterimi (`App.tsx` & `SystemEnginesView.tsx`)**:
+  - Sol menüden veya modül kartından "Sistem Motorları" (`system_engines`) seçildiğinde, dış kapsayıcı üst başlık kaldırıldı ve sadece ilgili uzmanlık masası ([SystemEnginesView.tsx](file:///c:/projeler/iot-dashboard/src/components/SystemEnginesView.tsx)) doğrudan tam genişlikte görüntülenecek şekilde izole edildi.
+  - Sayfa tepesine "← Sistem ve Ayarları'na Dön" hızlı dönüş bağlantısı eklendi.
+- **Kompakt ve Kullanıcı Dostu Genel Görünüm Masası (`SystemSettingsView.tsx`)**:
+  - Hacimli ve kaba üst siyah afişler kaldırılarak modern, sade ve kompakt bir sistem başlık kartı konumlandırıldı.
+  - "Sistem ve Ayarları" ana sekmesi açıldığında 4 temel sistem modülünü (Sistem Motorları, Genel Parametreler, Bildirim Kanalları, Depolama & WAL) özetleyen interaktif hızlı erişim kartları oluşturuldu.
+  - Kartlar üzerinden tek tıkla doğrudan motor masasına geçiş ve alt ayar panelleri arasında pürüzsüz geçiş sağlandı.
+
+
+---
+## 🚀 [v1.51.5] - 2026-10-29
+
+### 🛡️ PostgreSQL Şifre Değiştirme Bilgilendirmesi ve Gizli Panel Bildirimi
+- **Veritabanı Yönetim Paneli Bildirimi (`DatabaseDataView.tsx`)**:
+  - PostgreSQL yönetim ekranındaki bilgilendirme alanına, doğrudan şifre değiştirme ve hedef geçiş panellerinin sistem mimarisinde hazır ve eksiksiz kodlanmış olarak gizli (`hidden`) tutulduğu (`#safe-db-password-rotation-panel`), ihtiyaç duyulduğunda sistem üzerinde doğrudan görünür kılınarak tekrar kullanıma açılabileceği açıklaması eklendi.
+
+
+---
+## 🚀 [v1.51.4] - 2026-10-29
+
+### 🎛️ "Sistem ve Ayarları" Ana Sekmesi ve Hiyerarşik "Sistem Motorları" Entegrasyonu
+- **"Sistem ve Ayarları" Ana Navigasyon Sekmesi (`Sidebar.tsx`)**:
+  - Sol menüye doğrudan tıklanabilir **"Sistem ve Ayarları"** (`system_settings`) ana sekmesi eklendi.
+  - Açılır-kapanır (expandable) alt menü mimarisi kurularak **"Sistem Motorları"** (`system_engines`) bu ana sekmenin altında hiyerarşik bir alt sekme olarak konumlandırıldı.
+  - Alt menü ok simgesi (ChevronDown) ve bağımsız daraltma/genişletme kontrolleri entegre edildi; ana sekmeye tıklandığında hem ana yönetim görünümü açılır hem de alt menü otomatik genişletilir.
+- **Kapsayıcı Yönetim Masası (`SystemSettingsView.tsx`)**:
+  - "Sistem ve Ayarları" için zengin alt sekmeli üst yönetim masası oluşturuldu:
+    1. **Sistem Motorları**: 7 otonom arka plan motorunun kumanda ve izleme masası (`SystemEnginesView.tsx`).
+    2. **Genel Sistem Parametreleri**: Platform, kimlik ve çalışma zamanı temel yapılandırma ayarları.
+    3. **Bildirim & Dağıtım Kanalları**: SMTP, Webhook ve anlık dağıtım politikaları.
+    4. **Depolama & WAL Yapılandırması**: Veritabanı bağlantı havuzu, WAL diski ve kalıcılık metrikleri.
+- **Navigasyon ve Breadcrumb Senkronizasyonu (`App.tsx` & `permissions.ts`)**:
+  - Üst gezinme çubuğunda (breadcrumb) `Sistem ve Ayarları` ve `Sistem ve Ayarları > Sistem Motorları` hiyerarşisi tam senkronize edildi.
+  - Rol izin matrisinde (`ROLE_ALLOWED_TABS.admin`) `system_settings` ve `system_engines` kayıtları tanımlandı.
+- **Entegrasyon ve Regresyon Testleri (`system_engines.test.ts`)**:
+  - Navigasyon sözleşmesi, açılır alt menü yapısı ve bileşen hiyerarşisi test süitine dahil edilerek 100% yeşil doğrulandı.
+
+
+---
+## 🚀 [v1.51.3] - 2026-10-29
+
+### Sistem Motorları ve Servis Kontrol Merkezi (System Engines Control Center)
+- **Sol Menü (Sidebar) Yeniden Yapılandırması**: Sol menüye `SİSTEM VE AYARLARI` başlığı altında yeni bir yönetim alanı eklendi ve ilk sıraya `Sistem Motorları` (`system_engines`) çalışma alanı entegre edildi.
+- **Sistem Motorları Masası (`SystemEnginesView.tsx`)**:
+  - Arka planda çalışan 7 kritik otonom servis tek bir kumanda masasında toplandı:
+    1. **Bildirim & Alarm Motoru** (`ALARM-ENG-01`): Telemetri akışında kural ihlallerini anlık değerlendirme ve çok kanallı bildirim dağıtımı.
+    2. **Oto Güncelleme & OTA Dağıtım Motoru** (`OTA-ENG-02`): Periyodik (30s) firmware dağıtımı, zaman aşımı ve 3 kademeli (1dk/5dk/15dk) otomatik kurtarma yönetimi.
+    3. **Sanal Veri & Simülasyon Motoru** (`SIM-ENG-03`): Dinamik aralık ve anomali enjeksiyonlu sanal IoT donanım telemetri üretimi.
+    4. **Cihaz Sağlığı & Veri Yok (No-Data) Bekçisi** (`WATCHDOG-ENG-04`): 10 saniye periyotla kalp atışı (heartbeat) denetimi ve offline alarm üretimi.
+    5. **Otomasyon & Senaryo Yürütme Motoru** (`AUTO-ENG-05`): Gerçek zamanlı tetikleyici-koşul-aksiyon değerlendirmesi ve 60s cooldown debouncing.
+    6. **Komut & Downlink Dağıtım Motoru** (`DOWNLINK-ENG-06`): 30s periyotla cihaz uzaktan kontrol komutları onay (ACK) ve zaman aşımı süpürmesi.
+    7. **Veritabanı & Fiziksel WAL Motoru** (`STORAGE-ENG-07`): Disk üzerindeki Persistent WAL (`physical-telemetry.ndjson`) kuyruğu ve DB senkronizasyonu.
+  - Canlı durum göstergeleri (Çalışıyor / Durduruldu / Beklemede), çalışma döngüsü (Event-driven vs Periyodik), son tetiklenme zamanları ve temel metrik kartları eklendi.
+  - Motor kontrol araçları: Başlat/Durdur toggle anahtarı, anlık tek seferlik çalışma ("Şimdi Tetikle"), Simülatör yapılandırma modalı (aralık, anomali, senaryo seçimi) ve ilgili uzmanlık masasına hızlı yönlendirme sağlandı.
+  - Canlı Motor İşlem ve Komut Günlüğü konsolu ile yapılan her eylemin anlık geri bildirimi sağlandı.
+- **Backend Motor Yönetim Servisi & API'leri (`systemEngines.service.ts` & `system.ts`)**:
+  - `GET /api/system/engines`: Tüm motorların canlı durum ve metriklerini döndüren yönetim uç noktası (Admin yetkili).
+  - `POST /api/system/engines/:id/toggle`: Motorları başlatma ve durdurma uç noktası.
+  - `POST /api/system/engines/:id/trigger`: Motorları tek seferlik manuel çalıştırma uç noktası.
+  - `POST /api/system/engines/:id/config`: Motor çalışma parametrelerini (ör. simülasyon aralığı, senaryo) güncelleme uç noktası.
+- **Kapsamlı Regresyon ve Entegrasyon Testleri (`system_engines.test.ts`)**:
+  - Yetki kontrolü (401 unauthenticated, 403 customer), tüm motorların listelenmesi, toggle, trigger ve konfigürasyon API fonksiyonları ile Sidebar/App navigasyon sözleşmesi başarıyla doğrulandı.
+
+---
+## 🚀 [v1.51.2] - 2026-10-29
+
+### Rol Bazlı Sürüm Görünürlüğü ve GitHub İzolasyonu (Role-based Version Visibility)
+- **Müşteri Ekranları İzolasyonu**: Müşteri oturumlarında sol alt alanda yalnızca sunucuda çalışan aktif uygulama sürüm kartı (`sidebar-running-version-btn`) gösterilir.
+- **Yönetici Sürüm Takibi**: GitHub depo sürümü kartı (`sidebar-github-version-link`), canlı karşılaştırma ve depoya erişim yalnızca Yönetici (`admin`) rolüne sınırlandırıldı.
+- **Sistem Sürümü API Koruması (`/api/system/version`)**: Uç nokta istek sahibinin oturumunu doğrulayacak şekilde güncellendi; yönetici oturumu olmayan (müşteri ve kimlik doğrulaması yapılmamış) isteklerde GitHub repo, release tag ve senkronizasyon bilgileri döndürülmez.
+- **Ağ İstemci Optimizasyonu**: Müşteri oturumlarında (`Sidebar.tsx`) arka planda çalışan gereksiz GitHub sürüm sorgulama çağrısı devre dışı bırakıldı.
+- **Regresyon Testleri**: Müşteri ve yönetici oturumlarının sürüm görünürlük farklarını ve bileşen sözleşmesini doğrulayan kapsamlı test paketi (`version_role_visibility.test.ts`) eklendi.
+
+---
 ## 🚀 [v1.51.1] - 2026-10-29
 
 ### Secret recovery trace protection
@@ -308,8 +477,23 @@ Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümler
 ---
 ## 🚀 [v1.49.20] - 2026-10-24
 
-### 🔄 Sürüm Senkronizasyonu & Güncelleme
-- Sürüm numarası [package.json], [package-lock.json] ve [src/config/version.ts] ile tam senkron yükseltildi.
+### 🎛️ "Sistem ve Ayarları" Ana Sekmesi ve Hiyerarşik "Sistem Motorları" Entegrasyonu
+- **"Sistem ve Ayarları" Ana Navigasyon Sekmesi (`Sidebar.tsx`)**:
+  - Sol menüye doğrudan tıklanabilir **"Sistem ve Ayarları"** (`system_settings`) ana sekmesi eklendi.
+  - Açılır-kapanır (expandable) alt menü mimarisi kurularak **"Sistem Motorları"** (`system_engines`) bu ana sekmenin altında hiyerarşik bir alt sekme olarak konumlandırıldı.
+  - Alt menü ok simgesi (ChevronDown) ve bağımsız daraltma/genişletme kontrolleri entegre edildi; ana sekmeye tıklandığında hem ana yönetim görünümü açılır hem de alt menü otomatik genişletilir.
+- **Kapsayıcı Yönetim Masası (`SystemSettingsView.tsx`)**:
+  - "Sistem ve Ayarları" için zengin alt sekmeli üst yönetim masası oluşturuldu:
+    1. **Sistem Motorları**: 7 otonom arka plan motorunun kumanda ve izleme masası (`SystemEnginesView.tsx`).
+    2. **Genel Sistem Parametreleri**: Platform, kimlik ve çalışma zamanı temel yapılandırma ayarları.
+    3. **Bildirim & Dağıtım Kanalları**: SMTP, Webhook ve anlık dağıtım politikaları.
+    4. **Depolama & WAL Yapılandırması**: Veritabanı bağlantı havuzu, WAL diski ve kalıcılık metrikleri.
+- **Navigasyon ve Breadcrumb Senkronizasyonu (`App.tsx` & `permissions.ts`)**:
+  - Üst gezinme çubuğunda (breadcrumb) `Sistem ve Ayarları` ve `Sistem ve Ayarları > Sistem Motorları` hiyerarşisi tam senkronize edildi.
+  - Rol izin matrisinde (`ROLE_ALLOWED_TABS.admin`) `system_settings` ve `system_engines` kayıtları tanımlandı.
+- **Entegrasyon ve Regresyon Testleri (`system_engines.test.ts`)**:
+  - Navigasyon sözleşmesi, açılır alt menü yapısı ve bileşen hiyerarşisi test süitine dahil edilerek 100% yeşil doğrulandı.
+
 
 ---
 ## 🚀 [v1.49.19] - 2026-10-24

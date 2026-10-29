@@ -28,6 +28,7 @@ import {
   BarChart3,
   Clock,
   ArrowUpRight,
+  ArrowLeft,
   ChevronRight,
   Sliders,
   Terminal,
@@ -140,7 +141,11 @@ interface DatabaseStatsResponse {
   allDataRaw: Record<string, any>;
 }
 
-export const DatabaseDataView: React.FC = () => {
+interface DatabaseDataViewProps {
+  onNavigateToTab?: (tab: string) => void;
+}
+
+export const DatabaseDataView: React.FC<DatabaseDataViewProps> = ({ onNavigateToTab }) => {
   const { user } = useAuth();
   const { isConnected, wsLatency } = useRealtime();
 
@@ -1163,6 +1168,18 @@ export const DatabaseDataView: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
+            {onNavigateToTab && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab('system_settings')}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer mb-1.5 group"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Sistem ve Ayarları'na Dön</span>
+                </button>
+              </div>
+            )}
               <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50">
                 <Database className="w-5 h-5" />
               </div>

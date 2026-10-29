@@ -108,6 +108,10 @@ export function startOtaWorker(intervalMs: number = 30000): void {
   console.log(`[OTA Worker] Arka plan OTA yeniden deneme ve zaman aşımı servisi başlatıldı (${intervalMs / 1000}s).`);
 }
 
+export function isOtaWorkerRunning(): boolean {
+  return workerInterval !== null;
+}
+
 export function stopOtaWorker(): void {
   if (workerInterval) {
     clearInterval(workerInterval);

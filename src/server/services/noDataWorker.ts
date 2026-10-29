@@ -11,6 +11,15 @@ export function startNoDataWorker() {
   console.log('[NoDataWorker] NO_DATA (Veri Yok) alarm motoru başlatıldı (10 saniye periyot).');
 }
 
+export function isNoDataWorkerRunning(): boolean {
+  return interval !== null;
+}
+
+export function triggerNoDataCheck(): boolean {
+  checkNoData();
+  return true;
+}
+
 export function stopNoDataWorker() {
   if (interval) clearInterval(interval);
   interval = null;

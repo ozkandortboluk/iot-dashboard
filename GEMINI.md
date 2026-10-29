@@ -11,8 +11,8 @@
 3. **Bileşenlerde Sabit Sürüm Metni Bulunamaz**:
    - Tüm UI bileşenleri sürüm bilgisini `src/config/version.ts` dosyasından içe aktarır.
 4. **Sol Alt Sürüm Kartında Ortam ve GitHub Sürümü Görünür**:
-   - Sayfanın sol altındaki sürüm kartında hem o anki çalışma ortamının (Yerel Geliştirme / VPS Sunucu) aktif sürüm numarası hem de GitHub deposundaki son sürüm numarası açıkça gösterilir.
-   - Kullanıcı veya operatör, sunucu ya da çalışma ortamında hangi sürümün çalıştığını ve GitHub ile olan farkını (`Yerel +1`, `GitHub ile Eşit` vb.) anında görebilir.
+   - Müşteri ekranlarında yalnızca sunucudaki çalışan aktif uygulama sürüm kartı gösterilir.
+   - Yönetici (admin) ekranlarında hem o anki çalışma ortamının (Yerel Geliştirme / VPS Sunucu) aktif sürüm numarası hem de GitHub deposundaki son sürüm numarası ve senkronizasyon durumu (`Yerel +1`, `GitHub ile Eşit` vb.) açıkça gösterilir.
 
 ---
 

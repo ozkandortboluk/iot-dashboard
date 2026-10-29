@@ -48,7 +48,11 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 
-export const SystemLogsView: React.FC = () => {
+interface SystemLogsViewProps {
+  onNavigateToTab?: (tab: string) => void;
+}
+
+export const SystemLogsView: React.FC<SystemLogsViewProps> = ({ onNavigateToTab }) => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -338,6 +342,18 @@ export const SystemLogsView: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-[#0f172a] p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
+            {onNavigateToTab && (
+              <div className="w-full mb-1">
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab('system_settings')}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer group"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Sistem ve Ayarları'na Dön</span>
+                </button>
+              </div>
+            )}
             <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
               <Terminal className="w-6 h-6" />
             </div>

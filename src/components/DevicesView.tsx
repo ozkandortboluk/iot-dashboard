@@ -56,9 +56,22 @@ import {
   LayoutGrid,
   List,
   RotateCcw,
+  HeartPulse,
 } from 'lucide-react';
 
-export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNavigateToHelp }) => {
+export interface DevicesViewProps {
+  onNavigateToHelp?: () => void;
+  onNavigateToHealth?: () => void;
+  onNavigateToAutomations?: () => void;
+  onNavigateToTab?: (tab: string) => void;
+}
+
+export const DevicesView: React.FC<DevicesViewProps> = ({
+  onNavigateToHelp,
+  onNavigateToHealth,
+  onNavigateToAutomations,
+  onNavigateToTab,
+}) => {
   const {
     devices,
     latestTelemetry,
@@ -94,6 +107,17 @@ export const DevicesView: React.FC<{ onNavigateToHelp?: () => void }> = ({ onNav
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [healthSummaries, setHealthSummaries] = useState<DeviceHealthSummary[]>([]);
   const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
+
+  // Navigation Handlers for Header Buttons
+  const handleGoToHealth = () => {
+    if (onNavigateToHealth) onNavigateToHealth();
+    else if (onNavigateToTab) onNavigateToTab('device_health');
+  };
+
+  const handleGoToAutomations = () => {
+    if (onNavigateToAutomations) onNavigateToAutomations();
+    else if (onNavigateToTab) onNavigateToTab('automations');
+  };
 
   const [selectedSiteId, setSelectedSiteId] = useUserPreference<string>('devices_filter_site', 'all');
   const [selectedZoneId, setSelectedZoneId] = useUserPreference<string>('devices_filter_zone', 'all');
@@ -1348,6 +1372,51 @@ void sendHeartbeat() {
 
   return (
     <div className="space-y-6">
+      {/* Sayfa Üst Başlığı (Sistem Standartlarına Uygun) */}
+      <div className="bg-white dark:bg-slate-900/80 backdrop-blur-md p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 shrink-0">
+            <Cpu className="w-5 h-5 sm:w-6 sm:h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
+                {user?.role === 'customer' ? 'Cihazlarım & Sensör Verileri' : 'Tüm Saha Cihazları'}
+              </h1>
+              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                {user?.role === 'customer' ? 'Müşteri Filosu' : 'Endüstriyel Saha Filosu'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Saha donanımlarını, sensör telemetrilerini ve anlık operasyonel cihaz durumlarını yönetin.
+            </p>
+          </div>
+        </div>
+
+        {/* Sağ Köşe Butonları: Cihaz Sağlığı & Bakım ve Otomasyon */}
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={handleGoToHealth}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 shadow-xs transition-all cursor-pointer active:scale-95"
+            title="Cihaz Sağlığı ve Bakım Masasına Git"
+          >
+            <HeartPulse className="w-3.5 h-3.5 text-rose-500" />
+            <span>Cihaz Sağlığı & Bakım</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleGoToAutomations}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 shadow-xs transition-all cursor-pointer active:scale-95"
+            title="Otomasyon ve Senaryolar Masasına Git"
+          >
+            <Bot className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Otomasyon & Senaryolar</span>
+          </button>
+        </div>
+      </div>
+
       {/* 1. Device List Table */}
       <div className="bg-white dark:bg-[#0f172a] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden">
             <div className="p-3.5 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 sm:gap-3 flex-wrap">
@@ -1410,40 +1479,29 @@ void sendHeartbeat() {
                   </button>
                 )}
 
-                {selectedDeviceIds.size > 0 && (
+                {/* Cihaz Ekle Butonu / Tik seçilince Sil Butonuna Dönüşüm */}
+                {selectedDeviceIds.size > 0 ? (
                   <button
+                    type="button"
                     onClick={() => setShowBulkDeleteModal(true)}
-                    className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 animate-fadeIn"
+                    className="px-2.5 sm:px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1 sm:gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95 animate-fadeIn"
+                    title={`Seçili ${selectedDeviceIds.size} cihazı sil`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span><span className="hidden xs:inline">Seçilenleri </span>Sil ({selectedDeviceIds.size})</span>
+                    <span>Seçilenleri Sil ({selectedDeviceIds.size})</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(true)}
+                    className="px-2.5 sm:px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1 sm:gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span><span className="hidden xs:inline">Yeni </span>Cihaz<span className="hidden sm:inline"> Ekle</span></span>
                   </button>
                 )}
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="px-2.5 sm:px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center gap-1 sm:gap-1.5 transition-all shrink-0 cursor-pointer active:scale-95"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span><span className="hidden xs:inline">Yeni </span>Cihaz<span className="hidden sm:inline"> Ekle</span></span>
-                </button>
               </div>
             </div>
-
-            {selectedDeviceIds.size > 0 && (
-              <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border-b border-indigo-200/50 dark:border-indigo-800/40 px-4 py-2.5 flex items-center justify-between text-xs text-indigo-900 dark:text-indigo-200">
-                <span className="font-medium">
-                  <strong>{selectedDeviceIds.size}</strong> cihaz seçildi.
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleToggleSelectAllDevices}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                  >
-                    {selectedDeviceIds.size === filteredDevices.length ? 'Seçimi Temizle' : 'Tüm Filtrelenenleri Seç'}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {filteredDevices.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">

@@ -244,11 +244,13 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         const data = await res.json();
         if (data.success) {
           handleStatusData(data);
+          return data;
         }
       }
     } catch {
       // ignore transient network check errors
     }
+    return null;
   }, [ensureBootstrapToken, getAuthHeaders, handleStatusData]);
 
   useEffect(() => {
@@ -437,6 +439,15 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     }
   };
 
+  const handleKeyDownSubmit = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!connecting && !testing && status !== 'connected') {
+        handleConnect();
+      }
+    }
+  };
+
   const handleConnect = async () => {
     if (!sshHost || !sshUser) {
       setActionMessage({ type: 'error', text: 'Lütfen SSH Sunucu Adresi ve Kullanıcı Adı giriniz.' });
@@ -483,16 +494,79 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         setDiscoveredFingerprint(data.hostFingerprint);
       }
       if (data.success) {
+        // Status polling and verification of pre-login security checks
+        let statusData = await fetchStatus();
+        let allChecksPassed = false;
+
+        // In pre-login screen, strictly verify all 3 checklist items + host key pinning
+        if (isPreLoginScreen) {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const isSsh = Boolean(statusData?.sshConnected ?? (statusData?.status === 'connected'));
+            const isSel1 = Boolean(statusData?.postgresSelect1Verified ?? false);
+            const isReady = Boolean(statusData?.databaseReady ?? (statusData?.databaseState === 'READY'));
+            const fingerprintMatch = !expectedHostFingerprint.trim() ||
+              !statusData?.hostFingerprint ||
+              statusData?.hostFingerprint.toLowerCase() === expectedHostFingerprint.trim().toLowerCase();
+
+            if (isSsh && isSel1 && isReady && fingerprintMatch) {
+              allChecksPassed = true;
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 800));
+            statusData = await fetchStatus();
+          }
+
+          if (!allChecksPassed) {
+            // Giriş öncesi güvenlik kontrollerinden biri başarısız -> Tüneli otomatik kapat
+            try {
+              await fetch('/api/system/ssh-tunnel/disconnect', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                credentials: 'include',
+              });
+            } catch {
+              // ignore
+            }
+            await fetchStatus();
+            setActionMessage({
+              type: 'error',
+              text: 'Giriş öncesi güvenlik kontrollerinden biri (SSH bağlantısı / PostgreSQL SELECT 1 / Veritabanı READY / Host Key) başarısız oldu. SSH tüneli güvenlik amacıyla otomatik olarak kapatıldı.',
+            });
+            return;
+          }
+        }
+
         setActionMessage({ type: 'success', text: data.message });
-        await fetchStatus();
         if (onConnectedSuccess) {
           onConnectedSuccess();
         }
       } else {
-        setActionMessage({ type: 'error', text: data.message || data.error || 'SSH Tünel başlatılamadı.' });
+        // Connect failed or pre-flight check rejected: auto-close tunnel
+        try {
+          await fetch('/api/system/ssh-tunnel/disconnect', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            credentials: 'include',
+          });
+        } catch {
+          // ignore
+        }
+        setActionMessage({
+          type: 'error',
+          text: (data.message || data.error || 'SSH Tünel başlatılamadı.') + ' Güvenlik kontrolleri başarısız olduğu için tünel otomatik olarak kapatıldı.',
+        });
       }
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: `Tünel hatası: ${err?.message || err}` });
+      try {
+        await fetch('/api/system/ssh-tunnel/disconnect', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        });
+      } catch {
+        // ignore
+      }
+      setActionMessage({ type: 'error', text: `Tünel hatası: ${err?.message || err}. Güvenlik gereği tünel kapatıldı.` });
     } finally {
       setConnecting(false);
       fetchStatus();
@@ -548,6 +622,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
             type="text"
             value={sshHost}
             onChange={(e) => setSshHost(e.target.value)}
+            onKeyDown={handleKeyDownSubmit}
             placeholder="db.nexusnodeiot.com.tr"
             className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
           />
@@ -558,6 +633,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
             type="number"
             value={sshPort}
             onChange={(e) => setSshPort(e.target.value)}
+            onKeyDown={handleKeyDownSubmit}
             placeholder="22"
             className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-center"
           />
@@ -570,6 +646,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           type="text"
           value={sshUser}
           onChange={(e) => setSshUser(e.target.value)}
+          onKeyDown={handleKeyDownSubmit}
           placeholder="root veya ubuntu"
           className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
         />
@@ -618,6 +695,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleKeyDownSubmit}
               placeholder="••••••••••••"
               className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 pr-9 font-mono"
             />
@@ -733,6 +811,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
             type={showDbPassword ? 'text' : 'password'}
             value={dbPassword}
             onChange={(e) => setDbPassword(e.target.value)}
+            onKeyDown={handleKeyDownSubmit}
             placeholder="Mevcut sistem parolası kullanılır (opsiyonel)"
             className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 pr-9 font-mono"
           />
@@ -776,6 +855,7 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
           type="text"
           value={expectedHostFingerprint}
           onChange={(e) => setExpectedHostFingerprint(e.target.value)}
+          onKeyDown={handleKeyDownSubmit}
           placeholder="SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
           className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
         />

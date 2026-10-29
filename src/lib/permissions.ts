@@ -190,6 +190,8 @@ export const ROLE_ALLOWED_TABS: Record<Role, string[]> = {
     'database_data',
     'security',
     'system_logs',
+    'system_settings',
+    'system_engines',
     ADMIN_PLUGINS_TAB_ID,
     'deployment',
     'account_settings',
