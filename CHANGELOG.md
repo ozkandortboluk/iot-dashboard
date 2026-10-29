@@ -3,6 +3,18 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.50.2] - 2026-10-29
+
+### Open work tracking
+- Added a project rule to carry unfinished work from closed pull requests into `docs/genel.md` without pull request identifiers.
+
+---
+## 🚀 [v1.50.1] - 2026-10-29
+
+### Secret recovery trace protection
+- Added a runtime Bash xtrace regression test using an isolated temporary fixture to confirm recovered PostgreSQL passwords do not appear in trace output and tracing stays disabled for subsequent caller commands.
+
+---
 ## 🚀 [v1.50.0] - 2026-10-27
 
 ### Secure Codex VPS monitoring plugin

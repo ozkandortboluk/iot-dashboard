@@ -44,6 +44,15 @@
 
 ---
 
+## KURAL 5: Kapatılan PR'lardan Kalan İşlerin Takibi
+
+1. Her PR kapatıldığında, o PR kapsamında tamamlanmamış veya kapatılma nedeniyle ertelenmiş işler `docs/genel.md` dosyasına eklenir.
+2. `docs/genel.md` içinde PR numarası, PR bağlantısı veya PR'ı tanımlayan başlık kullanılmaz; maddeler proje genelindeki yapılacak işler olarak yazılır.
+3. `docs/genel.md` yalnızca açık işleri içerir. Tamamlanan işler silinir; devam eden işlerin durumu ve gerekli kanıt güncellenir.
+4. PR kapatılırken aktarılacak açık iş yoksa `docs/genel.md` değiştirilmez.
+
+---
+
 ## KURAL 4: Yol Haritası (Roadmap) 3 Kutu Durum Takip Sistemi ve Denetim Döngüsü
 
 1. **3 Kutu Durum Anlamları**:
