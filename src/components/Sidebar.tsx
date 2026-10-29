@@ -29,7 +29,7 @@ import {
   APP_VERSION,
   GITHUB_RELEASE_TAG,
   GITHUB_VERSION,
-  GITHUB_RELEASES_URL,
+  GITHUB_REPO_URL,
 } from '../config/version';
 import { apiFetch } from '../lib/apiFetch';
 import { canShowSshControls } from '../lib/sshRuntimePolicy';
@@ -52,6 +52,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [canShowSsh, setCanShowSsh] = useState(false);
   const [runtimeEnv, setRuntimeEnv] = useState<'vps' | 'aistudio' | 'local'>('local');
   const [githubVersionTag, setGithubVersionTag] = useState<string>(GITHUB_RELEASE_TAG);
+  const [githubSyncStatus, setGithubSyncStatus] = useState<'synced' | 'ahead' | 'behind'>(
+    APP_VERSION.localeCompare(GITHUB_VERSION, undefined, { numeric: true }) === 0
+      ? 'synced'
+      : APP_VERSION.localeCompare(GITHUB_VERSION, undefined, { numeric: true }) > 0 ? 'ahead' : 'behind',
+  );
   const [isGithubRefreshing, setIsGithubRefreshing] = useState(false);
   const [isRuntimeRefreshing, setIsRuntimeRefreshing] = useState(false);
 
@@ -85,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (data?.github?.releaseTag) {
         setGithubVersionTag(data.github.releaseTag);
       }
+      if (data?.github?.syncStatus) setGithubSyncStatus(data.github.syncStatus);
     } catch {
       // silently ignore
     } finally {
@@ -591,12 +597,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Alt Kart: GitHub Depo Sürümü */}
         <a
-          href={GITHUB_RELEASES_URL}
+          href={GITHUB_REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
           id="sidebar-github-version-link"
-          onClick={(e) => { e.preventDefault(); fetchGithubVersion(); window.open(GITHUB_RELEASES_URL, '_blank', 'noopener,noreferrer'); }}
-          title={`GitHub Depo Sürümü: ${githubVersionTag} — Tıklayarak GitHub sürümlerini açın ve yenileyin`}
+          onClick={(e) => { e.preventDefault(); fetchGithubVersion(); window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer'); }}
+          title={`GitHub deposundaki sürüm: ${githubVersionTag} — Depoyu açmak ve sürümü yenilemek için tıklayın`}
           className="group block p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/70 hover:border-emerald-400/70 dark:hover:border-emerald-500/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
         >
           <div className="flex items-center justify-between gap-2">
@@ -609,21 +615,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {isGithubRefreshing ? '...' : githubVersionTag}
                 </span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight mt-0.5">
-                  GitHub Son Sürüm
+                  GitHub Depo Sürümü
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide ${
-                APP_RELEASE_TAG === githubVersionTag
+                githubSyncStatus === 'synced'
                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : APP_VERSION > GITHUB_VERSION
+                  : githubSyncStatus === 'ahead'
                   ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20'
                   : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
               }`}>
-                {APP_RELEASE_TAG === githubVersionTag
+                {githubSyncStatus === 'synced'
                   ? 'Eşit'
-                  : APP_VERSION > GITHUB_VERSION
+                  : githubSyncStatus === 'ahead'
                   ? 'Yerel +1'
                   : 'Güncelleme'}
               </span>

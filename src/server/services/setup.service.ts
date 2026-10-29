@@ -68,6 +68,7 @@ export interface SetupStatusResponse {
     adminCreated: boolean;
   };
   completedAt?: string;
+  localFallbackActive?: boolean;
 }
 
 export interface DbTestResult {
@@ -78,6 +79,7 @@ export interface DbTestResult {
   timescaleVersion?: string;
   latencyMs?: number;
   tablesStatus?: Record<string, boolean>;
+  permissionsStatus?: Record<string, boolean>;
   errorCode?: string;
 }
 
@@ -127,6 +129,8 @@ export class SetupService {
   private completedAtDate: string | null = null;
   private setupToken: string | null = null;
   private lastDbError: string | null = null;
+  private localFallbackActive: boolean = false;
+  private recoveryTokensInUse = new Set<string>();
 
   private constructor() {
     this.loadRuntimeSecretConfig();
@@ -137,6 +141,14 @@ export class SetupService {
       SetupService.instance = new SetupService();
     }
     return SetupService.instance;
+  }
+
+  public isLocalFallbackActive(): boolean {
+    return this.localFallbackActive;
+  }
+
+  public setLocalFallbackActive(active: boolean): void {
+    this.localFallbackActive = active;
   }
 
   /**
@@ -836,6 +848,7 @@ export class SetupService {
         await client.query('SELECT 1;');
         isDbConnected = true;
         this.lastDbError = null;
+        this.localFallbackActive = false;
 
         // Admin check in PostgreSQL:
         // Strictly query for REAL production administrator, excluding only the canonical test admin (usr_test_admin)
@@ -910,12 +923,16 @@ export class SetupService {
         systemMode = 'SETUP';
         this.getOrInitSetupToken();
       } else if (!isDbConnected) {
-        // If PostgreSQL is unreachable, strictly return MAINTENANCE mode in production
-        const isProd = process.env.NODE_ENV === 'production' || isProductionVpsEnvironment();
-        if (isProd || process.env.STRICT_MAINTENANCE_LOCK === 'true' || !hasAdmin) {
-          systemMode = 'MAINTENANCE';
-        } else {
+        if (this.localFallbackActive) {
           systemMode = 'READY';
+        } else {
+          // If PostgreSQL is unreachable, strictly return MAINTENANCE mode in production
+          const isProd = process.env.NODE_ENV === 'production' || isProductionVpsEnvironment();
+          if (isProd || process.env.STRICT_MAINTENANCE_LOCK === 'true' || !hasAdmin) {
+            systemMode = 'MAINTENANCE';
+          } else {
+            systemMode = 'READY';
+          }
         }
       } else if (!hasAdmin) {
         // PostgreSQL is connected, setup was completed, but admin user is missing.
@@ -1055,14 +1072,18 @@ export class SetupService {
         adminCreated: hasAdmin,
       },
       completedAt: this.completedAtDate || undefined,
+      localFallbackActive: this.localFallbackActive,
     };
   }
 
   /**
    * Tests real PostgreSQL connection with strict timeout, version checks, and ZERO password leaking
    */
-  public async testConnection(config: DatabaseConfigPayload): Promise<DbTestResult> {
-    if (this.isSetupCompleted()) {
+  public async testConnection(
+    config: DatabaseConfigPayload,
+    options: { allowCompletedSetup?: boolean } = {},
+  ): Promise<DbTestResult> {
+    if (this.isSetupCompleted() && !options.allowCompletedSetup) {
       throw new Error('Kurulum zaten tamamlanmış ve kilitlenmiştir. Güvenlik nedeniyle test API\'si devre dışıdır.');
     }
 
@@ -1134,6 +1155,35 @@ export class SetupService {
         audit_logs: existingTables.has('audit_logs'),
       };
 
+      let permissionsStatus: Record<string, boolean> | undefined;
+      if (tablesStatus.users && tablesStatus.devices && tablesStatus.telemetry_readings) {
+        const privilegeRes = await client.query(`
+          SELECT
+            has_schema_privilege(current_user, 'public', 'USAGE') AS schema_usage,
+            has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create,
+            has_table_privilege(current_user, 'public.users', 'SELECT') AS users_select,
+            has_table_privilege(current_user, 'public.users', 'INSERT') AS users_insert,
+            has_table_privilege(current_user, 'public.users', 'UPDATE') AS users_update,
+            has_table_privilege(current_user, 'public.devices', 'SELECT') AS devices_select,
+            has_table_privilege(current_user, 'public.devices', 'INSERT') AS devices_insert,
+            has_table_privilege(current_user, 'public.devices', 'UPDATE') AS devices_update,
+            has_table_privilege(current_user, 'public.telemetry_readings', 'SELECT') AS telemetry_select,
+            has_table_privilege(current_user, 'public.telemetry_readings', 'INSERT') AS telemetry_insert,
+            NOT EXISTS (
+              SELECT 1
+              FROM pg_class seq
+              JOIN pg_namespace ns ON ns.oid = seq.relnamespace
+              WHERE ns.nspname = 'public'
+                AND seq.relkind = 'S'
+                AND NOT has_sequence_privilege(current_user, seq.oid, 'USAGE')
+            ) AS sequences_usage;
+        `);
+        const rawPermissions = privilegeRes.rows[0] || {};
+        permissionsStatus = Object.fromEntries(
+          Object.entries(rawPermissions).map(([key, value]) => [key, value === true]),
+        );
+      }
+
       return {
         success: true,
         message: 'PostgreSQL bağlantısı başarılı.',
@@ -1142,6 +1192,7 @@ export class SetupService {
         timescaleVersion,
         latencyMs,
         tablesStatus,
+        permissionsStatus,
       };
     } catch (err: any) {
       const rawMsg = err?.message || String(err);
@@ -1724,8 +1775,8 @@ export class SetupService {
     return new Set();
   }
 
-  private markRecoveryTokenConsumed(token: string): void {
-    if (!token) return;
+  private markRecoveryTokenConsumed(token: string): boolean {
+    if (!token) return false;
     const trimmed = token.trim();
     const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
     const consumedSet = this.loadConsumedTokens();
@@ -1739,9 +1790,43 @@ export class SetupService {
         fs.mkdirSync(dataDir, { recursive: true });
       }
       fs.writeFileSync(consumedFile, JSON.stringify(Array.from(consumedSet)), { encoding: 'utf8', mode: 0o600 });
+      const persisted = this.loadConsumedTokens();
+      return persisted.has(hash) && persisted.has(trimmed);
     } catch (err: any) {
       systemLogger.error('security', `Tüketilen kurtarma anahtarı kaydedilemedi: ${err?.message || err}`);
+      return false;
     }
+  }
+
+  public reserveRecoveryToken(token: string): boolean {
+    if (!this.validateRecoveryToken(token)) return false;
+    const hash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    if (this.recoveryTokensInUse.has(hash)) return false;
+    this.recoveryTokensInUse.add(hash);
+    return true;
+  }
+
+  public consumeReservedRecoveryToken(token: string): boolean {
+    const trimmed = token.trim();
+    const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
+    if (!this.recoveryTokensInUse.has(hash) || !this.markRecoveryTokenConsumed(trimmed)) return false;
+
+    const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
+    try {
+      if (fs.existsSync(tokenFile) && fs.readFileSync(tokenFile, 'utf8').trim() === trimmed) {
+        fs.unlinkSync(tokenFile);
+      }
+    } catch (err: any) {
+      systemLogger.warn('security', `Kullanılmış kurtarma anahtarı dosyası temizlenemedi: ${err?.message || err}`);
+    }
+    this.recoveryTokensInUse.delete(hash);
+    return true;
+  }
+
+  public releaseRecoveryToken(token: string): void {
+    if (!token) return;
+    const hash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    this.recoveryTokensInUse.delete(hash);
   }
 
   /**
@@ -1828,7 +1913,9 @@ export class SetupService {
       });
 
       // Mark token consumed permanently across ENV and file tokens
-      this.markRecoveryTokenConsumed(params.recoveryToken);
+      if (!this.markRecoveryTokenConsumed(params.recoveryToken)) {
+        throw new Error('Kurtarma anahtarı güvenli biçimde tüketilemedi.');
+      }
 
       // Clear recovery token file after single successful use
       const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');

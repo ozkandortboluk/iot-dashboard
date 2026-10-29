@@ -18,6 +18,7 @@ import {
 import { simulationTelemetryController } from '../controllers/simulationTelemetry.controller.js';
 import { simulationTelemetryService } from '../services/simulationTelemetry.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
+import { systemSecretsService } from '../services/systemSecrets.service.js';
 import { authenticateUser, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { validateSchemaHarmony, CANONICAL_SCHEMA_METADATA, SchemaAuditor } from '../database/schema.js';
 import { verifyDrizzleSchemaAlignment } from '../../db/schema.js';
@@ -26,7 +27,7 @@ import { emailService } from '../services/email.service.js';
 import { getRuntimeConfig } from '../config/runtimeEnvironment.js';
 import { isSshTunnelAllowed } from '../database/connection.js';
 import { sshTunnelService } from '../services/sshTunnel.service.js';
-import { verifyMasterEncryptionKey, verifyPassword } from '../utils/crypto.js';
+import { verifyMasterEncryptionKey, verifyPassword, sanitizeLogString } from '../utils/crypto.js';
 import { setupService } from '../services/setup.service.js';
 import {
   readBackupDestinationStatus,
@@ -47,6 +48,49 @@ import {
 } from '../../config/version.js';
 
 const startTime = Date.now();
+const GITHUB_VERSION_CACHE_TTL_MS = 10 * 60 * 1000;
+let githubVersionCache: { version: string; releaseTag: string; fetchedAt: number } | undefined;
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number);
+  const rightParts = right.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+async function getLatestGithubVersion(): Promise<{ version: string; releaseTag: string }> {
+  if (githubVersionCache && Date.now() - githubVersionCache.fetchedAt < GITHUB_VERSION_CACHE_TTL_MS) {
+    return githubVersionCache;
+  }
+
+  try {
+    const response = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/main/package.json`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) throw new Error(`GitHub sürüm dosyası sorgusu ${response.status} durumuyla sonuçlandı`);
+    const packageInfo = await response.json() as { version?: unknown };
+    if (typeof packageInfo.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(packageInfo.version)) {
+      throw new Error('GitHub package.json dosyasındaki sürüm geçerli bir semantik sürüm değil');
+    }
+    githubVersionCache = {
+      version: packageInfo.version,
+      releaseTag: `v${packageInfo.version}`,
+      fetchedAt: Date.now(),
+    };
+  } catch {
+    if (!githubVersionCache) {
+      githubVersionCache = { version: GITHUB_VERSION, releaseTag: GITHUB_RELEASE_TAG, fetchedAt: Date.now() };
+    } else {
+      githubVersionCache = { ...githubVersionCache, fetchedAt: Date.now() };
+    }
+  }
+
+  return githubVersionCache;
+}
 
 // System Router
 const systemRouter = Router();
@@ -174,14 +218,16 @@ systemRouter.get('/runtime', (req, res) => {
 });
 
 // System Version & GitHub Sync Diagnostic Endpoint (v1.49.2)
-systemRouter.get(['/system/version', '/version'], (req, res) => {
+systemRouter.get(['/system/version', '/version'], async (req, res) => {
   const config = getRuntimeConfig();
   const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
+  const githubRelease = await getLatestGithubVersion();
 
   let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
-  if (APP_VERSION > GITHUB_VERSION) {
+  const versionComparison = compareVersions(APP_VERSION, githubRelease.version);
+  if (versionComparison > 0) {
     syncStatus = 'ahead';
-  } else if (APP_VERSION < GITHUB_VERSION) {
+  } else if (versionComparison < 0) {
     syncStatus = 'behind';
   }
 
@@ -197,8 +243,8 @@ systemRouter.get(['/system/version', '/version'], (req, res) => {
       repo: GITHUB_REPO,
       repoUrl: GITHUB_REPO_URL,
       releasesUrl: GITHUB_RELEASES_URL,
-      version: GITHUB_VERSION,
-      releaseTag: GITHUB_RELEASE_TAG,
+      version: githubRelease.version,
+      releaseTag: githubRelease.releaseTag,
       syncStatus,
     },
   });
@@ -681,6 +727,33 @@ adminRouter.post('/service-tokens/:id/revoke', authenticateUser, requireAdmin, a
 // Database Management Router
 const databaseRouter = Router();
 
+/**
+ * A connection-string edit from the general settings screen may rotate credentials,
+ * but must not silently redirect production to a different data source.
+ */
+function isSameConfiguredPostgresTarget(candidateUrl: string): boolean {
+  const activeUrl = db.getPostgresUrl().trim();
+  if (!activeUrl) return true; // Initial configuration is still allowed.
+  const parseTarget = (raw: string) => {
+    const normalized = raw.trim().replace(/^postgres(?:ql)?:\/\//i, 'http://');
+    const parsed = new URL(normalized);
+    return {
+      host: parsed.hostname.toLowerCase(),
+      port: Number(parsed.port || 5432),
+      database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
+    };
+  };
+  try {
+    const candidate = parseTarget(candidateUrl);
+    const active = parseTarget(activeUrl);
+    return candidate.host === active.host &&
+      candidate.port === active.port &&
+      candidate.database === active.database;
+  } catch {
+    return false;
+  }
+}
+
 databaseRouter.get('/status', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getDatabaseHealth());
 });
@@ -875,7 +948,7 @@ databaseRouter.get('/config', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresConfig());
 });
 
-databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
+databaseRouter.post('/config', authenticateUser, requireAdmin, async (req, res) => {
   const { engine, postgresUrl } = req.body;
   const targetEngine = engine || db.getActiveEngine() || 'timescaledb';
   if (!targetEngine || !['postgres', 'timescaledb', 'local'].includes(targetEngine)) {
@@ -887,7 +960,25 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
     return res.status(403).json({ error: 'Production ortamında local veritabanı kullanımına izin verilmemektedir. Sadece PostgreSQL / TimescaleDB kullanılabilir.' });
   }
 
-  db.setActiveEngine(targetEngine, postgresUrl);
+  if (postgresUrl && targetEngine !== 'local') {
+    if (!isSameConfiguredPostgresTarget(postgresUrl)) {
+      return res.status(409).json({
+        success: false,
+        error: 'Bu ekran mevcut veritabanı hedefini değiştiremez. Host/port/veritabanı adı değişikliği için ayrı, yedek doğrulamalı bakım ve veri taşıma işlemi gerekir.',
+      });
+    }
+    const probe = await db.testPostgresConnection(postgresUrl);
+    if (!probe.success) {
+      return res.status(422).json({
+        success: false,
+        error: 'Yeni bağlantı doğrulanamadı; mevcut bağlantı yapılandırması korunmuştur.',
+        details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+      });
+    }
+  }
+
+  // A successful probe already committed the candidate URL; do not re-save a raw URL/password here.
+  db.setActiveEngine(targetEngine);
   res.json({
     success: true,
     message: `Veritabanı yapılandırması güncellendi.`,
@@ -895,23 +986,36 @@ databaseRouter.post('/config', authenticateUser, requireAdmin, (req, res) => {
   });
 });
 
-databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, (req, res) => {
+databaseRouter.post('/postgres/save-url', authenticateUser, requireAdmin, async (req, res) => {
   const { postgresUrl } = req.body;
   if (!postgresUrl || typeof postgresUrl !== 'string' || !postgresUrl.trim()) {
     return res.status(400).json({ error: 'Geçersiz veritabanı bağlantı adresi.' });
   }
   const trimmed = postgresUrl.trim();
-  db.savePostgresUrl(trimmed);
+  if (!isSameConfiguredPostgresTarget(trimmed)) {
+    return res.status(409).json({
+      success: false,
+      error: 'Bu ekran mevcut veritabanı hedefini değiştiremez. Host/port/veritabanı adı değişikliği için ayrı, yedek doğrulamalı bakım ve veri taşıma işlemi gerekir.',
+    });
+  }
+  const probe = await db.testPostgresConnection(trimmed);
+  if (!probe.success) {
+    return res.status(422).json({
+      success: false,
+      error: 'Bağlantı doğrulanamadı; kayıtlı bağlantı değiştirilmedi.',
+      details: sanitizeLogString(probe.message || 'Bağlantı testi başarısız.'),
+    });
+  }
   res.json({
     success: true,
-    message: 'PostgreSQL bağlantı adresi başarıyla kaydedildi.',
+    message: 'Bağlantı doğrulandı ve güvenli biçimde kaydedildi.',
     config: db.getPostgresConfig(),
   });
 });
 
 databaseRouter.post('/postgres/test', authenticateUser, requireAdmin, async (req, res) => {
   const { postgresUrl } = req.body;
-  const result = await db.testPostgresConnection(postgresUrl);
+  const result = await db.testPostgresConnection(postgresUrl, { applyOnSuccess: false });
   res.json(result);
 });
 
@@ -928,6 +1032,77 @@ databaseRouter.post('/postgres/sync-all', authenticateUser, requireAdmin, async 
 
 databaseRouter.get('/postgres/setup-guide', authenticateUser, requireAdmin, (req, res) => {
   res.json(db.getPostgresSetupGuide());
+});
+
+databaseRouter.post('/test-target', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const { host, port, database, user, password, sslMode, rejectUnauthorized } = req.body || {};
+
+  if (!host || !database || !user) {
+    return res.status(400).json({
+      success: false,
+      error: 'Host, veritabanı adı ve kullanıcı adı alanları zorunludur.',
+    });
+  }
+
+  const numPort = Number(port || 5432);
+  if (isNaN(numPort) || numPort < 1 || numPort > 65535) {
+    return res.status(400).json({
+      success: false,
+      error: 'Geçersiz port numarası (1 ile 65535 arasında olmalıdır).',
+    });
+  }
+
+  try {
+    setupService.validateDatabaseHost(host, numPort);
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: `Geçersiz veritabanı sunucu adresi: ${err?.message || err}`,
+    });
+  }
+
+  let effectivePassword = typeof password === 'string' ? password.trim() : '';
+  if (!effectivePassword || effectivePassword.includes('••••')) {
+    const activeDb = systemSecretsService.getDatabaseConfig();
+    if (activeDb.host === host && activeDb.database === database && activeDb.user === user) {
+      effectivePassword = systemSecretsService.getDatabasePassword();
+    }
+  }
+
+  const candidatePayload: any = {
+    host: String(host).trim(),
+    port: numPort,
+    database: String(database).trim(),
+    user: String(user).trim(),
+    password: effectivePassword,
+    sslMode: String(sslMode || 'disable'),
+    rejectUnauthorized: rejectUnauthorized !== false,
+  };
+
+  try {
+    const probe = await setupService.testConnection(candidatePayload, { allowCompletedSetup: true });
+    return res.json(probe);
+  } catch (err: any) {
+    return res.status(422).json({
+      success: false,
+      message: sanitizeLogString(err?.message || 'Bağlantı testi başarısız.'),
+      errorCode: err?.code || 'TEST_FAILED',
+    });
+  }
+});
+
+databaseRouter.post('/switch-target', authenticateUser, requireAdmin, (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Veritabanı hedefini uygulama içinden değiştirme devre dışıdır. Veri kaynağı değişiklikleri doğrulanmış yedek, veri sürekliliği kontrolü ve bakım planı gerektirir.',
+  });
+});
+
+databaseRouter.post('/rotate-password', authenticateUser, requireAdmin, (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'PostgreSQL rol parolasını uygulama içinden değiştirme devre dışıdır. Önceden hazırlanmış kimlik bilgilerini mevcut veritabanına ait oldukları doğrulandıktan sonra Sistem Gizli Bilgileri bölümünden kaydedin.',
+  });
 });
 
 // Canonical Schema Metadata & Schema Auditor Endpoints

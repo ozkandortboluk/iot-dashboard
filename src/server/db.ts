@@ -1935,6 +1935,7 @@ class LocalDatabase {
   public async softDeleteUser(userId: string, adminId: string, adminName: string) { return this.userRepository.softDeleteUser(userId, adminId, adminName); }
   public async terminateUserSessions(userId: string) { return this.userRepository.terminateUserSessions(userId); }
   public async terminateUserOtherSessions(userId: string, currentToken: string) { return this.userRepository.terminateUserOtherSessions(userId, currentToken); }
+  public async terminateAllSessions(reason?: string): Promise<void> { await this.userRepository.terminateAllSessions(reason); }
   public async getUserSessions(userId: string) { return this.userRepository.getUserSessions(userId); }
   public async checkDeviceStatuses(): Promise<boolean> { return await this.deviceRepository.checkDeviceStatuses(); }
   public async processDeviceTelemetryArrival(deviceId: string): Promise<Device | null> { return await this.deviceRepository.processDeviceTelemetryArrival(deviceId); }
@@ -3525,7 +3526,17 @@ class LocalDatabase {
       };
     }
     if (url && !url.includes('••••••••')) {
-      this.data.databaseSettings.postgresUrl = url.trim();
+      let urlToPersist = url.trim();
+      if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+        try {
+          const parsed = new URL(urlToPersist);
+          parsed.password = '';
+          urlToPersist = parsed.toString();
+        } catch {
+          throw new Error('Geçersiz PostgreSQL bağlantı adresi; kayıtlı ayarlar değiştirilmedi.');
+        }
+      }
+      this.data.databaseSettings.postgresUrl = urlToPersist;
       this.saveData(this.data);
     }
   }
@@ -3737,7 +3748,7 @@ class LocalDatabase {
     };
   }
 
-  public async testPostgresConnection(customUrl?: string): Promise<{
+  public async testPostgresConnection(customUrl?: string, options: { applyOnSuccess?: boolean } = { applyOnSuccess: true }): Promise<{
     success: boolean;
     message: string;
     version?: string;
@@ -3753,10 +3764,7 @@ class LocalDatabase {
       suggestionSteps: string[];
     };
   }> {
-    if (customUrl && !customUrl.includes('••••••••')) {
-      this.savePostgresUrl(customUrl.trim());
-    }
-
+    // A candidate URL is probed without changing active configuration. It is committed only after success.
     const connStr = this.resolveUnmaskedPostgresUrl(customUrl);
     if (!connStr) {
       return {
@@ -3810,36 +3818,84 @@ class LocalDatabase {
       try { client.release(); client = null; } catch {}
       try { await pool.end(); pool = null; } catch {}
 
-      // Update cached stats in local state
-      if (!this.data.databaseSettings) {
-        this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
-      }
-      this.data.databaseSettings.isPostgresConnected = true;
-      this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
-      this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-      if (customUrl && !customUrl.includes('••••••••')) {
-        this.data.databaseSettings.postgresUrl = customUrl.trim();
-      }
-      this.saveData(this.data);
+      if (options.applyOnSuccess === true) {
+        const requiredTables = ['users', 'devices', 'telemetry_readings'];
+        const missingTables = requiredTables.filter((table) => !tablesStatus[table]);
+        if (missingTables.length > 0) {
+          return {
+            success: false,
+            message: `Hedef veritabanında zorunlu NexusNode tabloları eksik: ${missingTables.join(', ')}. Kayıtlı bağlantı değiştirilmedi.`,
+            latencyMs,
+            tablesStatus,
+          };
+        }
 
-      // Re-initialize active Postgres repository and sync memory data
-      this.recyclePgPool();
-      await this.initPostgresRepository().catch(() => {});
+        const previousStoredUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
+        const previousConnected = this.data.databaseSettings?.isPostgresConnected;
+        if (!this.data.databaseSettings) {
+          this.data.databaseSettings = { activeEngine: this.getActiveEngine() };
+        }
+
+        if (customUrl && !customUrl.includes('••••••••')) {
+          let urlToPersist = customUrl.trim();
+          if (process.env.NODE_ENV === 'production' || process.env.VPS_PRODUCTION === 'true') {
+            try {
+              const parsed = new URL(urlToPersist);
+              parsed.password = '';
+              urlToPersist = parsed.toString();
+            } catch {
+              return { success: false, message: 'Bağlantı adresi güvenli biçimde saklanamadı; kayıtlı ayarlar değiştirilmedi.' };
+            }
+          }
+          this.data.databaseSettings.postgresUrl = urlToPersist;
+        }
+        this.saveData(this.data);
+
+        // Apply only after probe + schema gate, and verify the application's own pool can initialize.
+        this.recyclePgPool();
+        const connected = await this.initPostgresRepository(true).catch(() => false);
+        if (!connected) {
+          if (previousStoredUrl) {
+            this.data.databaseSettings.postgresUrl = previousStoredUrl;
+          } else {
+            delete this.data.databaseSettings.postgresUrl;
+          }
+          this.data.databaseSettings.isPostgresConnected = previousConnected ?? false;
+          this.saveData(this.data);
+          this.recyclePgPool();
+          const rollbackConnected = await this.initPostgresRepository(true).catch(() => false);
+          return {
+            success: false,
+            message: rollbackConnected
+              ? 'Bağlantı testi başarılı olsa da uygulama havuzu başlatılamadı; önceki bağlantı ayarları geri yüklendi.'
+              : 'Yeni bağlantı etkinleştirilemedi ve önceki bağlantı da doğrulanamadı. Üretim değişikliklerini durdurup sunucu bağlantı ayarlarını inceleyin.',
+            latencyMs,
+            tablesStatus,
+          };
+        }
+
+        this.data.databaseSettings.isPostgresConnected = true;
+        this.data.databaseSettings.postgresVersion = versionStr.split(' on ')[0] || versionStr;
+        this.data.databaseSettings.lastTestedAt = new Date().toISOString();
+        this.saveData(this.data);
+      }
 
       return {
         success: true,
-        message: 'PostgreSQL sunucusu ile başarılı bağlantı sağlandı.',
-        version: this.data.databaseSettings.postgresVersion,
+        message: options.applyOnSuccess === false
+          ? 'PostgreSQL bağlantı testi başarılı; kayıtlı yapılandırma değiştirilmedi.'
+          : 'PostgreSQL sunucusu ile başarılı bağlantı sağlandı.',
+        version: versionStr.split(' on ')[0] || versionStr,
         latencyMs,
         tablesStatus,
       };
     } catch (err: any) {
-      if (this.data.databaseSettings) {
+      // Failed candidate probes must not alter active connection metadata or readiness indicators.
+      const activeStoredUrl = (this.data.databaseSettings?.postgresUrl || '').trim();
+      const isTestingActiveUrl = options.applyOnSuccess !== false && (!customUrl || customUrl.trim() === activeStoredUrl);
+      if (isTestingActiveUrl && this.data.databaseSettings) {
         this.data.databaseSettings.isPostgresConnected = false;
         this.data.databaseSettings.lastTestedAt = new Date().toISOString();
-        if (customUrl && !customUrl.includes('••••••••')) {
-          this.data.databaseSettings.postgresUrl = customUrl.trim();
-        }
         this.saveData(this.data);
       }
 

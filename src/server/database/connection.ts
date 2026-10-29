@@ -198,6 +198,27 @@ export function applyPasswordToPostgresUrl(url: string, newPassword: string): st
 }
 
 /**
+ * Safely reads the database password from Docker Secret or file-backed host secret if present.
+ */
+export function getDockerSecretPassword(): string {
+  const secretPaths = [
+    '/run/secrets/postgres_password',
+    '/run/secrets/db_password',
+    path.resolve(process.cwd(), 'secrets', 'postgres_password'),
+    path.resolve(process.cwd(), 'secrets', 'db_password'),
+  ];
+  for (const sPath of secretPaths) {
+    try {
+      if (fs.existsSync(sPath)) {
+        const val = fs.readFileSync(sPath, 'utf8').trim();
+        if (val) return val;
+      }
+    } catch {}
+  }
+  return '';
+}
+
+/**
  * Resolves PostgreSQL connection URL from all possible environment variable conventions
  * and structured fallback configurations with clear, deterministic precedence.
  */
@@ -221,6 +242,10 @@ export function resolvePostgresConnectionString(customUrl?: string): string {
     try {
       prodVaultPassword = systemSecretsService.getDatabasePassword();
     } catch {}
+
+    if (!prodVaultPassword) {
+      prodVaultPassword = getDockerSecretPassword();
+    }
 
     if (!prodVaultPassword) {
       // Production fail-closed: No password in Vault/Docker Secret, reject connection to prevent insecure plaintext fallback.
