@@ -52,6 +52,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [canShowSsh, setCanShowSsh] = useState(false);
   const [runtimeEnv, setRuntimeEnv] = useState<'vps' | 'aistudio' | 'local'>('local');
   const [githubVersionTag, setGithubVersionTag] = useState<string>(GITHUB_RELEASE_TAG);
+  const [githubSyncStatus, setGithubSyncStatus] = useState<'synced' | 'ahead' | 'behind'>(
+    APP_VERSION.localeCompare(GITHUB_VERSION, undefined, { numeric: true }) === 0
+      ? 'synced'
+      : APP_VERSION.localeCompare(GITHUB_VERSION, undefined, { numeric: true }) > 0 ? 'ahead' : 'behind',
+  );
   const [isGithubRefreshing, setIsGithubRefreshing] = useState(false);
   const [isRuntimeRefreshing, setIsRuntimeRefreshing] = useState(false);
 
@@ -85,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (data?.github?.releaseTag) {
         setGithubVersionTag(data.github.releaseTag);
       }
+      if (data?.github?.syncStatus) setGithubSyncStatus(data.github.syncStatus);
     } catch {
       // silently ignore
     } finally {
@@ -615,15 +621,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide ${
-                APP_RELEASE_TAG === githubVersionTag
+                githubSyncStatus === 'synced'
                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : APP_VERSION > GITHUB_VERSION
+                  : githubSyncStatus === 'ahead'
                   ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20'
                   : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
               }`}>
-                {APP_RELEASE_TAG === githubVersionTag
+                {githubSyncStatus === 'synced'
                   ? 'Eşit'
-                  : APP_VERSION > GITHUB_VERSION
+                  : githubSyncStatus === 'ahead'
                   ? 'Yerel +1'
                   : 'Güncelleme'}
               </span>

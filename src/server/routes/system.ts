@@ -48,6 +48,46 @@ import {
 } from '../../config/version.js';
 
 const startTime = Date.now();
+const GITHUB_RELEASE_CACHE_TTL_MS = 10 * 60 * 1000;
+let githubReleaseCache: { version: string; releaseTag: string; fetchedAt: number } | undefined;
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number);
+  const rightParts = right.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+async function getLatestGithubRelease(): Promise<{ version: string; releaseTag: string }> {
+  if (githubReleaseCache && Date.now() - githubReleaseCache.fetchedAt < GITHUB_RELEASE_CACHE_TTL_MS) {
+    return githubReleaseCache;
+  }
+
+  try {
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NexusNode-IoT-version-check' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) throw new Error(`GitHub sürüm sorgusu ${response.status} durumuyla sonuçlandı`);
+    const release = await response.json() as { tag_name?: unknown };
+    if (typeof release.tag_name !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
+      throw new Error('GitHub son sürüm etiketi geçerli bir semantik sürüm değil');
+    }
+    const releaseTag = release.tag_name.startsWith('v') ? release.tag_name : `v${release.tag_name}`;
+    githubReleaseCache = { version: releaseTag.slice(1), releaseTag, fetchedAt: Date.now() };
+  } catch {
+    if (!githubReleaseCache) {
+      githubReleaseCache = { version: GITHUB_VERSION, releaseTag: GITHUB_RELEASE_TAG, fetchedAt: Date.now() };
+    } else {
+      githubReleaseCache = { ...githubReleaseCache, fetchedAt: Date.now() };
+    }
+  }
+
+  return githubReleaseCache;
+}
 
 // System Router
 const systemRouter = Router();
@@ -175,14 +215,16 @@ systemRouter.get('/runtime', (req, res) => {
 });
 
 // System Version & GitHub Sync Diagnostic Endpoint (v1.49.2)
-systemRouter.get(['/system/version', '/version'], (req, res) => {
+systemRouter.get(['/system/version', '/version'], async (req, res) => {
   const config = getRuntimeConfig();
   const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
+  const githubRelease = await getLatestGithubRelease();
 
   let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
-  if (APP_VERSION > GITHUB_VERSION) {
+  const versionComparison = compareVersions(APP_VERSION, githubRelease.version);
+  if (versionComparison > 0) {
     syncStatus = 'ahead';
-  } else if (APP_VERSION < GITHUB_VERSION) {
+  } else if (versionComparison < 0) {
     syncStatus = 'behind';
   }
 
@@ -198,8 +240,8 @@ systemRouter.get(['/system/version', '/version'], (req, res) => {
       repo: GITHUB_REPO,
       repoUrl: GITHUB_REPO_URL,
       releasesUrl: GITHUB_RELEASES_URL,
-      version: GITHUB_VERSION,
-      releaseTag: GITHUB_RELEASE_TAG,
+      version: githubRelease.version,
+      releaseTag: githubRelease.releaseTag,
       syncStatus,
     },
   });

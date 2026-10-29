@@ -3,6 +3,13 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.50.10] - 2026-10-29
+
+### GitHub Sürüm Bilgisini Canlı Gösterme
+- Sistem sürümü uç noktası, GitHub'da yayımlanan en son sürümü kısa süreli önbellekle okur; böylece yeni sürüm site yeniden dağıtılmadan gösterilir.
+- GitHub'a geçici olarak erişilemediğinde önceden bilinen sürüm bilgisi kullanılır.
+
+---
 ## [v1.50.9] - 2026-10-29
 
 ### CI and Rollback Validation
