@@ -1194,35 +1194,9 @@ export const DatabaseDataView: React.FC = () => {
 
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              onClick={() => {
-                setActiveCategory('settings');
-                setActiveTab('postgres');
-                setTimeout(() => {
-                  document.getElementById('safe-db-password-rotation-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 100);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-xs font-semibold text-white rounded-lg transition cursor-pointer shadow-xs"
-              title="PostgreSQL Veritabanı Şifresi Değiştirme Paneline Git"
-            >
-              <Key className="w-4 h-4 text-white" />
-              <span>Şifre Değiştir</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setActiveCategory('settings');
-                setActiveTab('postgres');
-                setTimeout(() => {
-                  document.getElementById('safe-db-switch-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 100);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-xs font-semibold text-white rounded-lg transition cursor-pointer shadow-xs"
-              title="Güvenli Veritabanı ve Rol Geçiş Paneline Git"
-            >
-              <ShieldCheck className="w-4 h-4 text-white" />
-              <span>Veritabanı & Rol Geçişi</span>
-            </button>
+            <div className="max-w-md rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-[11px] text-amber-900 dark:text-amber-200">
+              Veritabanı hedefini veya PostgreSQL rol parolasını uygulama içinden değiştirme kapatıldı. Önceden hazırlanmış ve aynı veritabanına ait kimlik bilgilerini Sistem Gizli Bilgileri bölümünden kaydedin.
+            </div>
 
             <button
               onClick={fetchDatabaseStats}
@@ -2067,7 +2041,7 @@ export const DatabaseDataView: React.FC = () => {
           </div>
 
           {/* SAFE DATABASE PASSWORD ROTATION CARD */}
-          <div id="safe-db-password-rotation-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-violet-500/80 dark:border-violet-500 p-5 shadow-md space-y-4">
+          <div hidden id="safe-db-password-rotation-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-violet-500/80 dark:border-violet-500 p-5 shadow-md space-y-4">
             <div className="border-b border-violet-100 dark:border-violet-900/50 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200/50 dark:border-violet-800/50">
@@ -2292,7 +2266,7 @@ export const DatabaseDataView: React.FC = () => {
           </div>
 
           {/* SAFE DATABASE & ROLE SWITCH CARD */}
-          <div id="safe-db-switch-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-indigo-500/80 dark:border-indigo-500 p-5 shadow-md space-y-4">
+          <div hidden id="safe-db-switch-panel" className="bg-white dark:bg-[#0c1220] rounded-xl border-2 border-indigo-500/80 dark:border-indigo-500 p-5 shadow-md space-y-4">
             <div className="border-b border-indigo-100 dark:border-indigo-900/50 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">

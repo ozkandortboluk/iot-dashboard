@@ -151,6 +151,8 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry, sshTu
   // Handle Emergency Database Reconfiguration
   const handleEmergencyDbSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setModalError('Bu acil değiştirme yolu güvenli geri dönüş doğrulaması sağlamadığı için kapatıldı. PostgreSQL tarafında yeni bir rol hazırlayın; eski rolü koruyarak Sistem Sırları ekranından değişikliği uygulayın.');
+    return;
     setModalLoading(true);
     setModalError(null);
     setModalSuccess(null);
@@ -578,6 +580,9 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({ onRetry, sshTu
               {/* Tab 1: Update DB Credentials */}
               {activeModalTab === 'update_db' && (
                 <form onSubmit={handleEmergencyDbSave} className="space-y-4">
+                  <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-xs text-amber-200 leading-relaxed">
+                    Acil veritabanı değişikliği bu ekranda kapalıdır. Güvenli geri dönüş için yeni bir PostgreSQL rolü kullanın ve eski rolü koruyun.
+                  </div>
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="space-y-1">
                       <label className="text-[11px] text-slate-400 font-medium">Sunucu (Host)</label>

@@ -8,6 +8,9 @@ The POSTGRES_USER, POSTGRES_DB, and POSTGRES_PASSWORD_FILE values in Compose are
 
 ## Changes in this PR
 
+- The legacy `POST /api/database/rotate-password` and `POST /api/database/switch-target` endpoints return `410 Gone`. The app no longer changes PostgreSQL role passwords in place or switches to a different data source through these unverified flows.
+- Prepare a least-privilege PostgreSQL role through an operator-controlled database maintenance procedure, then use System Secrets to save its credentials only for the existing host, port, and database after the read-only preflight succeeds.
+- Database target changes remain unavailable until a dedicated maintenance workflow can prove target identity and data continuity, verify a restorable backup, drain writes, and validate rollback.
 - A candidate PostgreSQL URL is tested before it can replace the active URL.
 - A failed candidate test no longer persists the candidate URL or marks a healthy active connection as disconnected.
 - Production URL persistence removes the URL password; the encrypted System Secrets Vault remains the authoritative password source.

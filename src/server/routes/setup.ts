@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { Router, type Request, type Response } from 'express';
 import { setupService, type DatabaseConfigPayload } from '../services/setup.service.js';
 import { systemSecretsService } from '../services/systemSecrets.service.js';
@@ -9,7 +7,6 @@ import { rateLimiterService } from '../services/rateLimiter.service.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import { requireSetupAuth, isRequestSetupAuthenticated, extractSetupToken } from '../middleware/setupAuth.js';
 import { db } from '../db.js';
-import { recycleSharedPgPool } from '../database/connection.js';
 import { isRealAdminUser } from '../database/postgres.js';
 import { scheduleSystemReboot } from '../services/systemLifecycle.service.js';
 
@@ -443,7 +440,14 @@ setupRouter.post('/recover-admin', async (req: Request, res: Response) => {
  * 2) Valid active Admin session
  * 3) Valid Admin email + password matching local admin account
  */
-setupRouter.post('/emergency-database-config', async (req: Request, res: Response) => {
+setupRouter.post('/emergency-database-config', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    success: false,
+    code: 'EMERGENCY_DATABASE_CONFIG_DISABLED',
+    message: 'Emergency database changes are disabled. Use Administration > System Secrets to safely change the database role or password, and keep the previous role available during rollback.',
+  });
+});
+/*
   const clientIp = getClientIp(req);
   const rateLimit = rateLimiterService.checkIpRateLimit(`emergency_db:${clientIp}`, 10);
   if (!rateLimit.allowed) {
@@ -593,6 +597,7 @@ setupRouter.post('/emergency-database-config', async (req: Request, res: Respons
   }
 });
 
+*/
 /**
  * POST /api/setup/enable-local-fallback
  * Enables offline local SQLite/WAL fallback mode when PostgreSQL is unreachable.

@@ -54,7 +54,7 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
     expect(db.data.sessions.length).toBe(0);
   });
 
-  it('2. POST /api/database/rotate-password terminates sessions, clears cookie, and schedules reboot', async () => {
+  it('2. POST /api/database/rotate-password is disabled to prevent in-place role password changes', async () => {
     mockUserSession('admin');
 
     // Mock system secrets
@@ -100,7 +100,10 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
         confirmPassword: 'brand_new_secure_pass_456',
       });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
+    expect(terminateSpy).not.toHaveBeenCalled();
+    expect(rebootSpy).not.toHaveBeenCalled();
+    return;
     expect(res.body.success).toBe(true);
     expect(res.body.rebooting).toBe(true);
     expect(res.body.sessionsRevoked).toBe(true);
@@ -118,7 +121,7 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
     // Verify session cookie was instructed to clear
     const setCookieHeaders = res.headers['set-cookie'];
     expect(setCookieHeaders).toBeDefined();
-    const cookieHeaderStr = Array.isArray(setCookieHeaders) ? setCookieHeaders.join('; ') : String(setCookieHeaders);
+    const cookieHeaderStr = String(setCookieHeaders);
     expect(cookieHeaderStr).toMatch(/nexus_session_token=;/);
   });
 
@@ -175,7 +178,7 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
           host: 'timescaledb',
           port: 5432,
           database: 'iot_dashboard',
-          user: 'iot_user',
+          user: 'iot_app_next',
           password: 'new_different_secret_pass_789',
           sslMode: 'disable',
         },
@@ -192,7 +195,7 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
     );
   });
 
-  it('4. POST /api/setup/emergency-database-config terminates sessions and schedules reboot', async () => {
+  it('4. POST /api/setup/emergency-database-config is disabled to prevent unsafe credential changes', async () => {
     // Provide emergency setup auth mock
     vi.spyOn(setupService, 'testConnection').mockResolvedValue({
       success: true,
@@ -219,10 +222,11 @@ describe('Database Password Change Session Termination & Controlled Reboot', () 
         sslMode: 'disable',
       });
 
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.rebooting).toBe(true);
-    expect(res.body.sessionsRevoked).toBe(true);
+    expect(res.status).toBe(410);
+    expect(res.body.code).toBe('EMERGENCY_DATABASE_CONFIG_DISABLED');
+    expect(terminateSpy).not.toHaveBeenCalled();
+    expect(rebootSpy).not.toHaveBeenCalled();
+    return;
     expect(terminateSpy).toHaveBeenCalledWith('Acil durum veritabanı ayarları güncellendi');
     expect(rebootSpy).toHaveBeenCalledWith(
       expect.stringContaining('Acil durum veritabanı ayarları güncellendi'),

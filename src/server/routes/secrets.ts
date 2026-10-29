@@ -151,7 +151,7 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
         database: String(database.database ?? previousDb.database).trim(),
         user: String(database.user ?? previousDb.user).trim(),
         password: incomingPassword && !isMaskedSecret(incomingPassword)
-          ? incomingPassword
+          ? incomingPassword.trim()
           : previousDb.password,
         sslMode: (['disable', 'require', 'prefer', 'verify-full'].includes(String(database.sslMode))
           ? String(database.sslMode)
@@ -181,14 +181,37 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
         });
       }
 
-      const passwordChanged = Boolean(incomingPassword && !isMaskedSecret(incomingPassword) && incomingPassword !== previousDb.password);
+      const passwordChanged = Boolean(
+        incomingPassword && !isMaskedSecret(incomingPassword) && candidateDb.password !== previousDb.password,
+      );
       const databaseChanged =
         candidateDb.user !== previousDb.user ||
         candidateDb.sslMode !== previousDb.sslMode ||
         passwordChanged;
 
       if (databaseChanged) {
+        if (passwordChanged && candidateDb.user === previousDb.user) {
+          return res.status(409).json({
+            success: false,
+            error: 'Geri dönüşü güvenli tutmak için mevcut PostgreSQL rolünün parolasını yerinde değiştirmeyin. Aynı veritabanında yeni bir rol hazırlayıp yeni rol/parola ile tekrar deneyin; eski rolü doğrulama tamamlanana kadar koruyun.',
+          });
+        }
+
         setupService.validateDatabaseHost(candidateDb.host, candidateDb.port);
+
+        // A role switch is reversible only while the previous credentials still work.
+        if (candidateDb.user !== previousDb.user) {
+          const rollbackProbe = await setupService.testConnection({
+            ...previousDb,
+            sslMode: previousDb.sslMode as DatabaseConfigPayload['sslMode'],
+          }, { allowCompletedSetup: true });
+          if (!rollbackProbe.success) {
+            return res.status(409).json({
+              success: false,
+              error: 'Önceki veritabanı rolüyle geri dönüş bağlantısı doğrulanamadı; yeni rol henüz etkinleştirilmedi. Önceki rolü yeniden kullanılabilir hâle getirin ve tekrar deneyin.',
+            });
+          }
+        }
 
         // Probe the candidate using a short-lived pool. This does not mutate the active URL or pool.
         const probe = await setupService.testConnection(candidateDb, { allowCompletedSetup: true });
@@ -228,7 +251,7 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
         }
 
         try {
-          await systemSecretsService.updateDatabaseSecrets(database, operatorName);
+          await systemSecretsService.updateDatabaseSecrets(candidateDb, operatorName);
           const effectiveDb = systemSecretsService.getDatabaseConfig();
           const effectivePayload: DatabaseConfigPayload = {
             host: effectiveDb.host,
@@ -282,7 +305,10 @@ secretsRouter.put('/', authenticateUser, requireAdmin, async (req: Request, res:
               sslMode: previousDb.sslMode as any,
             }));
             db.recyclePgPool();
-            await db.initPostgresRepository(true);
+            const rollbackConnected = await db.initPostgresRepository(true);
+            if (!rollbackConnected) {
+              throw new Error('Önceki veritabanı bağlantısı geri yüklendi ancak uygulama havuzu doğrulanamadı.');
+            }
           } catch (rollbackError: any) {
             systemLogger.error('database', `DB bağlantı değişikliği geri alınamadı; elle müdahale gerekiyor: ${sanitizeLogString(rollbackError?.message || rollbackError)}`);
             return res.status(503).json({

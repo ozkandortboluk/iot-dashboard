@@ -1,6 +1,10 @@
-# NexusNode IoT Cloud - Güvenli Veritabanı ve Rol Geçişi & Geri Alma (Rollback) Kılavuzu
+# ARŞİV — Kullanımdan Kaldırılan Veritabanı/Rol Geçişi Kılavuzu
 
-Bu belge, NexusNode IoT Cloud üzerinde çalışan PostgreSQL / TimescaleDB veritabanı bağlantı bilgilerinin (Host, Port, Veritabanı Adı, Kullanıcı Adı ve Parola) güvenle değiştirilmesi, hedef veritabanının ve rol yetkilerinin doğrulanması, yanlış veritabanına geçişin engellenmesi ve acil durumlarda eski role/veritabanına geri dönülmesi (Rollback) süreçlerini eksiksiz olarak açıklar.
+> **Bu kılavuz güncel değildir.** Uygulama içinden rol parolası değiştiren `/api/database/rotate-password` ve hedef veritabanı değiştiren `/api/database/switch-target` uç noktaları v1.50.7 itibarıyla devre dışıdır ve `410 Gone` döndürür. Aşağıdaki eski panel ve cURL adımlarını çalıştırmayın.
+>
+> Aynı host, port ve veritabanına önceden hazırlanmış PostgreSQL kimlik bilgilerini güvenli biçimde kaydetmek için [güncel rotasyon kılavuzunu](database-connection-rotation.md) izleyin. Veritabanı hedefi taşıma işlemi için doğrulanmış yedek, veri sürekliliği doğrulaması ve ayrı bir bakım/geri alma planı gerekir.
+
+Bu belgenin devamı yalnızca geçmiş uygulama tasarımını ve artık kullanılmayan örnekleri kaydeder.
 
 ---
 

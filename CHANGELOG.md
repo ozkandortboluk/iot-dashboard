@@ -3,6 +3,21 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## [v1.50.8] - 2026-10-29
+
+### Database Credential Rollback Safety
+- Disabled the emergency database configuration endpoint that bypassed schema and privilege checks and swallowed Vault or connection-pool failures.
+- Restricted password changes to staged PostgreSQL roles and require the previous role to remain usable for rollback.
+- Normalize candidate passwords before connection checks and persistence so the tested secret matches the stored secret.
+
+---
+## [v1.50.7] - 2026-10-28
+
+### PostgreSQL Credential Safety and Data Source Protection
+- Disabled in-app PostgreSQL role password changes and generic target database switching. Both admin endpoints return 410 without changing Vault, runtime settings, or the connection pool.
+- Pre-created PostgreSQL credentials can be saved through System Secrets only for the existing host, port, and database after the read-only connection preflight succeeds.
+- Updated regression coverage to verify authorization and that the retired endpoints perform no credential or pool mutations.
+
 ## 🚀 [v1.50.6] - 2026-10-27
 
 ### Veritabanı ve Vault Parola Senkronizasyonu & Kendi Kendini Onarma (Database & Vault Password Resync & Auto-Heal)

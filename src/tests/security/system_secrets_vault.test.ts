@@ -824,7 +824,9 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
         sslMode: 'disable',
       };
       const validateHostSpy = vi.spyOn(setupService, 'validateDatabaseHost').mockImplementation(() => {});
-      const testConnectionSpy = vi.spyOn(setupService, 'testConnection').mockResolvedValue({
+      const testConnectionSpy = vi.spyOn(setupService, 'testConnection')
+        .mockResolvedValueOnce({ success: true, message: 'Previous role verified' } as any)
+        .mockResolvedValueOnce({
         success: false,
         message: 'Veritabanı kimlik doğrulaması başarısız.',
         errorCode: 'AUTH_FAILED',
@@ -839,6 +841,7 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
           .send({
             database: {
               ...baseline,
+              user: 'iot_app_next',
               password: 'candidate_password_must_not_be_saved',
             },
           });
@@ -854,6 +857,71 @@ describe('AES-256-GCM System Secrets Vault & Masking Infrastructure', () => {
       } finally {
         validateHostSpy.mockRestore();
         testConnectionSpy.mockRestore();
+        await systemSecretsService.updateDatabaseSecrets({
+          host: originalDb.host,
+          port: originalDb.port,
+          database: originalDb.database,
+          user: originalDb.user,
+          password: originalDb.password,
+          sslMode: originalDb.sslMode,
+        }, 'test_restore');
+      }
+    });
+
+    it('restores the previous Vault, runtime URL, and pool when a verified credential cannot initialize the app pool', async () => {
+      const originalDb = systemSecretsService.getDatabaseConfig();
+      const baseline = {
+        host: 'timescaledb',
+        port: 5432,
+        database: 'iot_dashboard',
+        user: 'iot_user',
+        password: 'existing_vault_password_for_test',
+        sslMode: 'disable',
+      };
+      const candidate = { ...baseline, user: 'iot_app_next', password: 'candidate_password_for_test' };
+      const validateHostSpy = vi.spyOn(setupService, 'validateDatabaseHost').mockImplementation(() => {});
+      const testConnectionSpy = vi.spyOn(setupService, 'testConnection').mockResolvedValue({
+        success: true,
+        tablesStatus: { users: true, devices: true, telemetry_readings: true },
+        permissionsStatus: {
+          schema_usage: true, schema_create: true,
+          users_select: true, users_insert: true, users_update: true,
+          devices_select: true, devices_insert: true, devices_update: true,
+          telemetry_select: true, telemetry_insert: true, sequences_usage: true,
+        },
+      } as any);
+      await systemSecretsService.updateDatabaseSecrets(baseline, 'test_baseline');
+      const updateSecretsSpy = vi.spyOn(systemSecretsService, 'updateDatabaseSecrets').mockResolvedValue();
+      const saveRuntimeSpy = vi.spyOn(setupService, 'saveRuntimeSecretConfig').mockImplementation(() => {});
+      const saveUrlSpy = vi.spyOn(db, 'savePostgresUrl').mockImplementation(() => {});
+      const recyclePoolSpy = vi.spyOn(db, 'recyclePgPool').mockImplementation(() => {});
+      const initRepoSpy = vi.spyOn(db, 'initPostgresRepository')
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+
+      try {
+        const response = await request(app)
+          .put('/api/system/secrets')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ database: candidate });
+
+        expect(response.status).toBe(503);
+        expect(response.body.error).toContain('Önceki bağlantı ayarları geri yüklendi');
+        expect(testConnectionSpy).toHaveBeenCalledWith(expect.objectContaining(candidate), { allowCompletedSetup: true });
+        expect(updateSecretsSpy).toHaveBeenNthCalledWith(1, expect.objectContaining(candidate), expect.any(String));
+        expect(updateSecretsSpy).toHaveBeenNthCalledWith(2, expect.objectContaining(baseline), expect.any(String));
+        expect(saveRuntimeSpy).toHaveBeenCalledTimes(2);
+        expect(saveUrlSpy).toHaveBeenCalledTimes(2);
+        expect(recyclePoolSpy).toHaveBeenCalledTimes(2);
+        expect(initRepoSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        validateHostSpy.mockRestore();
+        testConnectionSpy.mockRestore();
+        updateSecretsSpy.mockRestore();
+        saveRuntimeSpy.mockRestore();
+        saveUrlSpy.mockRestore();
+        recyclePoolSpy.mockRestore();
+        initRepoSpy.mockRestore();
         await systemSecretsService.updateDatabaseSecrets({
           host: originalDb.host,
           port: originalDb.port,

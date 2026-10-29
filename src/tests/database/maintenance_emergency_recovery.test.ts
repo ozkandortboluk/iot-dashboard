@@ -46,9 +46,9 @@ describe('Maintenance Mode Emergency Recovery & Reconfiguration Security', () =>
           password: 'new_valid_password',
         });
 
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(410);
       expect(res.body.success).toBe(false);
-      expect(res.body.code).toBe('EMERGENCY_AUTH_REQUIRED');
+      expect(res.body.code).toBe('EMERGENCY_DATABASE_CONFIG_DISABLED');
     });
 
     it('2. MUST allow authenticated admin session to update configuration', async () => {
@@ -78,9 +78,8 @@ describe('Maintenance Mode Emergency Recovery & Reconfiguration Security', () =>
           password: 'new_valid_password',
         });
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.systemMode).toBe('READY');
+      expect(res.status).toBe(410);
+      expect(res.body.code).toBe('EMERGENCY_DATABASE_CONFIG_DISABLED');
     });
 
     it('3. MUST allow recovery token to authenticate and update configuration', async () => {
@@ -105,9 +104,8 @@ describe('Maintenance Mode Emergency Recovery & Reconfiguration Security', () =>
           password: 'new_valid_password',
         });
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.systemMode).toBe('READY');
+      expect(res.status).toBe(410);
+      expect(res.body.code).toBe('EMERGENCY_DATABASE_CONFIG_DISABLED');
     });
 
     it('4. MUST reject if candidate connection fails test with 400', async () => {
@@ -131,9 +129,9 @@ describe('Maintenance Mode Emergency Recovery & Reconfiguration Security', () =>
           password: 'wrong_password',
         });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(410);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toContain('password authentication failed');
+      expect(res.body.code).toBe('EMERGENCY_DATABASE_CONFIG_DISABLED');
     });
   });
 

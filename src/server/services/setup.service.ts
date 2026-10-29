@@ -130,6 +130,7 @@ export class SetupService {
   private setupToken: string | null = null;
   private lastDbError: string | null = null;
   private localFallbackActive: boolean = false;
+  private recoveryTokensInUse = new Set<string>();
 
   private constructor() {
     this.loadRuntimeSecretConfig();
@@ -1774,8 +1775,8 @@ export class SetupService {
     return new Set();
   }
 
-  private markRecoveryTokenConsumed(token: string): void {
-    if (!token) return;
+  private markRecoveryTokenConsumed(token: string): boolean {
+    if (!token) return false;
     const trimmed = token.trim();
     const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
     const consumedSet = this.loadConsumedTokens();
@@ -1789,9 +1790,43 @@ export class SetupService {
         fs.mkdirSync(dataDir, { recursive: true });
       }
       fs.writeFileSync(consumedFile, JSON.stringify(Array.from(consumedSet)), { encoding: 'utf8', mode: 0o600 });
+      const persisted = this.loadConsumedTokens();
+      return persisted.has(hash) && persisted.has(trimmed);
     } catch (err: any) {
       systemLogger.error('security', `Tüketilen kurtarma anahtarı kaydedilemedi: ${err?.message || err}`);
+      return false;
     }
+  }
+
+  public reserveRecoveryToken(token: string): boolean {
+    if (!this.validateRecoveryToken(token)) return false;
+    const hash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    if (this.recoveryTokensInUse.has(hash)) return false;
+    this.recoveryTokensInUse.add(hash);
+    return true;
+  }
+
+  public consumeReservedRecoveryToken(token: string): boolean {
+    const trimmed = token.trim();
+    const hash = crypto.createHash('sha256').update(trimmed).digest('hex');
+    if (!this.recoveryTokensInUse.has(hash) || !this.markRecoveryTokenConsumed(trimmed)) return false;
+
+    const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
+    try {
+      if (fs.existsSync(tokenFile) && fs.readFileSync(tokenFile, 'utf8').trim() === trimmed) {
+        fs.unlinkSync(tokenFile);
+      }
+    } catch (err: any) {
+      systemLogger.warn('security', `Kullanılmış kurtarma anahtarı dosyası temizlenemedi: ${err?.message || err}`);
+    }
+    this.recoveryTokensInUse.delete(hash);
+    return true;
+  }
+
+  public releaseRecoveryToken(token: string): void {
+    if (!token) return;
+    const hash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    this.recoveryTokensInUse.delete(hash);
   }
 
   /**
@@ -1878,7 +1913,9 @@ export class SetupService {
       });
 
       // Mark token consumed permanently across ENV and file tokens
-      this.markRecoveryTokenConsumed(params.recoveryToken);
+      if (!this.markRecoveryTokenConsumed(params.recoveryToken)) {
+        throw new Error('Kurtarma anahtarı güvenli biçimde tüketilemedi.');
+      }
 
       // Clear recovery token file after single successful use
       const tokenFile = path.join(process.cwd(), 'data', '.recovery_token');
