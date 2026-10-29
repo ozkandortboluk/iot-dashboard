@@ -48,8 +48,8 @@ import {
 } from '../../config/version.js';
 
 const startTime = Date.now();
-const GITHUB_RELEASE_CACHE_TTL_MS = 10 * 60 * 1000;
-let githubReleaseCache: { version: string; releaseTag: string; fetchedAt: number } | undefined;
+const GITHUB_VERSION_CACHE_TTL_MS = 10 * 60 * 1000;
+let githubVersionCache: { version: string; releaseTag: string; fetchedAt: number } | undefined;
 
 function compareVersions(left: string, right: string): number {
   const leftParts = left.split('.').map(Number);
@@ -61,32 +61,35 @@ function compareVersions(left: string, right: string): number {
   return 0;
 }
 
-async function getLatestGithubRelease(): Promise<{ version: string; releaseTag: string }> {
-  if (githubReleaseCache && Date.now() - githubReleaseCache.fetchedAt < GITHUB_RELEASE_CACHE_TTL_MS) {
-    return githubReleaseCache;
+async function getLatestGithubVersion(): Promise<{ version: string; releaseTag: string }> {
+  if (githubVersionCache && Date.now() - githubVersionCache.fetchedAt < GITHUB_VERSION_CACHE_TTL_MS) {
+    return githubVersionCache;
   }
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'NexusNode-IoT-version-check' },
+    const response = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/main/package.json`, {
+      headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(4000),
     });
-    if (!response.ok) throw new Error(`GitHub sürüm sorgusu ${response.status} durumuyla sonuçlandı`);
-    const release = await response.json() as { tag_name?: unknown };
-    if (typeof release.tag_name !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
-      throw new Error('GitHub son sürüm etiketi geçerli bir semantik sürüm değil');
+    if (!response.ok) throw new Error(`GitHub sürüm dosyası sorgusu ${response.status} durumuyla sonuçlandı`);
+    const packageInfo = await response.json() as { version?: unknown };
+    if (typeof packageInfo.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(packageInfo.version)) {
+      throw new Error('GitHub package.json dosyasındaki sürüm geçerli bir semantik sürüm değil');
     }
-    const releaseTag = release.tag_name.startsWith('v') ? release.tag_name : `v${release.tag_name}`;
-    githubReleaseCache = { version: releaseTag.slice(1), releaseTag, fetchedAt: Date.now() };
+    githubVersionCache = {
+      version: packageInfo.version,
+      releaseTag: `v${packageInfo.version}`,
+      fetchedAt: Date.now(),
+    };
   } catch {
-    if (!githubReleaseCache) {
-      githubReleaseCache = { version: GITHUB_VERSION, releaseTag: GITHUB_RELEASE_TAG, fetchedAt: Date.now() };
+    if (!githubVersionCache) {
+      githubVersionCache = { version: GITHUB_VERSION, releaseTag: GITHUB_RELEASE_TAG, fetchedAt: Date.now() };
     } else {
-      githubReleaseCache = { ...githubReleaseCache, fetchedAt: Date.now() };
+      githubVersionCache = { ...githubVersionCache, fetchedAt: Date.now() };
     }
   }
 
-  return githubReleaseCache;
+  return githubVersionCache;
 }
 
 // System Router
@@ -218,7 +221,7 @@ systemRouter.get('/runtime', (req, res) => {
 systemRouter.get(['/system/version', '/version'], async (req, res) => {
   const config = getRuntimeConfig();
   const environment = config.isVps ? 'vps' : (config.isAiStudio ? 'aistudio' : 'development');
-  const githubRelease = await getLatestGithubRelease();
+  const githubRelease = await getLatestGithubVersion();
 
   let syncStatus: 'synced' | 'ahead' | 'behind' = 'synced';
   const versionComparison = compareVersions(APP_VERSION, githubRelease.version);

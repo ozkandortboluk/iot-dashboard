@@ -29,7 +29,7 @@ import {
   APP_VERSION,
   GITHUB_RELEASE_TAG,
   GITHUB_VERSION,
-  GITHUB_RELEASES_URL,
+  GITHUB_REPO_URL,
 } from '../config/version';
 import { apiFetch } from '../lib/apiFetch';
 import { canShowSshControls } from '../lib/sshRuntimePolicy';
@@ -597,12 +597,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Alt Kart: GitHub Depo Sürümü */}
         <a
-          href={GITHUB_RELEASES_URL}
+          href={GITHUB_REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
           id="sidebar-github-version-link"
-          onClick={(e) => { e.preventDefault(); fetchGithubVersion(); window.open(GITHUB_RELEASES_URL, '_blank', 'noopener,noreferrer'); }}
-          title={`GitHub Depo Sürümü: ${githubVersionTag} — Tıklayarak GitHub sürümlerini açın ve yenileyin`}
+          onClick={(e) => { e.preventDefault(); fetchGithubVersion(); window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer'); }}
+          title={`GitHub deposundaki sürüm: ${githubVersionTag} — Depoyu açmak ve sürümü yenilemek için tıklayın`}
           className="group block p-2.5 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/70 hover:border-emerald-400/70 dark:hover:border-emerald-500/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
         >
           <div className="flex items-center justify-between gap-2">
@@ -615,7 +615,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {isGithubRefreshing ? '...' : githubVersionTag}
                 </span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight mt-0.5">
-                  GitHub Son Sürüm
+                  GitHub Depo Sürümü
                 </span>
               </div>
             </div>
