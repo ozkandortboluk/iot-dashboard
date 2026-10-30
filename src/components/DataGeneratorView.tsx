@@ -31,7 +31,13 @@ import {
 } from 'lucide-react';
 import { COMMON_UNITS, getMetricUnit, exportToCSV, exportToJSON } from '../lib/utils';
 
-export const DataGeneratorView: React.FC = () => {
+export interface DataGeneratorViewProps {
+  onNavigateToDevices?: () => void;
+}
+
+export const DataGeneratorView: React.FC<DataGeneratorViewProps> = ({
+  onNavigateToDevices,
+}) => {
   const { user } = useAuth();
   const { devices, simulationTelemetry, simulatorActive, toggleSimulator } = useRealtime();
 
@@ -314,7 +320,19 @@ export const DataGeneratorView: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Aktif Sanal Cihazınız Bulunmuyor</h2>
           <p className="text-sm text-slate-600 dark:text-slate-300 max-w-md mx-auto leading-relaxed">
-            Sanal veri üretmek ve telemetri testi yapmak için <strong>Cihazlar</strong> sayfasından en az bir <strong>Sanal Cihaz</strong> ekleyin. Fiziksel donanımlara simülasyon verisi gönderilmez.
+            Sanal veri üretmek ve telemetri testi yapmak için {
+              onNavigateToDevices ? (
+                <button
+                  type="button"
+                  onClick={onNavigateToDevices}
+                  className="underline text-indigo-600 dark:text-indigo-400 font-bold hover:text-indigo-500 cursor-pointer"
+                >
+                  Cihazlar
+                </button>
+              ) : (
+                <strong>Cihazlar</strong>
+              )
+            } sayfasından en az bir <strong>Sanal Cihaz</strong> ekleyin. Fiziksel donanımlara simülasyon verisi gönderilmez.
           </p>
         </div>
       </div>
@@ -346,8 +364,21 @@ export const DataGeneratorView: React.FC = () => {
           </div>
         </div>
 
-        {/* Global Simulator Toggle Switch */}
-        <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950/80 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0 self-end sm:self-center">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 self-end sm:self-center flex-wrap">
+          {onNavigateToDevices && (
+            <button
+              type="button"
+              onClick={onNavigateToDevices}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Tüm Saha Cihazlarına Dön"
+            >
+              <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Tüm Saha Cihazları</span>
+            </button>
+          )}
+
+          {/* Global Simulator Toggle Switch */}
+          <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950/80 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
           <div className="text-right sm:text-left">
             <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Otonom Simülatör</span>
             <div className="flex items-center gap-1.5 mt-0.5">
@@ -369,6 +400,7 @@ export const DataGeneratorView: React.FC = () => {
             {simulatorActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
             <span>{simulatorActive ? 'Durdur' : 'Başlat'}</span>
           </button>
+        </div>
         </div>
       </div>
 

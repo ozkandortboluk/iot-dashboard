@@ -206,6 +206,7 @@ function DashboardContent() {
               onNavigateToHelp={() => setActiveTab('help')}
               onNavigateToHealth={() => setActiveTab('device_health')}
               onNavigateToAutomations={() => setActiveTab('automations')}
+              onNavigateToGenerator={() => setActiveTab('generator')}
               onNavigateToTab={(tab) => setActiveTab(tab)}
             />
           )}
@@ -235,7 +236,9 @@ function DashboardContent() {
               onNavigateToDevices={() => setActiveTab('devices')}
             />
           )}
-          {isAdmin && safeActiveTab === 'generator' && <DataGeneratorView />}
+          {isAdmin && safeActiveTab === 'generator' && (
+            <DataGeneratorView onNavigateToDevices={() => setActiveTab('devices')} />
+          )}
           {(isAdmin || isOperator || isAnalyst) && safeActiveTab === 'analytics' && <AnalyticsView />}
           {safeActiveTab === 'notifications' && <NotificationsView />}
           {isAdmin && safeActiveTab === 'database_data' && (

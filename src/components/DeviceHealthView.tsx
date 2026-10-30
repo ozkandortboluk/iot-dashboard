@@ -537,10 +537,10 @@ export const DeviceHealthView: React.FC = () => {
                     <tr
                       key={`health_row_${device.id}_${idx}`}
                       onClick={() => setSelectedDetailDevice(device)}
-                      className={`transition-colors cursor-pointer ${
+                      className={`transition-colors cursor-pointer border-l-4 ${
                         device.maintenanceMode
-                          ? 'bg-amber-500/[0.08] dark:bg-amber-500/[0.12] hover:bg-amber-500/20 border-l-4 border-l-amber-500'
-                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                          ? 'bg-amber-500/[0.08] dark:bg-amber-500/[0.12] hover:bg-amber-500/20 border-l-amber-500'
+                          : 'border-l-transparent hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
                       }`}
                     >
                       <td className="py-3.5 px-4">

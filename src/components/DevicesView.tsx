@@ -63,6 +63,7 @@ export interface DevicesViewProps {
   onNavigateToHelp?: () => void;
   onNavigateToHealth?: () => void;
   onNavigateToAutomations?: () => void;
+  onNavigateToGenerator?: () => void;
   onNavigateToTab?: (tab: string) => void;
 }
 
@@ -70,6 +71,7 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
   onNavigateToHelp,
   onNavigateToHealth,
   onNavigateToAutomations,
+  onNavigateToGenerator,
   onNavigateToTab,
 }) => {
   const {
@@ -88,6 +90,7 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
     selectedCustomerForAdmin,
   } = useRealtime();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [selectedDeviceId, setSelectedDeviceId] = useUserPreference<string | null>('devices_selected_id', null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -109,6 +112,11 @@ export const DevicesView: React.FC<DevicesViewProps> = ({
   const [replacementHistory, setReplacementHistory] = useState<DeviceReplacementRecord[]>([]);
 
   // Navigation Handlers for Header Buttons
+  const handleGoToGenerator = () => {
+    if (onNavigateToGenerator) onNavigateToGenerator();
+    else if (onNavigateToTab) onNavigateToTab('generator');
+  };
+
   const handleGoToHealth = () => {
     if (onNavigateToHealth) onNavigateToHealth();
     else if (onNavigateToTab) onNavigateToTab('device_health');
@@ -1393,8 +1401,20 @@ void sendHeartbeat() {
           </div>
         </div>
 
-        {/* Sağ Köşe Butonları: Cihaz Sağlığı & Bakım ve Otomasyon */}
+        {/* Sağ Köşe Butonları: Sanal Veri Üreteci (Admin), Cihaz Sağlığı & Bakım ve Otomasyon */}
         <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap shrink-0">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleGoToGenerator}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Sanal Veri & Telemetri Üretecine Git"
+            >
+              <Radio className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Sanal Veri Üreteci</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleGoToHealth}
@@ -1738,10 +1758,10 @@ void sendHeartbeat() {
                     <div
                       key={`${dev.id}_${idx}`}
                       onClick={() => setSelectedDeviceId(dev.id)}
-                      className={`p-3 sm:p-4 cursor-pointer transition-colors flex items-center justify-between gap-2.5 sm:gap-4 ${
+                      className={`p-3 sm:p-4 cursor-pointer transition-colors flex items-center justify-between gap-2.5 sm:gap-4 border-l-4 ${
                         isSelected
-                          ? 'bg-indigo-500/10 border-l-4 border-l-indigo-500'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                          ? 'bg-indigo-500/10 border-l-indigo-500'
+                          : 'border-l-transparent hover:bg-slate-50 dark:hover:bg-slate-800/40'
                       }`}
                     >
                       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">

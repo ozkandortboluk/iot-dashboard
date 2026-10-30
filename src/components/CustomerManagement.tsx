@@ -678,8 +678,8 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   return (
                     <tr
                       key={cust.id}
-                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                        isSelectedForDashboard ? 'bg-indigo-50/70 dark:bg-indigo-500/10 border-l-2 border-indigo-500' : ''
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors border-l-2 ${
+                        isSelectedForDashboard ? 'bg-indigo-50/70 dark:bg-indigo-500/10 border-l-indigo-500' : 'border-l-transparent'
                       } ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-500/5' : ''}`}
                     >
                       <td className="py-4 px-4 w-10">

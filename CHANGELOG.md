@@ -3,6 +3,21 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.51.12] - 2026-10-30
+
+### 📡 Sanal Veri Üreteci Hızlı Buton Erişimi & Liste Seçim Kayması (Layout Shift) Optimizasyonu
+- **Sanal Veri Üretecinin Saha Cihazları Üst Barına Alınması (`DevicesView.tsx`, `Sidebar.tsx`, `App.tsx`, `DataGeneratorView.tsx`)**:
+  - Sanal Veri Üreteci (`generator`), yan menüdeki (sidebar) kalabalığı azaltmak amacıyla sol menüden kaldırıldı.
+  - "Tüm Saha Cihazları" sayfasının üst başlık kartındaki hızlı operasyonel butonlar arasına yalnızca sistem yöneticilerine (`isAdmin`) özel **"Sanal Veri Üreteci"** butonu entegre edildi.
+  - `DataGeneratorView.tsx` ekranına "Tüm Saha Cihazları" sayfasına tek tıkla geri dönüş butonu eklendi; sanal cihaz bulunmadığında gösterilen uyarı kutusundaki yönlendirme linki aktifleştirildi.
+- **Cihaz Seçimi ve Liste Satırlarındaki Kayma Probleminin Çözümü (Zero-Shift Border Architecture)**:
+  - Saha Cihazları (`DevicesView.tsx`) liste görünümünde bir cihaz seçildiğinde beliren mor şeridin (`border-l-4 border-l-indigo-500`) cihaz adı ve metrikleri 4px sağa iterek oluşturduğu görsel atlama/kayma (layout shift) engellendi.
+  - Liste elemanlarına kalıcı `border-l-4` uygulandı; seçili olmadığında `border-l-transparent`, seçildiğinde `border-l-indigo-500` geçişi yapılarak genişlik sabitlendi ve sıfır kayma sağlandı.
+  - Aynı atlama riski bulunan Müşteri Yönetimi (`CustomerManagement.tsx` - `border-l-2`) ve Cihaz Sağlığı (`DeviceHealthView.tsx` - `border-l-4`) ekranlarındaki dinamik sol şeritler de kalıcı şeffaf taban yapısına dönüştürülerek tam hizalama güvence altına alındı.
+- **Kapsamlı Test ve Doğrulama**:
+  - `devices_view_header_and_selection.test.ts` test paketine "Sanal Veri Üreteci" butonu varlığı, Admin yetki koşulu, Sidebar menüsünden kaldırılma doğrulaması ve persistent `border-l-` sıfır kayma kontrolleri eklendi (9/9 passed).
+
+---
 ## 🚀 [v1.51.11] - 2026-10-29
 
 ### 📡 Saha Cihazları Sayfası Standart Üst Başlığı, Hızlı Navigasyon & Dinamik Silme Dönüşümü

@@ -10,7 +10,6 @@ import {
   Bell,
   ShieldCheck,
   Server,
-  Radio,
   Users,
   Wifi,
   HelpCircle,
@@ -363,11 +362,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               icon: Terminal,
             },
           ],
-        },
-        {
-          id: 'generator',
-          label: 'Sanal Veri Üreteci',
-          icon: Radio,
         },
         {
           id: 'analytics',
