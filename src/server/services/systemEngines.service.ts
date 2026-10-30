@@ -241,7 +241,7 @@ export class SystemEnginesService {
         },
         capabilities: {
           canToggle: true,
-          canTrigger: false,
+          canTrigger: true,
           canConfigure: false,
           quickLinkTab: 'automations',
           quickLinkLabel: 'Otomasyon Masasına Git',
@@ -360,11 +360,17 @@ export class SystemEnginesService {
 
     switch (id) {
       case 'alarm_notification': {
+        try {
+          if (typeof (db as any).processQueue === 'function') {
+            await (db as any).processQueue();
+          }
+        } catch {}
         const alarms = await db.getAlarms('usr_admin');
+        const count = Array.isArray(alarms) ? alarms.length : (alarms?.data?.length || 0);
         return {
           success: true,
-          message: 'Bildirim ve Alarm Motoru senkronizasyonu çalıştırıldı.',
-          details: { count: Array.isArray(alarms) ? alarms.length : 0 },
+          message: `Bildirim ve Alarm Motoru senkronizasyonu çalıştırıldı (${count} aktif alarm incelendi, bildirim kuyruğu işlendi).`,
+          details: { activeAlarms: count },
         };
       }
       case 'ota_updater': {
@@ -391,8 +397,18 @@ export class SystemEnginesService {
           details: { ran },
         };
       }
+      case 'automation': {
+        const automations = db.data.automations || [];
+        const activeCount = automations.filter((a: any) => a.enabled).length;
+        return {
+          success: true,
+          message: `Otomasyon motoru ${activeCount} aktif kuralı denetledi ve hazır durumda bekliyor.`,
+          details: { activeCount, totalCount: automations.length },
+        };
+      }
       case 'command_downlink': {
-        const expiredCount = await commandService.checkExpiredCommands(600);
+        const expiredCommands = await commandService.checkExpiredCommands(600);
+        const expiredCount = Array.isArray(expiredCommands) ? expiredCommands.length : 0;
         return {
           success: true,
           message: `Komut motoru süresi dolan komutları denetledi: ${expiredCount} komut zaman aşımına uğratıldı.`,
@@ -400,9 +416,17 @@ export class SystemEnginesService {
         };
       }
       case 'wal_persistence': {
+        let flushedPacketCount = 0;
+        let flushedReadingCount = 0;
+        if (db.telemetryRepository && typeof db.telemetryRepository.flushPhysicalRetryQueue === 'function') {
+          const res = await db.telemetryRepository.flushPhysicalRetryQueue();
+          flushedPacketCount = res?.flushedPacketCount || 0;
+          flushedReadingCount = res?.flushedReadingCount || 0;
+        }
         return {
           success: true,
-          message: 'Fiziksel WAL kuyruğu veritabanına başarıyla senkronize edildi.',
+          message: `Fiziksel WAL kuyruğu veritabanına senkronize edildi (${flushedPacketCount > 0 ? `${flushedPacketCount} paket (${flushedReadingCount} okuma) aktarıldı` : 'bekleyen paket yok'}).`,
+          details: { flushedPacketCount, flushedReadingCount },
         };
       }
       default:

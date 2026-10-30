@@ -692,6 +692,13 @@ async function setupViteOrStatic() {
   // Background non-blocking database initialization
   (async () => {
     console.log("[Startup] Veritabanı bağlantısı arka planda doğrulanıyor...");
+    // 1 Saatlik Yerel SSH Geliştirici Oturumu Otomatik Yeniden Bağlanma
+    if (sshTunnelService.hasActiveDevSession()) {
+      console.log("[Startup] Geçerli 1 saatlik yerel SSH geliştirici oturumu tespit edildi. SSH tüneli otomatik yeniden bağlanıyor...");
+      await sshTunnelService.autoConnectDevSession().catch((e) => {
+        console.warn("[Startup] SSH tüneli otomatik bağlanma uyarısı:", e?.message || e);
+      });
+    }
     try {
       const startupTimeout = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST) ? 200 : 15000;
       await db.waitForInitialization(startupTimeout);
@@ -717,7 +724,7 @@ registerShutdownHook(async () => {
   try { stopOtaWorker(); } catch {}
   try { setSimulatorActive(false); } catch {}
   try { db.autoHealer?.stopWatchdog(); } catch {}
-  try { await sshTunnelService.disconnectTunnel(); } catch {}
+  try { await sshTunnelService.disconnectTunnel({ preserveDevSession: true }); } catch {}
   try { clusterSyncService.cleanupListener(); } catch {}
   try { systemLogger.flush(); } catch {}
 

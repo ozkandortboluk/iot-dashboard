@@ -300,6 +300,11 @@ systemRouter.post('/system/engines/:id/toggle', authenticateUser, requireAdmin, 
       return res.status(400).json({ error: 'enabled alanı boolean (true/false) olmalıdır.' });
     }
     const result = await systemEnginesService.toggleEngine(req.params.id, enabled);
+    if (!result.success) {
+      return res.status(400).json({ error: result.message });
+    }
+    broadcast('engines:updated', await systemEnginesService.getEnginesList());
+    db.addAuditLog((req as any).user?.id || 'admin', (req as any).user?.name || 'Yönetici', `Sistem Motoru '${req.params.id}' ${enabled ? 'başlatıldı' : 'durduruldu'}.`, 'medium').catch(() => {});
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: err?.message || 'Motor durumu değiştirilemedi.' });
@@ -309,6 +314,11 @@ systemRouter.post('/system/engines/:id/toggle', authenticateUser, requireAdmin, 
 systemRouter.post('/system/engines/:id/trigger', authenticateUser, requireAdmin, async (req, res) => {
   try {
     const result = await systemEnginesService.triggerEngine(req.params.id);
+    if (!result.success) {
+      return res.status(400).json({ error: result.message });
+    }
+    broadcast('engines:updated', await systemEnginesService.getEnginesList());
+    db.addAuditLog((req as any).user?.id || 'admin', (req as any).user?.name || 'Yönetici', `Sistem Motoru '${req.params.id}' manuel tetiklendi.`, 'low').catch(() => {});
     return res.json(result);
   } catch (err: any) {
     return res.status(400).json({ error: err?.message || 'Motor manuel tetiklenemedi.' });

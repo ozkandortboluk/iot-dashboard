@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { automationEngine } from '../services/automation.engine.js';
+import { alarmEngine } from '../services/alarmEngine.js';
 import { systemLogger } from '../services/systemLogger.service.js';
 import type {
   TelemetryReading,
@@ -1995,6 +1996,7 @@ export class TelemetryRepository {
 
   // Unified Rule Dispatcher
   public evaluateRules(reading: TelemetryReading, device?: Device) {
+    if (!alarmEngine.isEnabled()) return;
     if (reading.source === 'physical') {
       this.evaluateProductionRules(reading, device);
     } else {
@@ -2004,6 +2006,7 @@ export class TelemetryRepository {
 
   // 1. Production Rule Evaluation Engine (Fiziksel Saha Cihazları)
   public evaluateProductionRules(reading: TelemetryReading, device?: Device) {
+    if (!alarmEngine.isEnabled()) return;
     if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
 
     const rules = (this.db.data.rules || []).filter(
@@ -2301,6 +2304,7 @@ export class TelemetryRepository {
 
   // 2. Simulation Rule Evaluation Engine (Sanal Cihazlar & Testler)
   public evaluateSimulationRules(reading: TelemetryReading, device?: Device) {
+    if (!alarmEngine.isEnabled()) return;
     if (!this.db.data.activeAlarms) this.db.data.activeAlarms = [];
 
     const rules = (this.db.data.rules || []).filter(

@@ -3,6 +3,56 @@
 Bu belgede **Industrial IoT Analytics & Dashboard** platformunun tüm sürümleri, sürüm içerikleri ve yapılan geliştirmeler kronolojik olarak listelenmektedir.
 
 ---
+## 🚀 [v1.51.14] - 2026-10-30
+
+### ⚙️ 7 Sistem Motorunun Kapsamlı Denetimi, İşlevsellik Düzeltmeleri & Gerçek Çalışma Doğrulaması
+- **7 Sistem Motorunun Tam Kod Denetimi ve Entegrasyon Onarımları (`systemEngines.service.ts`, `telemetry.repository.ts`, `system.ts`)**:
+  - **Bildirim & Alarm Motoru (`alarm_notification` - ALARM-ENG-01)**:
+    - Motor durdurulduğunda kural değerlendirme katmanının (`telemetry.repository.ts` -> `evaluateRules`, `evaluateProductionRules`, `evaluateSimulationRules`) motorun aktiflik durumunu (`alarmEngine.isEnabled()`) denetlemediği tespit edildi. Koruma bariyeri eklenerek motor durdurulduğunda gelen telemetrilerden yeni alarm üretilmesi kesin olarak engellendi.
+    - Manuel tetiklemede (`triggerEngine`), bekleyen bildirim kuyruğu (`db.processQueue()`) anlık olarak işlenerek incelenen aktif alarm ve bildirim adedi raporda döndürüldü.
+  - **Oto Güncelleme & OTA Dağıtım Motoru (`ota_updater` - OTA-ENG-02)**:
+    - `processOtaJobsWorker()` işleyicisi denetlendi; zaman aşımına uğrayan işler ve devam eden OTA güncellemelerinin durumu analiz edilerek manuel tetikleme çıktısında sunuldu.
+  - **Sanal Veri & Simülasyon Motoru (`simulator` - SIM-ENG-03)**:
+    - `scheduleSimulationStep()` ile tek seferlik anlık veri enjeksiyonu, başlatma/durdurma ve senaryo metrik güncellemeleri başarıyla doğrulandı.
+  - **Cihaz Sağlığı & No-Data Bekçisi (`nodata_watchdog` - WATCHDOG-ENG-04)**:
+    - `triggerNoDataCheck()` anlık tarama mekanizması ve `startNoDataWorker` / `stopNoDataWorker` yaşam döngüsü doğrulanarak cihazların sessizlik süreleri denetlendi.
+  - **Otomasyon & Senaryo Yürütme Motoru (`automation` - AUTO-ENG-05)**:
+    - Yetenekler matrisinde `canTrigger: true` yapıldı; operatörlerin sistemdeki aktif otomasyon kurallarını manuel olarak denetleyebilmesi ve anlık durum raporu alabilmesi sağlandı.
+  - **Komut & Downlink Dağıtım Motoru (`command_downlink` - DOWNLINK-ENG-06)**:
+    - Manuel tetiklemedeki tip hatası giderildi: `commandService.checkExpiredCommands(600)` fonksiyonunun döndürdüğü dizi nesnesi doğrudan mesaj şablonuna yazılmak yerine dizi uzunluğu hesaplanarak temiz sayısal değer (`expiredCount`) ve doğru metin üretildi.
+  - **Veritabanı & Fiziksel WAL Motoru (`wal_persistence` - STORAGE-ENG-07)**:
+    - Önceden statik yanıt dönen tetikleme ucu, `db.telemetryRepository.flushPhysicalRetryQueue()` ile gerçek fiziksel kuyruk boşaltma işlemine bağlandı. Başarıyla aktarılan paket ve telemetri okuma adetleri döndürüldü.
+    - Sistem çekirdeği olduğu için operatörün motoru durdurma istekleri HTTP 400 Bad Request ile güvenli biçimde engellendi.
+- **Canlı WebSocket Bildirimi & Denetim İzi (Audit Log) Senkronizasyonu (`system.ts`)**:
+  - Motor durumlarında yapılan her değişiklik (`toggle` ve `trigger`), `broadcast('engines:updated', ...)` ile tüm bağlı istemcilere 15 saniyelik yoklama periyodunu beklemeden anında iletiliyor.
+  - Operatörün gerçekleştirdiği tüm motor tetikleme ve durum değiştirme işlemleri sistem denetim izine (`db.addAuditLog`) kaydediliyor.
+- **Kapsamlı Otomatik Test Paketi (`src/tests/system_ops/system_engines.test.ts`)**:
+  - 7 motorun tamamının tetikleme yanıtlarını, durdurma/başlatma tepkilerini, WAL çekirdek motoru koruma kuralını, alarm motoru durdurulduğunda alarm üretilmeme politikasını ve audit log kayıtlarını doğrulayan 11/11 Vitest testi başarıyla tamamlandı.
+
+---
+## 🚀 [v1.51.13] - 2026-10-30
+
+### 🔐 1 Saatlik Güvenli Yerel SSH Geliştirici Oturumu & Hot-Reload Otomatik Yeniden Bağlanma
+- **1 Saatlik Geçici Kriptografik Oturum Bileti (`sshTunnel.service.ts`, `sshTunnel.ts`)**:
+  - Localde ve AI Studio geliştirme ortamında SSH tüneli bir kez başarıyla kurulup PostgreSQL doğrulaması (SELECT 1 ve READY) tamamlandığında, 1 saat süreli (TTL = 3600 sn) yerel bir oturum bileti (`data/.ssh_dev_session.json`) oluşturulur.
+  - Bu oturum bileti, geliştiricinin her kod değişikliğinde tekrar tekrar şifre girmesi zorunluluğunu ortadan kaldırır.
+  - Yalnızca yerel geliştirme ve AI Studio ortamında aktiftir; canlı VPS üretim sunucularında (`isVps() === true`) kesinlikle devre dışıdır ve çalıştırılamaz.
+- **Kod Değişikliklerinde (Hot-Reload) Sıfır Dokunuşla Otomatik Yeniden Bağlanma (`server.ts`)**:
+  - Geliştirici kodda değişiklik yaptığında `tsx watch` sunucuyu baştan başlatsa bile, sunucu açılışında geçerli 1 saatlik oturumun süresini denetler.
+  - Süre dolmamışsa arka planda SSH tünelini ve PostgreSQL havuzunu kullanıcıdan hiçbir şifre veya müdahale beklemeden 1 saniye içinde kendiliğinden yeniden ayağa kaldırır.
+  - Süreç kapanışlarında (`SIGINT` / hot reload) `preserveDevSession: true` bayrağıyla oturum bileti korunur; yalnızca kullanıcı açıkça "Tüneli Kapat" butonuna bastığında oturum sonlandırılır.
+- **SSHTunnelDrawer Canlı Oturum Rozeti ve Şifresiz Bağlantı Desteği (`SSHTunnelDrawer.tsx`)**:
+  - Çekmece açıldığında aktif 1 saatlik oturumu gösteren yeşil renkli, canlı nabız animasyonlu ve kalan dakikayı bildiren **"1 Saatlik Yerel Oturum Aktif"** rozeti eklendi.
+  - Oturum aktifken SSH şifresi alanı otomatik placeholder (`•••••••• (1 Saatlik Yerel Oturumdan Aktarılacak)`) ile doldurulur ve şifre yazmadan tek tıkla bağlanma imkanı sunulur.
+  - İstendiğinde oturumu erken sonlandırmak için "Oturumu Kapat / Sıfırla" butonu eklendi.
+- **Güvenlik ve İzolasyon Standartları (KURAL 3)**:
+  - Şifreler asla istemciye veya tarayıcıya düz metin olarak gönderilmez; sunucu tarafında AES-256-GCM Vault içinde saklanır.
+  - 1 saat dolduğunda oturum bileti otomatik imha edilir (auto-expire).
+  - `x-ssh-dev-session-token` başlığı ve HTTP-Only `nexus_ssh_dev_session_token` çerezi ile yetkilendirme güvence altına alındı.
+- **Birim ve Güvenlik Testleri (`ssh_dev_session_1hour.test.ts`)**:
+  - Oturum oluşturma, 1 saatlik TTL denetimi, süre dolunca otomatik silinme, hot-reload oturum koruma, manuel oturum kapatma ve VPS ortam korumalarını doğrulayan 9/9 Vitest testi eklendi.
+
+---
 ## 🚀 [v1.51.12] - 2026-10-30
 
 ### 📡 Sanal Veri Üreteci Hızlı Buton Erişimi & Liste Seçim Kayması (Layout Shift) Optimizasyonu

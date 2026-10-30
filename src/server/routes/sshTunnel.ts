@@ -72,6 +72,18 @@ async function requireSshTunnelAuth(req: Request, res: Response, next: NextFunct
     return next();
   }
 
+  // 2.5. Valid 1-Hour Local Dev Session Token (strictly in local dev / AI Studio, never on VPS)
+  const devSessionToken =
+    (req.headers['x-ssh-dev-session-token'] as string) ||
+    (req as any).cookies?.nexus_ssh_dev_session_token;
+  if (devSessionToken && !isVps() && isSshTunnelAllowed()) {
+    const activeSession = sshTunnelService.getDevSession();
+    if (activeSession && activeSession.token === devSessionToken) {
+      (req as any).isSshDevSession = true;
+      return next();
+    }
+  }
+
   // 3. Fallback: Authenticated User Session
   return authenticateUser(req, res, () => next());
 }
@@ -430,6 +442,22 @@ sshTunnelRouter.post('/connect', guardSshTunnelPolicy, requireSshTunnelAuth, asy
         systemLogger.error('database', `SSH Tüneli bağlandıktan sonra PostgreSQL re-init hatası: ${e?.message}`);
       });
     }
+    // 1-Hour Dev Session cookie & response payload (Local Dev / AI Studio ONLY)
+    if (result.success && !isVps() && isSshTunnelAllowed()) {
+      const devSession = sshTunnelService.getDevSession();
+      if (devSession) {
+        const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+        res.cookie('nexus_ssh_dev_session_token', devSession.token, {
+          httpOnly: true,
+          secure: isSecure,
+          sameSite: isSecure ? 'none' : 'lax',
+          maxAge: Math.max(0, devSession.expiresAt - Date.now()),
+          path: '/',
+        });
+        (result as any).devSession = devSession;
+      }
+    }
+
     // Secret-free audit logging (SEC-01)
     const actorId = (req as any).user?.id || 'setup_recovery';
     const actorName = (req as any).user?.name || 'Kurulum Yöneticisi';
@@ -456,10 +484,11 @@ sshTunnelRouter.post('/connect', guardSshTunnelPolicy, requireSshTunnelAuth, asy
  */
 sshTunnelRouter.post('/disconnect', guardSshTunnelPolicy, requireSshTunnelAuth, async (req: Request, res: Response) => {
   try {
-    const result = await sshTunnelService.disconnectTunnel();
+    const result = await sshTunnelService.disconnectTunnel({ preserveDevSession: false });
+    res.clearCookie('nexus_ssh_dev_session_token');
     const actorId = (req as any).user?.id || 'setup_recovery';
     const actorName = (req as any).user?.name || 'Kurulum Yöneticisi';
-    db.addAuditLog(actorId, actorName, 'SSH Tüneli bağlantısı sonlandırıldı.', 'low').catch(() => {});
+    db.addAuditLog(actorId, actorName, 'SSH Tüneli bağlantısı sonlandırıldı ve yerel oturum temizlendi.', 'low').catch(() => {});
     return res.json(result);
   } catch (err: any) {
     systemLogger.error('database', `SSH Tünel kapatma hatası: ${err?.message}`);
@@ -468,4 +497,14 @@ sshTunnelRouter.post('/disconnect', guardSshTunnelPolicy, requireSshTunnelAuth, 
       message: `SSH tüneli kapatılırken hata oluştu: ${err?.message || err}`,
     });
   }
+});
+
+/**
+ * DELETE /api/system/ssh-tunnel/dev-session & DELETE /api/setup/ssh-tunnel/dev-session
+ * Terminate 1-hour local dev session ticket explicitly.
+ */
+sshTunnelRouter.delete('/dev-session', guardSshTunnelPolicy, requireSshTunnelAuth, (req: Request, res: Response) => {
+  sshTunnelService.clearDevSession();
+  res.clearCookie('nexus_ssh_dev_session_token');
+  return res.json({ success: true, message: '1 saatlik yerel geliştirici oturumu sonlandırıldı.' });
 });

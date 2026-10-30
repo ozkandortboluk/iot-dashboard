@@ -19,6 +19,7 @@ import {
   Info,
   ArrowRight,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 import { apiFetch as fetch } from '../lib/apiFetch';
 import { NexusNodeLogo } from './NexusNodeLogo';
@@ -67,6 +68,14 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
   const [databaseReady, setDatabaseReady] = useState(false);
   const [canProceed, setCanProceed] = useState(false);
 
+  // 1-Hour Ephemeral Local Dev Session State
+  const [devSession, setDevSession] = useState<{
+    active: boolean;
+    expiresAt: number | null;
+    remainingSeconds: number;
+    token: string | null;
+  } | null>(null);
+
   const [testing, setTesting] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -109,6 +118,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       sessionStorage.getItem('nexus_ssh_bootstrap_token');
     if (bootstrapToken) {
       headers['X-SSH-Bootstrap-Token'] = bootstrapToken;
+    }
+    const devSessionToken =
+      sessionStorage.getItem('nexus_ssh_dev_session_token');
+    if (devSessionToken) {
+      headers['X-SSH-Dev-Session-Token'] = devSessionToken;
     }
     return headers;
   }, [setupTokenInput]);
@@ -194,6 +208,14 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     setLastError(data.lastError || null);
     if (data.hostFingerprint) {
       setDiscoveredFingerprint(data.hostFingerprint);
+    }
+    if (data.devSession) {
+      setDevSession(data.devSession);
+      if (data.devSession.token) {
+        sessionStorage.setItem('nexus_ssh_dev_session_token', data.devSession.token);
+      }
+    } else {
+      setDevSession(null);
     }
     if (data.config && !isConfigLoaded) {
       if (data.config.sshHost) setSshHost(data.config.sshHost);
@@ -493,6 +515,12 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       if (data.hostFingerprint) {
         setDiscoveredFingerprint(data.hostFingerprint);
       }
+      if (data.devSession) {
+        setDevSession(data.devSession);
+        if (data.devSession.token) {
+          sessionStorage.setItem('nexus_ssh_dev_session_token', data.devSession.token);
+        }
+      }
       if (data.success) {
         // Status polling and verification of pre-login security checks
         let statusData = await fetchStatus();
@@ -587,6 +615,8 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
       });
       const data = await res.json();
       if (data.success) {
+        sessionStorage.removeItem('nexus_ssh_dev_session_token');
+        setDevSession(null);
         setActionMessage({ type: 'success', text: data.message });
       } else {
         setActionMessage({ type: 'error', text: data.message || data.error || 'Tünel kapatılamadı.' });
@@ -596,6 +626,22 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
     } finally {
       setDisconnecting(false);
       fetchStatus();
+    }
+  };
+
+  const handleTerminateDevSession = async () => {
+    try {
+      await fetch('/api/system/ssh-tunnel/dev-session', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+      sessionStorage.removeItem('nexus_ssh_dev_session_token');
+      setDevSession(null);
+      setActionMessage({ type: 'info', text: '1 saatlik yerel geliştirici oturumu sonlandırıldı. Tünel başlatılırken şifre gerekecektir.' });
+      fetchStatus();
+    } catch {
+      // ignore
     }
   };
 
@@ -687,16 +733,50 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
         </div>
       </div>
 
+      {devSession?.active && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 flex items-center justify-between gap-2.5 animate-fadeIn">
+          <div className="flex items-center gap-2 min-w-0">
+            <Clock className="w-4 h-4 text-emerald-400 shrink-0 animate-pulse" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-emerald-300">1 Saatlik Yerel Oturum Aktif</span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">
+                  {Math.max(1, Math.round(devSession.remainingSeconds / 60))} dk kaldı
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                Kod değişikliğinde sunucu yeniden başlasa bile şifre sormadan otomatik bağlanır.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleTerminateDevSession}
+            className="px-2 py-1 text-[10px] font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer shrink-0 border border-rose-500/20"
+            title="Oturumu Sıfırla"
+          >
+            Sıfırla
+          </button>
+        </div>
+      )}
+
       {authType === 'password' ? (
         <div className="space-y-1">
-          <label className="text-[11px] text-slate-400">SSH Kullanıcı Şifresi</label>
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] text-slate-400">SSH Kullanıcı Şifresi</label>
+            {devSession?.active && (
+              <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Yerel Oturumdan Otomatik
+              </span>
+            )}
+          </div>
           <div className="relative">
             <input
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={handleKeyDownSubmit}
-              placeholder="••••••••••••"
+              placeholder={devSession?.active ? '•••••••• (1 Saatlik Yerel Oturumdan Aktarılacak)' : '••••••••••••'}
               className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500 pr-9 font-mono"
             />
             <button
@@ -707,6 +787,11 @@ export const SSHTunnelDrawer: React.FC<SSHTunnelDrawerProps> = ({
               {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
           </div>
+          {devSession?.active && !password && (
+            <p className="text-[10px] text-emerald-400/90 flex items-center gap-1 mt-0.5">
+              ✓ Şifre girmeden doğrudan bağlanabilirsiniz (Yerel geliştirici oturumu geçerli).
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-1">

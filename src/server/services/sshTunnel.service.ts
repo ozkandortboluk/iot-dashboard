@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { systemLogger } from './systemLogger.service.js';
 import { systemSecretsService } from './systemSecrets.service.js';
-import { isDevelopmentSshTunnelAllowed } from '../config/runtimeEnvironment.js';
+import { isDevelopmentSshTunnelAllowed, isVps } from '../config/runtimeEnvironment.js';
 
 export function isSshTunnelAllowed(): boolean {
   return isDevelopmentSshTunnelAllowed();
@@ -30,6 +30,23 @@ export interface SSHTunnelConfig {
 
 export type SSHTunnelStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+export interface SSHDevSession {
+  token: string;
+  createdAt: string;
+  expiresAt: number;
+  ttlSeconds: number;
+  sshHost: string;
+  sshUser: string;
+  localPort: number;
+}
+
+export interface SSHTunnelDevSessionState {
+  active: boolean;
+  expiresAt: number | null;
+  remainingSeconds: number;
+  token: string | null;
+}
+
 export interface SSHTunnelState {
   status: SSHTunnelStatus;
   config: SSHTunnelConfig | null;
@@ -37,9 +54,12 @@ export interface SSHTunnelState {
   connectedAt: string | null;
   logs: string[];
   hostFingerprint: string | null;
+  devSession?: SSHTunnelDevSessionState;
 }
 
-const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
+export const CONFIG_FILE = path.join(process.cwd(), 'data', '.ssh_tunnel_config.json');
+export const DEV_SESSION_FILE = path.join(process.cwd(), 'data', '.ssh_dev_session.json');
+export const SSH_DEV_SESSION_TTL_MS = 60 * 60 * 1000; // 1 saat (3600 sn)
 // Use a dedicated local forwarding port to avoid collision with local PostgreSQL.
 export const DEFAULT_SSH_LOCAL_PORT = 15432;
 
@@ -221,6 +241,9 @@ class SSHTunnelService {
   }
 
   public getState(): SSHTunnelState {
+    const session = this.getDevSession();
+    const remainingSeconds = session ? Math.max(0, Math.round((session.expiresAt - Date.now()) / 1000)) : 0;
+
     return {
       status: this.status,
       config: this.activeConfig
@@ -234,7 +257,159 @@ class SSHTunnelService {
       connectedAt: this.connectedAt,
       logs: this.logs,
       hostFingerprint: this.activeHostFingerprint,
+      devSession: {
+        active: Boolean(session),
+        expiresAt: session?.expiresAt || null,
+        remainingSeconds,
+        token: session?.token || null,
+      },
     };
+  }
+
+  /**
+   * 1 Saatlik Güvenli Yerel Geliştirici Oturumu Oluşturur / Yeniler.
+   * Yalnızca yerel ortamda (Local/AI Studio) çalışır; VPS üretimde kesinlikle devre dışıdır.
+   */
+  public createOrRenewDevSession(config: SSHTunnelConfig): SSHDevSession | null {
+    if (!isSshTunnelAllowed() || isVps()) {
+      return null;
+    }
+
+    try {
+      const dataDir = path.dirname(DEV_SESSION_FILE);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      const now = Date.now();
+      const expiresAt = now + SSH_DEV_SESSION_TTL_MS;
+      const token = crypto.randomBytes(32).toString('hex');
+
+      const session: SSHDevSession = {
+        token,
+        createdAt: new Date(now).toISOString(),
+        expiresAt,
+        ttlSeconds: Math.round(SSH_DEV_SESSION_TTL_MS / 1000),
+        sshHost: config.sshHost,
+        sshUser: config.sshUser,
+        localPort: config.localPort || DEFAULT_SSH_LOCAL_PORT,
+      };
+
+      fs.writeFileSync(DEV_SESSION_FILE, JSON.stringify(session, null, 2), {
+        encoding: 'utf-8',
+        mode: 0o600,
+      });
+      try {
+        fs.chmodSync(DEV_SESSION_FILE, 0o600);
+      } catch {}
+
+      this.addLog(`1 saatlik güvenli yerel geliştirici oturumu oluşturuldu (Bitiş: ${new Date(expiresAt).toLocaleTimeString('tr-TR')}).`);
+      return session;
+    } catch (err: any) {
+      systemLogger.warn('database', `Yerel geliştirici oturumu kaydedilemedi: ${err?.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Aktif ve süresi dolmamış yerel geliştirici oturumunu döndürür.
+   */
+  public getDevSession(): SSHDevSession | null {
+    if (!isSshTunnelAllowed() || isVps()) {
+      return null;
+    }
+
+    try {
+      if (!fs.existsSync(DEV_SESSION_FILE)) {
+        return null;
+      }
+      const raw = fs.readFileSync(DEV_SESSION_FILE, 'utf-8');
+      const session = JSON.parse(raw) as SSHDevSession;
+      if (!session || !session.expiresAt || !session.token) {
+        return null;
+      }
+
+      if (Date.now() >= session.expiresAt) {
+        this.clearDevSession();
+        this.addLog('1 saatlik yerel geliştirici oturumunun süresi doldu.');
+        return null;
+      }
+
+      return session;
+    } catch (err: any) {
+      return null;
+    }
+  }
+
+  /**
+   * 1 saatlik yerel geliştirici oturumunu sonlandırır ve dosyayı temizler.
+   */
+  public clearDevSession(): void {
+    try {
+      if (fs.existsSync(DEV_SESSION_FILE)) {
+        fs.unlinkSync(DEV_SESSION_FILE);
+        this.addLog('1 saatlik yerel geliştirici oturumu sonlandırıldı.');
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Aktif bir 1 saatlik oturumun bulunup bulunmadığını kontrol eder.
+   */
+  public hasActiveDevSession(): boolean {
+    return this.getDevSession() !== null;
+  }
+
+  /**
+   * 1 saatlik aktif oturum biletini kullanarak SSH tünelini arka planda otomatik yeniden bağlar.
+   * Geliştirme esnasında kod değişiklikleri ile sunucu yeniden başlasa bile kullanıcıdan şifre istemez.
+   */
+  public async autoConnectDevSession(): Promise<boolean> {
+    if (!isSshTunnelAllowed() || isVps()) {
+      return false;
+    }
+
+    if (this.isConnected()) {
+      return true;
+    }
+
+    const session = this.getDevSession();
+    if (!session) {
+      return false;
+    }
+
+    if (!this.activeConfig) {
+      this.loadSavedConfig();
+    }
+
+    if (!this.activeConfig || !this.activeConfig.sshHost) {
+      return false;
+    }
+
+    const remainingMins = Math.max(1, Math.round((session.expiresAt - Date.now()) / 60000));
+    this.addLog(`1 saatlik yerel oturum aktif (${remainingMins} dk kaldı). SSH tüneli otomatik yeniden bağlanıyor...`);
+
+    try {
+      const result = await this.connectTunnel(this.activeConfig);
+      if (result.success) {
+        this.addLog(`Otomatik yeniden bağlanma başarılı! Veritabanı havuzu yenileniyor...`);
+        try {
+          const { db } = await import('../db.js');
+          if (db && typeof db.initPostgresRepository === 'function') {
+            await db.initPostgresRepository();
+          }
+        } catch {}
+        return true;
+      } else {
+        this.addLog(`Otomatik yeniden bağlanma başarısız: ${result.message}`);
+        return false;
+      }
+    } catch (err: any) {
+      this.addLog(`Otomatik yeniden bağlanırken hata: ${err?.message || err}`);
+      return false;
+    }
   }
 
   /**
@@ -444,7 +619,7 @@ class SSHTunnelService {
       return { success: false, message: 'Zorunlu SSH Host Key Parmak İzi (expectedHostFingerprint) eksik. VPS üzerinden doğruladığınız SHA256 parmak izini girin; bağlantı başlatılmadı.' };
     }
     if (this.status === 'connected' || this.status === 'connecting') {
-      await this.disconnectTunnel();
+      await this.disconnectTunnel({ preserveDevSession: true });
     }
 
     this.status = 'connecting';
@@ -630,6 +805,9 @@ class SSHTunnelService {
                 this.status = 'error';
                 this.lastError = 'PostgreSQL bağlantı doğrulaması başarısız oldu.';
                 this.cleanup();
+              } else {
+                // Başarılı bağlantıda 1 saatlik yerel geliştirici oturumunu başlat/yenile
+                this.createOrRenewDevSession(fullConfig);
               }
 
               const successMsg = isPgConnected
@@ -745,10 +923,13 @@ class SSHTunnelService {
     });
   }
 
-  public async disconnectTunnel(): Promise<{ success: boolean; message: string }> {
+  public async disconnectTunnel(options?: { preserveDevSession?: boolean }): Promise<{ success: boolean; message: string }> {
     this.addLog('SSH Tüneli kapatılıyor...');
     this.status = 'disconnected';
     this.cleanup();
+    if (!options?.preserveDevSession) {
+      this.clearDevSession();
+    }
     this.addLog('SSH Tüneli tamamen kapatıldı.');
     try {
       const { recycleSharedPgPool } = await import('../database/connection.js');

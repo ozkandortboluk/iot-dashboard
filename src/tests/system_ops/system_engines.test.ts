@@ -187,4 +187,154 @@ describe('System Engines Management & Control Center (Roadmap System Engines)', 
     expect(viewContent).toContain('Otonom Servis Masası');
     expect(viewContent).toContain("Sistem ve Ayarları'na Dön");
   });
+
+  it('8. Audits real triggers for all 7 registered system engines', async () => {
+    // 1. alarm_notification
+    const alarmRes = await request(app)
+      .post('/api/system/engines/alarm_notification/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(alarmRes.status).toBe(200);
+    expect(alarmRes.body.success).toBe(true);
+    expect(alarmRes.body.message).toContain('Bildirim ve Alarm Motoru');
+    expect(typeof alarmRes.body.details?.activeAlarms).toBe('number');
+
+    // 2. ota_updater
+    const otaRes = await request(app)
+      .post('/api/system/engines/ota_updater/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(otaRes.status).toBe(200);
+    expect(otaRes.body.success).toBe(true);
+    expect(otaRes.body.message).toContain('OTA Motoru taraması tamamlandı');
+    expect(typeof otaRes.body.details?.processedCount).toBe('number');
+    expect(typeof otaRes.body.details?.expiredCount).toBe('number');
+
+    // 3. simulator
+    const simRes = await request(app)
+      .post('/api/system/engines/simulator/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(simRes.status).toBe(200);
+    expect(simRes.body.success).toBe(true);
+    expect(simRes.body.message).toContain('Simülasyon motoru');
+    expect(simRes.body.details?.stepInjected).toBe(true);
+
+    // 4. nodata_watchdog
+    const wdRes = await request(app)
+      .post('/api/system/engines/nodata_watchdog/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(wdRes.status).toBe(200);
+    expect(wdRes.body.success).toBe(true);
+    expect(wdRes.body.message).toContain('No-Data Bekçisi');
+    expect(typeof wdRes.body.details?.ran).toBe('boolean');
+
+    // 5. automation
+    const autoRes = await request(app)
+      .post('/api/system/engines/automation/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(autoRes.status).toBe(200);
+    expect(autoRes.body.success).toBe(true);
+    expect(autoRes.body.message).toContain('Otomasyon motoru');
+    expect(typeof autoRes.body.details?.activeCount).toBe('number');
+
+    // 6. command_downlink
+    const cmdRes = await request(app)
+      .post('/api/system/engines/command_downlink/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(cmdRes.status).toBe(200);
+    expect(cmdRes.body.success).toBe(true);
+    expect(cmdRes.body.message).toContain('Komut motoru süresi dolan');
+    expect(typeof cmdRes.body.details?.expiredCount).toBe('number');
+
+    // 7. wal_persistence
+    const walRes = await request(app)
+      .post('/api/system/engines/wal_persistence/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+    expect(walRes.status).toBe(200);
+    expect(walRes.body.success).toBe(true);
+    expect(walRes.body.message).toContain('Fiziksel WAL kuyruğu');
+    expect(typeof walRes.body.details?.flushedPacketCount).toBe('number');
+  });
+
+  it('9. Audits toggle control and verifies core persistence protection', async () => {
+    // Core WAL persistence CANNOT be toggled off
+    const walToggleRes = await request(app)
+      .post('/api/system/engines/wal_persistence/toggle')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000')
+      .send({ enabled: false });
+    expect(walToggleRes.status).toBe(400);
+    expect(walToggleRes.body.error).toContain('durdurulamaz');
+
+    // Toggleable engines: nodata_watchdog and automation
+    const wdToggleOff = await request(app)
+      .post('/api/system/engines/nodata_watchdog/toggle')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000')
+      .send({ enabled: false });
+    expect(wdToggleOff.status).toBe(200);
+    expect(wdToggleOff.body.engine.enabled).toBe(false);
+
+    const wdToggleOn = await request(app)
+      .post('/api/system/engines/nodata_watchdog/toggle')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000')
+      .send({ enabled: true });
+    expect(wdToggleOn.status).toBe(200);
+    expect(wdToggleOn.body.engine.enabled).toBe(true);
+  });
+
+  it('10. Alarm engine toggle strictly protects telemetry rule evaluation', async () => {
+    // 1. Disable alarm engine
+    const toggleOff = await request(app)
+      .post('/api/system/engines/alarm_notification/toggle')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000')
+      .send({ enabled: false });
+    expect(toggleOff.status).toBe(200);
+    expect(toggleOff.body.engine.enabled).toBe(false);
+
+    const initialAlarmCount = (await db.getAlarms('usr_admin'))?.length || 0;
+
+    // Simulate an extreme reading that would trigger an alarm
+    const extremeReading = {
+      id: 'alarm_test_reading',
+      deviceId: 'dev_test_sensor',
+      temperature: 150.0, // High temperature exceeding all normal thresholds
+      humidity: 99.0,
+      timestamp: new Date().toISOString(),
+      source: 'physical' as const,
+    };
+    db.telemetryRepository.evaluateRules(extremeReading);
+
+    // No new alarm should be added because alarm engine is disabled
+    const afterAlarmCount = (await db.getAlarms('usr_admin'))?.length || 0;
+    expect(afterAlarmCount).toBe(initialAlarmCount);
+
+    // 2. Re-enable alarm engine
+    const toggleOn = await request(app)
+      .post('/api/system/engines/alarm_notification/toggle')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000')
+      .send({ enabled: true });
+    expect(toggleOn.status).toBe(200);
+    expect(toggleOn.body.engine.enabled).toBe(true);
+  });
+
+  it('11. Engine lifecycle operations record audit logs', async () => {
+    // Trigger command downlink to record audit log
+    await request(app)
+      .post('/api/system/engines/command_downlink/trigger')
+      .set('Cookie', `nexus_session_token=${adminSessionToken}`)
+      .set('Origin', 'http://localhost:3000');
+
+    const logs = await db.getAuditLogs();
+    const engineLog = logs.find((l: any) => l.action && l.action.includes("Sistem Motoru 'command_downlink'"));
+    expect(engineLog).toBeDefined();
+  });
 });
